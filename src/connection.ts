@@ -132,10 +132,10 @@ class Connection {
   /** 把"尚未上报"的字节推给 PEND；closing=true 时补一个收尾样本 */
   flush(closing?: boolean): void {
     if (!this.id) return;
-    const du = this.up - this.reportedUp;
-    const dd = this.down - this.reportedDown;
-    if (du <= 0 && dd <= 0) return;
 
+    // 收尾逻辑必须在"零字节"提前返回之前：
+    // 鉴权成功但一个字节都没传的连接（探测、被客户端立刻取消）也要计入
+    // node/direct 与种子刷新，否则计数和信誉表会漏掉这一整类连接。
     if (closing) {
       const now = Date.now();
       const dt = now - this.sampleAt;
@@ -153,6 +153,10 @@ class Connection {
         markSeedDirty(this.env);
       }
     }
+
+    const du = this.up - this.reportedUp;
+    const dd = this.down - this.reportedDown;
+    if (du <= 0 && dd <= 0) return;
 
     const via = this.via === "node" || this.via === "v6" ? this.via : "direct";
     S.funnel[via] = (S.funnel[via] || 0) + du + dd;

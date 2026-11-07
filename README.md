@@ -49,7 +49,7 @@ VLESS / Trojan over WebSocket，跑在 Cloudflare Workers 上。
 ```bash
 ./scripts/fetch-deps.sh     # typescript + 混淆器（首次）
 npm run build               # tsc + 打包 → dist/_worker.js
-npm test                    # 113 项断言
+npm test                    # 119 项断言
 npm run obf                 # → _worker_v3.mid.js（可部署）
 ```
 
@@ -107,7 +107,7 @@ GET    /<uuid>/debug?restore=1               # 从 KV 快照续回用量
 ```
 test/test_v3.mjs     59 项   协议解析 / 订阅输出 / 目标校验
 test/smoke_v3.mjs    26 项   端到端路由（假 env）
-test/test_score.mjs  28 项   评分 / 选择 / 连接状态机
+test/test_score.mjs  34 项   评分 / 选择 / 连接状态机 / 收尾计数
 ```
 
 测试跑的是**打包产物**（`dist/_worker.js`），不是 TS 源码 —— 保证测的就是要部署的东西。
@@ -128,4 +128,5 @@ test/test_score.mjs  28 项   评分 / 选择 / 连接状态机
 - 每个 isolate 的采样窗口独立，吞吐样本跨机器要等 30 分钟
 - 直连流量不经过节点，所以节点吞吐样本天然稀疏
 - `kbps` 是服务端视角，客户端瓶颈时偏高 —— 只适合比较节点，不适合当测速
-- stats 的写入受 KV 免费额度限制（1000 次/天），已做时间节流
+- KV 写受免费额度限制（1000 次/天）：seed ≤26 次/天、snap 走「1h/2h + 全局 45 分钟闸门」、
+  usage 快照 2 小时一次，合计约 70 次/天（早先是 600+）

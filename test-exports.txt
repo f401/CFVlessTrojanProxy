@@ -35,4 +35,8 @@ export {
   availOf,
   pFailOf,
   emptyCloseSuspect,
+  // —— 测试用：面板明细 / 日志去重 ——
+  nsOf,
+  pxGet,
+  logErr,
 };

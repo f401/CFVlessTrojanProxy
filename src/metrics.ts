@@ -1,5 +1,8 @@
 /* metrics */
 
+/** 错误日志去重表：msg|tag → 上次记录时间（5 秒窗口） */
+const ERR_SEEN = new Map<string, number>();
+
 /**
  * 记录某个入口的一次成功/失败（用于 RTT 学习）。
  * @param {string} id 用户 UUID
@@ -85,8 +88,18 @@ async function loadRtt(env: Env, id) {
  * @returns {void}
  */
 function logErr(msg, tag?) {
+  const m = String(msg).slice(0, 200);
+  // 同一个错误 5 秒内只记一次：节点大面积抖动时，每条连接都刷一行
+  // console.error 既费 CPU 又把真正有用的日志冲掉（面板也只留 50 条）。
+  const now0 = Date.now();
+  const key = tag ? m + "|" + tag : m;
+  const last = ERR_SEEN.get(key) || 0;
+  if (now0 - last < 5000) return;
+  if (ERR_SEEN.size > 200) ERR_SEEN.clear();
+  ERR_SEEN.set(key, now0);
+
   try {
-    S.errs.push({ t: Date.now(), m: String(msg).slice(0, 200), tag: tag || "" });
+    S.errs.push({ t: now0, m, tag: tag || "" });
     while (S.errs.length > 50) S.errs.shift();
   } catch (e) {}
   try {

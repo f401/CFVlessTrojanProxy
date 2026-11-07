@@ -56,7 +56,6 @@ class AppState {
   snapBytes = 0;
   kvw = 0;
   kvStat: any = { ok: null, key: "", at: 0 };
-  dirtyBytes = 0;
 
   // —— 用户与观测 ——
   usersCache: { v: Auth | null; t: number } = { v: null, t: 0 };

@@ -222,10 +222,16 @@ export default {
 
         // 面板
         const users = await loadUsers(env);
-        let statsMap = {};
-        try {
-          statsMap = (await kvGet<Record<string, any>>(env, `stats:${new Date().toISOString().slice(0, 10)}`)) || {};
-        } catch (e) {}
+        // 用量从 Meter DO 取（和 /stats 同一个口径）。
+        // 以前读的是 `stats:<date>` 这个早已废弃的键 —— 迁移到 snap/DO 之后
+        // 它再也没人写，"今日用量" 永远是 0。
+        const statsMap = {};
+        for (const u of users.list) {
+          try {
+            const s = await readStats(env, u.id);
+            statsMap[u.id] = { up: s.up || 0, down: s.down || 0 };
+          } catch (e) {}
+        }
         return safeHtml(renderAdmin(url, users, statsMap));
       }
 
@@ -249,10 +255,12 @@ export default {
 
       switch (sub) {
         case "": {
-          const pol = pxPolicy(env);
+          // 注意：不要写成 (await pxGet(env)).cur —— 那会在数组字面量里
+          // 先串行 await 一次，Promise.all 就只剩两个成员了。
+          const px0 = pxGet(env).then((x) => x.cur);
           const [st, curPx, alive] = await Promise.all([
             readStatsCached(env, id),
-            (await pxGet(env)).cur,
+            px0,
             aliveList(env),
           ]);
           const f: any = S.funnel || {};
@@ -305,7 +313,10 @@ export default {
         case "stats": {
           const s = await readStatsCached(env, id);
           if (url.searchParams.get("format") === "html") {
-            return new Response(renderStatsHtml(env, id, s, learned, await aliveList(env), ((await pxGet(env)).state || {}).ns || {}), {
+            const alive = await aliveList(env);
+            // 明细只算要展示的节点（以前是为整张 nstat 生成，能到几千条）
+            const nsMap = nsOf(alive.map((x: any) => x.h + ":" + x.p));
+            return new Response(renderStatsHtml(env, id, s, learned, alive, nsMap), {
               headers: { "content-type": "text/html;charset=utf-8" },
             });
           }
@@ -381,7 +392,8 @@ export default {
           const px = await pxGet(env);
           const alive = px.alive || [];
           const stat: any = px.state || {};
-          const nsMap = stat.ns || {};
+          const aliveKeys = (alive || []).map((x) => x.h + ":" + x.p);
+          const nsMap = nsOf(aliveKeys);
           const modeQ = url.searchParams.get("mode") === "lat" ? "lat" : "tput";
           const poolSize = Number(stat.poolN) || 0;
           const blacklist = [...S.nstat.entries()].filter(([, s]) => s.blackUntil > Date.now()).map(([k]) => k);
@@ -594,7 +606,8 @@ export default {
         }
         // 定时持久化的唯一入口：每轮 cron 最多各写 1 次
         try { await pendFlush(env, true); } catch (e) {}
-        try { await flushPx(env, true); } catch (e) {}
+        // cronScan 内部已经落过一次 seed（且自带 55 分钟节流），这里只补写脏数据
+        try { if (S.seedDirty) await flushPx(env); } catch (e) {}
         try {
           // 先把快照续回 DO（重建脚本后不会从 0 开始），再写新快照
           const snap = await usageSnapGet(env);
@@ -603,7 +616,8 @@ export default {
           }
           await usageSnapWrite(env);
         } catch (e) {}
-        try { await flushSnap(env, true); } catch (e) {}
+        // 不传 force：让 flushSnap 走「1h/2h + 全局 45 分钟闸门」的节奏
+        try { await flushSnap(env); } catch (e) {}
       })()
     );
   },

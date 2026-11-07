@@ -247,40 +247,6 @@ function capOf(s) {
 /** 近期吞吐峰值（p90，带衰减的直方图插值） */
 function p90Of(s) { return pctOf(s, 0.9); }
 
-/** 延迟估计：n>=5 用均值+1.96·se（悲观上界），否则用最近一次实测 */
-function latOf(s, a) {
-  const fallback = Number(a && a.ms) || SC.P_TCP;
-  if (!s) return fallback;
-  const n = s.pN || 0;
-  if (n >= 5) {
-    const mu = s.pSum / n;
-    const varp = Math.max(0, s.pSumSq / n - mu * mu);
-    return mu + 1.96 * Math.sqrt(varp / n);
-  }
-  return s.tcp || fallback;
-}
-
-/** 未收缩的代价（内部用，避免 prior 递归） */
-function costRaw(k, mode) {
-  const s = S.nstat.get(k);
-  const a = (S.alive.get(k) || {}) as NodeEntry;
-  if (!s) {
-    return mode === "tput"
-      ? (10 * 1048576 / SC.PRIOR_BPS) * 1000
-      : (Number(a.ms) || SC.P_TCP);
-  }
-  const tcp = latOf(s, a);
-  const tls = s.tls || SC.P_TLS;
-  const pF = pFailOf(s), pS = pStallOf(s);
-  if (mode === "tput") {
-    const bps = p90Of(s);
-    const e10 = bps > 0 ? (10 * 1048576 / bps) * 1000 : (10 * 1048576 / SC.PRIOR_BPS) * 1000;
-    return e10 + tcp * 0.5 + pF * SC.FAIL + pS * SC.STALL;
-  }
-  return tcp + tls * SC.TLS_G + Math.max(0, tls - 2 * tcp - SC.LOSS_SLACK) * SC.LOSS_G
-    + pF * SC.FAIL + pS * SC.STALL;
-}
-
 /**
  * 节点代价（毫秒当量，越小越好）。lat=速率优先，tput=吞吐优先。
  * @param {string} k "host:port"
@@ -288,6 +254,9 @@ function costRaw(k, mode) {
  * @returns {number} 代价
  */
 const ZERO_STAT = { tcp: 0, tls: 0, okW: 0, failW: 0, stallMs: 0, runMs: 0, tS: 0, tF: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0) };
+
+const TEN_MB = 10 * 1048576;
+const E10_PRIOR = (TEN_MB / SC.PRIOR_BPS) * 1000;   // 无吞吐样本时的先验代价（≈51 秒）
 
 function costOf(k, mode) {
   const m = mode === "tput" ? "tput" : "lat";
@@ -307,22 +276,20 @@ function costOf(k, mode) {
   const pS = pStallOf(s);
 
   let v;
+  let cap = 0;                                   // tput 模式下的能力值，只算一次
   if (m === "tput") {
-    const bps = capOf(s);
-    const okB = (s.bytesDown || 0) >= 3 * 1048576 && n >= 3 && bps > 0;
+    cap = capOf(s);
+    const okB = (s.bytesDown || 0) >= 3 * 1048576 && n >= 3 && cap > 0;
     const confB = okB ? 1 - Math.exp(-n / 8) : 0;
-    const priorE10 = (10 * 1048576 / SC.PRIOR_BPS) * 1000;
-    const e10 = okB ? (10 * 1048576 / bps) * 1000 : priorE10;
-    v = e10 * confB + priorE10 * (1 - confB) + tcp * 0.5 + pF * SC.FAIL + pS * SC.STALL;
+    const e10 = okB ? (TEN_MB / cap) * 1000 : E10_PRIOR;
+    v = e10 * confB + E10_PRIOR * (1 - confB) + tcp * 0.5 + pF * SC.FAIL + pS * SC.STALL;
   } else {
     v = tcp + tls * SC.TLS_G + Math.max(0, tls - 2 * tcp - SC.LOSS_SLACK) * SC.LOSS_G
       + pF * SC.FAIL + pS * SC.STALL;
   }
   if (pS > 0.25 && n >= 5) v += 400;
-  if (m === "tput") {
-    const bp = capOf(s);
-    if (bp > 0 && bp < 8 * 1024 && n >= 5) v += 400;
-  }
+  // 吞吐低到 8 KB/s 以下基本等于不可用（早先这里又算了一遍 capOf）
+  if (m === "tput" && cap > 0 && cap < 8 * 1024 && n >= 5) v += 400;
   return v;
 }
 
@@ -393,11 +360,12 @@ function bestFor(mode) {
   return c.length ? c[0].k : "";
 }
 
-/* ---- 落盘节流：变化驱动 + 30 分钟地板 ---- */
+/* ---- 落盘节流：变化驱动 + 90 分钟地板（SEED_WRITE_GAP 定义在 px.ts） ---- */
 let NS_WRITE_AT = 0;
 function markSeedDirty(env: Env) {
   if (!env || !env.STATS) return;
-  if (Date.now() - NS_WRITE_AT < 30 * 60000) return;
+  const last = Math.max(NS_WRITE_AT, S.seed.ts || 0);
+  if (Date.now() - last < SEED_WRITE_GAP) return;
   NS_WRITE_AT = Date.now();
   SEEDS.write(env).catch(() => {});
 }

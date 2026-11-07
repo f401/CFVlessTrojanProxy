@@ -7,6 +7,10 @@ const SEED_MAX = 40;              // 每个机房最多记 40 个节点
 const SEED_COLD_N = 8;            // 冷启动灌进 alive 的节点数
 const PX_TTL = 86400 * 30;
 const SEED_VER = 6;
+// 信誉表落盘的最小间隔：每个 isolate 各写各的会让写次数随实例数线性增长
+// （8 个 isolate × 48 次/天 = 384）。S.seed.ts 是从 KV 读回来的全局时间戳，
+// 用它当闸门能把全局写频压到 ~30 次/天。
+const SEED_WRITE_GAP = 90 * 60000;
 
 /* 评分参数：单位统一为「毫秒当量」——分数就是"平均多等多少毫秒" */
 const SC = {
@@ -223,27 +227,41 @@ async function pxGet(env: Env) {
       colo: S.colo || "??",
       funnel: { ...S.funnel },
       curs: { ...S.curs },
-      // 面板要的是每个节点的统计（本地已合并过 seed）
-      ns: (() => {
-        const m = {};
-        for (const [k, s] of S.nstat) {
-          m[k] = {
-            ok: s.ok || 0, fail: s.fail || 0, at: s.at || 0,
-            bps: Math.round(p90Of(s) || s.seedBps || 0),
-            bpsMed: Math.round(pctOf(s, 0.5) || 0),
-            bpsCap: Math.round(capOf(s) || 0),
-            n: Math.round((s.okW || 0) + (s.failW || 0)),
-            bytes: Math.round(s.bytesDown || 0),
-            pFail: Math.round(pFailOf(s) * 1000) / 1000,
-            pStall: Math.round(pStallOf(s) * 1000) / 1000,
-            lat: Math.round(costOf(k, "lat")),
-            tput: Math.round(costOf(k, "tput")),
-          };
-        }
-        return m;
-      })(),
+      // 注意：这里不再预先遍历整张 nstat 生成面板明细。
+      // nstat 会随着候选池扫描不断变长（实测能到 2000+），而每次订阅/面板
+      // 请求都会走 pxGet —— 2000 条 × 2 次 costOf 纯属白烧 CPU。
+      // 需要明细的地方用 nsOf(keys) 按需生成（只算真正要展示的那几个节点）。
     },
   };
+}
+
+/**
+ * 按需生成节点面板明细（只算传入的节点，避免为整张 nstat 白算分）。
+ * @param {Iterable<string>} keys "host:port" 列表
+ * @returns {object} "host:port" → 统计明细
+ */
+function nsOf(keys) {
+  const m = {};
+  let i = 0;
+  for (const k of keys) {
+    if (++i > 64) break;                       // 面板最多展示几十行，别被异常输入拖死
+    const s = S.nstat.get(k);
+    if (!s) continue;
+    const n = (s.okW || 0) + (s.failW || 0);
+    m[k] = {
+      ok: s.ok || 0, fail: s.fail || 0, at: s.at || 0,
+      bps: Math.round(p90Of(s) || s.seedBps || 0),
+      bpsMed: Math.round(pctOf(s, 0.5) || 0),
+      bpsCap: Math.round(capOf(s) || 0),
+      n: Math.round(n),
+      bytes: Math.round(s.bytesDown || 0),
+      pFail: Math.round(pFailOf(s) * 1000) / 1000,
+      pStall: Math.round(pStallOf(s) * 1000) / 1000,
+      lat: Math.round(costOf(k, "lat")),
+      tput: Math.round(costOf(k, "tput")),
+    };
+  }
+  return m;
 }
 
 /** 兼容旧调用：只改内存，不落盘 */
@@ -257,10 +275,13 @@ async function pxSet(env: Env, patch) {
 }
 
 /** 落盘：只写信誉表（池子走 commitPool），cron 每轮一次 */
-async function flushPx(env: Env, force) {
+async function flushPx(env: Env, force?: boolean) {
   if (!env || !env.STATS) return { ok: true, skipped: true };
   if (!force && !S.seedDirty) return { ok: true, skipped: true };
-  if (!force && Date.now() - NS_WRITE_AT < 30 * 60000) return { ok: true, skipped: true };
+  if (!force) {
+    const last = Math.max(NS_WRITE_AT, S.seed.ts || 0);
+    if (Date.now() - last < SEED_WRITE_GAP) return { ok: true, skipped: true };
+  }
   NS_WRITE_AT = Date.now();
   return SEEDS.write(env, S.colo ? undefined : true);
 }
@@ -357,13 +378,37 @@ async function cronScan(env: Env) {
     for (const x of S.alive.values()) if (!x.cc && geo[x.h]) x.cc = geo[x.h];
   }
 
+  // ④b 清理统计表：候选池一轮轮扫下去，nstat 只增不减（实测能到 2000+ 条），
+  //     每条带一个 12 格直方图。清掉"不在 alive、没有吞吐样本、6 小时没动静"的，
+  //     再对总量做个硬上限，防止长期运行后内存一路涨。
+  {
+    const live = new Set(S.alive.keys());
+    const cut = Date.now() - 6 * 3600e3;
+    for (const [k, s] of S.nstat) {
+      if (live.has(k) || (s.bytesDown || 0) > 0) continue;
+      if ((s.at || 0) > cut) continue;
+      S.nstat.delete(k);
+    }
+    if (S.nstat.size > 400) {
+      const old = [...S.nstat.entries()]
+        .filter(([k]) => !live.has(k))
+        .sort((a, b) => (a[1].at || 0) - (b[1].at || 0));
+      for (const [k] of old) {
+        if (S.nstat.size <= 300) break;
+        S.nstat.delete(k);
+      }
+    }
+  }
+
   // ⑤ 重算两个游标
   for (const m of MODES) SEL.maybeSwitch(env, m);
   SEL.sched(env);
 
-  // ⑥ 每轮只写一次 KV。cron isolate 不知道自己在哪个机房，只能写名单；
-  //    如果是 ?refresh=1 在服务 isolate 里跑（COLO 已知），就写完整统计。
-  await SEEDS.write(env, S.colo ? undefined : true, true);
+  // ⑥ 每轮最多写一次 KV，且两次落盘间隔 ≥55 分钟（S.seed.ts 来自 KV，跨 isolate 有效）。
+  //    cron 是 30 分钟一轮，早先每轮都强制写 = 48 次/天，光这一项就吃掉 5% 的日额度。
+  if (Date.now() - (S.seed.ts || 0) >= 55 * 60000) {
+    await SEEDS.write(env, S.colo ? undefined : true, true);
+  }
 }
 
 

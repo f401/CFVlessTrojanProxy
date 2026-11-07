@@ -144,7 +144,9 @@ async function usageSnapGet(env: Env) {
  */
 async function usageSnapWrite(env: Env) {
   if (!env.STATS || !env.METER) return;
-  const prev = (await usageSnapGet(env)) || { users: {} };
+  const prev = (await usageSnapGet(env)) || ({ users: {}, ts: 0 } as UsageSnap);
+  // 灾备快照，2 小时一次足够（cron 是 30 分钟一轮，别每轮都写一遍）
+  if (Date.now() - (prev.ts || 0) < 2 * 3600e3) return;
   const { list } = await loadUsers(env);
   const out = { ts: Date.now(), users: {} };
   for (const u of list) {
@@ -191,9 +193,10 @@ async function restoreUsage(env: Env, id, snap?) {
   }
 }
 
-const FLUSH_MIN_MS = 1800000;    // 30 分钟
-const FLUSH_DIRTY = 2 * 1024 * 1024;   // 或累计 2MB
-const FLUSH_MAX_MS = 3600000;    // 最迟 1 小时必落一次
+const FLUSH_MIN_MS = 3600000;    // 1 小时（且累计 ≥2MB 才写）
+const FLUSH_DIRTY = 2 * 1024 * 1024;   // 脏字节门槛
+const FLUSH_MAX_MS = 7200000;    // 最迟 2 小时必落一次
+const FLUSH_GAP = 2700000;       // 全局闸门：45 分钟内已有别的 isolate 写过就不再写
 
 /**
  * 累计一次连接的流量与连接数（同时写入本地表和待推送缓冲）。
@@ -213,7 +216,6 @@ function statBump(id, up, down, isNewConn) {
   }
   s.up += up || 0;
   s.down += down || 0;
-  S.dirtyBytes += (up || 0) + (down || 0);
   S.snapBytes += (up || 0) + (down || 0);
   if (isNewConn) s.conns += 1;
   s.last = Date.now();
@@ -306,8 +308,13 @@ async function kvSet(env: Env, key: string, obj: unknown, opts?: { expirationTtl
 async function kvPut(kv, key, val, opts) {
   // 10048 = 当日写额度耗尽。既然写不进去，10 分钟内别再试，
   // 免得每个连接都白跑一次 KV 调用并刷日志。
+  // 注意：熔断期必须"抛错"而不是静默返回 —— 调用方（flushSnap 等）
+  // 是靠 catch 判断写失败的，静默返回会让它以为写成功，直接把内存里的
+  // 统计清空，配额耗尽期间的数据就真丢了。
   if (S.kvStat && S.kvStat.quota && Date.now() - (S.kvStat.quotaAt || 0) < 10 * 60000) {
-    return;
+    const e = new Error("kv quota breaker: " + key);
+    (e as any).breaker = true;
+    throw e;
   }
   S.kvw += 1;
   try {
@@ -341,12 +348,17 @@ async function flushSnap(env: Env, force?: boolean): Promise<void> {
   const since = now - (S.snapWritten || 0);
   // 关键：按"时间"节流，而不是按"脏字节"。
   // 以前 snapBytes >= 2MB 就写 —— 一天 12 GB 流量 = 6000 次写，直接把
-  // 免费额度（1000/天）打爆。现在：最多 30 分钟一次，最迟 1 小时一次。
+  // 免费额度（1000/天）打爆。
   const due = !!force || (S.snapBytes >= FLUSH_DIRTY && since >= FLUSH_MIN_MS) || since >= FLUSH_MAX_MS;
   if (!due) return;
 
-  const day = new Date().toISOString().slice(0, 10);
+  // 第二个闸门是"全局"的：每个 isolate 各写各的会让写次数随实例数线性增长
+  // （实测 8 个 isolate × 24 次/天 = 192 次）。快照本身就是合并写入，
+  // 45 分钟内别人写过就跳过，自己的增量留在内存里下一轮合并，一条不丢。
   const prev = await getSnap(env);
+  if (now - (prev.ts || 0) < FLUSH_GAP) return;
+
+  const day = new Date().toISOString().slice(0, 10);
   const next = {
     v: 1,
     ts: now,
@@ -486,11 +498,6 @@ async function readStats(env: Env, id) {
     try {
       const snap = await getSnap(env);
       stored = (snap.stats || {})[id] || null;
-      if (!stored) {
-        const day = new Date().toISOString().slice(0, 10);
-        const old = (await kvGet<Record<string, any>>(env, `stats:${day}`)) || {};
-        stored = old[id] || null;
-      }
     } catch (e) {
       stored = null;
     }

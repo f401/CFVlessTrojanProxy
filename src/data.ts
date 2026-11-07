@@ -1,12 +1,26 @@
 /* data */
 function wsToStream(ws: WebSocketLike, earlyData: string): ReadableStream<Uint8Array> {
+  // 流被取消（pipeTo 提前结束）后 WS 仍可能在推消息：
+  // 继续 enqueue 会抛 "The stream is not in a state that permits enqueue"，
+  // 而这个异常发生在事件回调里，没人接得住 —— 用一个闩把后续消息直接丢掉。
+  let live = true;
   return new ReadableStream({
     start(controller) {
-      ws.addEventListener("message", (ev) => controller.enqueue(toU8(ev.data)));
+      const push = (d) => {
+        if (!live) return;
+        try {
+          controller.enqueue(toU8(d));
+        } catch (e) {
+          live = false;
+        }
+      };
+      ws.addEventListener("message", (ev) => push(ev.data));
       ws.addEventListener("close", () => {
+        live = false;
         try { controller.close(); } catch (e) {}
       });
       ws.addEventListener("error", (e) => {
+        live = false;
         try { controller.error(e); } catch (err) {}
       });
       if (earlyData) {
@@ -15,13 +29,41 @@ function wsToStream(ws: WebSocketLike, earlyData: string): ReadableStream<Uint8A
           const raw = atob(b64);
           const buf = new Uint8Array(raw.length);
           for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
-          controller.enqueue(buf);
+          push(buf);
         } catch (e) {
           /* 早期数据非法，忽略 */
         }
       }
     },
+    cancel() {
+      live = false;
+    },
   });
+}
+
+/**
+ * 换一个中转节点重连（"这个节点不通就换下一个"）。
+ * @param {object} env Worker 环境
+ * @param {object} st 连接状态（会被更新 node/via/pxTries）
+ * @param {string} mode 模式
+ * @returns {Promise<Socket|null>} 新连接，没有可换或连不上返回 null
+ */
+async function dialAnother(env: Env, st: Connection, mode: string, tag?: string): Promise<any> {
+  const alt = nextNode(mode, st.node);
+  if (!alt) return null;
+  const i = alt.lastIndexOf(":");
+  const host = alt.slice(0, i);
+  const port = Number(alt.slice(i + 1)) || 443;
+  try {
+    const s = await connect({ hostname: host, port });
+    st.node = alt;
+    st.via = "node";
+    st.pxTries = (st.pxTries || 1) + 1;
+    logErr(`retry another node ${alt}`, tag || "");
+    return s;
+  } catch (e) {
+    return null;
+  }
 }
 
 /**
@@ -95,6 +137,9 @@ async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext):
             throw new Error(bad);
           }
 
+          // VLESS 的响应头（ver,0）对 TCP/UDP 都要带，所以放在 UDP 分支之前设置
+          if (r.proto === "vless") st.header = new Uint8Array([r.ver, 0]);
+
           if (r.udp) {
             if (r.port !== 53) {
               try { serverWS.close(1011, "UDP 仅支持 DNS(53)"); } catch (e) {}
@@ -103,8 +148,6 @@ async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext):
             await handleDns(serverWS, u8.subarray(r.offset), st);
             return;
           }
-
-          if (r.proto === "vless") st.header = new Uint8Array([r.ver, 0]);
 
           const payload = u8.subarray(r.offset);
           st.retried = false;
@@ -150,20 +193,9 @@ async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext):
               st.via = "node";
             } catch (e2) {
               // 这个中转连不上，换一个再试一次
-              const alt = nextNode(mode, st.node);
-              if (alt) {
-                const ii = alt.lastIndexOf(":");
-                try {
-                  st.pxTries = 2;
-                  sock = await connect({ hostname: alt.slice(0, ii), port: Number(alt.slice(ii + 1)) || 443 });
-                  st.node = alt;
-                  st.via = "node";
-                  logErr(`dial retry another node ${alt}`, r.host || "");
-                } catch (e3) {
-                  await SEL.bumpFail(env, st.mode, st.node, st.trial);
-                  throw e3;
-                }
-              } else {
+              const alt = await dialAnother(env, st, mode, r.host);
+              if (alt) sock = alt;
+              else {
                 await SEL.bumpFail(env, st.mode, st.node, st.trial);
                 throw e2;
               }
@@ -179,6 +211,9 @@ async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext):
             if (payload.length) await st.writer.write(payload).catch(() => {});
 
             pipeBack(s2, serverWS, st, async (gotData) => {
+              // 客户端已经走了（取消下载 / 切网 / 切节点）：别再替它开新中转，
+              // 否则每次取消都会白烧一次拨号 + 一次探测不到的失败记录。
+              if (serverWS.readyState !== WS_OPEN) { closeQuietly(st.sock); return; }
               if (gotData) SEL.resetFail(env, st.node);   // 能通就说明链路健康，别乱切
               if (!gotData && !st.markedFail) {
                 st.markedFail = true;
@@ -196,18 +231,10 @@ async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext):
                 if (st.node) { const sn = nsGet(st.node); sn.eCloseP = (sn.eCloseP || 0) + 1; }
                 // 这个中转不通，换一个再试一次；直接放弃就是用户看到的"下载失败"
                 if ((st.pxTries || 1) < 2) {
-                  const alt = nextNode(st.mode, st.node);
-                  if (alt) {
-                    st.pxTries = (st.pxTries || 1) + 1;
-                    const ii = alt.lastIndexOf(":");
-                    try {
-                      const s2 = await connect({ hostname: alt.slice(0, ii), port: Number(alt.slice(ii + 1)) || 443 });
-                      st.node = alt;
-                      st.via = "node";
-                      logErr(`retry another node ${alt}`, r.host || "");
-                      await attach(s2);
-                      return;
-                    } catch (e) { /* 换节点也失败，走下面的放弃逻辑 */ }
+                  const s2 = await dialAnother(env, st, st.mode, r.host);
+                  if (s2) {
+                    await attach(s2);
+                    return;
                   }
                 }
                 cnt("dead"); kickFlush(env, st.id);                       // 换节点也不通 → 这个目标走不了中转

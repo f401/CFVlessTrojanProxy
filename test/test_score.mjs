@@ -137,5 +137,33 @@ eq("直连不产生吞吐样本", W.S.nstat.size, 0);
 c2.flush();
 eq("无 id 时 flush 不改状态", c2.reportedUp, 0);
 
+/* ---------- 6. 本轮优化的回归 ---------- */
+// 鉴权成功但零字节的连接（探测/被客户端立刻取消）也要落 node/direct 计数
+reset();
+const c3 = new W.Connection({}, {}, "tput", "");
+c3.id = "u-test";
+c3.node = "n9:443";
+const nBefore = W.S.cnt.node || 0;
+c3.flush(true);
+eq("零字节收尾也计入 node", W.S.cnt.node, nBefore + 1);
+
+// 面板明细按需生成：只算要展示的节点
+reset();
+node("p1:443", { tcp: 50, tS: 5 });
+node("p2:443", { tcp: 60, tS: 5 });
+const only = W.nsOf(["p1:443"]);
+eq("nsOf 只算传入的节点", Object.keys(only), ["p1:443"]);
+ok("nsOf 带出评分", typeof only["p1:443"].lat === "number" && only["p1:443"].lat > 0);
+
+const px = await W.pxGet({});
+eq("pxGet 不再预生成全量明细", px.state.ns, undefined);
+eq("pxGet 仍然给出存活列表", px.alive.length, 2);
+
+// 错误日志去重（稳定期不该被同一条错误刷屏）
+const e0 = W.S.errs.length;
+W.logErr("dup-msg-for-test");
+W.logErr("dup-msg-for-test");
+eq("5 秒内同一错误只记一次", W.S.errs.length, e0 + 1);
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
