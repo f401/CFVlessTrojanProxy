@@ -1,0 +1,32 @@
+# 构建产物
+build/
+dist/
+*.pre.js
+*.mid.js
+test/_bundle.mjs
+
+# 运行时源码（已被 src/*.ts 取代）
+_worker_v3.js
+_worker_v3.*.js
+
+# 依赖
+node_modules/
+
+# 含密钥，绝不入库
+config/config.env
+config/metadata.json
+meta_clean.json
+meta_deploy.json
+
+# 备份
+src.pre_oop/
+src.bak/
+*.bak
+
+# Python
+__pycache__/
+*.pyc
+
+# 构建依赖（由 scripts/fetch-deps.sh 下载）
+obf/obfuscator-browser.js
+_bundle.mjs

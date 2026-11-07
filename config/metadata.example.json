@@ -1,0 +1,25 @@
+{
+  "main_module": "_worker.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["streams_enable_constructors"],
+  "bindings": [
+    { "type": "plain_text", "name": "uuid", "text": "00000000-0000-0000-0000-000000000000" },
+    { "type": "secret_text", "name": "pwd", "text": "CHANGE_ME_PASSWORD" },
+    { "type": "secret_text", "name": "kek", "text": "CHANGE_ME_64_HEX" },
+    { "type": "plain_text", "name": "nodes", "text": "example.com:443:tls,www.visa.com:443:tls" },
+    { "type": "plain_text", "name": "proxyip", "text": "auto" },
+    { "type": "plain_text", "name": "regions", "text": "auto" },
+    { "type": "plain_text", "name": "quotaBytes", "text": "0" },
+    { "type": "plain_text", "name": "expireAt", "text": "2099-12-31T00:00:00Z" },
+    { "type": "plain_text", "name": "pxDwellMin", "text": "0" },
+    { "type": "plain_text", "name": "pxFailMax", "text": "3" },
+    { "type": "plain_text", "name": "pxForceAt", "text": "5" },
+    { "type": "plain_text", "name": "adminKey", "text": "#CHANGE_ME" },
+    { "type": "kv_namespace", "name": "STATS", "namespace_id": "REPLACE_WITH_KV_ID" },
+    { "type": "durable_object_namespace", "name": "METER", "class_name": "Meter" }
+  ],
+  "migrations": {
+    "new_tag": "v1",
+    "new_sqlite_classes": ["Meter"]
+  }
+}

@@ -1,0 +1,262 @@
+/* 协议解析：VLESS / Trojan 首包 */
+const USERS_TTL = 300000;  // 面板改动最多 5 分钟生效（把 KV 读从 1.4 万/天压到 1.4 千）
+
+const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * 加载用户表：把 env 里的 uuid/trojan（secret）与 KV 托管用户合并，结果缓存 30 秒。
+ * @param {object} env Worker 环境（读 uuid / uuids / trojan / STATS）
+ * @returns {Promise<{list: Array, uuids: Set<string>, trojan: Map<string,string>}>} 用户表与两套鉴权索引
+ */
+async function loadUsers(env: Env): Promise<Auth> {
+  const sig = `${env.uuids || env.uuid || ""}|${secretPwd(env)}`;
+  if (S.usersCache.v && S.usersSig === sig && Date.now() - S.usersCache.t < USERS_TTL) return S.usersCache.v;
+  S.usersSig = sig;
+
+  let managed: Partial<UserRec>[] = [];
+  try {
+    managed = (await kvGet<UserRec[]>(env, "users")) || [];
+  } catch (e) {
+    managed = [];
+  }
+
+  const uuids = new Set<string>();
+  const trojan = new Map<string, string>();
+  const list: UserRec[] = [];
+
+  const add = (id: string, pwd?: string, note?: string, enabled?: boolean, managedFlag?: boolean) => {
+    if (!RE_UUID.test(id)) return;
+    let rec = list.find((x) => x.id === id);
+    if (!rec) {
+      rec = { id, pwd: "", note: note || "", enabled: enabled !== false, managed: !!managedFlag };
+      list.push(rec);
+    } else {
+      if (note && !rec.note) rec.note = note;
+      if (managedFlag) rec.managed = true;
+    }
+    if (pwd) rec.pwd = pwd;
+    if (rec.enabled) {
+      uuids.add(id);
+      if (rec.pwd) trojan.set(toHex(sha224Bytes(enc.encode(rec.pwd))), id);
+    }
+  };
+
+  // 1) 环境变量里的用户
+  String(env.uuids || env.uuid || "")
+    .split(",")
+    .forEach((x) => add(x.trim().toLowerCase(), "", "env", true, false));
+
+  const rawTrojan = secretPwd(env);
+  if (rawTrojan && !rawTrojan.includes(":")) {
+    // 单密码模式：一个公共密码，给所有 env 用户用
+    String(env.uuids || env.uuid || "")
+      .split(",")
+      .forEach((x) => add(x.trim().toLowerCase(), rawTrojan, "env", true, false));
+  } else {
+    // 多密码模式：user_uuid:password,user_uuid:password
+    rawTrojan.split(",").forEach((pair) => {
+      const i = pair.indexOf(":");
+      if (i < 0) return;
+      add(pair.slice(0, i).trim().toLowerCase(), pair.slice(i + 1).trim(), "env", true, false);
+    });
+  }
+
+  // 2) 面板管理的用户
+  for (const m of managed) {
+    if (!m || !m.id) continue;
+    add(String(m.id).toLowerCase(), m.pwd, m.note || "", m.enabled !== false, true);
+  }
+
+  const out = { uuids, trojan, list };
+  S.usersCache = { v: out, t: Date.now() };
+  return out;
+}
+
+/**
+ * 清空用户表缓存，使下一次 loadUsers 重新读 KV（面板改完立刻生效）。
+ * @returns {void}
+ */
+function invalidateUsers() {
+  S.usersCache = { v: null, t: 0 };
+}
+
+/**
+ * 把托管用户列表写回 KV（只序列化 managed=true 的用户）。
+ * @param {object} env Worker 环境
+ * @param {Array<object>} list 完整用户列表
+ * @returns {Promise<void>}
+ */
+async function saveUsers(env: Env, list) {
+  const clean = list.filter((x) => x.managed).map((x) => ({
+    id: x.id,
+    pwd: x.pwd || "",
+    note: x.note || "",
+    enabled: x.enabled !== false,
+    ts: x.ts || 0,
+  }));
+  await kvSet(env, "users", clean);
+  invalidateUsers();
+}
+
+/* ==================================================================
+ * §4  协议侦测与解析
+ * ================================================================== */
+
+/**
+ * 判断字节区间内是否全为十六进制字符（Trojan 密码预检）。
+ * @param {Uint8Array} u8 字节数组
+ * @param {number} from 起始下标（含）
+ * @param {number} to 结束下标（不含）
+ * @returns {boolean} 全部是 0-9a-fA-F 时返回 true
+ */
+function isHexAscii(u8, from, to) {
+  for (let i = from; i < to; i++) {
+    const c = u8[i];
+    const ok = (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x66) || (c >= 0x41 && c <= 0x46);
+    if (!ok) return false;
+  }
+  return true;
+}
+
+/**
+ * 识别首包协议：第 57-58 字节是 \r\n 且前面 56 字节是十六进制 → Trojan，否则 VLESS。
+ * @param {Uint8Array} u8 客户端首个载荷
+ * @returns {'vless'|'trojan'} 协议名
+ */
+function detectProtocol(u8) {
+  if (u8.length >= 58 && u8[56] === 0x0d && u8[57] === 0x0a && isHexAscii(u8, 0, 56)) {
+    return "trojan";
+  }
+  return "vless";
+}
+
+/**
+ * 把两种协议里含义不同的地址类型字节归一化成 VLESS 语义。
+ * @param {'vless'|'trojan'} proto 协议名
+ * @param {number} atyp 原始地址类型字节
+ * @returns {number} 归一化后的 atyp（1=IPv4 3=域名 4=IPv6）
+ */
+function normAtyp(proto: string, atyp: number): string {
+  if (proto === "vless") {
+    return atyp === 1 ? "v4" : atyp === 2 ? "dom" : atyp === 3 ? "v6" : null;
+  }
+  return atyp === 1 ? "v4" : atyp === 3 ? "dom" : atyp === 4 ? "v6" : null;
+}
+
+/**
+ * 从首包中解析目标地址（IPv4 / 域名 / IPv6）。
+ * @param {Uint8Array} u8 首包
+ * @param {number} off 地址字段起始偏移
+ * @param {number} kind 归一化后的 atyp
+ * @returns {{host: string, port: number, next: number}|null} 目标地址、端口与下一字段偏移
+ */
+function readAddr(u8: Uint8Array, off: number, kind: string): AddrOk | AddrErr {
+  if (kind === "v4") {
+    if (u8.length < off + 4) return { err: "地址截断" };
+    return {
+      host: `${u8[off]}.${u8[off + 1]}.${u8[off + 2]}.${u8[off + 3]}`,
+      next: off + 4,
+    };
+  }
+  if (kind === "dom") {
+    if (u8.length < off + 1) return { err: "地址截断" };
+    const n = u8[off];
+    if (u8.length < off + 1 + n) return { err: "地址截断" };
+    return { host: dec.decode(u8.subarray(off + 1, off + 1 + n)), next: off + 1 + n };
+  }
+  if (kind === "v6") {
+    if (u8.length < off + 16) return { err: "地址截断" };
+    const p = [];
+    for (let i = 0; i < 8; i++) p.push(((u8[off + i * 2] << 8) | u8[off + i * 2 + 1]).toString(16));
+    return { host: p.join(":"), next: off + 16 };
+  }
+  return { err: "不支持的地址类型" };
+}
+
+/**
+ * 解析 VLESS 请求头并校验 UUID。
+ * @param {Uint8Array} u8 客户端首包
+ * @param {object} auth loadUsers 的返回值
+ * @returns {{ok: boolean, id?: string, host?: string, port?: number, udp?: boolean, offset?: number, ver?: number, err?: string}} 解析结果
+ */
+function parseVLESS(u8: Uint8Array, auth: Auth): ParseResult {
+  if (u8.length < 24) return { ok: false, err: "VLESS 头部过短" };
+
+  const ver = u8[0];
+  const uuid = uuidFromBytes(u8.subarray(1, 17));
+  if (!auth.uuids.has(uuid)) return { ok: false, err: "鉴权失败", id: uuid };
+
+  const optLen = u8[17];
+  let off = 18 + optLen;
+  if (u8.length < off + 1) return { ok: false, err: "VLESS 选项截断" };
+
+  const cmd = u8[off++];
+  if (u8.length < off + 3) return { ok: false, err: "VLESS 头部不完整" };
+
+  const port = (u8[off] << 8) | u8[off + 1];
+  off += 2;
+  const atyp = u8[off++];
+
+  const kind = normAtyp("vless", atyp);
+  if (!kind) return { ok: false, err: "不支持的地址类型" };
+  const a = readAddr(u8, off, kind);
+  if (a.err) return { ok: false, err: a.err };
+
+  const udp = cmd === 2;
+  if (cmd !== 1 && cmd !== 2) return { ok: false, err: "不支持的命令" };
+
+  return {
+    ok: true,
+    proto: "vless",
+    id: uuid,
+    udp,
+    host: a.host,
+    port,
+    offset: a.next,
+    ver,
+  };
+}
+
+/**
+ * 解析 Trojan 请求头并用 SHA-224(密码) 校验。
+ * @param {Uint8Array} u8 客户端首包
+ * @param {object} auth loadUsers 的返回值
+ * @returns {{ok: boolean, id?: string, host?: string, port?: number, udp?: boolean, offset?: number, err?: string}} 解析结果
+ */
+function parseTrojan(u8: Uint8Array, auth: Auth): ParseResult {
+  if (u8.length < 61) return { ok: false, err: "Trojan 头部过短" };
+
+  const hash = dec.decode(u8.subarray(0, 56)).toLowerCase();
+  const id = auth.trojan.get(hash);
+  if (!id) return { ok: false, err: "鉴权失败" };
+
+  let off = 58;
+  const cmd = u8[off++];
+  const atyp = u8[off++];
+
+  const kind = normAtyp("trojan", atyp);
+  if (!kind) return { ok: false, err: "不支持的地址类型" };
+  const a = readAddr(u8, off, kind);
+  if (a.err) return { ok: false, err: a.err };
+  off = a.next;
+
+  if (u8.length < off + 2) return { ok: false, err: "Trojan 头部不完整" };
+  const port = (u8[off] << 8) | u8[off + 1];
+  off += 2;
+
+  if (u8.length < off + 2 || u8[off] !== 0x0d || u8[off + 1] !== 0x0a) {
+    return { ok: false, err: "Trojan 缺少结尾 CRLF" };
+  }
+  off += 2;
+
+  const udp = cmd === 3;
+  if (cmd !== 1 && cmd !== 3) return { ok: false, err: "不支持的命令" };
+
+  return { ok: true, proto: "trojan", id, udp, host: a.host, port, offset: off };
+}
+
+/* ==================================================================
+ * §5  出口策略与拨号
+ * ================================================================== */
+
+// 危险端口：邮件滥发、数据库、远程桌面、SMB 等

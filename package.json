@@ -1,0 +1,16 @@
+{
+  "name": "cf-proxyx",
+  "version": "1.0.0",
+  "private": true,
+  "description": "VLESS/Trojan over WebSocket on Cloudflare Workers, with node scoring and rotation",
+  "scripts": {
+    "check": "node tools/tsc.js",
+    "build": "node tools/tsc.js && node build.js",
+    "test": "node test/mk_test.mjs && node test/test_v3.mjs && node test/smoke_v3.mjs && node test/test_score.mjs",
+    "obf": "node obf/pre.js && node obf/obf_mid.js",
+    "all": "npm run build && npm test && npm run obf"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3"
+  }
+}
