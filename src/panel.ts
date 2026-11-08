@@ -96,6 +96,7 @@ ${row("当前节点 · 吞吐优先", i.curTput || "（未定）", true)}
 ${row("当前节点 · 速率优先", i.curLat || "（未定）", true)}
 ${row("备用节点", (i.aliveCount || 0) + " 个", false)}
 ${row("用量", (i.used || "0 B") + " / " + (i.quota || "不限"), false)}
+${row("今日", i.today || "0 B", false)}
 ${row("到期", i.expire || "长期", false)}
 </table>
 
@@ -319,6 +320,7 @@ function renderAdmin(url, users, statsMap) {
     .map((u) => {
       const s = statsMap[u.id] || {};
       const used = fmtBytes((s.up || 0) + (s.down || 0));
+      const today = fmtBytes((s.todayUp || 0) + (s.todayDown || 0));
       const dis = u.enabled === false;
       const ops = u.managed
         ? `<form method="post" action="/admin/op" style="display:inline">
@@ -333,6 +335,7 @@ function renderAdmin(url, users, statsMap) {
         <td class="u">${u.pwd ? escapeHtml(u.pwd) : "<span class='mu'>—</span>"}</td>
         <td>${escapeHtml(u.note || "")}</td>
         <td>${dis ? "已禁用" : "正常"}</td>
+        <td>${today}</td>
         <td>${used}</td>
         <td>${ops}</td>
       </tr>`;
@@ -370,8 +373,8 @@ code{background:#f3f4f6;padding:1px 5px;border-radius:4px}
 </form>
 
 <table>
-<tr><th>UUID</th><th>Trojan 密码</th><th>备注</th><th>状态</th><th>今日用量</th><th>操作</th></tr>
-${rows || '<tr><td colspan="6" class="mu">还没有用户</td></tr>'}
+<tr><th>UUID</th><th>Trojan 密码</th><th>备注</th><th>状态</th><th>今日</th><th>累计</th><th>操作</th></tr>
+${rows || '<tr><td colspan="7" class="mu">还没有用户</td></tr>'}
 </table>
 
 <div class="sub" style="margin-top:18px">
@@ -495,6 +498,7 @@ td,th{border:1px solid #ddd;padding:6px 9px;text-align:left}
 </style>
 <h2>用量</h2>
 <table>
+<tr><th>今日</th><td>${fmtBytes((s.todayUp || 0) + (s.todayDown || 0))}</td></tr>
 <tr><th>上行</th><td>${fmtBytes(s.up)}</td></tr>
 <tr><th>下行</th><td>${fmtBytes(s.down)}</td></tr>
 <tr><th>合计</th><td>${fmtBytes(s.up + s.down)}${total ? ` / ${fmtBytes(total)}（${pct}%）` : ""}</td></tr>

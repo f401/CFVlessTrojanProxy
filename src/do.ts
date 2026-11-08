@@ -8,7 +8,7 @@ export class Meter {
   constructor(state: DurableObjectState, env: Env) {
     this.st = state;
     this.env = env;
-    this.c = { up: 0, down: 0, conns: 0, first: 0, ts: 0 };
+    this.c = { up: 0, down: 0, conns: 0, first: 0, ts: 0, d: "", dU: 0, dD: 0 };
     this.g = { d: "" };                        // 全局日计数（连接/走节点/断流…）
     this.s = {};                               // 节点快照 "h:p" -> {med,p90,cap,n,...}
     this.e = [];                               // 跨 isolate 的错误环形（最多 50 条）
@@ -98,6 +98,12 @@ export class Meter {
       c.up += Number(d.up) || 0;
       c.down += Number(d.down) || 0;
       c.conns += Number(d.conns) || 0;
+      // 当日字节：跨天自动清零。累计值 up/down 是订阅头用的（协议惯例），
+      // 面板上的"今日"用这一份 —— 否则用户永远只看到历史总量。
+      const today0 = new Date().toISOString().slice(0, 10);
+      if (c.d !== today0) { c.d = today0; c.dU = 0; c.dD = 0; }
+      c.dU = (c.dU || 0) + (Number(d.up) || 0);
+      c.dD = (c.dD || 0) + (Number(d.down) || 0);
       c.ts = Date.now();
       if (!c.first) c.first = c.ts;
       // 每次都落盘：DO 随时可能被驱逐，靠内存攒着会在驱逐时全丢
@@ -148,7 +154,7 @@ export class Meter {
     }
 
     if (p.endsWith("/reset")) {
-      this.c = { up: 0, down: 0, conns: 0, first: 0, ts: Date.now() };
+      this.c = { up: 0, down: 0, conns: 0, first: 0, ts: Date.now(), d: "", dU: 0, dD: 0 };
       await this.save();
       return this.json();
     }

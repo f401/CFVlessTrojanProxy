@@ -484,6 +484,9 @@ async function readStats(env: Env, id) {
       up: (doTotal.up || 0) + p.up,
       down: (doTotal.down || 0) + p.down,
       conns: (doTotal.conns || 0) + p.conns,
+      // 当日量 = DO 里的当日累计 + 还没推上去的增量
+      todayUp: (doTotal.dU || 0) + p.up,
+      todayDown: (doTotal.dD || 0) + p.down,
       firstSeen: doTotal.first || local.first || null,
       lastSeen: Math.max(doTotal.ts || 0, local.last) || null,
       isolateLocal: { up: local.up, down: local.down, conns: local.conns },
@@ -508,6 +511,9 @@ async function readStats(env: Env, id) {
     up: (base.up || 0) + local.up,
     down: (base.down || 0) + local.down,
     conns: (base.conns || 0) + local.conns,
+    // 没绑 DO 时，快照本身就是"当日"口径（flushSnap 跨天会重置）
+    todayUp: (base.up || 0) + local.up,
+    todayDown: (base.down || 0) + local.down,
     firstSeen: base.first || local.first || null,
     lastSeen: Math.max(base.last || 0, local.last) || null,
     isolateLocal: { up: local.up, down: local.down, conns: local.conns },

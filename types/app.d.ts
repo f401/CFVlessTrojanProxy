@@ -237,7 +237,7 @@ interface SnapDoc {
 }
 
 /** Meter DO 里存的用量累计 */
-interface UsageMeter { up: number; down: number; conns: number; first: number; ts: number }
+interface UsageMeter { up: number; down: number; conns: number; first: number; ts: number; d?: string; dU?: number; dD?: number }
 
 /** Meter DO 里存的节点快照（跨 isolate 展示用） */
 interface NodeSnap { med: number; p90: number; cap: number; n: number; ts?: number; tf?: number; at: number }

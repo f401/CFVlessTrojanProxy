@@ -229,7 +229,10 @@ export default {
         for (const u of users.list) {
           try {
             const s = await readStats(env, u.id);
-            statsMap[u.id] = { up: s.up || 0, down: s.down || 0 };
+            statsMap[u.id] = {
+              up: s.up || 0, down: s.down || 0,
+              todayUp: s.todayUp || 0, todayDown: s.todayDown || 0,
+            };
           } catch (e) {}
         }
         return safeHtml(renderAdmin(url, users, statsMap));
@@ -276,6 +279,7 @@ export default {
             funnel: `直连 ${pctOf(f.direct || 0)} · 中转 ${pctOf(f.node || 0)}` + (f.v6 ? ` · v6 ${pctOf(f.v6)}` : ""),
             aliveCount: alive.length,
             used: fmtBytes((st.up || 0) + (st.down || 0)),
+            today: fmtBytes((st.todayUp || 0) + (st.todayDown || 0)),
             quota: fmtBytes(effectiveQuota(env, (st.up || 0) + (st.down || 0))) + "（到顶自动翻倍）",
             expire: env.expireAt ? String(env.expireAt).slice(0, 10) : "长期",
             [P_T + "Pwd"]: trojanPasswordOf(env, id),
