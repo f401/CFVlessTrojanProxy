@@ -296,5 +296,14 @@ eq("新域名挑全局最优的未试节点", p2, "a:443");
 eq("标记为站点试探", st2.hostTrial, true);
 eq("试探节点写回 st.node", st2.node, "a:443");
 
+// 两个节点各 1 次样本：有对比就该按站点选，不用等 n>=2
+reset();
+node("p:443", { tcp: 60 });
+node("q:443", { tcp: 300 });
+W.hostNodeMark("two.test", "p:443", { ok: true, bad: false, bytes: 100, ttfb: 80 });
+W.hostNodeMark("two.test", "q:443", { ok: true, bad: false, bytes: 100, ttfb: 600 });
+const st3 = { host: "two.test" };
+eq("两次样本就能比较出快慢", W.SEL.pick({ pxShadow: 0 }, "tput", st3), "p:443");
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -41,9 +41,12 @@ pick(env: Env, mode, st) {
     const rank = hostRank(host, m);
     if (rank.length) {
       const best = rank[0].k;
-      const bs = (S.hostNode.get(host) || new Map()).get(best);
-      // 样本够了才敢覆盖全局游标；只有 1 次样本时跟着走风险太大
-      if (bs && bs.n >= 2) {
+      const hm = S.hostNode.get(host) || new Map();
+      const bs = hm.get(best);
+      // 这个站至少有两个节点有样本（有对比才有意义），才敢覆盖全局游标
+      let sampled = 0;
+      for (const s of hm.values()) if (s.n > 0) sampled++;
+      if (bs && bs.n > 0 && (bs.n >= 2 || sampled >= 2)) {
         // 稳定期留 2% 给次优节点，保持样本新鲜（不然一次侥幸定终身）
         if (rank.length > 1 && !(st && st.retried) && Math.random() < 0.02) {
           if (st) st.node = rank[1].k;

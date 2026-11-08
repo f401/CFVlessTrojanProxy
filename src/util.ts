@@ -3,7 +3,7 @@ const WS_OPEN = 1;
 const WS_BUFFER_LIMIT = 1024 * 1024;   // 下行发送缓冲超过 1MB 就开始背压
 const WS_STALL_MS = 60000;              // 客户端一时收不动很常见，给到 60 秒
 const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐了
-const VERSION = "5.2";
+const VERSION = "5.3";
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
