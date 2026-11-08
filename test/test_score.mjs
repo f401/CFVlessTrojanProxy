@@ -165,5 +165,19 @@ W.logErr("dup-msg-for-test");
 W.logErr("dup-msg-for-test");
 eq("5 秒内同一错误只记一次", W.S.errs.length, e0 + 1);
 
+// 成功连接要给节点记 ok/tS，否则面板永远显示 0、可用性门槛永远不生效
+reset();
+const c6 = new W.Connection({}, {}, "tput", "");
+c6.id = "u3"; c6.node = "ok2:443"; c6.down = 2048;
+c6.flush(true);
+eq("成功连接记一次 ok", (W.S.nstat.get("ok2:443") || {}).okW, 1);
+eq("成功连接进入可用性样本", (W.S.nstat.get("ok2:443") || {}).tS, 1);
+
+reset();
+const c7 = new W.Connection({}, {}, "tput", "");
+c7.id = "u4"; c7.node = "bad2:443"; c7.down = 2048; c7.failed = true;
+c7.flush(true);
+eq("断流的连接不记 ok", ((W.S.nstat.get("bad2:443") || {}).okW) || 0, 0);
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

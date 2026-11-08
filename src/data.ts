@@ -370,6 +370,7 @@ function pipeBack(sock: any, ws: WebSocketLike, st: Connection, onClose?: (gotDa
       closeQuietly(sock);
       // 已经传过数据却异常结束 = 中途断流，算这个节点一次失败（以前只在空关闭时记账）
       if (st && st.down > 0) {
+        st.failed = true;
         cnt("cut");
         if (st.node) {
           const sn = nsGet(st.node);

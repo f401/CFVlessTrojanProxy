@@ -36,6 +36,7 @@ class Connection {
   // —— 生命周期 ——
   markedOk = false;
   markedFail = false;
+  failed = false;         // 中途断流/异常（由 pipeBack 的 catch 置位），不算成功
   retried = false;
   pxTries = 0;
   triedV6 = false;
@@ -150,6 +151,11 @@ class Connection {
       if (!this.counted) {
         this.counted = 1;
         cnt(this.node ? "node" : "direct");
+        // 真实流量的"成功"样本：可用性(pFail/availOf)、面板成功率全靠它。
+        // 早先只有失败才记账（nsFail），成功只走 SEL.resetFail()，而那里
+        // 第一行就是 `if (!S.pxFailSeen) return` —— 健康节点永远 n=0，
+        // 面板显示"一个连接都没有"，可用性门槛也永远不触发。
+        if (this.node && !this.failed && this.down > 0) nsOk(this.node, 0, 0);
         markSeedDirty(this.env);
       }
     }
