@@ -57,6 +57,12 @@ class AppState {
   kvw = 0;
   kvStat: any = { ok: null, key: "", at: 0 };
 
+  // —— 按站点的节点画像（诊断 / 站点级偏好用）——
+  //   hostNode[host][node] = {n, ok, bad, bytes, ttfb, at}
+  //   只保留最近活跃的 120 个域名，每个域名最多 12 个节点
+  hostNode: Map<string, Map<string, HNStat>> = new Map();
+  hostDirect: Map<string, HDirect> = new Map();
+
   // —— 用户与观测 ——
   usersCache: { v: Auth | null; t: number } = { v: null, t: 0 };
   usersSig = "";

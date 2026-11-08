@@ -108,12 +108,124 @@ function logErr(msg, tag?) {
 }
 
 /* ==================================================================
- * §7  WebSocket 数据面
+ * 按站点的节点画像（诊断：某个站到底该用哪个节点 / 为什么被拦）
  * ================================================================== */
 
+const HN_MAX_HOSTS = 120;   // 最多记 120 个域名
+const HN_MAX_NODES = 12;    // 每个域名最多记 12 个节点
+
 /**
- * 把 WebSocket 的可读消息包装成 ReadableStream，并可注入 0-RTT 早期数据。
- * @param {WebSocket} ws 服务端 WS
- * @param {string} [earlyData] base64url 编码的早期数据
- * @returns {ReadableStream<Uint8Array>} 数据流
+ * 记一次 (站点, 节点) 的连接结果。
+ * @param {string} host 目标域名
+ * @param {string} node "host:port" 节点
+ * @param {{ok:boolean, bad:boolean, bytes:number, ttfb:number}} o 本次结果
+ * @returns {void}
  */
+function hostNodeMark(host, node, o) {
+  if (!host || !node) return;
+  let m = S.hostNode.get(host);
+  if (!m) {
+    if (S.hostNode.size >= HN_MAX_HOSTS) {
+      // 淘汰最久没更新过的域名（120 条，线性扫可接受）
+      let oldK = "", oldT = Infinity;
+      for (const [k, v] of S.hostNode) {
+        let t = 0;
+        for (const s of v.values()) if (s.at > t) t = s.at;
+        if (t < oldT) { oldT = t; oldK = k; }
+      }
+      if (oldK) S.hostNode.delete(oldK);
+    }
+    m = new Map<string, HNStat>();
+    S.hostNode.set(host, m);
+  }
+  let s = m.get(node);
+  if (!s) {
+    if (m.size >= HN_MAX_NODES) {
+      let oldN = "", oldT = Infinity;
+      for (const [k, v] of m) if (v.at < oldT) { oldT = v.at; oldN = k; }
+      if (oldN) m.delete(oldN);
+    }
+    s = { n: 0, ok: 0, bad: 0, bytes: 0, ttfb: 0, at: 0 };
+    m.set(node, s);
+  }
+  s.n += 1;
+  if (o.ok) s.ok += 1;
+  if (o.bad) s.bad += 1;
+  s.bytes += o.bytes || 0;
+  if (o.ttfb > 0) s.ttfb = s.ttfb ? Math.round(s.ttfb * 0.6 + o.ttfb * 0.4) : Math.round(o.ttfb);
+  s.at = Date.now();
+}
+
+/**
+ * 记一次直连结果（用来判断"是节点的锅还是站点/指纹的锅"）。
+ * @param {string} host 目标域名
+ * @param {boolean} ok 直连是否成功拿到数据
+ * @returns {void}
+ */
+function hostDirectMark(host, ok) {
+  if (!host) return;
+  if (S.hostDirect.size >= HN_MAX_HOSTS) {
+    let oldK = "", oldT = Infinity;
+    for (const [k, v] of S.hostDirect) if (v.at < oldT) { oldT = v.at; oldK = k; }
+    if (oldK) S.hostDirect.delete(oldK);
+  }
+  const e = S.hostDirect.get(host) || { ok: 0, bad: 0, at: 0 };
+  if (ok) e.ok += 1; else e.bad += 1;
+  e.at = Date.now();
+  S.hostDirect.set(host, e);
+}
+
+/**
+ * 由样本推出结论（纯函数，便于单测）。
+ * @param {Array} rows [{node, cc, n, ok, bad, bytes, ttfb}]
+ * @param {{ok:number,bad:number}} direct 直连对照
+ * @returns {{kind:string, verdict:string, suspect:string[]}}
+ */
+function diagVerdict(rows, direct) {
+  const tested = (rows || []).filter((r) => r.n > 0);
+  const suspect = tested.filter((r) => r.bad >= 1 && r.bad * 2 >= r.n);
+  const d = direct || { ok: 0, bad: 0 };
+
+  if (!tested.length) {
+    return {
+      kind: "empty",
+      verdict: "还没有样本：先访问一次这个站，或者加 &probe=1 做一轮主动探测",
+      suspect: [],
+    };
+  }
+  if (!suspect.length) {
+    return {
+      kind: "ok",
+      verdict: `正常：${tested.length} 个节点有样本，没有可疑的`,
+      suspect: [],
+    };
+  }
+  const names = suspect.map((r) => r.node);
+  if (suspect.length < tested.length) {
+    const ccs = [...new Set(suspect.map((r) => String(r.cc || "").toUpperCase()).filter(Boolean))];
+    if (ccs.length === 1 && suspect.length >= 2) {
+      return {
+        kind: "geo",
+        verdict: `${suspect.length}/${tested.length} 个节点可疑，且都集中在 ${ccs[0]}：疑似地区 / ASN 规则，避开该地区即可`,
+        suspect: names,
+      };
+    }
+    return {
+      kind: "ip",
+      verdict: `${suspect.length}/${tested.length} 个节点可疑，分散在不同地区：疑似单 IP 信誉被拉黑（已按站避开）`,
+      suspect: names,
+    };
+  }
+  if (d.ok > 0 && d.ok >= d.bad) {
+    return {
+      kind: "pool",
+      verdict: "全部节点都被拦，但直连正常：整个中转池的 IP 段被这个站拉黑了，换节点没用，得换出口类型",
+      suspect: names,
+    };
+  }
+  return {
+    kind: "unknown",
+    verdict: "全部节点都被拦，直连也不通：大概率是站点自身规则（地区封锁 / 登录态）或 TLS 指纹，需用浏览器直连验证一次",
+    suspect: names,
+  };
+}

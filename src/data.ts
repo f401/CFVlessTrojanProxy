@@ -128,6 +128,7 @@ async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext):
           }
 
           st.id = r.id;
+          st.host = r.host;
           statBump(r.id, 0, 0, true);
           if (ipTag) rttLearn(cf, ipTag, r.id);
 
@@ -208,6 +209,8 @@ async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext):
             st.sock = s2;
             st.writer = s2.writable.getWriter();
             st.headerSent = false;
+            st.tAttach = Date.now();          // 首字节耗时从这里起算
+            st.ttfb = 0;
             if (payload.length) await st.writer.write(payload).catch(() => {});
 
             pipeBack(s2, serverWS, st, async (gotData) => {
@@ -242,6 +245,9 @@ async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext):
                 try { serverWS.close(1000, "done"); } catch (e) {}
                 return;
               }
+
+              // 直连这一跳 0 字节关闭：记成"直连不通"，用来和节点做对照
+              st.directFail = true;
 
               // ① 先试 IPv6：CF 只隔离 IPv4 到自家网段，走 IPv6 能通
               // 可选：IPv6 兜底（实测对 CF 托管站点无效，默认关闭，配了 env.cfIpv6 才启用）
@@ -341,6 +347,7 @@ function pipeBack(sock: any, ws: WebSocketLike, st: Connection, onClose?: (gotDa
           const u8 = toU8(chunk);
           // 热路径：加字节 → 比阈值 → 发送。其余全在 tick 里（每 512 KB）
           st.down += u8.length;
+          if (!st.ttfb && st.tAttach) st.ttfb = Date.now() - st.tAttach;
           if (st.down >= st.mark) {
             if (!(await st.tick(ws))) return;
           }

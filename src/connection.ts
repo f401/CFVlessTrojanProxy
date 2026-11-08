@@ -19,6 +19,7 @@ class Connection {
   // —— 归属 ——
   ipTag: string;
   node = "";
+  host = "";              // 目标域名（按站点的节点画像用）
   mode: string;
   trial = false;
   via = "direct";
@@ -52,6 +53,11 @@ class Connection {
   reportedUp = 0;
   reportedDown = 0;
   stallMs = 0;
+
+  // —— 观测 ——
+  tAttach = 0;            // 连上上游的时刻
+  ttfb = 0;               // 首字节耗时（ms），按站点的画像就靠它
+  directFail = false;     // 直连阶段 0 字节关闭过（用于"直连对照"）
 
   // —— 身份与上下文 ——
   t0 = Date.now();
@@ -156,6 +162,20 @@ class Connection {
         // 第一行就是 `if (!S.pxFailSeen) return` —— 健康节点永远 n=0，
         // 面板显示"一个连接都没有"，可用性门槛也永远不触发。
         if (this.node && !this.failed && this.down > 0) nsOk(this.node, 0, 0);
+        // 按站点的节点画像：谁对这个站行、谁不行（诊断与站点级选路用）
+        if (this.host) {
+          if (this.node) {
+            hostNodeMark(this.host, this.node, {
+              ok: !this.failed && this.down > 0,
+              bad: this.failed,
+              bytes: this.down,
+              ttfb: this.ttfb,
+            });
+            if (this.directFail) hostDirectMark(this.host, false);
+          } else {
+            hostDirectMark(this.host, !this.failed && this.down > 0);
+          }
+        }
         markSeedDirty(this.env);
       }
     }

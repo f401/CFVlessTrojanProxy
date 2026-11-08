@@ -477,6 +477,68 @@ export default {
         }
 
         case "debug": {
+          /* ---------- 站点诊断：这个站该用哪个节点 / 为什么被拦 ---------- */
+          const diagHost = String(url.searchParams.get("diag") || "").trim().toLowerCase();
+          if (diagHost) {
+            if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(diagHost)) {
+              return json({ ok: false, error: "域名格式不对" });
+            }
+            const port = Number(url.searchParams.get("port")) || 443;
+            const alive = await aliveList(env);
+            const ccOf: Record<string, string> = {};
+            for (const a of alive) ccOf[a.h + ":" + a.p] = a.cc || "";
+
+            const rows: any[] = [];
+            const m = S.hostNode.get(diagHost);
+            if (m) {
+              for (const [node, s] of m) {
+                rows.push({ node, cc: ccOf[node] || "", ...s });
+              }
+            }
+            rows.sort((a, b) => b.n - a.n);
+
+            const direct = S.hostDirect.get(diagHost) || { ok: 0, bad: 0, at: 0 };
+
+            // 主动探测：不信历史样本时，直接拿每个节点试一次
+            // （只验"能不能把这个 SNI 转出去"，看不到 HTTP 状态）
+            let probe: any[] | null = null;
+            if (url.searchParams.get("probe") === "1") {
+              probe = await Promise.all(
+                alive.slice(0, 8).map(async (a) => {
+                  const r = await probeSni(a.h, a.p, diagHost, port);
+                  return { node: a.h + ":" + a.p, cc: a.cc || "", ...r };
+                })
+              );
+            }
+
+            // 有真实样本就用真实样本；没有就退化成这一轮探测的结果
+            let basis = rows;
+            let basisLabel = "真实流量";
+            if (!rows.length && probe) {
+              basis = probe.map((p) => ({
+                node: p.node, cc: p.cc, n: 1,
+                ok: p.err ? 0 : 1, bad: p.err ? 1 : 0,
+                bytes: 0, ttfb: p.hs || 0,
+              }));
+              basisLabel = "主动探测";
+            }
+            const v = diagVerdict(basis, direct);
+
+            return json({
+              host: diagHost,
+              port,
+              kind: v.kind,
+              verdict: v.verdict,
+              suspect: v.suspect,
+              basis: basisLabel,
+              direct,
+              samples: rows,
+              probe,
+              alive: alive.length,
+              note: "Worker 看不到 HTTP 状态码（TLS 端到端），这里靠的是连接结果与对照",
+            });
+          }
+
           const pr = url.searchParams.get("probe");
           if (pr) {
             const idx = pr.lastIndexOf(":");

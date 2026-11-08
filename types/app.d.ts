@@ -239,6 +239,12 @@ interface SnapDoc {
 /** Meter DO 里存的用量累计 */
 interface UsageMeter { up: number; down: number; conns: number; first: number; ts: number; d?: string; dU?: number; dD?: number }
 
+/** 某个节点在某个站点上的画像（诊断用：谁对这个站不行） */
+interface HNStat { n: number; ok: number; bad: number; bytes: number; ttfb: number; at: number }
+
+/** 直连对照：这个站直连到底通不通 */
+interface HDirect { ok: number; bad: number; at: number }
+
 /** Meter DO 里存的节点快照（跨 isolate 展示用） */
 interface NodeSnap { med: number; p90: number; cap: number; n: number; ts?: number; tf?: number; at: number }
 

@@ -1,4 +1,8 @@
 import * as W from "./_bundle.mjs";
+import { webcrypto } from "node:crypto";
+
+// Node 18 没有全局 crypto（Workers 有），补一个给 tlsHello() 用
+if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 let pass = 0, fail = 0;
 const eq = (n, a, b) => { if (JSON.stringify(a) === JSON.stringify(b)) pass++; else { fail++; console.log(`FAIL ${n}\n  got : ${JSON.stringify(a)}\n  want: ${JSON.stringify(b)}`); } };
@@ -178,6 +182,53 @@ const c7 = new W.Connection({}, {}, "tput", "");
 c7.id = "u4"; c7.node = "bad2:443"; c7.down = 2048; c7.failed = true;
 c7.flush(true);
 eq("断流的连接不记 ok", ((W.S.nstat.get("bad2:443") || {}).okW) || 0, 0);
+
+/* ---------- 7. 站点诊断 ---------- */
+const hn = (node, cc, n, ok, bad) => ({ node, cc, n, ok, bad, bytes: 0, ttfb: 0 });
+
+eq("无样本 → empty", W.diagVerdict([], { ok: 0, bad: 0 }).kind, "empty");
+eq("全部正常 → ok", W.diagVerdict([hn("a", "US", 2, 2, 0)], { ok: 0, bad: 0 }).kind, "ok");
+eq("个别节点被拦 → ip", W.diagVerdict([hn("a", "US", 2, 2, 0), hn("b", "DE", 2, 0, 2)], { ok: 0, bad: 0 }).kind, "ip");
+eq("同国多节点被拦 → geo",
+  W.diagVerdict([hn("a", "BG", 2, 0, 2), hn("b", "BG", 2, 0, 2), hn("c", "DE", 2, 2, 0)], { ok: 0, bad: 0 }).kind,
+  "geo");
+eq("全挂但直连正常 → pool", W.diagVerdict([hn("a", "US", 2, 0, 2)], { ok: 2, bad: 0 }).kind, "pool");
+eq("全挂直连也挂 → unknown", W.diagVerdict([hn("a", "US", 2, 0, 2)], { ok: 0, bad: 2 }).kind, "unknown");
+
+W.hostNodeMark("t.example", "n1:443", { ok: true, bad: false, bytes: 100, ttfb: 50 });
+W.hostNodeMark("t.example", "n1:443", { ok: false, bad: true, bytes: 10, ttfb: 0 });
+const hnStat = W.S.hostNode.get("t.example").get("n1:443");
+eq("画像累计 n/ok/bad", [hnStat.n, hnStat.ok, hnStat.bad], [2, 1, 1]);
+ok("画像记下 ttfb", hnStat.ttfb === 50, String(hnStat.ttfb));
+
+const hello = W.tlsHello("x.com");
+eq("ClientHello 是握手记录", hello[0], 0x16);
+ok("ClientHello 里带 SNI", W.toHex(hello).includes(W.toHex(new TextEncoder().encode("x.com"))));
+
+// 长度自洽性检查：TLS 解析器对 ext_len/list_len 极敏感，写错就是 decode_error
+const tlsWalk = (h) => {
+  if (((h[3] << 8) | h[4]) !== h.length - 5) return "record len";
+  let p = 5;
+  if (h[p] !== 1) return "not client_hello";
+  const hl = (h[p + 1] << 16) | (h[p + 2] << 8) | h[p + 3];
+  if (hl !== h.length - p - 4) return "handshake len";
+  p += 4 + 2 + 32;
+  p += 1 + h[p];
+  const cs = (h[p] << 8) | h[p + 1];
+  p += 2 + cs;
+  p += 1 + h[p];
+  const extLen = (h[p] << 8) | h[p + 1];
+  p += 2;
+  const end = p + extLen;
+  if (end !== h.length) return "ext block len";
+  while (p < end) {
+    const l = (h[p + 2] << 8) | h[p + 3];
+    p += 4 + l;
+  }
+  return p === end ? "ok" : "ext overflow";
+};
+eq("ClientHello 长度自洽", tlsWalk(hello), "ok");
+eq("长域名也自洽", tlsWalk(W.tlsHello("pbs.twimg.com")), "ok");
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
