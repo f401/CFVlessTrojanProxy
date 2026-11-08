@@ -1,4 +1,4 @@
-import { secretPwd } from "./util";
+import { secretPwd } from "../core/util";
 
 /* sub */
 export const DEFAULT_PORTS = [

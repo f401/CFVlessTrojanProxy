@@ -1,11 +1,11 @@
-import { pipeBack } from "./data";
-import { hostDirectMark, hostNodeMark, logErr } from "./metrics";
-import { cnt } from "./px";
-import { availOf, markSeedDirty, nsFail, nsOk, nsSpeed, nsStall } from "./px-score";
-import { SEL } from "./selector";
-import { S } from "./state";
-import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "./store";
-import { WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS, closeQuietly, releaseAll } from "./util";
+import { pipeBack } from "./session";
+import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
+import { cnt } from "../px/pool";
+import { availOf, markSeedDirty, nsFail, nsOk, nsSpeed, nsStall } from "../nodes/score";
+import { SEL } from "../nodes/selector";
+import { S } from "../core/state";
+import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";
+import { WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS, closeQuietly, releaseAll } from "../core/util";
 
 /**
  * 一条 WebSocket 连接的全部状态与行为。

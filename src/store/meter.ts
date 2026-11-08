@@ -1,5 +1,5 @@
-import { cnt } from "./px";
-import { seal, unseal } from "./store";
+import { cnt } from "../px/pool";
+import { seal, unseal } from "./index";
 
 /* do */
 export class Meter {

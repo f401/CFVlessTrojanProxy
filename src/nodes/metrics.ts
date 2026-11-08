@@ -1,6 +1,6 @@
-import { costOf, isBlack, isFrozen } from "./px-score";
-import { S } from "./state";
-import { getSnap, kvGet } from "./store";
+import { costOf, isBlack, isFrozen } from "./score";
+import { S } from "../core/state";
+import { getSnap, kvGet } from "../store/index";
 
 /* metrics */
 

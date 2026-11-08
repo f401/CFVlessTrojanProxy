@@ -1,11 +1,11 @@
-import { HIST_BASE, HIST_N, SC } from "./const";
-import { logErr } from "./metrics";
-import { POOL_TTL_MS, geoLabel, probeProxy, refillPool } from "./px-probe";
-import { candsFor, capOf, costOf, isBlack, nsLatency, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, pcts } from "./px-score";
-import { BUCKET_DEF, SEEDS } from "./px-seed";
-import { SEL } from "./selector";
-import { S } from "./state";
-import { kvGet, kvSet, scheduleFlush } from "./store";
+import { HIST_BASE, HIST_N, SC } from "../core/const";
+import { logErr } from "../nodes/metrics";
+import { POOL_TTL_MS, geoLabel, probeProxy, refillPool } from "./probe";
+import { candsFor, capOf, costOf, isBlack, nsLatency, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, pcts } from "../nodes/score";
+import { BUCKET_DEF, SEEDS } from "./seed";
+import { SEL } from "../nodes/selector";
+import { S } from "../core/state";
+import { kvGet, kvSet, scheduleFlush } from "../store/index";
 
 /* 代理节点：状态 / 信誉分桶 / 选择 / cron */
 /* ---- 轮换模块：内存为权威，KV 只存「候选池 + 分机房节点信誉」 ---- */
@@ -21,7 +21,7 @@ export const SEED_VER = 6;
 // 用它当闸门能把全局写频压到 ~30 次/天。
 export const SEED_WRITE_GAP = 90 * 60000;
 
-export { SC, HIST_BASE, HIST_N } from "./const";
+export { SC, HIST_BASE, HIST_N } from "../core/const";
 
 export const MODES = ["lat", "tput"];
 

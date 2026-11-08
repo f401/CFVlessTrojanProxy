@@ -1,4 +1,4 @@
-import { cnt } from "./px";
+import { cnt } from "../px/pool";
 
 /**
  * 全局可变状态（每个 isolate 一份）

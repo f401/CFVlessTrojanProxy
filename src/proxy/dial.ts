@@ -1,4 +1,4 @@
-import { S } from "./state";
+import { S } from "../core/state";
 import { connect } from "cloudflare:sockets";
 
 /* 出站网络：DNS / 三级拨号 / 目标校验 */

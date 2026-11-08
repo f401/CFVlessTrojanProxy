@@ -1,8 +1,8 @@
-import { Meter } from "./do";
-import { p90Of, scoreMerged , ZERO_STAT } from "./px-score";
-import { S } from "./state";
+import { Meter } from "../store/meter";
+import { p90Of, scoreMerged , ZERO_STAT } from "../nodes/score";
+import { S } from "../core/state";
 import { COLO_CITY, loadNodes, pickProtos } from "./sub";
-import { P_T, VERSION, enc, toHex } from "./util";
+import { P_T, VERSION, enc, toHex } from "../core/util";
 
 /* panel */
 export function fmtBytes(n: any) {

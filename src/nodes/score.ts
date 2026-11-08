@@ -1,7 +1,7 @@
-import { HIST_BASE, HIST_N, SC } from "./const";
-import { SEED_WRITE_GAP } from "./px";
-import { SEEDS } from "./px-seed";
-import { S } from "./state";
+import { HIST_BASE, HIST_N, SC } from "../core/const";
+import { SEED_WRITE_GAP } from "../px/pool";
+import { SEEDS } from "../px/seed";
+import { S } from "../core/state";
 
 /* 代理节点：统计与评分（纯计算） */
 /**

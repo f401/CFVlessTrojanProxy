@@ -1,6 +1,6 @@
-import { S } from "./state";
-import { kvGet, kvSet } from "./store";
-import { dec, enc, secretPwd, sha224Bytes, toHex, uuidFromBytes } from "./util";
+import { S } from "../core/state";
+import { kvGet, kvSet } from "../store/index";
+import { dec, enc, secretPwd, sha224Bytes, toHex, uuidFromBytes } from "../core/util";
 
 /* 协议解析：VLESS / Trojan 首包 */
 export const USERS_TTL = 300000;  // 面板改动最多 5 分钟生效（把 KV 读从 1.4 万/天压到 1.4 千）

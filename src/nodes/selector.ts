@@ -1,10 +1,10 @@
-import { SC } from "./const";
+import { SC } from "../core/const";
 import { hostRank, hostUntried, logErr } from "./metrics";
-import { MODES, aliveList, cnt, keyOf, pxGet } from "./px";
-import { pxPolicy } from "./px-probe";
-import { bestFor, candsFor, costOf, freezeNode, isBlack, isFrozen, nsFail, nsGet, nsOk , ZERO_STAT } from "./px-score";
-import { SEEDS } from "./px-seed";
-import { S } from "./state";
+import { MODES, aliveList, cnt, keyOf, pxGet } from "../px/pool";
+import { pxPolicy } from "../px/probe";
+import { bestFor, candsFor, costOf, freezeNode, isBlack, isFrozen, nsFail, nsGet, nsOk , ZERO_STAT } from "./score";
+import { SEEDS } from "../px/seed";
+import { S } from "../core/state";
 
 /* 节点选择：挑谁 / 何时换 / 失败怎么办 */
 export class Selector {

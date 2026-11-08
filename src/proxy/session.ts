@@ -1,13 +1,13 @@
 import { Connection } from "./connection";
-import { logErr, rttLearn, rttMark } from "./metrics";
-import { checkTarget, dial, expandV6, isV6Literal, parseProxyIp } from "./net";
-import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./proto";
-import { cnt, kickFlush } from "./px";
-import { nextNode, nsGet } from "./px-score";
-import { SEL } from "./selector";
-import { S } from "./state";
-import { flushSnap, pendFlush, statBump } from "./store";
-import { WS_OPEN, closeQuietly, enc, safeSend, toU8 } from "./util";
+import { logErr, rttLearn, rttMark } from "../nodes/metrics";
+import { checkTarget, dial, expandV6, isV6Literal, parseProxyIp } from "./dial";
+import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./protocol";
+import { cnt, kickFlush } from "../px/pool";
+import { nextNode, nsGet } from "../nodes/score";
+import { SEL } from "../nodes/selector";
+import { S } from "../core/state";
+import { flushSnap, pendFlush, statBump } from "../store/index";
+import { WS_OPEN, closeQuietly, enc, safeSend, toU8 } from "../core/util";
 import { connect } from "cloudflare:sockets";
 
 /* data */

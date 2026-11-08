@@ -1,8 +1,8 @@
-import { logErr } from "./metrics";
-import { checkTarget } from "./net";
-import { aliveList } from "./px";
-import { S } from "./state";
-import { dec, enc, toHex } from "./util";
+import { logErr } from "../nodes/metrics";
+import { checkTarget } from "../proxy/dial";
+import { aliveList } from "./pool";
+import { S } from "../core/state";
+import { dec, enc, toHex } from "../core/util";
 import { connect } from "cloudflare:sockets";
 
 /* 代理节点：探活与池子抓取 */

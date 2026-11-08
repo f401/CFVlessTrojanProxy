@@ -1,5 +1,5 @@
-import { Meter } from "./do";
+import { Meter } from "./store/meter";
 
 export * from "./test-surface";
 export { default } from "./index";
-export { Meter } from "./do";
+export { Meter } from "./store/meter";
