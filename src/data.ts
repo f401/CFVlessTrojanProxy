@@ -278,7 +278,11 @@ async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext):
                 for (const [h2, t2] of S.needPx) if (t2 <= now2) S.needPx.delete(h2);
                 if (S.needPx.size >= 300) S.needPx.delete(S.needPx.keys().next().value);
               }
-              S.needPx.set(r.host, Date.now() + 10 * 60000);
+              // 记住"这个站必须走中转"。
+              // 10 分钟太短：x.com 这种一次开几十条连接的站点，过期后每条新连接
+              // 又要先撞一次注定失败的直连（多 0.3~1s），表现就是"能上但一直转圈"。
+              // 6 小时足够覆盖一次浏览会话；真变回可直连也只是多走一跳，不会坏。
+              S.needPx.set(r.host, Date.now() + 6 * 3600e3);
               logErr(`empty close -> proxyip ${px.host}`, r.host);
               try {
                 const s3 = await connect({ hostname: px.host, port: px.port });
