@@ -62,6 +62,8 @@ class AppState {
   //   只保留最近活跃的 120 个域名，每个域名最多 12 个节点
   hostNode: Map<string, Map<string, HNStat>> = new Map();
   hostDirect: Map<string, HDirect> = new Map();
+  // 站点排行缓存（family|mode → 排好序的列表，30 秒），避免每次连接都重算
+  hostRankCache: Map<string, { t: number; v: any[] }> = new Map();
 
   // —— 用户与观测 ——
   usersCache: { v: Auth | null; t: number } = { v: null, t: 0 };

@@ -94,6 +94,27 @@ async read(env: Env) {
     S.gcnt = v.cnt || null;
     S.poolBuilt = Number(v.builtAt) || 0;
     for (const n of this.bucket().nodes || []) this.unpackNode(n);
+    // 站点偏好：同机房的 isolate 共享一份，冷启动不用重新学
+    for (const e of (this.bucket() as SeedBucket).hp || []) {
+      if (!e || !e.h || !e.k) continue;
+      let hm = S.hostNode.get(e.h);
+      if (!hm) {
+        if (S.hostNode.size >= 120) continue;
+        hm = new Map<string, HNStat>();
+        S.hostNode.set(e.h, hm);
+      }
+      const cur = hm.get(e.k);
+      if (!cur || (e.n || 0) > cur.n) {
+        hm.set(e.k, {
+          n: e.n || 0,
+          ok: Math.max(0, (e.n || 0) - (e.bad || 0)),
+          bad: e.bad || 0,
+          bytes: 0,
+          ttfb: e.ttfb || 0,
+          at: e.at || 0,
+        });
+      }
+    }
   }
   // 读到空表时只缓存 1 分钟：否则一个刚部署的 isolate 会"空着"整整半小时，
   // 期间该机房所有连接都只能直连。
@@ -156,7 +177,32 @@ async write(env: Env, listOnly?, force?) {
   for (const [k, n] of Object.entries(dlt)) gc[k] = (gc[k] || 0) + n;
 
   const byColo = { ...(S.seed.byColo || {}) };
-  byColo[this.coloKey()] = { ts: Date.now(), lastSwitch: Math.max(S.lastSwitch.lat || 0, S.lastSwitch.tput || 0), nodes };
+  // 站点偏好：只写"样本够"（族内 ≥3 次）的，按样本数取前 40 —— 约 2KB，
+  // 跟 seed 同一次写，不增加任何 KV 写入次数。
+  const hpAll = [];
+  for (const [h, hm] of S.hostNode) {
+    let tot = 0;
+    for (const s of hm.values()) tot += s.n;
+    if (tot < 3) continue;
+    for (const [k, s] of hm) {
+      if (!s.n) continue;
+      hpAll.push({ h, k, ttfb: s.ttfb || 0, n: s.n, bad: s.bad || 0, at: s.at || 0 });
+    }
+  }
+  hpAll.sort((a, b) => b.n - a.n);
+  // 和桶里已有的合并：每个 isolate 只有自己看到的那部分，直接覆盖会把
+  // 别的 isolate 学到的条目冲掉。按 (族,节点) 去重，样本多的留下。
+  const mergedHp = new Map<string, any>();
+  for (const e of ((this.bucket() as SeedBucket).hp || [])) {
+    if (e && e.h && e.k) mergedHp.set(e.h + "|" + e.k, { ...e });
+  }
+  for (const e of hpAll) {
+    const key = e.h + "|" + e.k;
+    const old = mergedHp.get(key);
+    if (!old || e.n > old.n) mergedHp.set(key, e);
+  }
+  const hpTop = [...mergedHp.values()].sort((a, b) => (b.n || 0) - (a.n || 0)).slice(0, 40);
+  byColo[this.coloKey()] = { ts: Date.now(), lastSwitch: Math.max(S.lastSwitch.lat || 0, S.lastSwitch.tput || 0), nodes, hp: hpTop };
   // 第一次落盘时顺手建一份"全局候选名单"（只有名字，没有统计），
   // 让还没跑过 cron 的机房也能拿到节点，而不是干等 30 分钟。
   // 名单桶：任何一次落盘都用"当轮实测 ms"刷新一次。它只是给还没测过的机房的参考值，

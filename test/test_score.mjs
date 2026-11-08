@@ -11,6 +11,7 @@ const ok = (n, c, info = "") => { if (c) pass++; else { fail++; console.log(`FAI
 const S = W.S;
 const reset = () => {
   S.alive.clear(); S.nstat.clear();
+  S.hostNode.clear(); S.hostDirect.clear(); S.hostRankCache.clear();
   S.curs = { lat: "", tput: "" }; S.prev = { lat: "", tput: "" };
   S.lastSwitch = { lat: 0, tput: 0 }; S.switchHits = { lat: [], tput: [] };
 };
@@ -282,7 +283,7 @@ eq("按站点选节点", W.SEL.pick({ pxShadow: 0 }, "tput", st1), "fast:443");
 eq("命中偏好不算试探", st1.hostTrial, false);
 
 // 冻结的节点不能出现在站点排行里
-W.nsGet("fast:443").freeUntil = Date.now() + 60000;
+W.freezeNode("fast:443");
 eq("冻结节点被跳过", W.hostRank("site.test", "tput")[0].k, "slow:443");
 W.nsGet("fast:443").freeUntil = 0;
 
@@ -304,6 +305,36 @@ W.hostNodeMark("two.test", "p:443", { ok: true, bad: false, bytes: 100, ttfb: 80
 W.hostNodeMark("two.test", "q:443", { ok: true, bad: false, bytes: 100, ttfb: 600 });
 const st3 = { host: "two.test" };
 eq("两次样本就能比较出快慢", W.SEL.pick({ pxShadow: 0 }, "tput", st3), "p:443");
+
+/* ---------- 10. 站点族 / 保质期 / 缓存 ---------- */
+eq("api.x.com → x.com", W.hostKey("api.x.com"), "x.com");
+eq("pbs.twimg.com → x.com", W.hostKey("pbs.twimg.com"), "x.com");
+eq("www.example.co.uk 保留三段", W.hostKey("www.example.co.uk"), "example.co.uk");
+eq("a.b.example.com → example.com", W.hostKey("a.b.example.com"), "example.com");
+eq("IP 原样", W.hostKey("1.2.3.4"), "1.2.3.4");
+
+// 同族共享一张表
+reset();
+node("f1:443", { tcp: 50 });
+node("f2:443", { tcp: 60 });
+W.hostNodeMark("api.x.com", "f1:443", { ok: true, bad: false, bytes: 100, ttfb: 70 });
+W.hostNodeMark("pbs.twimg.com", "f2:443", { ok: true, bad: false, bytes: 100, ttfb: 200 });
+eq("同族两个域名共用一张表", W.S.hostNode.get("x.com").size, 2);
+eq("族内按首字节排序", W.hostRank("x.com", "tput")[0].k, "f1:443");
+
+// 保质期：7 小时前的样本降权 300ms
+reset();
+node("old:443", { tcp: 50 });
+node("new:443", { tcp: 50 });
+W.hostNodeMark("stale.test", "old:443", { ok: true, bad: false, bytes: 1, ttfb: 100 });
+W.hostNodeMark("stale.test", "new:443", { ok: true, bad: false, bytes: 1, ttfb: 300 });
+W.S.hostNode.get("stale.test").get("old:443").at = Date.now() - 7 * 3600e3;
+W.S.hostRankCache.clear();
+eq("过期样本被降权", W.hostRank("stale.test", "tput")[0].k, "new:443");
+
+// 新样本要让缓存失效
+W.hostNodeMark("stale.test", "old:443", { ok: true, bad: false, bytes: 1, ttfb: 50 });
+eq("新样本刷新排行", W.hostRank("stale.test", "tput")[0].k, "old:443");
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -106,6 +106,7 @@ export default {
           [P_T]: auth.trojan.size,
           statEntries: S.stats.size,
           rttBuckets: S.rtt.size,
+          hostPrefs: S.hostNode.size,
           errors: S.errs.length,
           colo: cf.colo || "",
           cnt: cntView(),
@@ -506,8 +507,9 @@ export default {
             const ccOf: Record<string, string> = {};
             for (const a of alive) ccOf[a.h + ":" + a.p] = a.cc || "";
 
+            const fam = hostKey(diagHost);
             const rows: any[] = [];
-            const m = S.hostNode.get(diagHost);
+            const m = S.hostNode.get(fam);
             if (m) {
               for (const [node, s] of m) {
                 rows.push({ node, cc: ccOf[node] || "", ...s });
@@ -544,6 +546,7 @@ export default {
 
             return json({
               host: diagHost,
+              family: fam,
               port,
               kind: v.kind,
               verdict: v.verdict,

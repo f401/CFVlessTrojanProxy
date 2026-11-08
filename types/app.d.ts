@@ -106,6 +106,8 @@ interface SeedBucket {
   ts?: number;
   lastSwitch?: number;
   nodes?: SeedNode[];
+  /** 站点偏好：{h:族名, k:节点, ttfb, n, bad, at}，只存样本够的 */
+  hp?: any[];
 }
 
 /** px:seed 的整体结构 */

@@ -105,6 +105,7 @@ function nsFail(k) {
   s.blackUntil = now + ladder[Math.min(s.streak, 4) - 1];
   if (s.streak >= 4) s.streak = 0;     // 给第五次机会
   s.at = now;
+  S.hostRankCache.clear();             // 冷却中的节点不该继续被站点排行推荐
 }
 
 /**
@@ -311,6 +312,7 @@ function freezeNode(k) {
   if (!k) return;
   const s = nsGet(k);
   s.freeUntil = Date.now() + SC.ROLL_FREEZE;
+  S.hostRankCache.clear();     // 站点排行里不能再推荐它
 }
 
 /**

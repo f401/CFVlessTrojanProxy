@@ -82,37 +82,81 @@ async function loadRtt(env: Env, id) {
 
 
 /**
- * 某个节点在某个站点上的代价（毫秒当量）。
- * 有真实样本就用首字节时间，没有就用全局分 + 不确定性惩罚 —— 惩罚保证
- * "没试过的节点"不会因为先验乐观而一直霸占榜首。
+ * 域名 → 站点族。
+ * 目的：x.com / api.x.com / pbs.twimg.com 共享一份样本，否则每个域名
+ * 各自只有一两条样本，永远学不出来。少数大厂手工归并，其余按可注册域。
  * @param {string} host 目标域名
- * @param {string} k "host:port"
- * @param {string} mode "lat" | "tput"
- * @returns {number} 代价，越小越好
+ * @returns {string} 族名
  */
-function hostCost(host: string, k: string, mode: string): number {
-  const m = S.hostNode.get(host);
-  const s = m && m.get(k);
-  const g = costOf(k, mode);
-  if (!s || !s.n) return g + 300;
-  const fail = (s.bad + 1) / (s.n + 6);          // 小样本往坏里估，但不一票否决
-  const ttfb = s.ttfb > 0 ? s.ttfb : Math.min(g, 800);
-  return ttfb + fail * 4000 + (s.n < 2 ? 150 : 0);
+function hostKey(host: string): string {
+  const h = String(host || "").toLowerCase().replace(/\.$/, "");
+  if (!h) return "";
+  if (/^[\d.]+$/.test(h) || h.includes(":")) return h;   // IP 字面量原样
+
+  // 手工归并（同一套基础设施，物理路径通常一致）
+  if (/(^|\.)(x|twitter)\.com$|(^|\.)twimg\.com$/.test(h)) return "x.com";
+  if (/(^|\.)(google|youtube|ytimg|googlevideo|gstatic|googleapis|ggpht)\.com$/.test(h)) return "google.com";
+  if (/(^|\.)(facebook|instagram|fbcdn|cdninstagram)\.(com|net)$/.test(h)) return "meta.com";
+  if (/(^|\.)(github|githubusercontent|githubassets)\.com$/.test(h)) return "github.com";
+  if (/(^|\.)(cloudflare|cloudflareinsights|cfimages)\.com$/.test(h)) return "cloudflare.com";
+  if (/(^|\.)(openai|oaistatic|oaiusercontent)\.com$/.test(h)) return "openai.com";
+
+  const p = h.split(".");
+  if (p.length <= 2) return h;
+  // 形如 example.co.uk / xxx.com.cn 的，保留三段
+  if (/^(co|com|net|org|gov|edu|ac|ne|or)\.(uk|cn|jp|kr|tw|hk|sg|au|nz|br|in|za|mx|tr)$/.test(p.slice(-2).join("."))) {
+    return p.slice(-3).join(".");
+  }
+  return p.slice(-2).join(".");
 }
 
 /**
- * 某个站点上的节点排行（只算 alive 且没被黑/冻结的）。
- * @param {string} host 目标域名
- * @param {string} mode 模式
+ * 站点样本的分数（毫秒当量，越小越好）。
+ * 纯算术，不调 costOf —— 稳态下 8 个节点加起来不到 1µs。
+ * @param {object} s HNStat
+ * @param {number} now 当前时间
+ * @returns {number} 分数
+ */
+function hostScore(s, now: number): number {
+  const fail = (s.bad + 1) / (s.n + 6);            // 小样本往坏里估
+  const stale = now - (s.at || 0) > 6 * 3600e3 ? 300 : 0;   // 6 小时没更新就降权
+  const ttfb = s.ttfb > 0 ? s.ttfb : 800;
+  return ttfb + fail * 4000 + (s.n < 2 ? 150 : 0) + stale;
+}
+
+/**
+ * 某个站点上的节点排行（跳过黑名单/冻结），30 秒缓存。
+ * @param {string} host 目标域名（内部转成族）
+ * @param {string} mode "lat" | "tput"
  * @returns {Array<{k:string,v:number}>} 升序
  */
 function hostRank(host: string, mode: string) {
+  const fam = hostKey(host);
+  if (!fam) return [];
+  const mkey = fam + "|" + (mode === "lat" ? "lat" : "tput");
+  const now = Date.now();
+  const hit = S.hostRankCache.get(mkey);
+  if (hit && now - hit.t < 30000) return hit.v;
+
+  const m = S.hostNode.get(fam);
   const out = [];
-  for (const k of S.alive.keys()) {
-    if (isBlack(k) || isFrozen(k)) continue;
-    out.push({ k, v: hostCost(host, k, mode) });
+  if (m) {
+    for (const [k, s] of m) {
+      if (!S.alive.has(k) || isBlack(k) || isFrozen(k)) continue;
+      out.push({ k, v: hostScore(s, now) });
+    }
+  }
+  // 只有样本少于 2 个时才把"没试过的节点"按全局分补进来（冷启动用）
+  if (out.length < 2) {
+    for (const k of S.alive.keys()) {
+      if (isBlack(k) || isFrozen(k)) continue;
+      if (m && m.has(k)) continue;
+      out.push({ k, v: costOf(k, mode) + 300 });
+    }
   }
   out.sort((a, b) => a.v - b.v);
+  if (S.hostRankCache.size > 80) S.hostRankCache.clear();
+  S.hostRankCache.set(mkey, { t: now, v: out });
   return out;
 }
 
@@ -123,7 +167,7 @@ function hostRank(host: string, mode: string) {
  * @returns {string} 节点 key，没有返回 ""
  */
 function hostUntried(host: string, mode: string) {
-  const m = S.hostNode.get(host);
+  const m = S.hostNode.get(hostKey(host));
   let best = "", bv = Infinity;
   for (const k of S.alive.keys()) {
     if (isBlack(k) || isFrozen(k)) continue;
@@ -176,7 +220,9 @@ const HN_MAX_NODES = 12;    // 每个域名最多记 12 个节点
  */
 function hostNodeMark(host, node, o) {
   if (!host || !node) return;
-  let m = S.hostNode.get(host);
+  const fam = hostKey(host);
+  if (!fam) return;
+  let m = S.hostNode.get(fam);
   if (!m) {
     if (S.hostNode.size >= HN_MAX_HOSTS) {
       // 淘汰最久没更新过的域名（120 条，线性扫可接受）
@@ -189,7 +235,7 @@ function hostNodeMark(host, node, o) {
       if (oldK) S.hostNode.delete(oldK);
     }
     m = new Map<string, HNStat>();
-    S.hostNode.set(host, m);
+    S.hostNode.set(fam, m);
   }
   let s = m.get(node);
   if (!s) {
@@ -207,6 +253,9 @@ function hostNodeMark(host, node, o) {
   s.bytes += o.bytes || 0;
   if (o.ttfb > 0) s.ttfb = s.ttfb ? Math.round(s.ttfb * 0.6 + o.ttfb * 0.4) : Math.round(o.ttfb);
   s.at = Date.now();
+  // 排行缓存失效（两个模式各一份）
+  S.hostRankCache.delete(fam + "|lat");
+  S.hostRankCache.delete(fam + "|tput");
 }
 
 /**
