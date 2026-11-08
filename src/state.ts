@@ -45,7 +45,7 @@ class AppState {
   stats: Map<string, any> = new Map();
   pend: Map<string, any> = new Map();
   pendAt = 0;
-  pendMs = 10000;
+  pendMs = 30000;          // 推送间隔地板：30 秒（原来 10 秒，DO 请求量 ×3）
   tflush: any = null;
   pendBytes = 0;
   doCalls = 0;

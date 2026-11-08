@@ -13,25 +13,47 @@ export class Meter {
     this.s = {};                               // 节点快照 "h:p" -> {med,p90,cap,n,...}
     this.e = [];                               // 跨 isolate 的错误环形（最多 50 条）
     this.st.blockConcurrencyWhile(async () => {
+      // 单键存储：每次 /add 只写 1 行。
+      // 以前是 c/g/s/e 四个键 = 4 行，SQLite DO 的「行写入」额度（免费 10 万/天）
+      // 会被吃掉 4 倍；一个持续活跃的 isolate 就要 3.4 万行/天。
+      const all = await this.st.storage.get("a");
+      if (all) {
+        const o = await unseal(env, all);
+        if (o && typeof o === "object") {
+          if (o.c && typeof o.c === "object") this.c = { ...this.c, ...o.c };
+          if (o.g && typeof o.g === "object") this.g = o.g;
+          if (o.s && typeof o.s === "object") this.s = o.s;
+          if (Array.isArray(o.e)) this.e = o.e;
+        }
+        return;
+      }
+      // 老结构（c/e/s/g 四个键）：读出来顺手迁到新键，再删掉旧的
+      let migrated = false;
       const v = await this.st.storage.get("c");
       if (v) {
         const obj = await unseal(env, v);      // 兼容老的明文对象
-        if (obj) this.c = { ...this.c, ...obj };
+        if (obj) { this.c = { ...this.c, ...obj }; migrated = true; }
       }
       const ev = await this.st.storage.get("e");
       if (ev) {
         const o4 = await unseal(env, ev);
-        if (Array.isArray(o4)) this.e = o4;
+        if (Array.isArray(o4)) { this.e = o4; migrated = true; }
       }
       const sv = await this.st.storage.get("s");
       if (sv) {
         const o3 = await unseal(env, sv);
-        if (o3 && typeof o3 === "object") this.s = o3;
+        if (o3 && typeof o3 === "object") { this.s = o3; migrated = true; }
       }
       const gv = await this.st.storage.get("g");
       if (gv) {
         const obj2 = await unseal(env, gv);
-        if (obj2 && typeof obj2 === "object") this.g = obj2;
+        if (obj2 && typeof obj2 === "object") { this.g = obj2; migrated = true; }
+      }
+      if (migrated) {
+        try {
+          await this.save();
+          for (const k of ["c", "e", "s", "g"]) await this.st.storage.delete(k);
+        } catch (e) {}
       }
     });
   }
@@ -41,10 +63,8 @@ export class Meter {
    * @returns {Promise<void>}
    */
   async save() {
-    await this.st.storage.put("c", await seal(this.env, this.c));
-    await this.st.storage.put("g", await seal(this.env, this.g));
-    await this.st.storage.put("s", await seal(this.env, this.s));
-    await this.st.storage.put("e", await seal(this.env, this.e));
+    // 一次 put = 一行。四个字段塞进一个对象，行写入直接 ÷4。
+    await this.st.storage.put("a", await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e }));
   }
 
   /**

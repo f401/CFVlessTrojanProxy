@@ -230,5 +230,42 @@ const tlsWalk = (h) => {
 eq("ClientHello 长度自洽", tlsWalk(hello), "ok");
 eq("长域名也自洽", tlsWalk(W.tlsHello("pbs.twimg.com")), "ok");
 
+/* ---------- 8. Meter DO：单键存储 + 当日计数 ---------- */
+const mkDO = (init) => {
+  const store = new Map(init || []);
+  // 真实运行时里 blockConcurrencyWhile 会挡住后续请求；这里用 gate 模拟
+  let gate = Promise.resolve();
+  const state = {
+    blockConcurrencyWhile: (fn) => { gate = Promise.resolve().then(fn); return gate; },
+    storage: {
+      get: async (k) => store.get(k),
+      put: async (k, v) => { store.set(k, v); },
+      delete: async (k) => { store.delete(k); },
+    },
+  };
+  const m = new W.Meter(state, {});
+  const raw = m.fetch.bind(m);
+  m.fetch = async (req) => { await gate; return raw(req); };
+  return { store, m };
+};
+const do1 = mkDO();
+await do1.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
+await do1.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 5, down: 7, conns: 1 }) }));
+const j1 = await (await do1.m.fetch(new Request("https://m/get"))).json();
+eq("DO 累计", [j1.up, j1.down, j1.conns], [15, 27, 2]);
+eq("DO 只占一个键（行写入 ÷4）", [...do1.store.keys()], ["a"]);
+eq("DO 当日字节", [j1.dU, j1.dD], [15, 27]);
+
+// 老结构（c/e/s/g 四个键）要能读出来并迁移
+const legacy = mkDO([
+  ["c", JSON.stringify({ up: 100, down: 200, conns: 3, first: 1, ts: 2 })],
+  ["g", JSON.stringify({ d: "2026-01-01", conn: 5 })],
+  ["s", JSON.stringify({ "1.2.3.4:443": { med: 1 } })],
+  ["e", JSON.stringify([{ t: 1, m: "x" }])],
+]);
+const lj = await (await legacy.m.fetch(new Request("https://m/get"))).json();
+eq("老数据能读出来", [lj.up, lj.down, lj.conns], [100, 200, 3]);
+eq("迁移后只剩新键", [...legacy.store.keys()], ["a"]);
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

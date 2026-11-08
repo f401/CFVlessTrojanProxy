@@ -87,9 +87,9 @@ async function pendFlush(env: Env, force?: boolean): Promise<void> {
       }
     })
   );
-  // 自适应退避：失败了就把间隔翻倍（最多 60s），成功了慢慢降回 5s
+  // 自适应退避：失败了就把间隔翻倍（最多 60s），成功了慢慢降回 30s
   if (bad) S.pendMs = Math.min(S.pendMs * 2, 60000);
-  else S.pendMs = Math.max(10000, Math.round(S.pendMs / 2));
+  else S.pendMs = Math.max(30000, Math.round(S.pendMs / 2));
 }
 
 const METER_TTL = 15000;
@@ -197,6 +197,9 @@ const FLUSH_MIN_MS = 3600000;    // 1 小时（且累计 ≥2MB 才写）
 const FLUSH_DIRTY = 2 * 1024 * 1024;   // 脏字节门槛
 const FLUSH_MAX_MS = 7200000;    // 最迟 2 小时必落一次
 const FLUSH_GAP = 2700000;       // 全局闸门：45 分钟内已有别的 isolate 写过就不再写
+
+/** snap 快照的内存缓存时长：读多写少，5 分钟足够（原来 60 秒 = 1440 读/天/isolate） */
+const SNAP_TTL = 300000;
 
 /**
  * 累计一次连接的流量与连接数（同时写入本地表和待推送缓冲）。
@@ -355,7 +358,8 @@ async function flushSnap(env: Env, force?: boolean): Promise<void> {
   // 第二个闸门是"全局"的：每个 isolate 各写各的会让写次数随实例数线性增长
   // （实测 8 个 isolate × 24 次/天 = 192 次）。快照本身就是合并写入，
   // 45 分钟内别人写过就跳过，自己的增量留在内存里下一轮合并，一条不丢。
-  const prev = await getSnap(env);
+  // 这里必须 fresh：缓存里的 ts 可能已经过时 5 分钟，会误判"该写了"。
+  const prev = await getSnap(env, true);
   if (now - (prev.ts || 0) < FLUSH_GAP) return;
 
   const day = new Date().toISOString().slice(0, 10);
@@ -416,12 +420,13 @@ async function flushSnap(env: Env, force?: boolean): Promise<void> {
 /* ---------- 统一快照：stats + rtt + errs 合成一个 KV key，一次写 ---------- */
 
 /**
- * 读取 snap 快照（60 秒内存缓存）。
+ * 读取 snap 快照（5 分钟内存缓存）。
  * @param {object} env Worker 环境
+ * @param {boolean} [fresh] 跳过缓存（写之前判断"全局闸门"必须拿最新时间戳）
  * @returns {Promise<object>} 快照对象，读不到返回空对象
  */
-async function getSnap(env: Env) {
-  if (S.snapCache.v && Date.now() - S.snapCache.t < 60000) return S.snapCache.v;
+async function getSnap(env: Env, fresh?: boolean) {
+  if (!fresh && S.snapCache.v && Date.now() - S.snapCache.t < SNAP_TTL) return S.snapCache.v;
   let v = null;
   try {
     v = (await kvGet<SnapDoc>(env, "snap")) || null;
