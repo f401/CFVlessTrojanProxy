@@ -24,23 +24,29 @@ VLESS / Trojan over WebSocket，跑在 Cloudflare Workers 上。
 
 ### 模块
 
-| 文件 | 职责 |
-|---|---|
-`src/index.ts` | 路由 + 入口（fetch / scheduled） |
-`src/state.ts` | `AppState`：全部可变状态（`S` 单例） |
-`src/connection.ts` | `Connection`：一条连接的字节/采样/背压 |
-`src/selector.ts` | `Selector`：挑谁 / 何时换 / 失败处理（全局游标 + 按站点偏好） |
-`src/px-seed.ts` | `SeedStore`：信誉表按机房分桶读写 |
-`src/px-score.ts` | 评分纯函数（毫秒当量、LCB、可用性） |
-`src/px-probe.ts` | 探活（TLS 验真）与候选池抓取 |
-`src/px.ts` | 池子状态、`pxGet`、cron |
-`src/data.ts` | WS 握手与双向转发 |
-`src/store.ts` | KV/DO/加密/快照 |
-`src/do.ts` | `Meter`（Durable Object） |
-`src/proto.ts` | VLESS / Trojan 首包解析 |
-`src/net.ts` | DNS、三级拨号、目标校验 |
-`src/sub.ts` / `src/panel.ts` | 订阅渲染 / 面板 |
-`src/metrics.ts` / `src/util.ts` | RTT 学习 / 通用工具 |
+| 目录 | 文件 | 职责 |
+|---|---|---|
+| `src/core/` | `util` | 编码 / SHA-224 / WebSocket 工具 |
+| | `const` | 纯常量（评分参数、直方图、seed 闸门） |
+| | `state` | `AppState`：isolate 级可变状态（`S` 单例） |
+| `src/store/` | `index` | KV / 加密 / 快照 / 用量读取 |
+| | `meter` | `Meter` Durable Object（全局账本） |
+| `src/nodes/` | `score` | 评分纯函数（毫秒当量、可用性、吞吐直方图） |
+| | `selector` | 挑谁 / 何时换 / 失败处理 |
+| | `metrics` | RTT 学习、错误日志、按站点的节点画像 |
+| `src/px/` | `pool` | 中转池状态、`pxGet`、cron |
+| | `probe` | TLS 验真探活、候选源抓取 |
+| | `seed` | 信誉表按机房分桶读写 |
+| `src/proxy/` | `protocol` | VLESS / Trojan 首包解析 |
+| | `dial` | DNS、三级拨号、目标校验 |
+| | `session` | WS 握手与会话状态机 |
+| | `fallback` | 换节点重连 |
+| | `tunnel` | 双向管道 + 背压 |
+| | `connection` | 一条连接的字节 / 采样 / 背压 |
+| `src/views/` | `sub` / `panel` | 订阅渲染（clash/singbox/links）/ 面板 |
+| `src/edge/` | `respond` / `types` | 响应与安全头（唯一来源）/ 请求上下文 |
+| `src/routes/` | `health` `subscription` `admin` `tools` | 端点实现 |
+| `src/index.ts` | — | 组装根：路由分发 + ws 升级 + cron |
 
 ---
 

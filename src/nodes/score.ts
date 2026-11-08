@@ -1,5 +1,5 @@
 import { HIST_BASE, HIST_N, SC } from "../core/const";
-import { SEED_WRITE_GAP } from "../px/pool";
+import { SEED_WRITE_GAP } from "../core/const";
 import { SEEDS } from "../px/seed";
 import { S } from "../core/state";
 

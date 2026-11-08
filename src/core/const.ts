@@ -24,3 +24,6 @@ export const SC = {
 };
 export const HIST_BASE = 16 * 1024;   // 直方图起点 16 KB/s
 export const HIST_N = 12;             // 16K ~ 32M
+
+/** 信誉表落盘的最小间隔（全局闸门，防多 isolate 叠加写 KV） */
+export const SEED_WRITE_GAP = 90 * 60000;

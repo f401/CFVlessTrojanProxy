@@ -1,0 +1,100 @@
+{
+  "main_module": "_worker.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": [
+    "streams_enable_constructors"
+  ],
+  "bindings": [
+    {
+      "name": "adminKey",
+      "text": "#CKgF998244353",
+      "type": "plain_text"
+    },
+    {
+      "name": "expireAt",
+      "text": "2099-12-31T00:00:00Z",
+      "type": "plain_text"
+    },
+    {
+      "name": "nodes",
+      "text": "nanlianqing.ccwu.cc:443:tls,nanlianqing.ccwu.cc:8443:tls,www.visa.com:443:tls,usa.visa.com:443:tls,www.visa.com.tw:443:tls,104.16.0.1:443:tls,104.18.0.1:443:tls,172.64.0.1:443:tls,162.159.0.1:443:tls",
+      "type": "plain_text"
+    },
+    {
+      "name": "proxyip",
+      "text": "auto",
+      "type": "plain_text"
+    },
+    {
+      "name": "pxDwellMin",
+      "text": "0",
+      "type": "plain_text"
+    },
+    {
+      "name": "pxFailMax",
+      "text": "3",
+      "type": "plain_text"
+    },
+    {
+      "name": "pxForceAt",
+      "text": "5",
+      "type": "plain_text"
+    },
+    {
+      "name": "pxSchedH",
+      "text": "0",
+      "type": "plain_text"
+    },
+    {
+      "name": "pxShadow",
+      "text": "0.05",
+      "type": "plain_text"
+    },
+    {
+      "name": "defaultMode",
+      "text": "tput",
+      "type": "plain_text"
+    },
+    {
+      "name": "quotaBytes",
+      "text": "0",
+      "type": "plain_text"
+    },
+    {
+      "name": "regions",
+      "text": "auto",
+      "type": "plain_text"
+    },
+    {
+      "name": "STATS",
+      "namespace_id": "f55a151764e0491b813e2ba1cb7e4a25",
+      "type": "kv_namespace"
+    },
+    {
+      "type": "secret_text",
+      "name": "pwd",
+      "text": "TjRYUOTxz1eBDxS2"
+    },
+    {
+      "name": "uuid",
+      "type": "secret_text",
+      "text": "7c53c12a-88b1-4fda-b6e7-4da62e47a4e1"
+    },
+    {
+      "type": "durable_object_namespace",
+      "name": "METER",
+      "class_name": "Meter"
+    },
+    {
+      "type": "secret_text",
+      "name": "kek",
+      "text": "ab6fa6c256e0361a7cf56c062ffa885746a2a1ebcf3e7c4bb432bdb465cebd6e"
+    }
+  ],
+  "migrations": {
+    "new_tag": "v1",
+    "new_sqlite_classes": [
+      "Meter"
+    ]
+  }
+}

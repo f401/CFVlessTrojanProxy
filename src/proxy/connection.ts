@@ -1,4 +1,3 @@
-import { pipeBack } from "./session";
 import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../px/pool";
 import { availOf, markSeedDirty, nsFail, nsOk, nsSpeed, nsStall } from "../nodes/score";

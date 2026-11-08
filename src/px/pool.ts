@@ -1,3 +1,4 @@
+import { SEED_WRITE_GAP } from "../core/const";
 import { HIST_BASE, HIST_N, SC } from "../core/const";
 import { logErr } from "../nodes/metrics";
 import { POOL_TTL_MS, geoLabel, probeProxy, refillPool } from "./probe";
@@ -19,7 +20,6 @@ export const SEED_VER = 6;
 // 信誉表落盘的最小间隔：每个 isolate 各写各的会让写次数随实例数线性增长
 // （8 个 isolate × 48 次/天 = 384）。S.seed.ts 是从 KV 读回来的全局时间戳，
 // 用它当闸门能把全局写频压到 ~30 次/天。
-export const SEED_WRITE_GAP = 90 * 60000;
 
 export { SC, HIST_BASE, HIST_N } from "../core/const";
 

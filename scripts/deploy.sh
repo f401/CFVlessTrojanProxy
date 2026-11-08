@@ -11,6 +11,7 @@ source config/config.env
 META="${META:-config/metadata.json}"
 [ -f "$META" ] || { echo "缺少 $META（参考 config/metadata.example.json）"; exit 1; }
 
+node tools/check-arch.js
 node tools/tsc.js
 node tools/bundle.js
 node test/mk_test.mjs >/dev/null

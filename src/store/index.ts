@@ -245,7 +245,7 @@ export function statBump(id: any, up: any, down: any, isNewConn: any) {
  * 密钥由 secret 绑定 kek 派生。没有 kek 时退化为明文（保证老部署还能跑）。
  * 读取兼容明文：解析失败当明文 JSON 处理，下次写入自动转成密文。
  */
-export let AEK: CryptoKey | null = null;
+const KEY_BOX: { aek: CryptoKey | null } = { aek: null };
 export function b64e(u8: any) {
   let s = "";
   const CH = 0x8000;
@@ -261,12 +261,12 @@ export function b64d(str: any) {
 
 /** 从 secret 绑定 kek 派生 AES-GCM 密钥（进程内缓存） */
 export async function aesKey(env: Env) {
-  if (AEK) return AEK;
+  if (KEY_BOX.aek) return KEY_BOX.aek;
   const raw = String((env && env.kek) || "");
   if (!raw) return null;
   const dig = await crypto.subtle.digest("SHA-256", enc.encode(raw));
-  AEK = await crypto.subtle.importKey("raw", dig, "AES-GCM", false, ["encrypt", "decrypt"]);
-  return AEK;
+  KEY_BOX.aek = await crypto.subtle.importKey("raw", dig, "AES-GCM", false, ["encrypt", "decrypt"]);
+  return KEY_BOX.aek;
 }
 
 /** 对象 → 密文字符串（ENC1:iv:ct，均为 base64） */
@@ -532,12 +532,3 @@ export async function readStats(env: Env, id: any) {
     persisted: !!stored,
   };
 }
-
-/* ==================================================================
- * §6.2  proxyip 代理池（探测 / 轮换 / Cron）
- *   env.proxyip = "auto"  → 自动模式
- *   env.proxyip = "h:p"   → 手动模式（原行为）
- *   env.proxyip = ""      → 关闭
- * ================================================================== */
-
-// 预置的 TLS 1.2 ClientHello（SNI = 本项目域名），用于探测候选反代
