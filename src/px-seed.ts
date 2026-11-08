@@ -1,11 +1,17 @@
+import { SC } from "./const";
+import { PX_TTL, SEED_KEY, SEED_MAX, SEED_TTL, SEED_VER, cnt, cntDelta } from "./px";
+import { costOf, nsGet, p90Local } from "./px-score";
+import { S } from "./state";
+import { kvGet, kvSet } from "./store";
+
 /* 代理节点：信誉表分桶读写 */
 /* ---- seed：按机房分桶 ---- */
 // 认知边界：cron 跑在哪个机房是未知的，所以它只写"候选名单"桶（BUCKET_DEF），
 // 不写延迟/吞吐统计 —— 否则又是跨机房污染。服务 isolate 只写自己那桶。
-const BUCKET_DEF = "*";
+export const BUCKET_DEF = "*";
 
 /** 当前写入的桶名 */
-class SeedStore {
+export class SeedStore {
 coloKey() { return S.colo || BUCKET_DEF; }
 
 /** 当前机房的信誉桶 */
@@ -243,4 +249,4 @@ async write(env: Env, listOnly?, force?) {
 
 }
 
-const SEEDS = new SeedStore();
+export const SEEDS = new SeedStore();

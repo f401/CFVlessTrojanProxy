@@ -1,5 +1,13 @@
+import { SC } from "./const";
+import { hostRank, hostUntried, logErr } from "./metrics";
+import { MODES, aliveList, cnt, keyOf, pxGet } from "./px";
+import { pxPolicy } from "./px-probe";
+import { bestFor, candsFor, costOf, freezeNode, isBlack, isFrozen, nsFail, nsGet, nsOk } from "./px-score";
+import { SEEDS } from "./px-seed";
+import { S } from "./state";
+
 /* 节点选择：挑谁 / 何时换 / 失败怎么办 */
-class Selector {
+export class Selector {
 /** 按国家挑一个节点（地区出口） */
 async region(env: Env, cc) {
   const want = String(cc || "").toUpperCase();
@@ -238,4 +246,4 @@ sched(env: Env) {
  */
 }
 
-const SEL = new Selector();
+export const SEL = new Selector();

@@ -1,0 +1,26 @@
+// 纯常量：不依赖任何模块，供各方引用（避免 ESM 循环初始化时读到 undefined）
+
+/* 评分参数：单位统一为「毫秒当量」——分数就是"平均多等多少毫秒" */
+export const SC = {
+  HL: 6 * 3600e3,     // 统计半衰期
+  A: 0.3,             // EWMA 系数
+  P_TCP: 250,         // 冷启动先验
+  P_TLS: 60,
+  FAIL: 8000,         // 一次失败的期望代价
+  STALL: 2500,        // 卡顿当量
+  TLS_G: 1.2,
+  LOSS_G: 2,
+  LOSS_SLACK: 30,
+  MIN_BYTES: 1048576, // 吞吐样本准入门槛
+  PRIOR_BPS: 200 * 1024,
+  H_LAT: 20,
+  H_TPUT: 0.25,
+  DWELL_TPUT: 20 * 60000,
+  DWELL: 10 * 60000,
+  BUDGET: 3,
+  ROLL_WIN: 60000,
+  ROLL_FREEZE: 30 * 60000,
+  TRIAL_N: 3,
+};
+export const HIST_BASE = 16 * 1024;   // 直方图起点 16 KB/s
+export const HIST_N = 12;             // 16K ~ 32M

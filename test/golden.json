@@ -1,0 +1,44 @@
+{
+  "items": [
+    {
+      "name": "clash",
+      "bytes": 9361,
+      "sha": "2bcc40f3f9ee8da375dcab950f67c849"
+    },
+    {
+      "name": "singbox",
+      "bytes": 12876,
+      "sha": "2d7ba7d190f4222c8d900dfd93e44cce"
+    },
+    {
+      "name": "links",
+      "bytes": 4304,
+      "sha": "5faf864112fc4c6f50a3bb560ee777cc"
+    },
+    {
+      "name": "subHeaders",
+      "bytes": 278,
+      "sha": "b1f44e7aa795892e72fd9d34ebb342ce"
+    },
+    {
+      "name": "orderNodes",
+      "bytes": 640,
+      "sha": "4d8cc2747ed66e7901759623b7a85c22"
+    },
+    {
+      "name": "nodeLabels",
+      "bytes": 116,
+      "sha": "4c2c7e4635e2dd287f3c5e785bd078a5"
+    },
+    {
+      "name": "subHeadersQuota",
+      "bytes": 275,
+      "sha": "f27ddd1983bcbe5ed546ffb9de76e5b6"
+    },
+    {
+      "name": "subHeadersNoExpire",
+      "bytes": 269,
+      "sha": "dcf17d7fa9b34e4078fc8d6576f38823"
+    }
+  ]
+}

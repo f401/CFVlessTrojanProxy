@@ -1,10 +1,15 @@
+import { HIST_BASE, HIST_N, SC } from "./const";
+import { SEED_WRITE_GAP } from "./px";
+import { SEEDS } from "./px-seed";
+import { S } from "./state";
+
 /* 代理节点：统计与评分（纯计算） */
 /**
  * 取节点统计对象（不存在则初始化）。
  * @param {string} k "host:port"
  * @returns {object} 统计对象
  */
-function nsGet(k) {
+export function nsGet(k) {
   let s = S.nstat.get(k);
   if (!s) {
     s = {
@@ -28,7 +33,7 @@ function nsGet(k) {
  * @param {number} now 当前时间戳
  * @returns {void}
  */
-function nsDecay(s, now) {
+export function nsDecay(s, now) {
   if (!s) return;
   if (!s.at) { s.at = now; return; }
   const k = Math.pow(0.5, (now - s.at) / SC.HL);
@@ -46,7 +51,7 @@ function nsDecay(s, now) {
  * @param {number} [tls] TLS 往返毫秒
  * @returns {void}
  */
-function nsOk(k, tcp, tls) {
+export function nsOk(k, tcp, tls) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -64,7 +69,7 @@ function nsOk(k, tcp, tls) {
  * @param {number} tls TLS 往返
  * @returns {void}
  */
-function nsProbe(k, ms, tcp, tls) {
+export function nsProbe(k, ms, tcp, tls) {
   if (!k || !(ms > 0)) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -81,7 +86,7 @@ function nsProbe(k, ms, tcp, tls) {
  * @param {string} k "host:port"
  * @returns {void}
  */
-function nsProbeFail(k) {
+export function nsProbeFail(k) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -95,7 +100,7 @@ function nsProbeFail(k) {
  * @param {string} k "host:port"
  * @returns {void}
  */
-function nsFail(k) {
+export function nsFail(k) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -116,7 +121,7 @@ function nsFail(k) {
  * @param {object} [env] 用于节流落盘
  * @returns {void}
  */
-function nsSpeed(k, bps, bytes, env) {
+export function nsSpeed(k, bps, bytes, env) {
   if (!k || !(bps > 0)) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -129,7 +134,7 @@ function nsSpeed(k, bps, bytes, env) {
 }
 
 /** 记录卡顿时长（背压累计） */
-function nsStall(k, stallMs, runMs) {
+export function nsStall(k, stallMs, runMs) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -139,7 +144,7 @@ function nsStall(k, stallMs, runMs) {
 }
 
 /** 记录本地实测延迟（探活用） */
-function nsLatency(k, ms) {
+export function nsLatency(k, ms) {
   if (!k || !(ms > 0)) return;
   const s = nsGet(k);   // 必须走 nsGet，否则缺 stallMs/runMs 会让 pStall 变 NaN
   s.msLocal = s.msLocal ? Math.round(s.msLocal * 0.6 + ms * 0.4) : Math.round(ms);
@@ -152,7 +157,7 @@ function nsLatency(k, ms) {
  * @param {object} s 统计对象
  * @returns {number} 0~0.9 的失败概率估计
  */
-function pFailOf(s) {
+export function pFailOf(s) {
   if (!s) return 0.4;
   const ok = s.tS || 0;
   const bad = s.tF || 0;
@@ -163,7 +168,7 @@ function pFailOf(s) {
 }
 
 /** 可用性（小样本用后验均值，大样本用 Wilson 下界） */
-function availOf(s) {
+export function availOf(s) {
   if (!s) return 0.5;
   const ok = s.tS || 0, bad = s.tF || 0;
   const n = ok + bad;
@@ -178,7 +183,7 @@ function availOf(s) {
 }
 
 /** 卡顿占比（无数据 = 0.05） */
-function pStallOf(s) {
+export function pStallOf(s) {
   if (!s) return 0.05;
   return (s.stallMs + 50) / (s.runMs + 1000);
 }
@@ -191,7 +196,7 @@ function pStallOf(s) {
  * @param {number} q 0~1
  * @returns {number} 字节/秒
  */
-function pctOf(s, q) {
+export function pctOf(s, q) {
   if (!s || !s.hist) return 0;
   let tot = 0;
   for (let i = 0; i < HIST_N; i++) tot += s.hist[i];
@@ -210,14 +215,14 @@ function pctOf(s, q) {
 }
 
 /** 本地直方图的 p90（落盘用；导入值不能再写回去，否则自我强化） */
-function p90Local(s) { return pctOf(s, 0.9); }
+export function p90Local(s) { return pctOf(s, 0.9); }
 
 /**
  * 一次遍历同时得到 p50 / p90 / cap，避免三次重复扫描直方图
  * @param {object} s 统计对象
  * @returns {{p50:number,p90:number,cap:number}} 分位与能力值
  */
-function pcts(s) {
+export function pcts(s) {
   if (!s || !s.hist) return { p50: 0, p90: 0, cap: s && s.seedBps ? s.seedBps : 0 };
   let tot = 0;
   for (let i = 0; i < HIST_N; i++) tot += s.hist[i];
@@ -236,7 +241,7 @@ function pcts(s) {
 }
 
 /** 用于排序的"能力值"：p90 与 p50 取折中，单次突发不能定生死 */
-function capOf(s) {
+export function capOf(s) {
   if (!s) return 0;
   const p90 = pctOf(s, 0.9);
   const p50 = pctOf(s, 0.5);
@@ -246,7 +251,7 @@ function capOf(s) {
 }
 
 /** 近期吞吐峰值（p90，带衰减的直方图插值） */
-function p90Of(s) { return pctOf(s, 0.9); }
+export function p90Of(s) { return pctOf(s, 0.9); }
 
 /**
  * 节点代价（毫秒当量，越小越好）。lat=速率优先，tput=吞吐优先。
@@ -254,12 +259,12 @@ function p90Of(s) { return pctOf(s, 0.9); }
  * @param {string} mode "lat" | "tput"
  * @returns {number} 代价
  */
-const ZERO_STAT = { tcp: 0, tls: 0, okW: 0, failW: 0, stallMs: 0, runMs: 0, tS: 0, tF: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0) };
+export const ZERO_STAT = { tcp: 0, tls: 0, okW: 0, failW: 0, stallMs: 0, runMs: 0, tS: 0, tF: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0) };
 
-const TEN_MB = 10 * 1048576;
-const E10_PRIOR = (TEN_MB / SC.PRIOR_BPS) * 1000;   // 无吞吐样本时的先验代价（≈51 秒）
+export const TEN_MB = 10 * 1048576;
+export const E10_PRIOR = (TEN_MB / SC.PRIOR_BPS) * 1000;   // 无吞吐样本时的先验代价（≈51 秒）
 
-function costOf(k, mode) {
+export function costOf(k, mode) {
   const m = mode === "tput" ? "tput" : "lat";
   const s = S.nstat.get(k) || ZERO_STAT;   // 空对象会让 pStall 变 NaN，必须用带零值的占位
   const a = (S.alive.get(k) || {}) as NodeEntry;
@@ -295,20 +300,20 @@ function costOf(k, mode) {
 }
 
 /** 面板展示用的分值（越小越好） */
-function scoreMerged(k, _ns?) { return costOf(k, "lat"); }
+export function scoreMerged(k, _ns?) { return costOf(k, "lat"); }
 
 /** 是否处于冷却期 */
-function isBlack(k) {
+export function isBlack(k) {
   const s = S.nstat.get(k);
   return !!(s && s.blackUntil > Date.now());
 }
 /** 是否被回滚冻结 */
-function isFrozen(k) {
+export function isFrozen(k) {
   const s = S.nstat.get(k);
   return !!(s && s.freeUntil > Date.now());
 }
 /** 冻结一个刚出问题的节点 */
-function freezeNode(k) {
+export function freezeNode(k) {
   if (!k) return;
   const s = nsGet(k);
   s.freeUntil = Date.now() + SC.ROLL_FREEZE;
@@ -321,7 +326,7 @@ function freezeNode(k) {
  * @param {string} k "host:port"
  * @returns {boolean} 是否可疑
  */
-function emptyCloseSuspect(k) {
+export function emptyCloseSuspect(k) {
   const s = S.nstat.get(k);
   if (!s) return false;
   const viaP = s.eCloseP || 0;
@@ -330,7 +335,7 @@ function emptyCloseSuspect(k) {
 }
 
 /** 候选列表（已过滤黑名单/冻结，按代价升序） */
-function candsFor(mode) {
+export function candsFor(mode) {
   const out = [];
   for (const k of S.alive.keys()) {
     if (isBlack(k) || isFrozen(k)) continue;
@@ -350,25 +355,25 @@ function candsFor(mode) {
  * @param {string} avoid 要避开的节点
  * @returns {string} 节点 key，没有可换的返回 ""
  */
-function nextNode(mode, avoid) {
+export function nextNode(mode, avoid) {
   const c = candsFor(mode);
   for (const x of c) if (x.k !== avoid) return x.k;
   return "";
 }
 
 /** 当前最优 */
-function bestFor(mode) {
+export function bestFor(mode) {
   const c = candsFor(mode);
   return c.length ? c[0].k : "";
 }
 
 /* ---- 落盘节流：变化驱动 + 90 分钟地板（SEED_WRITE_GAP 定义在 px.ts） ---- */
-let NS_WRITE_AT = 0;
-function markSeedDirty(env: Env) {
+
+export function markSeedDirty(env: Env) {
   if (!env || !env.STATS) return;
-  const last = Math.max(NS_WRITE_AT, S.seed.ts || 0);
+  const last = Math.max(S.nsWriteAt, S.seed.ts || 0);
   if (Date.now() - last < SEED_WRITE_GAP) return;
-  NS_WRITE_AT = Date.now();
+  S.nsWriteAt = Date.now();
   SEEDS.write(env).catch(() => {});
 }
 

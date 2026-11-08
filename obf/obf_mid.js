@@ -6,12 +6,7 @@ const JSO = require("./obfuscator-browser.js");
 
 let src = fs.readFileSync(path.join(ROOT, "_worker_v3.pre.js"), "utf8");
 
-// 生产包不需要测试用导出（里面有协议名）
-const m = src.match(/\nexport \{[^}]*\};?\s*$/);
-if (m) {
-  src = src.slice(0, m.index) + "\n";
-  console.log("已剥离具名导出块 %d 字节", m[0].length);
-}
+// 生产包不再附带测试导出（测试用 dist/_test.js）
 
 // === 用户指定配置 ===
 const options = {

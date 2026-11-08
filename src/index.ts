@@ -1,3 +1,19 @@
+import { SC } from "./const";
+import { handleUpgrade } from "./data";
+import { Meter } from "./do";
+import { diagVerdict, hostKey, hostRank, loadRtt, logErr } from "./metrics";
+import { checkTarget, dohQuery, expandV6, resolveAAAA } from "./net";
+import { adminAuthed, effectiveQuota, fmtBytes, newNonce, randomPwd, renderAdmin, renderAdminHint, renderHtml, renderLogin, renderStatsHtml, rlReset, rlTake, sessionToken, sha256Hex, subHeaders } from "./panel";
+import { loadUsers, saveUsers } from "./proto";
+import { aliveList, cnt, cntView, commitPool, cronScan, flushPx, nsOf, pxGet, pxSet, spdSnapshot } from "./px";
+import { EXTRA_HOSTS, POOL_SOURCES, PX_LINE, probeProxy, probeSni, regionListAsync, takePoolLine } from "./px-probe";
+import { capOf, costOf, nsGet, p90Of, pFailOf, pStallOf, pctOf } from "./px-score";
+import { S } from "./state";
+import { flushSnap, getSnap, pendFlush, readStats, readStatsCached, restoreUsage, usageSnapGet, usageSnapWrite } from "./store";
+import { renderClash, renderLinks, renderSingbox, trojanPasswordOf } from "./sub";
+import { P_T, VERSION } from "./util";
+import { connect } from "cloudflare:sockets";
+
 /**
  * ============================================================================
  *  VLESS + Trojan over WebSocket  ——  Cloudflare Workers 单文件实现
@@ -47,18 +63,6 @@
  *  · 所有异步链路均有 catch，KV 不可用时降级为内存模式
  * ============================================================================
  */
-
-import { connect } from "cloudflare:sockets";
-import "./util";
-import "./proto";
-import "./net";
-import "./store";
-import "./px";
-import "./metrics";
-import "./data";
-import "./sub";
-import "./panel";
-import "./do";
 
 /* ==================================================================
  * §6.3  RTT 学习 + 错误环形缓冲
@@ -711,3 +715,5 @@ export default {
 };
 
 /* 供单测导出（Workers 运行时忽略额外导出） */
+
+export { Meter } from "./do";

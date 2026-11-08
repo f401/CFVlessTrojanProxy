@@ -1,5 +1,8 @@
+import { S } from "./state";
+import { connect } from "cloudflare:sockets";
+
 /* 出站网络：DNS / 三级拨号 / 目标校验 */
-const DENY_PORTS = new Set([
+export const DENY_PORTS = new Set([
   23, 25, 135, 137, 138, 139, 445, 465, 587, 1433, 1521, 2049, 3306, 3389, 5432, 5900, 6379,
   9200, 11211, 27017,
 ]);
@@ -9,7 +12,7 @@ const DENY_PORTS = new Set([
  * @param {string} h 主机名或 IP 字面量
  * @returns {boolean} 命中保留地址返回 true
  */
-function isPrivateHost(h) {
+export function isPrivateHost(h) {
   if (!h) return true;
   const host = h.toLowerCase();
 
@@ -44,7 +47,7 @@ function isPrivateHost(h) {
  * @param {number} port 目标端口
  * @returns {string|null} 不允许时返回中文原因，允许返回 null
  */
-function checkTarget(host, port) {
+export function checkTarget(host, port) {
   if (!host) return "空目标";
   if (!(port > 0 && port < 65536)) return "端口非法";
   if (DENY_PORTS.has(port)) return `端口 ${port} 被策略禁止`;
@@ -54,7 +57,7 @@ function checkTarget(host, port) {
 
 
 /** 查 AAAA 记录（用于绕过 CF 对 IPv4 的内部隔离） */
-const DOH_ENDPOINTS = [
+export const DOH_ENDPOINTS = [
   "https://dns.google/resolve",                 // 非 CF，优先
   "https://1.1.1.1/dns-query",                  // CF
   "https://doh.pub/dns-query",                  // 腾讯
@@ -66,7 +69,7 @@ const DOH_ENDPOINTS = [
  * @param {'A'|'AAAA'} type 记录类型
  * @returns {Promise<string|null>} 解析到的地址，全部失败返回 null
  */
-async function dohQuery(domain, type) {
+export async function dohQuery(domain, type) {
   for (const base of DOH_ENDPOINTS) {
     try {
       const url = `${base}?name=${encodeURIComponent(domain)}&type=${type}`;
@@ -88,7 +91,7 @@ async function dohQuery(domain, type) {
  * @param {string} domain 域名
  * @returns {Promise<string|null>} IPv6 地址或 null
  */
-async function resolveAAAA(domain) {
+export async function resolveAAAA(domain) {
   const hit = S.aaaaCache.get(domain);
   if (hit && Date.now() - hit.t < 300000) return hit.ip;
   const ip = await dohQuery(domain, "AAAA");
@@ -98,14 +101,14 @@ async function resolveAAAA(domain) {
   return ip;
 }
 
-const isV6Literal = (h) => typeof h === "string" && h.includes(":");
+export const isV6Literal = (h) => typeof h === "string" && h.includes(":");
 
 /**
  * 把压缩写法的 IPv6 展开成 8 段完整形式（connect() 对压缩形式不友好）。
  * @param {string} a IPv6 字符串
  * @returns {string} 展开后的 IPv6
  */
-function expandV6(a) {
+export function expandV6(a) {
   if (!a.includes("::")) return a;
   const [head, tail] = a.split("::");
   const h = head ? head.split(":") : [];
@@ -119,7 +122,7 @@ function expandV6(a) {
  * @param {string} domain 域名
  * @returns {Promise<string>} IPv4 地址
  */
-async function resolveV4(domain) {
+export async function resolveV4(domain) {
   const hit = S.dnsCache.get(domain);
   if (hit && Date.now() - hit.t < 300000) return hit.ip;
   const ip = await dohQuery(domain, "A");
@@ -134,20 +137,20 @@ async function resolveV4(domain) {
  * @param {string} ip 点分 IPv4
  * @returns {string} 形如 [2001:67c:2960:6464::xxxx:xxxx] 的地址
  */
-function nat64FromV4(ip) {
+export function nat64FromV4(ip) {
   const p = ip.split(".").map((x) => Number(x).toString(16).padStart(2, "0"));
   if (p.length !== 4) throw new Error("IPv4 非法");
   return `[2001:67c:2960:6464::${p[0]}${p[1]}:${p[2]}${p[3]}]`;
 }
 
-const isV4Literal = (h) => /^\d{1,3}(\.\d{1,3}){3}$/.test(h);
+export const isV4Literal = (h) => /^\d{1,3}(\.\d{1,3}){3}$/.test(h);
 
 /**
  * 解析 proxyip 配置字符串。
  * @param {string} raw 支持 "host" / "host:port" / "[v6]:port"
  * @returns {{host: string, port: number}|null} 解析结果，空串返回 null
  */
-function parseProxyIp(raw) {
+export function parseProxyIp(raw) {
   const s = String(raw || "").trim();
   if (!s) return null;
   const m6 = /^\[([^\]]+)\](?::(\d+))?$/.exec(s);
@@ -163,7 +166,7 @@ function parseProxyIp(raw) {
  * @param {number} port 目标端口
  * @returns {Promise<Socket>} 已建立的连接
  */
-async function dial(host, port) {
+export async function dial(host, port) {
   let lastErr = null;
 
   try {

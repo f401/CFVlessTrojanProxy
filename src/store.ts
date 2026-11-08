@@ -1,3 +1,9 @@
+import { Meter } from "./do";
+import { loadUsers } from "./proto";
+import { cntDelta, spdSnapshot } from "./px";
+import { S } from "./state";
+import { enc } from "./util";
+
 /* 存储与计量：KV/DO/加密/快照/统计缓存 */
 
 /* ---------- 计量的全局帐本：Durable Object ----------
@@ -5,7 +11,7 @@
  * 热路径只往 PEND 里加数（纯内存），攒够/到点才往 DO 送一批。
  * 没绑 METER 时自动退回原来的 KV 方案（env.METER 为空即可）。
  */
-const PEND_FLUSH_BYTES = 16 * 1024 * 1024;  // 大文件传输时别频繁打 DO：DO 调用会吃这条连接的 CPU
+export const PEND_FLUSH_BYTES = 16 * 1024 * 1024;  // 大文件传输时别频繁打 DO：DO 调用会吃这条连接的 CPU
 
 /**
  * 把一次连接的流量增量放进待推送缓冲（纯内存，热路径无阻塞）。
@@ -15,7 +21,7 @@ const PEND_FLUSH_BYTES = 16 * 1024 * 1024;  // 大文件传输时别频繁打 DO
  * @param {boolean} [isNew] 是否为新连接（用于连接数统计）
  * @returns {void}
  */
-function pendAdd(id, up, down, isNew) {
+export function pendAdd(id, up, down, isNew) {
   if (!id) return;
   const p = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
   p.up += up || 0;
@@ -32,7 +38,7 @@ function pendAdd(id, up, down, isNew) {
  * @param {number} [delay] 自定义延迟（毫秒），传 0 表示尽快
  * @returns {void}
  */
-function scheduleFlush(env: Env, delay) {
+export function scheduleFlush(env: Env, delay) {
   if (S.tflush) return;
   const d = delay === undefined ? S.pendMs : delay;
   S.tflush = setTimeout(() => {
@@ -47,7 +53,7 @@ function scheduleFlush(env: Env, delay) {
  * @param {boolean} [force] 跳过节流立即发送
  * @returns {Promise<void>}
  */
-async function pendFlush(env: Env, force?: boolean): Promise<void> {
+export async function pendFlush(env: Env, force?: boolean): Promise<void> {
   if (!env || !env.METER || !S.pend.size) return;
   if (!force && Date.now() - S.pendAt < S.pendMs) return;
   S.pendAt = Date.now();
@@ -92,7 +98,7 @@ async function pendFlush(env: Env, force?: boolean): Promise<void> {
   else S.pendMs = Math.max(30000, Math.round(S.pendMs / 2));
 }
 
-const METER_TTL = 15000;
+export const METER_TTL = 15000;
 
 /**
  * 读取某个用户在 Meter DO 里的全局累计。
@@ -101,7 +107,7 @@ const METER_TTL = 15000;
  * @param {string} id 用户 UUID
  * @returns {Promise<{up:number,down:number,conns:number,first?:number,ts?:number}|null>} 累计值
  */
-async function meterGet(env: Env, id) {
+export async function meterGet(env: Env, id) {
   if (!env || !env.METER || !id) return null;
   const hit = S.meterCache.get(id);
   if (hit && Date.now() - hit.t < METER_TTL) return hit.v;
@@ -122,14 +128,14 @@ async function meterGet(env: Env, id) {
   return hit ? hit.v : null;
 }
 
-const USAGE_SNAP_KEY = "usage:snap";
+export const USAGE_SNAP_KEY = "usage:snap";
 
 /**
  * 读用量快照（KV）。用于 DO 被重置（比如重建脚本）后回填历史累计。
  * @param {object} env Worker 环境
  * @returns {Promise<{ts:number, users:Record<string,{up:number,down:number,conns:number}>}|null>} 快照
  */
-async function usageSnapGet(env: Env) {
+export async function usageSnapGet(env: Env) {
   try {
     return (await kvGet<UsageSnap>(env, USAGE_SNAP_KEY)) || null;
   } catch (e) {
@@ -142,7 +148,7 @@ async function usageSnapGet(env: Env) {
  * @param {object} env Worker 环境
  * @returns {Promise<void>}
  */
-async function usageSnapWrite(env: Env) {
+export async function usageSnapWrite(env: Env) {
   if (!env.STATS || !env.METER) return;
   const prev = (await usageSnapGet(env)) || ({ users: {}, ts: 0 } as UsageSnap);
   // 灾备快照，2 小时一次足够（cron 是 30 分钟一轮，别每轮都写一遍）
@@ -176,7 +182,7 @@ async function usageSnapWrite(env: Env) {
  * @param {object} [snap] 已读到的 usage:snap；不传则现读
  * @returns {Promise<object|null>} 恢复后的累计值
  */
-async function restoreUsage(env: Env, id, snap?) {
+export async function restoreUsage(env: Env, id, snap?) {
   if (!env || !env.METER) return null;
   const s = snap || (await usageSnapGet(env));
   const u = s && s.users && s.users[id];
@@ -193,13 +199,13 @@ async function restoreUsage(env: Env, id, snap?) {
   }
 }
 
-const FLUSH_MIN_MS = 3600000;    // 1 小时（且累计 ≥2MB 才写）
-const FLUSH_DIRTY = 2 * 1024 * 1024;   // 脏字节门槛
-const FLUSH_MAX_MS = 7200000;    // 最迟 2 小时必落一次
-const FLUSH_GAP = 2700000;       // 全局闸门：45 分钟内已有别的 isolate 写过就不再写
+export const FLUSH_MIN_MS = 3600000;    // 1 小时（且累计 ≥2MB 才写）
+export const FLUSH_DIRTY = 2 * 1024 * 1024;   // 脏字节门槛
+export const FLUSH_MAX_MS = 7200000;    // 最迟 2 小时必落一次
+export const FLUSH_GAP = 2700000;       // 全局闸门：45 分钟内已有别的 isolate 写过就不再写
 
 /** snap 快照的内存缓存时长：读多写少，5 分钟足够（原来 60 秒 = 1440 读/天/isolate） */
-const SNAP_TTL = 300000;
+export const SNAP_TTL = 300000;
 
 /**
  * 累计一次连接的流量与连接数（同时写入本地表和待推送缓冲）。
@@ -209,7 +215,7 @@ const SNAP_TTL = 300000;
  * @param {boolean} isNewConn 是否新连接
  * @returns {void}
  */
-function statBump(id, up, down, isNewConn) {
+export function statBump(id, up, down, isNewConn) {
   if (!id) return;
   pendAdd(id, up, down, isNewConn);   // 全局帐本（DO）
   let s = S.stats.get(id);
@@ -239,14 +245,14 @@ function statBump(id, up, down, isNewConn) {
  * 密钥由 secret 绑定 kek 派生。没有 kek 时退化为明文（保证老部署还能跑）。
  * 读取兼容明文：解析失败当明文 JSON 处理，下次写入自动转成密文。
  */
-let AEK = null;
-function b64e(u8) {
+export let AEK = null;
+export function b64e(u8) {
   let s = "";
   const CH = 0x8000;
   for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
   return btoa(s);
 }
-function b64d(str) {
+export function b64d(str) {
   const bin = atob(str);
   const u8 = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
@@ -254,7 +260,7 @@ function b64d(str) {
 }
 
 /** 从 secret 绑定 kek 派生 AES-GCM 密钥（进程内缓存） */
-async function aesKey(env: Env) {
+export async function aesKey(env: Env) {
   if (AEK) return AEK;
   const raw = String((env && env.kek) || "");
   if (!raw) return null;
@@ -264,7 +270,7 @@ async function aesKey(env: Env) {
 }
 
 /** 对象 → 密文字符串（ENC1:iv:ct，均为 base64） */
-async function seal(env: Env, obj: unknown): Promise<string> {
+export async function seal(env: Env, obj: unknown): Promise<string> {
   const text = typeof obj === "string" ? obj : JSON.stringify(obj);
   const k = await aesKey(env);
   if (!k) return text;
@@ -274,7 +280,7 @@ async function seal(env: Env, obj: unknown): Promise<string> {
 }
 
 /** 密文 → 对象；明文（老数据）也能读 */
-async function unseal(env: Env, raw: unknown): Promise<any> {
+export async function unseal(env: Env, raw: unknown): Promise<any> {
   if (raw == null) return null;
   if (typeof raw !== "string") return raw;
   if (!raw.startsWith("ENC1:")) {
@@ -296,7 +302,7 @@ async function unseal(env: Env, raw: unknown): Promise<any> {
 }
 
 /** 读 KV 并解密 */
-async function kvGet<T = any>(env: Env, key: string): Promise<T | null> {
+export async function kvGet<T = any>(env: Env, key: string): Promise<T | null> {
   if (!env || !env.STATS) return null;
   let raw = null;
   try { raw = await env.STATS.get(key); } catch (e) { return null; }
@@ -304,11 +310,11 @@ async function kvGet<T = any>(env: Env, key: string): Promise<T | null> {
 }
 
 /** 加密后写 KV */
-async function kvSet(env: Env, key: string, obj: unknown, opts?: { expirationTtl?: number }): Promise<void> {
+export async function kvSet(env: Env, key: string, obj: unknown, opts?: { expirationTtl?: number }): Promise<void> {
   return kvPut(env.STATS, key, await seal(env, obj), opts);
 }
 
-async function kvPut(kv, key, val, opts) {
+export async function kvPut(kv, key, val, opts) {
   // 10048 = 当日写额度耗尽。既然写不进去，10 分钟内别再试，
   // 免得每个连接都白跑一次 KV 调用并刷日志。
   // 注意：熔断期必须"抛错"而不是静默返回 —— 调用方（flushSnap 等）
@@ -341,7 +347,7 @@ async function kvPut(kv, key, val, opts) {
  * @param {boolean} [force] 由 cron 调用时强制写；请求路径只在攒够 2MB 时写
  * @returns {Promise<void>}
  */
-async function flushSnap(env: Env, force?: boolean): Promise<void> {
+export async function flushSnap(env: Env, force?: boolean): Promise<void> {
   const kv = env.STATS;
   if (!kv) return;
   const hasData = S.stats.size > 0 || S.rtt.size > 0 || S.errs.length > 0;
@@ -425,7 +431,7 @@ async function flushSnap(env: Env, force?: boolean): Promise<void> {
  * @param {boolean} [fresh] 跳过缓存（写之前判断"全局闸门"必须拿最新时间戳）
  * @returns {Promise<object>} 快照对象，读不到返回空对象
  */
-async function getSnap(env: Env, fresh?: boolean) {
+export async function getSnap(env: Env, fresh?: boolean) {
   if (!fresh && S.snapCache.v && Date.now() - S.snapCache.t < SNAP_TTL) return S.snapCache.v;
   let v = null;
   try {
@@ -445,7 +451,7 @@ async function getSnap(env: Env, fresh?: boolean) {
  * @param {string} id 用户 UUID
  * @returns {Promise<object>} 用量对象
  */
-async function readStatsCached(env: Env, id) {
+export async function readStatsCached(env: Env, id) {
   const hit = S.statCache.get(id);
   if (hit && Date.now() - hit.t < 60000) return hit.v;
   const v = await readStats(env, id);
@@ -460,7 +466,7 @@ async function readStatsCached(env: Env, id) {
  * @param {string} id 用户 UUID
  * @returns {Promise<{up:number,down:number,conns:number,backend:string}>} 含 backend 标记数据来源
  */
-async function readStats(env: Env, id) {
+export async function readStats(env: Env, id) {
   const local = S.stats.get(id) || { up: 0, down: 0, conns: 0, first: 0, last: 0 };
   const p = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
 

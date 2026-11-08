@@ -1,49 +1,36 @@
+import { HIST_BASE, HIST_N, SC } from "./const";
+import { logErr } from "./metrics";
+import { POOL_TTL_MS, geoLabel, probeProxy, refillPool } from "./px-probe";
+import { candsFor, capOf, costOf, isBlack, nsLatency, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, pcts } from "./px-score";
+import { BUCKET_DEF, SEEDS } from "./px-seed";
+import { SEL } from "./selector";
+import { S } from "./state";
+import { kvGet, kvSet, scheduleFlush } from "./store";
+
 /* 代理节点：状态 / 信誉分桶 / 选择 / cron */
 /* ---- 轮换模块：内存为权威，KV 只存「候选池 + 分机房节点信誉」 ---- */
 
-const SEED_KEY = "px:seed";
-const SEED_TTL = 30 * 60000;      // 信誉表回读周期
-const SEED_MAX = 40;              // 每个机房最多记 40 个节点
-const SEED_COLD_N = 8;            // 冷启动灌进 alive 的节点数
-const PX_TTL = 86400 * 30;
-const SEED_VER = 6;
+export const SEED_KEY = "px:seed";
+export const SEED_TTL = 30 * 60000;      // 信誉表回读周期
+export const SEED_MAX = 40;              // 每个机房最多记 40 个节点
+export const SEED_COLD_N = 8;            // 冷启动灌进 alive 的节点数
+export const PX_TTL = 86400 * 30;
+export const SEED_VER = 6;
 // 信誉表落盘的最小间隔：每个 isolate 各写各的会让写次数随实例数线性增长
 // （8 个 isolate × 48 次/天 = 384）。S.seed.ts 是从 KV 读回来的全局时间戳，
 // 用它当闸门能把全局写频压到 ~30 次/天。
-const SEED_WRITE_GAP = 90 * 60000;
+export const SEED_WRITE_GAP = 90 * 60000;
 
-/* 评分参数：单位统一为「毫秒当量」——分数就是"平均多等多少毫秒" */
-const SC = {
-  HL: 6 * 3600e3,     // 统计半衰期
-  A: 0.3,             // EWMA 系数
-  P_TCP: 250,         // 冷启动先验
-  P_TLS: 60,
-  FAIL: 8000,         // 一次失败的期望代价
-  STALL: 2500,        // 卡顿当量
-  TLS_G: 1.2,
-  LOSS_G: 2,
-  LOSS_SLACK: 30,
-  MIN_BYTES: 1048576, // 吞吐样本准入门槛
-  PRIOR_BPS: 200 * 1024,
-  H_LAT: 20,
-  H_TPUT: 0.25,
-  DWELL_TPUT: 20 * 60000,
-  DWELL: 10 * 60000,
-  BUDGET: 3,
-  ROLL_WIN: 60000,
-  ROLL_FREEZE: 30 * 60000,
-  TRIAL_N: 3,
-};
-const HIST_BASE = 16 * 1024;   // 直方图起点 16 KB/s
-const HIST_N = 12;             // 16K ~ 32M
-const MODES = ["lat", "tput"];
+export { SC, HIST_BASE, HIST_N } from "./const";
+
+export const MODES = ["lat", "tput"];
 
 
 
 
 // 灾备种子：seed 被清空时用它兜底，避免"池子有 2000 条但一个能用的都没有"。
 // 这些是历史上实测可用的中转，会被正常探活/熔断覆盖，不是永久白名单。
-const BOOT = [
+export const BOOT = [
   "45.147.250.39:443", "45.136.117.194:443", "185.253.117.147:443", "91.215.154.80:443",
   "91.215.153.143:443", "45.151.183.22:443", "193.181.211.185:443", "89.22.227.132:443",
 ];
@@ -57,7 +44,7 @@ const BOOT = [
  * @param {number} [n] 增量
  * @returns {void}
  */
-function cnt(k, n?) {
+export function cnt(k, n?) {
   if (!S.cntKeys.includes(k)) {
     try { console.error("[cnt] unknown key", k); } catch (e) {}
     return;
@@ -74,7 +61,7 @@ function cnt(k, n?) {
  * 每个节点的紧凑快照（用于跨 isolate 展示：本 isolate 看不到别人测的吞吐）
  * @returns {object} { "h:p": {med,p90,cap,n,ts,tf,at} }
  */
-function spdSnapshot() {
+export function spdSnapshot() {
   const out = {};
   let i = 0;
   for (const [k, s] of S.nstat) {
@@ -102,18 +89,18 @@ function spdSnapshot() {
  * @param {string} id 用户 UUID
  * @returns {void}
  */
-function kickFlush(env: Env, id) {
+export function kickFlush(env: Env, id) {
   if (!env || !id || !env.METER) return;
   if (!S.pend.has(id)) S.pend.set(id, { up: 0, down: 0, conns: 0 });
   scheduleFlush(env, 0);
 }
 
 /** 取出"上次落盘之后"的增量，并把基线推到当前值 */
-function cntView() {
+export function cntView() {
   return { ...S.cnt, d: S.cnt.d || new Date().toISOString().slice(0, 10) };
 }
 
-function cntDelta() {
+export function cntDelta() {
   const out = {};
   for (const k of S.cntKeys) {
     const v = (S.cnt[k] || 0) - (S.cntSent[k] || 0);
@@ -123,10 +110,10 @@ function cntDelta() {
   return out;
 }
 
-const keyOf = (x) => x.h + ":" + x.p;
+export const keyOf = (x) => x.h + ":" + x.p;
 
 /** 候选项池：内存 → KV(poolGen) → 空；空时由 cronScan 触发重建 */
-async function ensurePool(env: Env) {
+export async function ensurePool(env: Env) {
   if (S.pool.length) return S.pool;
   await SEEDS.read(env);
   const gen = S.seed.poolGen || 0;
@@ -142,7 +129,7 @@ async function ensurePool(env: Env) {
 }
 
 /** 两阶段提交新候选池：先写新代际键，成功后再改 seed.poolGen */
-async function commitPool(env: Env, fresh, allowShrink?) {
+export async function commitPool(env: Env, fresh, allowShrink?) {
   const oldN = S.pool.length || Number(S.seed.poolN) || 0;
   const newN = fresh.length;
   if (!newN) return { ok: false, reason: "empty" };
@@ -168,7 +155,7 @@ async function commitPool(env: Env, fresh, allowShrink?) {
  * @param {object} env Worker 环境
  * @returns {Promise<{cur:string, alive:Array, state:object}>} 状态
  */
-async function pxGet(env: Env) {
+export async function pxGet(env: Env) {
   await SEEDS.read(env);
   if (!S.alive.size) {
     let src = SEEDS.bucket().nodes || [];
@@ -240,7 +227,7 @@ async function pxGet(env: Env) {
  * @param {Iterable<string>} keys "host:port" 列表
  * @returns {object} "host:port" → 统计明细
  */
-function nsOf(keys) {
+export function nsOf(keys) {
   const m = {};
   let i = 0;
   for (const k of keys) {
@@ -265,7 +252,7 @@ function nsOf(keys) {
 }
 
 /** 兼容旧调用：只改内存，不落盘 */
-async function pxSet(env: Env, patch) {
+export async function pxSet(env: Env, patch) {
   if (!patch) return pxGet(env);
   if (typeof patch.cur === "string") { S.curs.tput = patch.cur; S.curs.lat = patch.cur; }
   if (Array.isArray(patch.alive)) {
@@ -275,24 +262,24 @@ async function pxSet(env: Env, patch) {
 }
 
 /** 落盘：只写信誉表（池子走 commitPool），cron 每轮一次 */
-async function flushPx(env: Env, force?: boolean) {
+export async function flushPx(env: Env, force?: boolean) {
   if (!env || !env.STATS) return { ok: true, skipped: true };
   if (!force && !S.seedDirty) return { ok: true, skipped: true };
   if (!force) {
-    const last = Math.max(NS_WRITE_AT, S.seed.ts || 0);
+    const last = Math.max(S.seed.ts || 0);
     if (Date.now() - last < SEED_WRITE_GAP) return { ok: true, skipped: true };
   }
-  NS_WRITE_AT = Date.now();
+  S.nsWriteAt = Date.now();
   return SEEDS.write(env, S.colo ? undefined : true);
 }
 
 /** 对外：本机房的存活节点列表 */
-async function aliveList(env: Env) {
+export async function aliveList(env: Env) {
   await pxGet(env);
   return [...S.alive.values()];
 }
 
-async function cronScan(env: Env) {
+export async function cronScan(env: Env) {
   await pxGet(env);
   let pool = await ensurePool(env);
   if (!pool.length || Date.now() - S.poolBuilt > POOL_TTL_MS) {

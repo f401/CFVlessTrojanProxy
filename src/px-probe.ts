@@ -1,5 +1,12 @@
+import { logErr } from "./metrics";
+import { checkTarget } from "./net";
+import { aliveList } from "./px";
+import { S } from "./state";
+import { dec, enc, toHex } from "./util";
+import { connect } from "cloudflare:sockets";
+
 /* 代理节点：探活与池子抓取 */
-const PROBE_HELLO = (() => {
+export const PROBE_HELLO = (() => {
   const hx = "16030100d2010000ce030380f2b59e000bbca2041abbd20c3ad59999e3ee3a101aa9956fc2b767da0a0b36000038c02cc030009fcca9cca8ccaac02bc02f009ec024c028006bc023c0270067c00ac0140039c009c0130033009d009c003d003c0035002f00ff0100006d0000001700150000127777772e636c6f7564666c6172652e636f6d000b000403000102000a000c000a001d0017001e00190018002300000016000000170000000d002a0028040305030603080708080809080a080b080408050806040105010601030303010302040205020602";
   const a = new Uint8Array(hx.length / 2);
   for (let i = 0; i < a.length; i++) a[i] = parseInt(hx.substr(i * 2, 2), 16);
@@ -7,7 +14,7 @@ const PROBE_HELLO = (() => {
 })();
 
 // 额外候选主机（不是列表，是"池域名"，解析后是多台机器）
-const EXTRA_HOSTS = ["pyip.ygkkk.dpdns.org"];
+export const EXTRA_HOSTS = ["pyip.ygkkk.dpdns.org"];
 
 // 候选池来源（按价值排序；单源失败不影响其余源）
 //   1. IPDB 官方 GitHub 镜像 —— API 站从 Worker 访问恒 403，镜像可通
@@ -16,7 +23,7 @@ const EXTRA_HOSTS = ["pyip.ygkkk.dpdns.org"];
 //   4. IPDB 精选带国家码
 //   5. 老源（唯一长期验证可用的原始源）
 //   6. 官方 API —— 目前 403，留作对方解封后的兜底
-const POOL_SOURCES = [
+export const POOL_SOURCES = [
   "https://raw.githubusercontent.com/ymyuuu/IPDB/main/BestProxy/proxy.txt",
   "https://raw.githubusercontent.com/CB-X2-Jun/cf-proxyip-lists/main/proxyip.txt",
   "https://cdn.jsdelivr.net/gh/CB-X2-Jun/cf-proxyip-lists@main/proxyip.txt",
@@ -26,7 +33,7 @@ const POOL_SOURCES = [
 ];
 
 // 一行候选：IP[:PORT][#CC | ,… | :CC | 空白]
-const PX_LINE = /^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?(?:[#,:]|\s|$)/;
+export const PX_LINE = /^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?(?:[#,:]|\s|$)/;
 
 /**
  * 解析候选池的一行文本并写入去重表；私网/保留地址直接丢弃。
@@ -35,7 +42,7 @@ const PX_LINE = /^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?(?:[#,:]|\s|$)/;
  * @param {Map<string,object>} seen 去重表（key = ip:port）
  * @returns {boolean} 是否为有效新增
  */
-function takePoolLine(line, src, seen) {
+export function takePoolLine(line, src, seen) {
   const m = PX_LINE.exec(line.trim());
   if (!m) return false;
   const ip = m[1];
@@ -49,7 +56,7 @@ function takePoolLine(line, src, seen) {
   return true;
 }
 
-const POOL_TTL_MS = 24 * 3600e3;    // 候选池重建周期（上游源每天都会变）
+export const POOL_TTL_MS = 24 * 3600e3;    // 候选池重建周期（上游源每天都会变）
 // 换节点策略（可用环境变量覆盖）
 //   pxDwellMin : 切换后最少驻留多少分钟（默认 360 = 6 小时）
 //   pxFailMax  : 连续失败多少次才允许换（默认 5）
@@ -59,7 +66,7 @@ const POOL_TTL_MS = 24 * 3600e3;    // 候选池重建周期（上游源每天�
  * @param {object} env Worker 环境
  * @returns {{dwell:number, fail:number, force:number}} 驻留毫秒、失败阈值、强制换阈值
  */
-function pxPolicy(env: Env) {
+export function pxPolicy(env: Env) {
   const d = Number(env.pxDwellMin);
   const f = Number(env.pxFailMax);
   const x = Number(env.pxForceAt);
@@ -76,7 +83,7 @@ function pxPolicy(env: Env) {
  * @param {number} p 候选端口
  * @returns {Promise<{h:string,p:number,ms:number,ts:number,bad?:string}|null>} 成功返回节点信息，失败返回 null
  */
-async function probeProxy(h, p) {
+export async function probeProxy(h, p) {
   if (checkTarget(h, p)) return null;      // 纵深防御：任何路径都不许探内网
   const t0 = Date.now();
   let sock = null;
@@ -134,7 +141,7 @@ async function probeProxy(h, p) {
  * @param {object} env Worker 环境
  * @returns {Promise<Array<{h:string,p:number,src:string}>>} 合并后的候选池
  */
-async function refillPool(env: Env) {
+export async function refillPool(env: Env) {
   const seen = new Map();
   for (const src of POOL_SOURCES) {
     try {
@@ -168,7 +175,7 @@ async function refillPool(env: Env) {
  * @param {string[]} ips IP 列表
  * @returns {Promise<Record<string,string>>} IP → 两位国家码
  */
-async function geoLabel(ips) {
+export async function geoLabel(ips) {
   const out = {};
   if (!ips.length) return out;
   try {
@@ -199,7 +206,7 @@ async function geoLabel(ips) {
  * @param {string} sni 目标域名
  * @returns {Uint8Array} 完整的 ClientHello 记录
  */
-function tlsHello(sni: string): Uint8Array {
+export function tlsHello(sni: string): Uint8Array {
   const name = enc.encode(sni);
   const out: number[] = [];
   const u16 = (n: number) => { out.push((n >> 8) & 0xff, n & 0xff); };
@@ -253,7 +260,7 @@ function tlsHello(sni: string): Uint8Array {
  * @param {number} [ms] 超时毫秒
  * @returns {Promise<{tcp:number, hs?:number, err:string}>} 结果
  */
-async function probeSni(nodeHost: string, nodePort: number, sni: string, ms = 2500): Promise<any> {
+export async function probeSni(nodeHost: string, nodePort: number, sni: string, ms = 2500): Promise<any> {
   if (checkTarget(nodeHost, nodePort)) return { err: "denied" };
   const t0 = Date.now();
   let sock: any = null;
@@ -302,7 +309,7 @@ async function probeSni(nodeHost: string, nodePort: number, sni: string, ms = 25
  * @param {object} env Worker 环境
  * @returns {Promise<string[]>} 最多 6 个两位国家码
  */
-async function regionListAsync(env: Env) {
+export async function regionListAsync(env: Env) {
   const raw = String(env.regions || "").trim();
   if (raw && raw.toLowerCase() !== "auto") {
     return raw

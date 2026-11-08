@@ -1,3 +1,6 @@
+import { cnt } from "./px";
+import { seal, unseal } from "./store";
+
 /* do */
 export class Meter {
   st: DurableObjectState; env: Env; c: UsageMeter; g: CounterDoc; s: Record<string, NodeSnap>; e: ErrItem[];

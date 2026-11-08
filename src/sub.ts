@@ -1,5 +1,7 @@
+import { secretPwd } from "./util";
+
 /* sub */
-const DEFAULT_PORTS = [
+export const DEFAULT_PORTS = [
   [443, true],
   [8443, true],
   [2053, true],
@@ -8,7 +10,7 @@ const DEFAULT_PORTS = [
 ];
 
 /** Cloudflare colo 代码 → 城市中文名（常用部分） */
-const COLO_CITY = {
+export const COLO_CITY = {
   HKG: "香港", NRT: "东京", KIX: "大阪", ICN: "首尔", TPE: "台北", KHH: "高雄",
   SIN: "新加坡", BKK: "曼谷", KUL: "吉隆坡", CGK: "雅加达", MNL: "马尼拉",
   SGN: "胡志明", HAN: "河内", DEL: "德里", BOM: "孟买", CCU: "加尔各答",
@@ -28,10 +30,10 @@ const COLO_CITY = {
 };
 
 /** 把入口地址压成可放进 URL 的标签：104.16.0.1 → 104-16-0-1 */
-const tagOf = (h) => String(h).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+export const tagOf = (h) => String(h).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 /** 节点唯一标签 = 入口 + 端口（同一域名的 443/8443 是两个节点） */
-const nodeTag = (n) => `${tagOf(n.host)}-${n.port}`;
+export const nodeTag = (n) => `${tagOf(n.host)}-${n.port}`;
 
 /**
  * 解析 env.nodes 配置成入口节点列表（host:port:mode）。
@@ -39,7 +41,7 @@ const nodeTag = (n) => `${tagOf(n.host)}-${n.port}`;
  * @param {string} host 当前请求的 Host
  * @returns {Array<{host:string,port:number,mode:string}>} 节点数组
  */
-function loadNodes(env: Env, host) {
+export function loadNodes(env: Env, host) {
   const raw = String(env.nodes || "").trim();
   if (raw) {
     return raw
@@ -64,7 +66,7 @@ function loadNodes(env: Env, host) {
  * @param {boolean} hasTrojanOverride 是否被查询参数强制指定
  * @returns {string[]} 协议名数组
  */
-function pickProtos(env: Env, url, hasTrojanOverride?) {
+export function pickProtos(env: Env, url, hasTrojanOverride?) {
   const hasTrojan = hasTrojanOverride === undefined
     ? Boolean(secretPwd(env))
     : !!hasTrojanOverride;
@@ -80,7 +82,7 @@ function pickProtos(env: Env, url, hasTrojanOverride?) {
  * @param {string} id 用户 UUID
  * @returns {string} 密码，没有则空串
  */
-function trojanPasswordOf(env: Env, id) {
+export function trojanPasswordOf(env: Env, id) {
   const raw = secretPwd(env);
   if (!raw) return "";
   // 单密码模式：一个公共密码，所有用户共用
@@ -99,7 +101,7 @@ function trojanPasswordOf(env: Env, id) {
  * @param {object} learned RTT 学习结果
  * @returns {Array<object>} 排序后的节点数组
  */
-function orderNodes(nodes, learned) {
+export function orderNodes(nodes, learned) {
   return nodes
     .map((n, i) => {
       const info = learned[nodeTag(n)];
@@ -119,7 +121,7 @@ function orderNodes(nodes, learned) {
  * @param {object} n 节点对象
  * @returns {string} 展示名
  */
-function nodeLabel(n) {
+export function nodeLabel(n) {
   const tag = nodeTag(n);
   if (n._colo) {
     const city = COLO_CITY[n._colo] || "";
@@ -133,7 +135,7 @@ function nodeLabel(n) {
  * @param {object} n 节点对象
  * @returns {string} 路径标识
  */
-function nodePath(n) {
+export function nodePath(n) {
   return `/?ed=2560&ip=${nodeTag(n)}`;
 }
 
@@ -145,7 +147,7 @@ function nodePath(n) {
  * @param {string[]} protos 要输出的协议
  * @returns {Array<object>} 地区节点数组
  */
-function regionEntries(regions, host, pass, protos) {
+export function regionEntries(regions, host, pass, protos) {
   const out = [];
   for (const cc of regions) {
     for (const proto of protos) {
@@ -173,7 +175,7 @@ function regionEntries(regions, host, pass, protos) {
  * @param {string[]} [regions] 地区列表
  * @returns {string} YAML 文本
  */
-function renderClash(env: Env, url, id, host, learned = {}, regions = []) {
+export function renderClash(env: Env, url, id, host, learned = {}, regions = []) {
   const nodes = orderNodes(loadNodes(env, host), learned);
   const protos = pickProtos(env, url);
   const pass = trojanPasswordOf(env, id);
@@ -279,7 +281,7 @@ function renderClash(env: Env, url, id, host, learned = {}, regions = []) {
   ].join("\n");
 }
 
-function renderSingbox(env: Env, url, id, host, learned = {}, regions = []) {
+export function renderSingbox(env: Env, url, id, host, learned = {}, regions = []) {
   const nodes = orderNodes(loadNodes(env, host), learned);
   const protos = pickProtos(env, url);
   const pass = trojanPasswordOf(env, id);
@@ -370,7 +372,7 @@ function renderSingbox(env: Env, url, id, host, learned = {}, regions = []) {
   );
 }
 
-function renderLinks(env: Env, url, id, host, learned = {}, regions = []) {
+export function renderLinks(env: Env, url, id, host, learned = {}, regions = []) {
   const nodes = orderNodes(loadNodes(env, host), learned);
   const protos = pickProtos(env, url);
   const pass = trojanPasswordOf(env, id);

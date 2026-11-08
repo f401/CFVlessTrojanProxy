@@ -1,7 +1,11 @@
+import { costOf, isBlack, isFrozen } from "./px-score";
+import { S } from "./state";
+import { getSnap, kvGet } from "./store";
+
 /* metrics */
 
 /** 错误日志去重表：msg|tag → 上次记录时间（5 秒窗口） */
-const ERR_SEEN = new Map<string, number>();
+export const ERR_SEEN = new Map<string, number>();
 
 /**
  * 记录某个入口的一次成功/失败（用于 RTT 学习）。
@@ -10,7 +14,7 @@ const ERR_SEEN = new Map<string, number>();
  * @param {boolean} ok 是否成功
  * @returns {void}
  */
-function rttMark(id, tag, ok) {
+export function rttMark(id, tag, ok) {
   if (!id || !tag) return;
   let bucket = S.rtt.get(id);
   if (!bucket) {
@@ -31,7 +35,7 @@ function rttMark(id, tag, ok) {
  * @param {string} id 用户 UUID
  * @returns {void}
  */
-function rttLearn(cf, tag, id) {
+export function rttLearn(cf, tag, id) {
   if (!cf || !tag || !id) return;
   const rtt = cf.clientTcpRtt;
   if (typeof rtt !== "number" || rtt <= 0) return;
@@ -64,7 +68,7 @@ function rttLearn(cf, tag, id) {
  * @param {string} id 用户 UUID
  * @returns {Promise<object>} 入口标签 → RTT 信息
  */
-async function loadRtt(env: Env, id) {
+export async function loadRtt(env: Env, id) {
   if (!id) return {};
   const mem = S.rtt.get(id) || {};
   if (!env.STATS) return mem;
@@ -88,7 +92,7 @@ async function loadRtt(env: Env, id) {
  * @param {string} host 目标域名
  * @returns {string} 族名
  */
-function hostKey(host: string): string {
+export function hostKey(host: string): string {
   const h = String(host || "").toLowerCase().replace(/\.$/, "");
   if (!h) return "";
   if (/^[\d.]+$/.test(h) || h.includes(":")) return h;   // IP 字面量原样
@@ -117,7 +121,7 @@ function hostKey(host: string): string {
  * @param {number} now 当前时间
  * @returns {number} 分数
  */
-function hostScore(s, now: number): number {
+export function hostScore(s, now: number): number {
   const fail = (s.bad + 1) / (s.n + 6);            // 小样本往坏里估
   const stale = now - (s.at || 0) > 6 * 3600e3 ? 300 : 0;   // 6 小时没更新就降权
   const ttfb = s.ttfb > 0 ? s.ttfb : 800;
@@ -130,7 +134,7 @@ function hostScore(s, now: number): number {
  * @param {string} mode "lat" | "tput"
  * @returns {Array<{k:string,v:number}>} 升序
  */
-function hostRank(host: string, mode: string) {
+export function hostRank(host: string, mode: string) {
   const fam = hostKey(host);
   if (!fam) return [];
   const mkey = fam + "|" + (mode === "lat" ? "lat" : "tput");
@@ -166,7 +170,7 @@ function hostRank(host: string, mode: string) {
  * @param {string} mode 模式
  * @returns {string} 节点 key，没有返回 ""
  */
-function hostUntried(host: string, mode: string) {
+export function hostUntried(host: string, mode: string) {
   const m = S.hostNode.get(hostKey(host));
   let best = "", bv = Infinity;
   for (const k of S.alive.keys()) {
@@ -184,7 +188,7 @@ function hostUntried(host: string, mode: string) {
  * @param {string} [tag] 关联标签（域名或入口）
  * @returns {void}
  */
-function logErr(msg, tag?) {
+export function logErr(msg, tag?) {
   const m = String(msg).slice(0, 200);
   // 同一个错误 5 秒内只记一次：节点大面积抖动时，每条连接都刷一行
   // console.error 既费 CPU 又把真正有用的日志冲掉（面板也只留 50 条）。
@@ -208,8 +212,8 @@ function logErr(msg, tag?) {
  * 按站点的节点画像（诊断：某个站到底该用哪个节点 / 为什么被拦）
  * ================================================================== */
 
-const HN_MAX_HOSTS = 120;   // 最多记 120 个域名
-const HN_MAX_NODES = 12;    // 每个域名最多记 12 个节点
+export const HN_MAX_HOSTS = 120;   // 最多记 120 个域名
+export const HN_MAX_NODES = 12;    // 每个域名最多记 12 个节点
 
 /**
  * 记一次 (站点, 节点) 的连接结果。
@@ -218,7 +222,7 @@ const HN_MAX_NODES = 12;    // 每个域名最多记 12 个节点
  * @param {{ok:boolean, bad:boolean, bytes:number, ttfb:number}} o 本次结果
  * @returns {void}
  */
-function hostNodeMark(host, node, o) {
+export function hostNodeMark(host, node, o) {
   if (!host || !node) return;
   const fam = hostKey(host);
   if (!fam) return;
@@ -264,7 +268,7 @@ function hostNodeMark(host, node, o) {
  * @param {boolean} ok 直连是否成功拿到数据
  * @returns {void}
  */
-function hostDirectMark(host, ok) {
+export function hostDirectMark(host, ok) {
   if (!host) return;
   if (S.hostDirect.size >= HN_MAX_HOSTS) {
     let oldK = "", oldT = Infinity;
@@ -283,7 +287,7 @@ function hostDirectMark(host, ok) {
  * @param {{ok:number,bad:number}} direct 直连对照
  * @returns {{kind:string, verdict:string, suspect:string[]}}
  */
-function diagVerdict(rows, direct) {
+export function diagVerdict(rows, direct) {
   const tested = (rows || []).filter((r) => r.n > 0);
   const suspect = tested.filter((r) => r.bad >= 1 && r.bad * 2 >= r.n);
   const d = direct || { ok: 0, bad: 0 };

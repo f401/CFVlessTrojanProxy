@@ -1,14 +1,18 @@
-/* 协议解析：VLESS / Trojan 首包 */
-const USERS_TTL = 300000;  // 面板改动最多 5 分钟生效（把 KV 读从 1.4 万/天压到 1.4 千）
+import { S } from "./state";
+import { kvGet, kvSet } from "./store";
+import { dec, enc, secretPwd, sha224Bytes, toHex, uuidFromBytes } from "./util";
 
-const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/* 协议解析：VLESS / Trojan 首包 */
+export const USERS_TTL = 300000;  // 面板改动最多 5 分钟生效（把 KV 读从 1.4 万/天压到 1.4 千）
+
+export const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * 加载用户表：把 env 里的 uuid/trojan（secret）与 KV 托管用户合并，结果缓存 30 秒。
  * @param {object} env Worker 环境（读 uuid / uuids / trojan / STATS）
  * @returns {Promise<{list: Array, uuids: Set<string>, trojan: Map<string,string>}>} 用户表与两套鉴权索引
  */
-async function loadUsers(env: Env): Promise<Auth> {
+export async function loadUsers(env: Env): Promise<Auth> {
   const sig = `${env.uuids || env.uuid || ""}|${secretPwd(env)}`;
   if (S.usersCache.v && S.usersSig === sig && Date.now() - S.usersCache.t < USERS_TTL) return S.usersCache.v;
   S.usersSig = sig;
@@ -76,7 +80,7 @@ async function loadUsers(env: Env): Promise<Auth> {
  * 清空用户表缓存，使下一次 loadUsers 重新读 KV（面板改完立刻生效）。
  * @returns {void}
  */
-function invalidateUsers() {
+export function invalidateUsers() {
   S.usersCache = { v: null, t: 0 };
 }
 
@@ -86,7 +90,7 @@ function invalidateUsers() {
  * @param {Array<object>} list 完整用户列表
  * @returns {Promise<void>}
  */
-async function saveUsers(env: Env, list) {
+export async function saveUsers(env: Env, list) {
   const clean = list.filter((x) => x.managed).map((x) => ({
     id: x.id,
     pwd: x.pwd || "",
@@ -109,7 +113,7 @@ async function saveUsers(env: Env, list) {
  * @param {number} to 结束下标（不含）
  * @returns {boolean} 全部是 0-9a-fA-F 时返回 true
  */
-function isHexAscii(u8, from, to) {
+export function isHexAscii(u8, from, to) {
   for (let i = from; i < to; i++) {
     const c = u8[i];
     const ok = (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x66) || (c >= 0x41 && c <= 0x46);
@@ -123,7 +127,7 @@ function isHexAscii(u8, from, to) {
  * @param {Uint8Array} u8 客户端首个载荷
  * @returns {'vless'|'trojan'} 协议名
  */
-function detectProtocol(u8) {
+export function detectProtocol(u8) {
   if (u8.length >= 58 && u8[56] === 0x0d && u8[57] === 0x0a && isHexAscii(u8, 0, 56)) {
     return "trojan";
   }
@@ -136,7 +140,7 @@ function detectProtocol(u8) {
  * @param {number} atyp 原始地址类型字节
  * @returns {number} 归一化后的 atyp（1=IPv4 3=域名 4=IPv6）
  */
-function normAtyp(proto: string, atyp: number): string {
+export function normAtyp(proto: string, atyp: number): string {
   if (proto === "vless") {
     return atyp === 1 ? "v4" : atyp === 2 ? "dom" : atyp === 3 ? "v6" : null;
   }
@@ -150,7 +154,7 @@ function normAtyp(proto: string, atyp: number): string {
  * @param {number} kind 归一化后的 atyp
  * @returns {{host: string, port: number, next: number}|null} 目标地址、端口与下一字段偏移
  */
-function readAddr(u8: Uint8Array, off: number, kind: string): AddrOk | AddrErr {
+export function readAddr(u8: Uint8Array, off: number, kind: string): AddrOk | AddrErr {
   if (kind === "v4") {
     if (u8.length < off + 4) return { err: "地址截断" };
     return {
@@ -179,7 +183,7 @@ function readAddr(u8: Uint8Array, off: number, kind: string): AddrOk | AddrErr {
  * @param {object} auth loadUsers 的返回值
  * @returns {{ok: boolean, id?: string, host?: string, port?: number, udp?: boolean, offset?: number, ver?: number, err?: string}} 解析结果
  */
-function parseVLESS(u8: Uint8Array, auth: Auth): ParseResult {
+export function parseVLESS(u8: Uint8Array, auth: Auth): ParseResult {
   if (u8.length < 24) return { ok: false, err: "VLESS 头部过短" };
 
   const ver = u8[0];
@@ -223,7 +227,7 @@ function parseVLESS(u8: Uint8Array, auth: Auth): ParseResult {
  * @param {object} auth loadUsers 的返回值
  * @returns {{ok: boolean, id?: string, host?: string, port?: number, udp?: boolean, offset?: number, err?: string}} 解析结果
  */
-function parseTrojan(u8: Uint8Array, auth: Auth): ParseResult {
+export function parseTrojan(u8: Uint8Array, auth: Auth): ParseResult {
   if (u8.length < 61) return { ok: false, err: "Trojan 头部过短" };
 
   const hash = dec.decode(u8.subarray(0, 56)).toLowerCase();

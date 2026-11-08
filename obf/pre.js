@@ -20,9 +20,7 @@ src = src
   })
   .join("\n");
 
-// ① 去掉测试用导出
-const m = src.match(/\nexport \{[^}]*\};?\s*$/);
-if (m) src = src.slice(0, m.index) + "\n";
+// ① 测试导出已经拆到 dist/_test.js，生产包只剩 export { Meter, default }，不能剥
 
 // ② 模板字符串里的协议前缀（`vless://${id}…`）先单独处理
 src = src.replace(/`vless:\/\//g, "`${P_V}://").replace(/`trojan:\/\//g, "`${P_T}://");

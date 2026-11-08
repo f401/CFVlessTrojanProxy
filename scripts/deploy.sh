@@ -12,11 +12,12 @@ META="${META:-config/metadata.json}"
 [ -f "$META" ] || { echo "缺少 $META（参考 config/metadata.example.json）"; exit 1; }
 
 node tools/tsc.js
-node build.js
+node tools/bundle.js
 node test/mk_test.mjs >/dev/null
 node test/test_v3.mjs >/dev/null
 node test/smoke_v3.mjs >/dev/null
 node test/test_score.mjs >/dev/null
+node test/golden.mjs >/dev/null
 echo "✓ 测试通过"
 
 if [ "${1:-}" != "--no-obf" ]; then

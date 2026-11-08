@@ -1,31 +1,31 @@
 /* 通用工具：编码/哈希/字节处理/WS 发送 */
-const WS_OPEN = 1;
-const WS_BUFFER_LIMIT = 1024 * 1024;   // 下行发送缓冲超过 1MB 就开始背压
-const WS_STALL_MS = 60000;              // 客户端一时收不动很常见，给到 60 秒
-const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐了
-const VERSION = "5.4";
-const enc = new TextEncoder();
-const dec = new TextDecoder();
+export const WS_OPEN = 1;
+export const WS_BUFFER_LIMIT = 1024 * 1024;   // 下行发送缓冲超过 1MB 就开始背压
+export const WS_STALL_MS = 60000;              // 客户端一时收不动很常见，给到 60 秒
+export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐了
+export const VERSION = "6.0";
+export const enc = new TextEncoder();
+export const dec = new TextDecoder();
 
 /* ==================================================================
  * §1  常量与工具
  * ================================================================== */
 
-const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"));
+export const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"));
 
 // 密码绑定的读取：优先 env.pwd（中性名），兼容老的 env[P_T]
-const secretPwd = (env) => String((env && (env.pwd || env[P_T])) || "").trim();
+export const secretPwd = (env) => String((env && (env.pwd || env[P_T])) || "").trim();
 
 // 协议名在运行时拼装，源码里不出现明文，混淆后也不会残留
-const P_V = String.fromCharCode(118, 108, 101, 115, 115);          // 118 108 101 115 115
-const P_T = String.fromCharCode(116, 114, 111, 106, 97, 110);      // 116 114 111 106 97 110
+export const P_V = String.fromCharCode(118, 108, 101, 115, 115);          // 118 108 101 115 115
+export const P_T = String.fromCharCode(116, 114, 111, 106, 97, 110);      // 116 114 111 106 97 110
 
 /**
  * 字节数组 → 小写十六进制字符串。
  * @param {Uint8Array|ArrayBuffer|number[]} u8 字节序列
  * @returns {string} 十六进制串，长度为字节数 × 2
  */
-function toHex(u8) {
+export function toHex(u8) {
   let s = "";
   for (let i = 0; i < u8.length; i++) s += HEX[u8[i]];
   return s;
@@ -36,7 +36,7 @@ function toHex(u8) {
  * @param {any} d 原始消息体
  * @returns {Uint8Array} 字节视图
  */
-function toU8(d) {
+export function toU8(d) {
   if (d instanceof Uint8Array) return d;
   if (d instanceof ArrayBuffer) return new Uint8Array(d);
   if (ArrayBuffer.isView(d)) return new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
@@ -44,7 +44,7 @@ function toU8(d) {
   return new Uint8Array(0);
 }
 
-const isUUID = (s) =>
+export const isUUID = (s) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 /**
@@ -52,7 +52,7 @@ const isUUID = (s) =>
  * @param {Uint8Array} b 长度至少 16 的字节数组
  * @returns {string} 小写 UUID
  */
-function uuidFromBytes(b) {
+export function uuidFromBytes(b) {
   const h = toHex(b);
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
 }
@@ -63,9 +63,9 @@ function uuidFromBytes(b) {
  * @param {Uint8Array|ArrayBuffer} data 待发送数据
  * @returns {void}
  */
-const WS_MSG_MAX = 256 * 1024;   // 单帧上限：CF 对超大 WS 消息会直接断链
+export const WS_MSG_MAX = 256 * 1024;   // 单帧上限：CF 对超大 WS 消息会直接断链
 
-function safeSend(ws, data) {
+export function safeSend(ws, data) {
   try {
     if (!ws || ws.readyState !== WS_OPEN) return;
     // 大块拆帧：一次 send 超过约 1 MB 时运行时可能直接重置连接，
@@ -87,7 +87,7 @@ function safeSend(ws, data) {
  * @param {object} st 连接状态对象
  * @returns {void}
  */
-function releaseAll(st) {
+export function releaseAll(st) {
   if (!st) return;
   try {
     if (st.writer) st.writer.releaseLock();
@@ -104,7 +104,7 @@ function releaseAll(st) {
  * @param {Socket|null} sock 待关闭的连接
  * @returns {void}
  */
-function closeQuietly(sock) {
+export function closeQuietly(sock) {
   try {
     if (sock) sock.close();
   } catch (e) {
@@ -116,7 +116,7 @@ function closeQuietly(sock) {
  * §2  SHA-224（Trojan 鉴权用；WebCrypto 不提供 SHA-224）
  * ================================================================== */
 
-const SHA_K = new Uint32Array([
+export const SHA_K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
   0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
@@ -126,18 +126,18 @@ const SHA_K = new Uint32Array([
   0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
   0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ]);
-const SHA_H224 = new Uint32Array([
+export const SHA_H224 = new Uint32Array([
   0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939, 0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4,
 ]);
 
-const rotr = (x, n) => ((x >>> n) | (x << (32 - n))) >>> 0;
+export const rotr = (x, n) => ((x >>> n) | (x << (32 - n))) >>> 0;
 
 /**
  * 计算 SHA-224 摘要（纯 JS 实现，用于 Trojan 密码校验）。
  * @param {Uint8Array} data 待摘要数据
  * @returns {Uint8Array} 28 字节摘要
  */
-function sha224Bytes(data) {
+export function sha224Bytes(data) {
   const data8 = toU8(data);
   const len = data8.length;
   const total = (((len + 8) >> 6) + 1) << 6;

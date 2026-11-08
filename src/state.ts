@@ -1,3 +1,5 @@
+import { cnt } from "./px";
+
 /**
  * 全局可变状态（每个 isolate 一份）
  *
@@ -6,7 +8,7 @@
  *   · 想改状态 → 只能通过 S.xxx
  *   · 想知道"谁动了它" → 全仓搜索 S.xxx
  */
-class AppState {
+export class AppState {
   // —— 节点与选择 ——
   alive: Map<string, NodeEntry> = new Map();
   nstat: Map<string, NodeStats> = new Map();
@@ -64,6 +66,7 @@ class AppState {
   hostDirect: Map<string, HDirect> = new Map();
   // 站点排行缓存（family|mode → 排好序的列表，30 秒），避免每次连接都重算
   hostRankCache: Map<string, { t: number; v: any[] }> = new Map();
+  nsWriteAt = 0;
 
   // —— 用户与观测 ——
   usersCache: { v: Auth | null; t: number } = { v: null, t: 0 };
@@ -84,4 +87,4 @@ class AppState {
   }
 }
 
-const S = new AppState();
+export const S = new AppState();

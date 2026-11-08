@@ -1,3 +1,12 @@
+import { pipeBack } from "./data";
+import { hostDirectMark, hostNodeMark, logErr } from "./metrics";
+import { cnt } from "./px";
+import { availOf, markSeedDirty, nsFail, nsOk, nsSpeed, nsStall } from "./px-score";
+import { SEL } from "./selector";
+import { S } from "./state";
+import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "./store";
+import { WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS, closeQuietly, releaseAll } from "./util";
+
 /**
  * 一条 WebSocket 连接的全部状态与行为。
  *
@@ -13,9 +22,9 @@
  */
 
 /** 每收到多少字节触发一次 tick */
-const TICK_BYTES = 512 * 1024;
+export const TICK_BYTES = 512 * 1024;
 
-class Connection {
+export class Connection {
   // —— 归属 ——
   ipTag: string;
   node = "";

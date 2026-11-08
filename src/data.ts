@@ -1,5 +1,17 @@
+import { Connection } from "./connection";
+import { logErr, rttLearn, rttMark } from "./metrics";
+import { checkTarget, dial, expandV6, isV6Literal, parseProxyIp } from "./net";
+import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./proto";
+import { cnt, kickFlush } from "./px";
+import { nextNode, nsGet } from "./px-score";
+import { SEL } from "./selector";
+import { S } from "./state";
+import { flushSnap, pendFlush, statBump } from "./store";
+import { WS_OPEN, closeQuietly, enc, safeSend, toU8 } from "./util";
+import { connect } from "cloudflare:sockets";
+
 /* data */
-function wsToStream(ws: WebSocketLike, earlyData: string): ReadableStream<Uint8Array> {
+export function wsToStream(ws: WebSocketLike, earlyData: string): ReadableStream<Uint8Array> {
   // 流被取消（pipeTo 提前结束）后 WS 仍可能在推消息：
   // 继续 enqueue 会抛 "The stream is not in a state that permits enqueue"，
   // 而这个异常发生在事件回调里，没人接得住 —— 用一个闩把后续消息直接丢掉。
@@ -48,7 +60,7 @@ function wsToStream(ws: WebSocketLike, earlyData: string): ReadableStream<Uint8A
  * @param {string} mode 模式
  * @returns {Promise<Socket|null>} 新连接，没有可换或连不上返回 null
  */
-async function dialAnother(env: Env, st: Connection, mode: string, tag?: string): Promise<any> {
+export async function dialAnother(env: Env, st: Connection, mode: string, tag?: string): Promise<any> {
   const alt = nextNode(mode, st.node);
   if (!alt) return null;
   const i = alt.lastIndexOf(":");
@@ -73,7 +85,7 @@ async function dialAnother(env: Env, st: Connection, mode: string, tag?: string)
  * @param {ExecutionContext} ctx 执行上下文
  * @returns {Promise<Response>} 101 升级响应
  */
-async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const pair = new WebSocketPair();
   const [clientWS, serverWS] = Object.values(pair) as WebSocketLike[];
   serverWS.accept();
@@ -341,7 +353,7 @@ async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext):
  * @returns {void}
  */
 
-function pipeBack(sock: any, ws: WebSocketLike, st: Connection, onClose?: (gotData: boolean) => void): void {
+export function pipeBack(sock: any, ws: WebSocketLike, st: Connection, onClose?: (gotData: boolean) => void): void {
   sock.readable
     .pipeTo(
       new WritableStream({
@@ -405,7 +417,7 @@ function pipeBack(sock: any, ws: WebSocketLike, st: Connection, onClose?: (gotDa
  * @param {object} st 连接状态
  * @returns {Promise<void>}
  */
-async function handleDns(ws: WebSocketLike, firstBody: Uint8Array, st: ConnState): Promise<void> {
+export async function handleDns(ws: WebSocketLike, firstBody: Uint8Array, st: ConnState): Promise<void> {
   const send = async (dnsMsg) => {
     const resp = await fetch("https://1.1.1.1/dns-query", {
       method: "POST",

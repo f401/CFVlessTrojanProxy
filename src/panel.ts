@@ -1,5 +1,11 @@
+import { Meter } from "./do";
+import { p90Of, scoreMerged } from "./px-score";
+import { S } from "./state";
+import { COLO_CITY, loadNodes, pickProtos } from "./sub";
+import { P_T, VERSION, enc, toHex } from "./util";
+
 /* panel */
-function fmtBytes(n) {
+export function fmtBytes(n) {
   const u = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
   let v = Number(n) || 0;
@@ -20,7 +26,7 @@ function fmtBytes(n) {
  * @param {object} info 展示用信息
  * @returns {string} HTML
  */
-function renderHtml(env: Env, url, id, host, key, info) {
+export function renderHtml(env: Env, url, id, host, key, info) {
   const base = `${url.origin}/${id}`;
   const kq = key ? `?k=${encodeURIComponent(key)}` : "";
   const kk = key ? "&k=" + encodeURIComponent(key) : "";
@@ -146,7 +152,7 @@ ${row("?k=", "页面口令（配置了 pageKey 才生效）", false)}
  * @param {string} name cookie 名
  * @returns {string} 值，没有则空串
  */
-function getCookie(req, name) {
+export function getCookie(req, name) {
   const raw = req.headers.get("cookie") || "";
   for (const part of raw.split(";")) {
     const i = part.indexOf("=");
@@ -161,7 +167,7 @@ function getCookie(req, name) {
  * @param {string} str 原文
  * @returns {Promise<string>} 64 位十六进制
  */
-async function sha256Hex(str) {
+export async function sha256Hex(str) {
   const d = await crypto.subtle.digest("SHA-256", enc.encode(str));
   return toHex(new Uint8Array(d));
 }
@@ -171,7 +177,7 @@ async function sha256Hex(str) {
  * @param {object} env Worker 环境
  * @returns {Promise<string>} token
  */
-async function sessionToken(env: Env) {
+export async function sessionToken(env: Env) {
   const t = await sha256Hex(`adm|${env.adminKey || ""}|${env.adminHash || ""}`);
   return t.slice(0, 40);
 }
@@ -183,7 +189,7 @@ async function sessionToken(env: Env) {
  * @param {object} env Worker 环境
  * @returns {Promise<boolean>} 是否通过
  */
-async function adminAuthed(request, url, env) {
+export async function adminAuthed(request, url, env) {
   const k = url.searchParams.get("k");
   if (k && env.adminKey && k === env.adminKey) return true;
   const tok = getCookie(request, "adm");
@@ -191,7 +197,7 @@ async function adminAuthed(request, url, env) {
   return tok === (await sessionToken(env));
 }
 
-const RL_MEM = new Map();   // ip -> { n, t }
+export const RL_MEM = new Map();   // ip -> { n, t }
 
 /**
  * 登录限流：命中则返回 false。
@@ -199,7 +205,7 @@ const RL_MEM = new Map();   // ip -> { n, t }
  * @param {number} limit 单位时间内的最大次数
  * @returns {boolean} 是否允许本次请求
  */
-function rlTake(ip, limit) {
+export function rlTake(ip, limit) {
   const now = Date.now();
   const e = RL_MEM.get(ip);
   if (e && now - e.t < 600000) {
@@ -217,7 +223,7 @@ function rlTake(ip, limit) {
  * @param {string} ip 客户端 IP
  * @returns {void}
  */
-function rlReset(ip) {
+export function rlReset(ip) {
   RL_MEM.delete(ip);
 }
 
@@ -225,7 +231,7 @@ function rlReset(ip) {
  * 生成一次性随机串（用于登录表单防重放）。
  * @returns {string} 32 位十六进制
  */
-function newNonce() {
+export function newNonce() {
   const b = crypto.getRandomValues(new Uint8Array(12));
   return Date.now().toString(16) + "." + toHex(b);
 }
@@ -236,7 +242,7 @@ function newNonce() {
  * @param {string} [err] 错误提示
  * @returns {string} HTML
  */
-function renderLogin(nonce, err) {
+export function renderLogin(nonce, err) {
   return `<!doctype html><html lang="zh"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>登录</title>
@@ -287,7 +293,7 @@ f.addEventListener('submit',async e=>{
  * @param {number} [n] 长度
  * @returns {string} 密码
  */
-function randomPwd(n) {
+export function randomPwd(n) {
   const A = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const b = crypto.getRandomValues(new Uint8Array(n || 16));
   let s = "";
@@ -299,7 +305,7 @@ function randomPwd(n) {
  * 渲染“未配置 adminKey”的提示页。
  * @returns {string} HTML
  */
-function renderAdminHint() {
+export function renderAdminHint() {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>需要配置</title><body style="font:15px/1.6 system-ui;margin:32px;max-width:640px">
 <h2>管理面板未启用</h2>
@@ -315,7 +321,7 @@ function renderAdminHint() {
  * @param {Map<string,object>} statsMap 用量表
  * @returns {string} HTML
  */
-function renderAdmin(url, users, statsMap) {
+export function renderAdmin(url, users, statsMap) {
   const rows = users.list
     .map((u) => {
       const s = statsMap[u.id] || {};
@@ -393,7 +399,7 @@ ${rows || '<tr><td colspan="7" class="mu">还没有用户</td></tr>'}
  * @param {number} used 已用字节
  * @returns {number} 展示用总量
  */
-function effectiveQuota(env: Env, used) {
+export function effectiveQuota(env: Env, used) {
   const base = Number(env.quotaBytes) > 0 ? Number(env.quotaBytes) : 1024 ** 4;  // 默认 1 TB
   const u = Number(used);
   if (!Number.isFinite(u) || u <= 0) return base;
@@ -408,7 +414,7 @@ function effectiveQuota(env: Env, used) {
  * @param {object} stats 用量对象
  * @returns {Record<string,string>} 响应头
  */
-function subHeaders(env: Env, stats) {
+export function subHeaders(env: Env, stats) {
   const used = (stats.up || 0) + (stats.down || 0);
   const total = effectiveQuota(env, used);
 
@@ -440,7 +446,7 @@ function subHeaders(env: Env, stats) {
  * @param {object} learned RTT 学习结果
  * @returns {string} HTML
  */
-function renderStatsHtml(env: Env, id, s, learned, alive, nsMap) {
+export function renderStatsHtml(env: Env, id, s, learned, alive, nsMap) {
   const usedBytes = (s.up || 0) + (s.down || 0);
   const total = effectiveQuota(env, usedBytes);
   const pct = total > 0 ? Math.min(100, Math.round((usedBytes / total) * 100)) : 0;
@@ -521,7 +527,7 @@ ${total ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
  * @param {string} s 原文
  * @returns {string} 转义后的文本
  */
-function escapeHtml(s) {
+export function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
