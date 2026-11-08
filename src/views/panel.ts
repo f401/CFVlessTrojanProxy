@@ -1,3 +1,5 @@
+import { escapeHtml, fmtBytes } from "./html";
+import { effectiveQuota } from "../core/quota";
 import { Meter } from "../store/meter";
 import { p90Of, scoreMerged , ZERO_STAT } from "../nodes/score";
 import { S } from "../core/state";
@@ -5,16 +7,7 @@ import { COLO_CITY, loadNodes, pickProtos } from "./sub";
 import { P_T, VERSION, enc, toHex } from "../core/util";
 
 /* panel */
-export function fmtBytes(n: any) {
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  let i = 0;
-  let v = Number(n) || 0;
-  while (v >= 1024 && i < u.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(i ? 1 : 0)} ${u[i]}`;
-}
+
 
 /**
  * 生成用户首页（用量、当前节点、订阅入口与参数说明）。
@@ -152,35 +145,21 @@ ${row("?k=", "页面口令（配置了 pageKey 才生效）", false)}
  * @param {string} name cookie 名
  * @returns {string} 值，没有则空串
  */
-export function getCookie(req: any, name: any) {
-  const raw = req.headers.get("cookie") || "";
-  for (const part of raw.split(";")) {
-    const i = part.indexOf("=");
-    if (i < 0) continue;
-    if (part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
-  }
-  return "";
-}
+
 
 /**
  * 计算字符串的 SHA-256，输出十六进制。
  * @param {string} str 原文
  * @returns {Promise<string>} 64 位十六进制
  */
-export async function sha256Hex(str: any) {
-  const d = await crypto.subtle.digest("SHA-256", enc.encode(str));
-  return toHex(new Uint8Array(d));
-}
+
 
 /**
  * 用 adminKey 派生会话 token（不存任何明文）。
  * @param {object} env Worker 环境
  * @returns {Promise<string>} token
  */
-export async function sessionToken(env: Env) {
-  const t = await sha256Hex(`adm|${env.adminKey || ""}|${env.adminHash || ""}`);
-  return t.slice(0, 40);
-}
+
 
 /**
  * 校验管理端请求是否已登录（cookie 或 URL 上的 key）。
@@ -189,15 +168,8 @@ export async function sessionToken(env: Env) {
  * @param {object} env Worker 环境
  * @returns {Promise<boolean>} 是否通过
  */
-export async function adminAuthed(request: any, url: any, env: any) {
-  const k = url.searchParams.get("k");
-  if (k && env.adminKey && k === env.adminKey) return true;
-  const tok = getCookie(request, "adm");
-  if (!tok) return false;
-  return tok === (await sessionToken(env));
-}
 
-export const RL_MEM = new Map();   // ip -> { n, t }
+
 
 /**
  * 登录限流：命中则返回 false。
@@ -205,36 +177,20 @@ export const RL_MEM = new Map();   // ip -> { n, t }
  * @param {number} limit 单位时间内的最大次数
  * @returns {boolean} 是否允许本次请求
  */
-export function rlTake(ip: any, limit: any) {
-  const now = Date.now();
-  const e = RL_MEM.get(ip);
-  if (e && now - e.t < 600000) {
-    if (e.n >= limit) return false;
-    e.n += 1;
-    return true;
-  }
-  RL_MEM.set(ip, { n: 1, t: now });
-  if (RL_MEM.size > 500) RL_MEM.clear();
-  return true;
-}
+
 
 /**
  * 清空某个 IP 的失败计数（登录成功后调用）。
  * @param {string} ip 客户端 IP
  * @returns {void}
  */
-export function rlReset(ip: any) {
-  RL_MEM.delete(ip);
-}
+
 
 /**
  * 生成一次性随机串（用于登录表单防重放）。
  * @returns {string} 32 位十六进制
  */
-export function newNonce() {
-  const b = crypto.getRandomValues(new Uint8Array(12));
-  return Date.now().toString(16) + "." + toHex(b);
-}
+
 
 /**
  * 渲染登录页。
@@ -293,13 +249,7 @@ f.addEventListener('submit',async e=>{
  * @param {number} [n] 长度
  * @returns {string} 密码
  */
-export function randomPwd(n: any) {
-  const A = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const b = crypto.getRandomValues(new Uint8Array(n || 16));
-  let s = "";
-  for (let i = 0; i < b.length; i++) s += A[b[i] % A.length];
-  return s;
-}
+
 
 /**
  * 渲染“未配置 adminKey”的提示页。
@@ -399,14 +349,7 @@ ${rows || '<tr><td colspan="7" class="mu">还没有用户</td></tr>'}
  * @param {number} used 已用字节
  * @returns {number} 展示用总量
  */
-export function effectiveQuota(env: Env, used: any) {
-  const base = Number(env.quotaBytes) > 0 ? Number(env.quotaBytes) : 1024 ** 4;  // 默认 1 TB
-  const u = Number(used);
-  if (!Number.isFinite(u) || u <= 0) return base;
-  let total = base;
-  while (u >= total) total *= 2;     // 不设上限，直到覆盖实际用量
-  return total;
-}
+
 
 /**
  * 生成订阅响应头（subscription-userinfo / 到期 / 标题）。
@@ -414,29 +357,7 @@ export function effectiveQuota(env: Env, used: any) {
  * @param {object} stats 用量对象
  * @returns {Record<string,string>} 响应头
  */
-export function subHeaders(env: Env, stats: any) {
-  const used = (stats.up || 0) + (stats.down || 0);
-  const total = effectiveQuota(env, used);
 
-  // expire=0 表示"无期限"。空值 / never / 0 / 非法日期 一律当无期限处理
-  let exp = 0;
-  const raw = String(env.expireAt || "").trim();
-  if (raw && raw !== "0" && raw.toLowerCase() !== "never") {
-    const n = Number(raw);
-    if (Number.isFinite(n) && n > 0) exp = Math.floor(n);
-    else {
-      const t = Date.parse(raw);
-      if (!Number.isNaN(t)) exp = Math.floor(t / 1000);
-    }
-  }
-  return {
-    "Subscription-Userinfo": `upload=${stats.up || 0}; download=${stats.down || 0}; total=${total}; expire=${exp}`,
-    "Profile-Update-Interval": "12",
-    "Profile-Title": "edge",
-    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    "Access-Control-Allow-Origin": "*",
-  };
-}
 
 /**
  * 渲染用量看板（进度条 + 各入口 RTT + 最近错误）。
@@ -527,10 +448,7 @@ ${total ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
  * @param {string} s 原文
  * @returns {string} 转义后的文本
  */
-export function escapeHtml(s: any) {
-  const MAP: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-  return String(s).replace(/[&<>"']/g, (c) => MAP[c]);
-}
+
 
 /* ==================================================================
  * Meter：每个用户一个 Durable Object —— 全局唯一的流量帐本

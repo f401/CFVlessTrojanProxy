@@ -29,7 +29,9 @@ VLESS / Trojan over WebSocket，跑在 Cloudflare Workers 上。
 | `src/core/` | `util` | 编码 / SHA-224 / WebSocket 工具 |
 | | `const` | 纯常量（评分参数、直方图、seed 闸门） |
 | | `state` | `AppState`：isolate 级可变状态（`S` 单例） |
-| `src/store/` | `index` | KV / 加密 / 快照 / 用量读取 |
+| `src/store/` | `index` | barrel：对外只暴露这一层 |
+| | `kv` / `crypto` | KV 读写 / AES-GCM 封装 |
+| | `snapshot` / `metering` | 用量灾备快照 / PEND + DO 账本 |
 | | `meter` | `Meter` Durable Object（全局账本） |
 | `src/nodes/` | `score` | 评分纯函数（毫秒当量、可用性、吞吐直方图） |
 | | `selector` | 挑谁 / 何时换 / 失败处理 |
@@ -43,9 +45,11 @@ VLESS / Trojan over WebSocket，跑在 Cloudflare Workers 上。
 | | `fallback` | 换节点重连 |
 | | `tunnel` | 双向管道 + 背压 |
 | | `connection` | 一条连接的字节 / 采样 / 背压 |
-| `src/views/` | `sub` / `panel` | 订阅渲染（clash/singbox/links）/ 面板 |
+| `src/views/` | `sub` / `panel` | 订阅渲染（clash/singbox/links）/ 面板页 |
+| | `html` / `auth` | 转义与格式化 / 面板会话与限流 |
+| `src/core/` | `quota` | 配额与 `subscription-userinfo`（纯计算） |
 | `src/edge/` | `respond` / `types` | 响应与安全头（唯一来源）/ 请求上下文 |
-| `src/routes/` | `health` `subscription` `admin` `tools` | 端点实现 |
+| `src/routes/` | `health` `subscription` `admin` `tools` `logs` `cron` | 端点实现 |
 | `src/index.ts` | — | 组装根：路由分发 + ws 升级 + cron |
 
 ---

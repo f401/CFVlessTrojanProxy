@@ -1,7 +1,9 @@
 import { P_T } from "../core/util";
 import { S } from "../core/state";
 import { SC } from "../core/const";
-import { fmtBytes, effectiveQuota, subHeaders, renderStatsHtml, renderHtml } from "../views/panel";
+import { renderStatsHtml, renderHtml } from "../views/panel";
+import { fmtBytes } from "../views/html";
+import { effectiveQuota, subHeaders } from "../core/quota";
 import { renderClash, renderSingbox, renderLinks, trojanPasswordOf } from "../views/sub";
 import { readStatsCached } from "../store/index";
 import { aliveList, cntView, nsOf, pxGet } from "../px/pool";

@@ -1,7 +1,7 @@
 import { Connection } from "./proxy/connection";
 import { diagVerdict, hostDirectMark, hostKey, hostNodeMark, hostRank, hostScore, hostUntried, logErr, rttLearn } from "./nodes/metrics";
 import { checkTarget, isPrivateHost } from "./proxy/dial";
-import { effectiveQuota, subHeaders } from "./views/panel";
+
 import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./proxy/protocol";
 import { nsOf, pxGet } from "./px/pool";
 import { tlsHello } from "./px/probe";
@@ -18,7 +18,7 @@ export { detectProtocol, parseVLESS, parseTrojan, loadUsers } from "./proxy/prot
 export { checkTarget, isPrivateHost } from "./proxy/dial";
 export { renderClash, renderSingbox, renderLinks, orderNodes, nodeLabel, tagOf, loadNodes, COLO_CITY, trojanPasswordOf } from "./views/sub";
 export { rttLearn } from "./nodes/metrics";
-export { subHeaders, effectiveQuota } from "./views/panel";
+export { subHeaders, effectiveQuota } from "./core/quota";
 export { S } from "./core/state";
 export { SEL } from "./nodes/selector";
 export { SEEDS } from "./px/seed";

@@ -1,4 +1,5 @@
-import { adminAuthed, renderAdmin, renderAdminHint, renderLogin, randomPwd, rlTake, rlReset, newNonce, sessionToken, sha256Hex } from "../views/panel";
+import { renderAdmin, renderAdminHint, renderLogin } from "../views/panel";
+import { adminAuthed, newNonce, randomPwd, rlReset, rlTake, sessionToken, sha256Hex } from "../views/auth";
 import { loadUsers, saveUsers, invalidateUsers } from "../proxy/protocol";
 import { readStats } from "../store/index";
 import type { RouteCtx } from "../edge/types";

@@ -1,81 +1,26 @@
-import { SC } from "./core/const";
+
 import { handleUpgrade } from "./proxy/session";
 import { Meter } from "./store/meter";
 import { health } from "./routes/health";
+import { logs } from "./routes/logs";
+import { runCron } from "./routes/cron";
 import { subscription } from "./routes/subscription";
 import { admin } from "./routes/admin";
 import { proxyip, debug } from "./routes/tools";
-import { json, text } from "./edge/respond";
-import { diagVerdict, hostKey, hostRank, loadRtt, logErr } from "./nodes/metrics";
-import { checkTarget, dohQuery, expandV6, resolveAAAA } from "./proxy/dial";
-import { adminAuthed, effectiveQuota, fmtBytes, newNonce, randomPwd, renderAdmin, renderAdminHint, renderHtml, renderLogin, renderStatsHtml, rlReset, rlTake, sessionToken, sha256Hex, subHeaders } from "./views/panel";
-import { loadUsers, saveUsers } from "./proxy/protocol";
-import { aliveList, cnt, cntView, commitPool, cronScan, flushPx, nsOf, pxGet, pxSet, spdSnapshot } from "./px/pool";
-import { EXTRA_HOSTS, POOL_SOURCES, PX_LINE, probeProxy, probeSni, regionListAsync, takePoolLine } from "./px/probe";
-import { capOf, costOf, nsGet, p90Of, pFailOf, pStallOf, pctOf, ZERO_STAT } from "./nodes/score";
+
+import { loadRtt, logErr } from "./nodes/metrics";
+
+import { loadUsers } from "./proxy/protocol";
+
+import { regionListAsync } from "./px/probe";
+
 import { S } from "./core/state";
-import { flushSnap, getSnap, pendFlush, readStats, readStatsCached, restoreUsage, usageSnapGet, usageSnapWrite } from "./store/index";
-import { renderClash, renderLinks, renderSingbox, trojanPasswordOf } from "./views/sub";
-import { P_T, VERSION } from "./core/util";
-import { connect } from "cloudflare:sockets";
+import { pendFlush } from "./store/index";
 
 /**
- * ============================================================================
- *  VLESS + Trojan over WebSocket  ——  Cloudflare Workers 单文件实现
- * ============================================================================
- *
- *  数据面：客户端 ──wss──► 本 Worker ──connect()──► 目标
- *                          直连失败（CF 托管站点）→ proxyip 中转
- *                          带 &rg=xx → 强制走该国代理出口
- *
- *  控制面：/<uuid> 控制台 · /cl|/sb|/ty 订阅 · /stats 用量 · /proxyip 池
- *          /admin 登录式用户管理（挑战-应答，密码不出浏览器）
- *
- *  ── 目录 ──────────────────────────────────────────────────────────────
- *  §1   常量与工具
- *  §2   SHA-224（Trojan 鉴权；WebCrypto 无此算法）
- *  §3   用户与鉴权（env + KV 合并）
- *  §4   协议侦测与解析（VLESS / Trojan）
- *  §5   出口策略与拨号（私网拦截、sslip、NAT64）
- *  §6.1 流量统计
- *  §6.2 proxyip 代理池（探测 / 轮换 / Cron）
- *  §6.3 RTT 学习 + 错误日志
- *  §7   WebSocket 数据面
- *  §8   配置下发（clash / sing-box / base64 / html）
- *  §8b  用户管理面板（登录 + 增删改）
- *  §9   路由与响应
- *
- *  ── 环境变量 ──────────────────────────────────────────────────────────
- *  uuid / uuids    必填   VLESS 身份，逗号分隔多用户
- *  trojan          可选   "uuid:password,uuid:password"
- *  nodes           可选   "host:port:tls[:name],..."（订阅里用的入口）
- *  regions         可选   "auto" 或 "JP,US,HK"（地区出口节点）
- *  proxyip         可选   "auto" 自动池 / "h:p" 手动 / "" 关闭
- *  adminKey        可选   管理面板登录密码（未设则面板不可用）
- *  pageKey         可选   控制页/订阅的访问口令 ?k=
- *  quotaBytes      可选   订阅头里显示的总量
- *  expireAt        可选   到期时间（ISO 或 unix 秒）
- *  pxDwellMin      可选   切换后最少驻留分钟数（默认 360）
- *  pxFailMax       可选   连续失败多少次才允许换（默认 5）
- *  pxForceAt       可选   失败到多少强制换（默认 8）
- *  pxSchedH        可选   定时轮换周期小时数（0 关闭，默认 6）
- *  STATS           KV     统计 / RTT / 代理池 / 用户表
- *
- *  ── 安全基线 ──────────────────────────────────────────────────────────
- *  · 无硬编码凭据；未知路径 404，不泄露 request.cf
- *  · 出站拦截私网/保留/元数据地址与危险端口（含外部候选池）
- *  · 管理面板：nonce + SHA-256 挑战应答，HttpOnly 会话 cookie，失败限速
- *  · 所有异步链路均有 catch，KV 不可用时降级为内存模式
- * ============================================================================
+ * 组装根：只做三件事 —— HTTP 分发、WebSocket 升级、cron 入口。
+ * 具体实现全在 routes/ 与 proxy/ 里，这个文件不应该再长出业务逻辑。
  */
-
-/* ==================================================================
- * §6.3  RTT 学习 + 错误环形缓冲
- *   客户端连的是哪个入口 IP，由订阅里的 path 标签带上来；
- *   真实延迟由 request.cf.clientTcpRtt 提供。
- *   按「运营商 ASN + 城市」聚合，同一个地方的同运营商共享统计。
- * ================================================================== */
-
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     try {
@@ -140,42 +85,16 @@ export default {
         }
 
         case "logs": {
-          let stored = [];
-          try {
-            const snap = await getSnap(env);
-            stored = snap.errs || [];
-          } catch (e: any) {}
-          // 再并上 DO 里那份（跨 isolate），否则永远只能看到"当前这个实例"的 50 条
-          let fromDo = [];
-          if (env.METER) {
-            try {
-              const stub = env.METER.get(env.METER.idFromName(id));
-              const r = await stub.fetch("https://meter/cnt");
-              const j = await r.json();
-              fromDo = (j && j.e) || [];
-            } catch (e: any) {}
-          }
-          const seen = new Set();
-          const all = [];
-          for (const x of [...fromDo, ...stored, ...S.errs]) {
-            if (!x || !x.t || seen.has(x.t)) continue;
-            seen.add(x.t);
-            all.push(x);
-          }
-          all.sort((a2, b2) => a2.t - b2.t);
-          const out = all.slice(-50);
-          return json({ count: out.length, persisted: stored.length, fromDo: fromDo.length, items: out });
+          return logs({ ...base, id });
         }
 
         case "proxyip": {
           return proxyip({ ...base, id });
         }
 
-
         case "debug": {
           return debug({ ...base, id });
         }
-
 
         default:
           return new Response("Not Found", { status: 404 });
@@ -191,30 +110,8 @@ export default {
     }
   },
 
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(
-      (async () => {
-        try {
-          await cronScan(env);
-        } catch (e: any) {
-          logErr(`cron: ${e && e.message ? e.message : e}`);
-        }
-        // 定时持久化的唯一入口：每轮 cron 最多各写 1 次
-        try { await pendFlush(env, true); } catch (e: any) {}
-        // cronScan 内部已经落过一次 seed（且自带 55 分钟节流），这里只补写脏数据
-        try { if (S.seedDirty) await flushPx(env); } catch (e: any) {}
-        try {
-          // 先把快照续回 DO（重建脚本后不会从 0 开始），再写新快照
-          const snap = await usageSnapGet(env);
-          if (snap && snap.users) {
-            for (const id of Object.keys(snap.users)) await restoreUsage(env, id, snap);
-          }
-          await usageSnapWrite(env);
-        } catch (e: any) {}
-        // 不传 force：让 flushSnap 走「1h/2h + 全局 45 分钟闸门」的节奏
-        try { await flushSnap(env); } catch (e: any) {}
-      })()
-    );
+  scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    return runCron(env, ctx);
   },
 };
 

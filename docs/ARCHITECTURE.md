@@ -6,14 +6,16 @@
 
 ```
 core/     util const state          无业务依赖
-store/    index meter               适配器：KV / 加密 / 快照 / Meter DO
+store/    index kv crypto         适配器：KV / 加密 / 快照 / 计量 / Meter DO
+          snapshot metering meter
 nodes/    score selector metrics    节点域：评分、选择、画像
 px/       pool probe seed           中转域：候选池、探活、信誉表
 proxy/    protocol dial session     数据面：协议、拨号、会话
           fallback tunnel connection
-views/    sub panel                 纯渲染：(data) => string
+views/    sub panel html auth       纯渲染：(data) => string（auth 是面板会话）
+core/     quota                     配额与订阅头（纯计算）
 edge/     respond types             响应与安全头、请求上下文
-routes/   health subscription admin tools
+routes/   health subscription admin tools logs cron
 index.ts                            组装根：分发 + ws 升级 + cron
 ```
 
@@ -34,8 +36,10 @@ fetch(request)
  └─ HTTP
      ├─ /health                     routes/health
      ├─ /admin                      routes/admin
-     └─ /<uuid>/{page,cl,sb,ty,...}  routes/subscription
-        /<uuid>/{proxyip,debug}     routes/tools
+     ├─ /<uuid>/{page,cl,sb,ty,...}  routes/subscription
+     ├─ /<uuid>/{proxyip,debug}     routes/tools
+     ├─ /<uuid>/logs                routes/logs
+     └─ scheduled                   routes/cron（30 分钟一轮）
 ```
 
 ## 3 状态归属
