@@ -14,7 +14,7 @@ export const ERR_SEEN = new Map<string, number>();
  * @param {boolean} ok 是否成功
  * @returns {void}
  */
-export function rttMark(id, tag, ok) {
+export function rttMark(id: any, tag: any, ok: any) {
   if (!id || !tag) return;
   let bucket = S.rtt.get(id);
   if (!bucket) {
@@ -35,7 +35,7 @@ export function rttMark(id, tag, ok) {
  * @param {string} id 用户 UUID
  * @returns {void}
  */
-export function rttLearn(cf, tag, id) {
+export function rttLearn(cf: any, tag: any, id: any) {
   if (!cf || !tag || !id) return;
   const rtt = cf.clientTcpRtt;
   if (typeof rtt !== "number" || rtt <= 0) return;
@@ -68,7 +68,7 @@ export function rttLearn(cf, tag, id) {
  * @param {string} id 用户 UUID
  * @returns {Promise<object>} 入口标签 → RTT 信息
  */
-export async function loadRtt(env: Env, id) {
+export async function loadRtt(env: Env, id: any) {
   if (!id) return {};
   const mem = S.rtt.get(id) || {};
   if (!env.STATS) return mem;
@@ -79,7 +79,7 @@ export async function loadRtt(env: Env, id) {
       stored = (await kvGet<Record<string, RttEntry>>(env, `rtt:${id}`)) || {};
     }
     return { ...stored, ...mem };
-  } catch (e) {
+  } catch (e: any) {
     return mem;
   }
 }
@@ -121,7 +121,7 @@ export function hostKey(host: string): string {
  * @param {number} now 当前时间
  * @returns {number} 分数
  */
-export function hostScore(s, now: number): number {
+export function hostScore(s: any, now: number): number {
   const fail = (s.bad + 1) / (s.n + 6);            // 小样本往坏里估
   const stale = now - (s.at || 0) > 6 * 3600e3 ? 300 : 0;   // 6 小时没更新就降权
   const ttfb = s.ttfb > 0 ? s.ttfb : 800;
@@ -143,7 +143,7 @@ export function hostRank(host: string, mode: string) {
   if (hit && now - hit.t < 30000) return hit.v;
 
   const m = S.hostNode.get(fam);
-  const out = [];
+  const out: any[] = [];
   if (m) {
     for (const [k, s] of m) {
       if (!S.alive.has(k) || isBlack(k) || isFrozen(k)) continue;
@@ -188,7 +188,7 @@ export function hostUntried(host: string, mode: string) {
  * @param {string} [tag] 关联标签（域名或入口）
  * @returns {void}
  */
-export function logErr(msg, tag?) {
+export function logErr(msg: any, tag?: string) {
   const m = String(msg).slice(0, 200);
   // 同一个错误 5 秒内只记一次：节点大面积抖动时，每条连接都刷一行
   // console.error 既费 CPU 又把真正有用的日志冲掉（面板也只留 50 条）。
@@ -202,10 +202,10 @@ export function logErr(msg, tag?) {
   try {
     S.errs.push({ t: now0, m, tag: tag || "" });
     while (S.errs.length > 50) S.errs.shift();
-  } catch (e) {}
+  } catch (e: any) {}
   try {
     console.error("[err]", msg);
-  } catch (e) {}
+  } catch (e: any) {}
 }
 
 /* ==================================================================
@@ -222,7 +222,7 @@ export const HN_MAX_NODES = 12;    // 每个域名最多记 12 个节点
  * @param {{ok:boolean, bad:boolean, bytes:number, ttfb:number}} o 本次结果
  * @returns {void}
  */
-export function hostNodeMark(host, node, o) {
+export function hostNodeMark(host: any, node: any, o: any) {
   if (!host || !node) return;
   const fam = hostKey(host);
   if (!fam) return;
@@ -268,7 +268,7 @@ export function hostNodeMark(host, node, o) {
  * @param {boolean} ok 直连是否成功拿到数据
  * @returns {void}
  */
-export function hostDirectMark(host, ok) {
+export function hostDirectMark(host: any, ok: any) {
   if (!host) return;
   if (S.hostDirect.size >= HN_MAX_HOSTS) {
     let oldK = "", oldT = Infinity;
@@ -287,9 +287,9 @@ export function hostDirectMark(host, ok) {
  * @param {{ok:number,bad:number}} direct 直连对照
  * @returns {{kind:string, verdict:string, suspect:string[]}}
  */
-export function diagVerdict(rows, direct) {
-  const tested = (rows || []).filter((r) => r.n > 0);
-  const suspect = tested.filter((r) => r.bad >= 1 && r.bad * 2 >= r.n);
+export function diagVerdict(rows: any, direct: any) {
+  const tested = (rows || []).filter((r: any) => r.n > 0);
+  const suspect = tested.filter((r: any) => r.bad >= 1 && r.bad * 2 >= r.n);
   const d = direct || { ok: 0, bad: 0 };
 
   if (!tested.length) {
@@ -306,9 +306,9 @@ export function diagVerdict(rows, direct) {
       suspect: [],
     };
   }
-  const names = suspect.map((r) => r.node);
+  const names = suspect.map((r: any) => r.node);
   if (suspect.length < tested.length) {
-    const ccs = [...new Set(suspect.map((r) => String(r.cc || "").toUpperCase()).filter(Boolean))];
+    const ccs = [...new Set(suspect.map((r: any) => String(r.cc || "").toUpperCase()).filter(Boolean))];
     if (ccs.length === 1 && suspect.length >= 2) {
       return {
         kind: "geo",

@@ -7,7 +7,7 @@ import { adminAuthed, effectiveQuota, fmtBytes, newNonce, randomPwd, renderAdmin
 import { loadUsers, saveUsers } from "./proto";
 import { aliveList, cnt, cntView, commitPool, cronScan, flushPx, nsOf, pxGet, pxSet, spdSnapshot } from "./px";
 import { EXTRA_HOSTS, POOL_SOURCES, PX_LINE, probeProxy, probeSni, regionListAsync, takePoolLine } from "./px-probe";
-import { capOf, costOf, nsGet, p90Of, pFailOf, pStallOf, pctOf } from "./px-score";
+import { capOf, costOf, nsGet, p90Of, pFailOf, pStallOf, pctOf, ZERO_STAT } from "./px-score";
 import { S } from "./state";
 import { flushSnap, getSnap, pendFlush, readStats, readStatsCached, restoreUsage, usageSnapGet, usageSnapWrite } from "./store";
 import { renderClash, renderLinks, renderSingbox, trojanPasswordOf } from "./sub";
@@ -93,11 +93,11 @@ export default {
       const pageKey = env.pageKey || "";
       const keyOk = !pageKey || url.searchParams.get("k") === pageKey;
 
-      const json = (obj, extra = undefined) =>
+      const json = (obj: any, extra?: Record<string, string>) =>
         new Response(typeof obj === "string" ? obj : JSON.stringify(obj, null, 2), {
           headers: { "content-type": "application/json;charset=utf-8", ...(extra || {}) },
         });
-      const text = (s, extra) =>
+      const text = (s: any, extra?: Record<string, string>) =>
         new Response(s, { headers: { "content-type": "text/plain;charset=utf-8", ...(extra || {}) } });
 
       /* ---------- 健康检查 ---------- */
@@ -230,7 +230,7 @@ export default {
         // 用量从 Meter DO 取（和 /stats 同一个口径）。
         // 以前读的是 `stats:<date>` 这个早已废弃的键 —— 迁移到 snap/DO 之后
         // 它再也没人写，"今日用量" 永远是 0。
-        const statsMap = {};
+        const statsMap: Record<string, any> = {};
         for (const u of users.list) {
           try {
             const s = await readStats(env, u.id);
@@ -238,7 +238,7 @@ export default {
               up: s.up || 0, down: s.down || 0,
               todayUp: s.todayUp || 0, todayDown: s.todayDown || 0,
             };
-          } catch (e) {}
+          } catch (e: any) {}
         }
         return safeHtml(renderAdmin(url, users, statsMap));
       }
@@ -273,7 +273,7 @@ export default {
           ]);
           const f: any = S.funnel || {};
           const ftot = (f.direct || 0) + (f.node || 0) + (f.v6 || 0);
-          const pctOf = (x) => (ftot > 0 ? Math.round((x / ftot) * 1000) / 10 + "%" : "-");
+          const pctOf = (x: any) => (ftot > 0 ? Math.round((x / ftot) * 1000) / 10 + "%" : "-");
           const info = {
             regions,
             curPx,
@@ -337,7 +337,7 @@ export default {
           try {
             const snap = await getSnap(env);
             stored = snap.errs || [];
-          } catch (e) {}
+          } catch (e: any) {}
           // 再并上 DO 里那份（跨 isolate），否则永远只能看到"当前这个实例"的 50 条
           let fromDo = [];
           if (env.METER) {
@@ -346,7 +346,7 @@ export default {
               const r = await stub.fetch("https://meter/cnt");
               const j = await r.json();
               fromDo = (j && j.e) || [];
-            } catch (e) {}
+            } catch (e: any) {}
           }
           const seen = new Set();
           const all = [];
@@ -372,7 +372,7 @@ export default {
                 const j = await r.json();
                 g = j && j.g;
                 nodesSnap = (j && j.s) || {};
-              } catch (e) {}
+              } catch (e: any) {}
             }
             return json({ date: (g && g.d) || "", cnt: g || {}, nodes: nodesSnap, local: cntView(), localSpd: spdSnapshot(), now: Date.now() });
           }
@@ -395,7 +395,7 @@ export default {
             S.scanN = Number.isFinite(sn) && sn > 12 ? sn : 12;
             if (Date.now() - S.lastManual > 5000) {
               S.lastManual = Date.now();
-              await cronScan(env).catch((e) => logErr("cron: " + (e && e.message ? e.message : e)));
+              await cronScan(env).catch((e: any) => logErr("cron: " + (e && e.message ? e.message : e)));
             }
           }
           const px = await pxGet(env);
@@ -408,7 +408,7 @@ export default {
           const blacklist = [...S.nstat.entries()].filter(([, s]) => s.blackUntil > Date.now()).map(([k]) => k);
           const rows = (alive || []).map((x) => {
             const k = x.h + ":" + x.p;
-            const ns = nsMap[k] || {};
+            const ns: any = (nsMap as Record<string, any>)[k] || {};
             return {
               node: k,
               ms: x.ms,
@@ -471,7 +471,7 @@ export default {
               .slice(0, 12);
             out.hostPref = hp;
             out.explain = rows.slice(0, 8).map((r) => {
-              const s = S.nstat.get(r.node) || {};
+              const s = S.nstat.get(r.node) || ZERO_STAT;
               const tcp = Math.round(s.tcp || r.ms || SC.P_TCP);
               const tls = Math.round(s.tls || SC.P_TLS);
               const pf = pFailOf(s), pst = pStallOf(s);
@@ -575,7 +575,7 @@ export default {
             return json({ probe: pr, ok: !!r, result: r });
           }
           if (url.searchParams.get("refill") === "1") {
-            const counts = {};
+            const counts: Record<string, any> = {};
             const merged = new Map();
             let total = 0;
             for (const src of POOL_SOURCES) {
@@ -592,7 +592,7 @@ export default {
                 } else {
                   lines = -r.status;
                 }
-              } catch (e) {
+              } catch (e: any) {
                 lines = -1;
               }
               counts[src] = { lines, ok: one.size };
@@ -651,22 +651,22 @@ export default {
               });
               seeded = await r.json();
               S.meterCache.set(id, { v: seeded, t: Date.now() });
-            } catch (e) {
+            } catch (e: any) {
               return json({ ok: false, error: String((e && e.message) || e) });
             }
             return json({ ok: true, seeded });
           }
 
           const h = url.searchParams.get("host") || "x.com";
-          const out = { host: h, aaaa: null, a: null, v6Connect: null };
-          try { out.aaaa = await resolveAAAA(h); } catch (e) { out.aaaa = "ERR " + e.message; }
-          try { out.a = await dohQuery(h, "A"); } catch (e) { out.a = "ERR " + e.message; }
+          const out: any = { host: h, aaaa: null, a: null, v6Connect: null };
+          try { out.aaaa = await resolveAAAA(h); } catch (e: any) { out.aaaa = "ERR " + e.message; }
+          try { out.a = await dohQuery(h, "A"); } catch (e: any) { out.a = "ERR " + e.message; }
           if (out.aaaa && typeof out.aaaa === "string" && out.aaaa.includes(":")) {
             try {
               const s6 = await connect({ hostname: expandV6(out.aaaa), port: 443 });
               out.v6Connect = "ok";
-              try { s6.close(); } catch (e) {}
-            } catch (e) {
+              try { s6.close(); } catch (e: any) {}
+            } catch (e: any) {
               out.v6Connect = "ERR " + (e && e.message ? e.message : e);
             }
           }
@@ -676,7 +676,7 @@ export default {
         default:
           return new Response("Not Found", { status: 404 });
       }
-    } catch (e) {
+    } catch (e: any) {
       const msg = e && e.message ? e.message : String(e);
       logErr(`router: ${msg}`);
       let dbg = "";
@@ -692,13 +692,13 @@ export default {
       (async () => {
         try {
           await cronScan(env);
-        } catch (e) {
+        } catch (e: any) {
           logErr(`cron: ${e && e.message ? e.message : e}`);
         }
         // 定时持久化的唯一入口：每轮 cron 最多各写 1 次
-        try { await pendFlush(env, true); } catch (e) {}
+        try { await pendFlush(env, true); } catch (e: any) {}
         // cronScan 内部已经落过一次 seed（且自带 55 分钟节流），这里只补写脏数据
-        try { if (S.seedDirty) await flushPx(env); } catch (e) {}
+        try { if (S.seedDirty) await flushPx(env); } catch (e: any) {}
         try {
           // 先把快照续回 DO（重建脚本后不会从 0 开始），再写新快照
           const snap = await usageSnapGet(env);
@@ -706,9 +706,9 @@ export default {
             for (const id of Object.keys(snap.users)) await restoreUsage(env, id, snap);
           }
           await usageSnapWrite(env);
-        } catch (e) {}
+        } catch (e: any) {}
         // 不传 force：让 flushSnap 走「1h/2h + 全局 45 分钟闸门」的节奏
-        try { await flushSnap(env); } catch (e) {}
+        try { await flushSnap(env); } catch (e: any) {}
       })()
     );
   },

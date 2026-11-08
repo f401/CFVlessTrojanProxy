@@ -8,7 +8,7 @@
       "DOM"
     ],
     "types": [],
-    "strict": false,
+    "strict": true,
     "noEmitOnError": false,
     "isolatedModules": true,
     "skipLibCheck": true,

@@ -1,11 +1,11 @@
 import { Meter } from "./do";
-import { p90Of, scoreMerged } from "./px-score";
+import { p90Of, scoreMerged , ZERO_STAT } from "./px-score";
 import { S } from "./state";
 import { COLO_CITY, loadNodes, pickProtos } from "./sub";
 import { P_T, VERSION, enc, toHex } from "./util";
 
 /* panel */
-export function fmtBytes(n) {
+export function fmtBytes(n: any) {
   const u = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
   let v = Number(n) || 0;
@@ -26,7 +26,7 @@ export function fmtBytes(n) {
  * @param {object} info 展示用信息
  * @returns {string} HTML
  */
-export function renderHtml(env: Env, url, id, host, key, info) {
+export function renderHtml(env: Env, url: any, id: any, host: any, key: any, info: any) {
   const base = `${url.origin}/${id}`;
   const kq = key ? `?k=${encodeURIComponent(key)}` : "";
   const kk = key ? "&k=" + encodeURIComponent(key) : "";
@@ -36,13 +36,13 @@ export function renderHtml(env: Env, url, id, host, key, info) {
   const regions = i.regions || [];
   const nodeCount = loadNodes(env, host).length * protos.length + regions.length * protos.length;
 
-  const row = (k, v, mono) =>
+  const row = (k: any, v: any, mono: any) =>
     `<tr><td class="k">${k}</td><td class="${mono ? "u" : ""}">${v}</td></tr>`;
 
-  const link = (path, desc, tag) =>
+  const link = (path: any, desc: any, tag: any) =>
     `<tr><td class="t">${tag || "GET"}</td><td class="u"><a href="${base}${path}${kq}" target="_blank">${base}${path}${kq}</a></td><td class="d">${desc}</td></tr>`;
 
-  const topLink = (path, desc, tag) =>
+  const topLink = (path: any, desc: any, tag: any) =>
     `<tr><td class="t">${tag || "GET"}</td><td class="u"><a href="${url.origin}${path}${kq}" target="_blank">${url.origin}${path}${kq}</a></td><td class="d">${desc}</td></tr>`;
 
   return `<!doctype html><html lang="zh"><meta charset="utf-8">
@@ -152,7 +152,7 @@ ${row("?k=", "页面口令（配置了 pageKey 才生效）", false)}
  * @param {string} name cookie 名
  * @returns {string} 值，没有则空串
  */
-export function getCookie(req, name) {
+export function getCookie(req: any, name: any) {
   const raw = req.headers.get("cookie") || "";
   for (const part of raw.split(";")) {
     const i = part.indexOf("=");
@@ -167,7 +167,7 @@ export function getCookie(req, name) {
  * @param {string} str 原文
  * @returns {Promise<string>} 64 位十六进制
  */
-export async function sha256Hex(str) {
+export async function sha256Hex(str: any) {
   const d = await crypto.subtle.digest("SHA-256", enc.encode(str));
   return toHex(new Uint8Array(d));
 }
@@ -189,7 +189,7 @@ export async function sessionToken(env: Env) {
  * @param {object} env Worker 环境
  * @returns {Promise<boolean>} 是否通过
  */
-export async function adminAuthed(request, url, env) {
+export async function adminAuthed(request: any, url: any, env: any) {
   const k = url.searchParams.get("k");
   if (k && env.adminKey && k === env.adminKey) return true;
   const tok = getCookie(request, "adm");
@@ -205,7 +205,7 @@ export const RL_MEM = new Map();   // ip -> { n, t }
  * @param {number} limit 单位时间内的最大次数
  * @returns {boolean} 是否允许本次请求
  */
-export function rlTake(ip, limit) {
+export function rlTake(ip: any, limit: any) {
   const now = Date.now();
   const e = RL_MEM.get(ip);
   if (e && now - e.t < 600000) {
@@ -223,7 +223,7 @@ export function rlTake(ip, limit) {
  * @param {string} ip 客户端 IP
  * @returns {void}
  */
-export function rlReset(ip) {
+export function rlReset(ip: any) {
   RL_MEM.delete(ip);
 }
 
@@ -242,7 +242,7 @@ export function newNonce() {
  * @param {string} [err] 错误提示
  * @returns {string} HTML
  */
-export function renderLogin(nonce, err) {
+export function renderLogin(nonce: any, err: any) {
   return `<!doctype html><html lang="zh"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>登录</title>
@@ -293,7 +293,7 @@ f.addEventListener('submit',async e=>{
  * @param {number} [n] 长度
  * @returns {string} 密码
  */
-export function randomPwd(n) {
+export function randomPwd(n: any) {
   const A = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const b = crypto.getRandomValues(new Uint8Array(n || 16));
   let s = "";
@@ -321,9 +321,9 @@ export function renderAdminHint() {
  * @param {Map<string,object>} statsMap 用量表
  * @returns {string} HTML
  */
-export function renderAdmin(url, users, statsMap) {
+export function renderAdmin(url: any, users: any, statsMap: any) {
   const rows = users.list
-    .map((u) => {
+    .map((u: any) => {
       const s = statsMap[u.id] || {};
       const used = fmtBytes((s.up || 0) + (s.down || 0));
       const today = fmtBytes((s.todayUp || 0) + (s.todayDown || 0));
@@ -348,7 +348,7 @@ export function renderAdmin(url, users, statsMap) {
     })
     .join("");
 
-  const total = users.list.filter((x) => x.enabled !== false).length;
+  const total = users.list.filter((x: any) => x.enabled !== false).length;
 
   return `<!doctype html><html lang="zh"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -399,7 +399,7 @@ ${rows || '<tr><td colspan="7" class="mu">还没有用户</td></tr>'}
  * @param {number} used 已用字节
  * @returns {number} 展示用总量
  */
-export function effectiveQuota(env: Env, used) {
+export function effectiveQuota(env: Env, used: any) {
   const base = Number(env.quotaBytes) > 0 ? Number(env.quotaBytes) : 1024 ** 4;  // 默认 1 TB
   const u = Number(used);
   if (!Number.isFinite(u) || u <= 0) return base;
@@ -414,7 +414,7 @@ export function effectiveQuota(env: Env, used) {
  * @param {object} stats 用量对象
  * @returns {Record<string,string>} 响应头
  */
-export function subHeaders(env: Env, stats) {
+export function subHeaders(env: Env, stats: any) {
   const used = (stats.up || 0) + (stats.down || 0);
   const total = effectiveQuota(env, used);
 
@@ -446,7 +446,7 @@ export function subHeaders(env: Env, stats) {
  * @param {object} learned RTT 学习结果
  * @returns {string} HTML
  */
-export function renderStatsHtml(env: Env, id, s, learned, alive, nsMap) {
+export function renderStatsHtml(env: Env, id: any, s: any, learned: any, alive: any, nsMap: any) {
   const usedBytes = (s.up || 0) + (s.down || 0);
   const total = effectiveQuota(env, usedBytes);
   const pct = total > 0 ? Math.min(100, Math.round((usedBytes / total) * 100)) : 0;
@@ -454,7 +454,7 @@ export function renderStatsHtml(env: Env, id, s, learned, alive, nsMap) {
   const rttRows = (Object.entries(learned || {}) as [string, any][])
     .sort((a, b) => a[1].rtt - b[1].rtt)
     .map(([tag, v]) => {
-      const city = v.colo ? `${v.colo}${COLO_CITY[v.colo] ? "-" + COLO_CITY[v.colo] : ""}` : "-";
+      const city = v.colo ? `${v.colo}${(COLO_CITY as Record<string, string>)[v.colo] ? "-" + (COLO_CITY as Record<string, string>)[v.colo] : ""}` : "-";
       const ok = v.ok || 0, bad = v.fail || 0;
       const rate = ok + bad > 0 ? Math.round((ok / (ok + bad)) * 100) + "% (" + ok + "/" + (ok + bad) + ")" : "-";
       const cls = ok + bad >= 5 && ok / (ok + bad) < 0.8 ? ' style="color:#dc2626"' : "";
@@ -463,9 +463,9 @@ export function renderStatsHtml(env: Env, id, s, learned, alive, nsMap) {
     .join("");
 
   const nodeRows = (alive || [])
-    .map((x) => {
+    .map((x: any) => {
       const k = x.h + ":" + x.p;
-      const a1 = (S.nstat.get(k) || {}) as NodeStats;
+      const a1 = (S.nstat.get(k) || ZERO_STAT);
       const b1 = (nsMap && nsMap[k]) || {};
       const st = {
         ok: Math.max(a1.ok || 0, b1.ok || 0),
@@ -478,10 +478,10 @@ export function renderStatsHtml(env: Env, id, s, learned, alive, nsMap) {
       const kbps = st.bps ? Math.round(st.bps / 1024) + " KB/s" : "未用";
       return { x, k, score: scoreMerged(k, nsMap), kbps, rate, ok, bad, cc: x.cc || "" };
     })
-    .sort((a, b) => a.score - b.score)
+    .sort((a: any, b: any) => a.score - b.score)
     .slice(0, 10)
     .map(
-      (n) =>
+      (n: any) =>
         `<tr><td class="u">${n.k}</td><td>${n.cc || "-"}</td><td>${n.x.ms} ms</td><td>${n.kbps}</td><td>${n.rate}</td><td><b>${Math.round(n.score)}</b></td></tr>`
     )
     .join("");
@@ -527,8 +527,9 @@ ${total ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
  * @param {string} s 原文
  * @returns {string} 转义后的文本
  */
-export function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+export function escapeHtml(s: any) {
+  const MAP: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return String(s).replace(/[&<>"']/g, (c) => MAP[c]);
 }
 
 /* ==================================================================

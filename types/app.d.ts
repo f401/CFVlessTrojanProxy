@@ -37,42 +37,42 @@ interface Env {
 
 /** 单个节点的统计（NSTAT 的值） */
 interface NodeStats {
-  ok?: number;
-  fail?: number;
-  at?: number;
-  msLocal?: number;
+  ok: number;
+  fail: number;
+  at: number;
+  msLocal: number;
 
   /** 熔断/冻结 */
-  streak?: number;
-  blackUntil?: number;
-  freeUntil?: number;
-  lastTry?: number;
+  streak: number;
+  blackUntil: number;
+  freeUntil: number;
+  lastTry: number;
 
   /** 探活：延迟样本与三段计时 */
-  pN?: number;
-  pSum?: number;
-  pSumSq?: number;
-  pF?: number;
-  tcp?: number;
-  tls?: number;
+  pN: number;
+  pSum: number;
+  pSumSq: number;
+  pF: number;
+  tcp: number;
+  tls: number;
 
   /** 真实流量：可用性 */
-  tS?: number;
-  tF?: number;
-  okW?: number;
-  failW?: number;
-  eCloseP?: number;
-  eCloseD?: number;
+  tS: number;
+  tF: number;
+  okW: number;
+  failW: number;
+  eCloseP: number;
+  eCloseD: number;
 
   /** 吞吐：直方图 + 卡顿 */
-  stallMs?: number;
-  runMs?: number;
-  bytesDown?: number;
-  hist?: number[];
-  seedBps?: number;
+  stallMs: number;
+  runMs: number;
+  bytesDown: number;
+  hist: number[];
+  seedBps: number;
 
   /** 其它 */
-  counted?: number;
+  counted: number;
   [k: string]: any;
 }
 
@@ -112,6 +112,8 @@ interface SeedBucket {
 
 /** px:seed 的整体结构 */
 interface Seed {
+  /** 老结构：整张表只属于一个机房 */
+  nodes?: SeedNode[];
   v: number;
   ts: number;
   poolGen: number;
@@ -269,14 +271,14 @@ interface ErrItem { t: number; m: string; tag?: string }
 
 /** Worker 侧的 WebSocket（客户端连接与服务端连接共用） */
 interface WebSocketLike {
-  accept?(): void;
+  accept(): void;
   send(data: any): void;
   close(code?: number, reason?: string): void;
   readyState: number;
-  bufferedAmount?: number;
+  bufferedAmount: number;
   binaryType?: string;
-  addEventListener?(t: string, f: (...a: any[]) => void): void;
-  removeEventListener?(t: string, f: (...a: any[]) => void): void;
+  addEventListener(t: string, f: (...a: any[]) => void): void;
+  removeEventListener(t: string, f: (...a: any[]) => void): void;
 }
 
 /** 地址解析：成功 */

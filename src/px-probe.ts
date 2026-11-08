@@ -42,7 +42,7 @@ export const PX_LINE = /^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?(?:[#,:]|\s|$)/
  * @param {Map<string,object>} seen 去重表（key = ip:port）
  * @returns {boolean} 是否为有效新增
  */
-export function takePoolLine(line, src, seen) {
+export function takePoolLine(line: any, src: any, seen: any) {
   const m = PX_LINE.exec(line.trim());
   if (!m) return false;
   const ip = m[1];
@@ -83,7 +83,7 @@ export function pxPolicy(env: Env) {
  * @param {number} p 候选端口
  * @returns {Promise<{h:string,p:number,ms:number,ts:number,bad?:string}|null>} 成功返回节点信息，失败返回 null
  */
-export async function probeProxy(h, p) {
+export async function probeProxy(h: any, p: any) {
   if (checkTarget(h, p)) return null;      // 纵深防御：任何路径都不许探内网
   const t0 = Date.now();
   let sock = null;
@@ -112,10 +112,10 @@ export async function probeProxy(h, p) {
           r.read(),
           new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), wait)),
         ]);
-      } catch (e) {
+      } catch (e: any) {
         break;                       // 超时/断开：跳出，走下面的诊断返回
       }
-      const v = got && got.value;
+      const v = (got as any) && (got as any).value;
       if (!v || !v.length) break;
       const merged = new Uint8Array(buf.length + v.length);
       merged.set(buf, 0);
@@ -129,10 +129,10 @@ export async function probeProxy(h, p) {
       }
     }
     return { h, p, ms: Date.now() - t0, tcp, tls: 0, ts: Date.now(), bad: "no-cf-cert", len: buf.length, head: toHex(buf.slice(0, 24)) };
-  } catch (e) {
+  } catch (e: any) {
     return null;
   } finally {
-    try { sock && sock.close(); } catch (e) {}
+    try { sock && sock.close(); } catch (e: any) {}
   }
 }
 
@@ -157,7 +157,7 @@ export async function refillPool(env: Env) {
       if (!r.ok) continue;
       const txt = await r.text();
       for (const line of txt.split("\n")) takePoolLine(line, src, seen);
-    } catch (e) {
+    } catch (e: any) {
       /* 换下一个源 */
     }
   }
@@ -175,8 +175,8 @@ export async function refillPool(env: Env) {
  * @param {string[]} ips IP 列表
  * @returns {Promise<Record<string,string>>} IP → 两位国家码
  */
-export async function geoLabel(ips) {
-  const out = {};
+export async function geoLabel(ips: any) {
+  const out: Record<string, any> = {};
   if (!ips.length) return out;
   try {
     const r = await fetch("http://ip-api.com/batch?fields=status,countryCode", {
@@ -186,11 +186,11 @@ export async function geoLabel(ips) {
     });
     if (r.ok) {
       const arr = await r.json();
-      arr.forEach((x, i) => {
+      arr.forEach((x: any, i: any) => {
         if (x && x.status === "success" && x.countryCode) out[ips[i]] = String(x.countryCode).toUpperCase();
       });
     }
-  } catch (e) {
+  } catch (e: any) {
     /* 查不到就不打标，不影响可用性 */
   }
   return out;
@@ -283,7 +283,7 @@ export async function probeSni(nodeHost: string, nodePort: number, sni: string, 
           r.read(),
           new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), wait)),
         ]);
-      } catch (e) {
+      } catch (e: any) {
         break;
       }
       const v = got && got.value;
@@ -296,10 +296,10 @@ export async function probeSni(nodeHost: string, nodePort: number, sni: string, 
     if (!buf.length) return { err: "no-data" };
     if (buf[0] !== 0x16) return { err: "not-tls", head: toHex(buf.slice(0, 8)) };
     return { hs: Math.max(0, Date.now() - t0), err: "" };
-  } catch (e) {
+  } catch (e: any) {
     return { err: "tcp" };
   } finally {
-    try { if (sock) sock.close(); } catch (e) {}
+    try { if (sock) sock.close(); } catch (e: any) {}
   }
 }
 
@@ -319,7 +319,7 @@ export async function regionListAsync(env: Env) {
       .slice(0, 6);
   }
   const list = await aliveList(env);
-  const set = [];
+  const set: any[] = [];
   for (const x of list) {
     const cc = (x.cc || "").toUpperCase();
     if (cc && !set.includes(cc)) set.push(cc);

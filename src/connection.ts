@@ -114,7 +114,7 @@ export class Connection {
 
       this.flush(false);
       return await this.backpressure(ws);
-    } catch (e) {
+    } catch (e: any) {
       logErr("tick: " + ((e && e.message) || e), this.node || "");
       return true;   // 统计出错绝不影响数据面
     }
@@ -136,7 +136,7 @@ export class Connection {
       if ((ws.bufferedAmount || 0) > WS_MAX_BUFFER || Date.now() > deadline) {
         cnt("stall");
         this.stallMs += Date.now() - t0;
-        try { ws.close(1011, "stall"); } catch (e) {}
+        try { ws.close(1011, "stall"); } catch (e: any) {}
         closeQuietly(this.sock);
         return false;
       }

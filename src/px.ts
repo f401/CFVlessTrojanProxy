@@ -44,9 +44,9 @@ export const BOOT = [
  * @param {number} [n] 增量
  * @returns {void}
  */
-export function cnt(k, n?) {
+export function cnt(k: any, n: number = 1) {
   if (!S.cntKeys.includes(k)) {
-    try { console.error("[cnt] unknown key", k); } catch (e) {}
+    try { console.error("[cnt] unknown key", k); } catch (e: any) {}
     return;
   }
   const d = new Date().toISOString().slice(0, 10);
@@ -62,7 +62,7 @@ export function cnt(k, n?) {
  * @returns {object} { "h:p": {med,p90,cap,n,ts,tf,at} }
  */
 export function spdSnapshot() {
-  const out = {};
+  const out: Record<string, any> = {};
   let i = 0;
   for (const [k, s] of S.nstat) {
     const n = (s.tS || 0) + (s.tF || 0);
@@ -89,7 +89,7 @@ export function spdSnapshot() {
  * @param {string} id 用户 UUID
  * @returns {void}
  */
-export function kickFlush(env: Env, id) {
+export function kickFlush(env: Env, id: any) {
   if (!env || !id || !env.METER) return;
   if (!S.pend.has(id)) S.pend.set(id, { up: 0, down: 0, conns: 0 });
   scheduleFlush(env, 0);
@@ -101,7 +101,7 @@ export function cntView() {
 }
 
 export function cntDelta() {
-  const out = {};
+  const out: Record<string, any> = {};
   for (const k of S.cntKeys) {
     const v = (S.cnt[k] || 0) - (S.cntSent[k] || 0);
     if (v) out[k] = v;
@@ -110,7 +110,7 @@ export function cntDelta() {
   return out;
 }
 
-export const keyOf = (x) => x.h + ":" + x.p;
+export const keyOf = (x: any) => x.h + ":" + x.p;
 
 /** 候选项池：内存 → KV(poolGen) → 空；空时由 cronScan 触发重建 */
 export async function ensurePool(env: Env) {
@@ -124,12 +124,12 @@ export async function ensurePool(env: Env) {
       S.pool = v;
       S.poolGen = gen;
     }
-  } catch (e) {}
+  } catch (e: any) {}
   return S.pool;
 }
 
 /** 两阶段提交新候选池：先写新代际键，成功后再改 seed.poolGen */
-export async function commitPool(env: Env, fresh, allowShrink?) {
+export async function commitPool(env: Env, fresh: any, allowShrink = false) {
   const oldN = S.pool.length || Number(S.seed.poolN) || 0;
   const newN = fresh.length;
   if (!newN) return { ok: false, reason: "empty" };
@@ -139,7 +139,7 @@ export async function commitPool(env: Env, fresh, allowShrink?) {
   const gen = (S.poolGen || S.seed.poolGen || 0) + 1;
   try {
     await kvSet(env, "px:pool:" + gen, fresh, { expirationTtl: PX_TTL });
-  } catch (e) {
+  } catch (e: any) {
     return { ok: false, reason: "kv " + String((e && e.message) || e).slice(0, 60) };
   }
   S.pool = fresh;
@@ -159,7 +159,7 @@ export async function pxGet(env: Env) {
   await SEEDS.read(env);
   if (!S.alive.size) {
     let src = SEEDS.bucket().nodes || [];
-    const refMs = {};
+    const refMs: Record<string, number> = {};
     for (const n of ((S.seed.byColo || {})[BUCKET_DEF] || {}).nodes || []) {
       if (n && n.k && n.ms) refMs[n.k] = n.ms;
     }
@@ -227,8 +227,8 @@ export async function pxGet(env: Env) {
  * @param {Iterable<string>} keys "host:port" 列表
  * @returns {object} "host:port" → 统计明细
  */
-export function nsOf(keys) {
-  const m = {};
+export function nsOf(keys: any) {
+  const m: Record<string, any> = {};
   let i = 0;
   for (const k of keys) {
     if (++i > 64) break;                       // 面板最多展示几十行，别被异常输入拖死
@@ -252,11 +252,11 @@ export function nsOf(keys) {
 }
 
 /** 兼容旧调用：只改内存，不落盘 */
-export async function pxSet(env: Env, patch) {
+export async function pxSet(env: Env, patch: any) {
   if (!patch) return pxGet(env);
   if (typeof patch.cur === "string") { S.curs.tput = patch.cur; S.curs.lat = patch.cur; }
   if (Array.isArray(patch.alive)) {
-    S.alive = new Map(patch.alive.map((x) => [keyOf(x), x]));
+    S.alive = new Map(patch.alive.map((x: any) => [keyOf(x), x]));
   }
   return pxGet(env);
 }
@@ -306,8 +306,9 @@ export async function cronScan(env: Env) {
   S.hits += hits.length;
 
   for (const x of hits) {
+    if (!x) continue;
     const k = keyOf(x);
-    S.alive.set(k, { h: x.h, p: x.p, cc: x.cc || ((S.alive.get(k) || {}) as NodeEntry).cc || "", ms: x.ms, src: "probe" });
+    S.alive.set(k, { h: x.h, p: x.p, cc: (x as any).cc || ((S.alive.get(k) || {}) as NodeEntry).cc || "", ms: x.ms, src: "probe" });
     nsLatency(k, x.ms);
     nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
   }

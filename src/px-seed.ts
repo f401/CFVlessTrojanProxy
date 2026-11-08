@@ -1,6 +1,6 @@
 import { SC } from "./const";
 import { PX_TTL, SEED_KEY, SEED_MAX, SEED_TTL, SEED_VER, cnt, cntDelta } from "./px";
-import { costOf, nsGet, p90Local } from "./px-score";
+import { costOf, nsGet, p90Local , ZERO_STAT } from "./px-score";
 import { S } from "./state";
 import { kvGet, kvSet } from "./store";
 
@@ -21,8 +21,8 @@ bucket() {
 }
 
 /** 把一条统计压成可存的形状 */
-packNode(k) {
-  const s = (S.nstat.get(k) || {}) as NodeStats;
+packNode(k: any) {
+  const s = (S.nstat.get(k) || ZERO_STAT);
   const a = (S.alive.get(k) || {}) as NodeEntry;
   const i = k.lastIndexOf(":");
   const n = (s.okW || 0) + (s.failW || 0);
@@ -42,14 +42,14 @@ packNode(k) {
 }
 
 /** 只存"名字"（cron 用：不知道自己在哪个机房，就不该写延迟） */
-packName(k) {
+packName(k: any) {
   const a = (S.alive.get(k) || {}) as NodeEntry;
   const i = k.lastIndexOf(":");
   return { k, h: a.h || k.slice(0, i), p: a.p || (Number(k.slice(i + 1)) || 443), cc: a.cc || "", ms: Math.round(a.ms || 0) || undefined };
 }
 
 /** 把存下来的形状合并回本地统计（只增不减） */
-unpackNode(o) {
+unpackNode(o: any) {
   if (!o || !o.k) return;
   const s = nsGet(o.k);
   if (!s.tcp && o.tcp) s.tcp = o.tcp;
@@ -76,7 +76,7 @@ unpackNode(o) {
 async read(env: Env) {
   if (S.seedAt && Date.now() - S.seedAt < SEED_TTL) return S.seed;
   let v = null;
-  try { v = await kvGet<Seed>(env, SEED_KEY); } catch (e) {}
+  try { v = await kvGet<Seed>(env, SEED_KEY); } catch (e: any) {}
   if (v && Array.isArray(v.nodes) && !v.byColo) {
     // 旧结构：整张表属于"当前机房"，迁移时不做跨机房假设
     v = { v: SEED_VER, ts: v.ts || 0, poolGen: v.poolGen || 0, poolN: v.poolN || 0, builtAt: v.builtAt || 0, byColo: { [S.colo || "??"]: { nodes: v.nodes, ts: v.ts || 0 } } };
@@ -134,7 +134,7 @@ async read(env: Env) {
  * @param {object} env Worker 环境
  * @returns {Promise<{ok:boolean,err?:string}>} 结果
  */
-async write(env: Env, listOnly?, force?) {
+async write(env: Env, listOnly = false, force = false) {
   if (!env || !env.STATS) return { ok: true, skipped: true };
   // 必须先读到已有 seed 再写：否则一个"还没读过"的 isolate 会拿空对象覆盖，
   // 把 poolGen 和所有机房的桶一起抹掉（踩过一次，池子直接变 0）。
@@ -172,13 +172,13 @@ async write(env: Env, listOnly?, force?) {
     try {
       await kvSet(env, SEED_KEY, S.seed, { expirationTtl: PX_TTL });
       return { ok: true, empty: true };
-    } catch (e) {
+    } catch (e: any) {
       return { ok: false, err: String((e && e.message) || e).slice(0, 80) };
     }
   }
   // 全局日计数合并进 seed（跨 isolate 聚合，最多 20 分钟延迟）
   const d0 = new Date().toISOString().slice(0, 10);
-  const gc = S.seed.cnt && S.seed.cnt.d === d0 ? { ...S.seed.cnt } : { d: d0 };
+  const gc: Record<string, any> = S.seed.cnt && S.seed.cnt.d === d0 ? { ...S.seed.cnt } : { d: d0 };
   const dlt = cntDelta();
   for (const [k, n] of Object.entries(dlt)) gc[k] = (gc[k] || 0) + n;
 
@@ -241,7 +241,7 @@ async write(env: Env, listOnly?, force?) {
   try {
     await kvSet(env, SEED_KEY, S.seed, { expirationTtl: PX_TTL });
     return { ok: true };
-  } catch (e) {
+  } catch (e: any) {
     return { ok: false, err: String((e && e.message) || e).slice(0, 80) };
   }
 }

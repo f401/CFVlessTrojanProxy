@@ -9,8 +9,8 @@ import { S } from "./state";
  * @param {string} k "host:port"
  * @returns {object} 统计对象
  */
-export function nsGet(k) {
-  let s = S.nstat.get(k);
+export function nsGet(k: any): NodeStats {
+  let s: NodeStats | undefined = S.nstat.get(k);
   if (!s) {
     s = {
       ok: 0, fail: 0, at: 0, msLocal: 0,
@@ -20,7 +20,7 @@ export function nsGet(k) {
       tS: 0, tF: 0,                            // 真实流量（只用于可用性）
       eCloseP: 0, eCloseD: 0,                  // 空关闭：中转后 / 直连
       bytesDown: 0, hist: new Array(HIST_N).fill(0),
-      counted: 0,
+      seedBps: 0, counted: 0,
     };
     S.nstat.set(k, s);
   }
@@ -33,7 +33,7 @@ export function nsGet(k) {
  * @param {number} now 当前时间戳
  * @returns {void}
  */
-export function nsDecay(s, now) {
+export function nsDecay(s: any, now: any) {
   if (!s) return;
   if (!s.at) { s.at = now; return; }
   const k = Math.pow(0.5, (now - s.at) / SC.HL);
@@ -51,7 +51,7 @@ export function nsDecay(s, now) {
  * @param {number} [tls] TLS 往返毫秒
  * @returns {void}
  */
-export function nsOk(k, tcp, tls) {
+export function nsOk(k: any, tcp: any, tls: any) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -69,7 +69,7 @@ export function nsOk(k, tcp, tls) {
  * @param {number} tls TLS 往返
  * @returns {void}
  */
-export function nsProbe(k, ms, tcp, tls) {
+export function nsProbe(k: any, ms: any, tcp: any, tls: any) {
   if (!k || !(ms > 0)) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -86,7 +86,7 @@ export function nsProbe(k, ms, tcp, tls) {
  * @param {string} k "host:port"
  * @returns {void}
  */
-export function nsProbeFail(k) {
+export function nsProbeFail(k: any) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -100,7 +100,7 @@ export function nsProbeFail(k) {
  * @param {string} k "host:port"
  * @returns {void}
  */
-export function nsFail(k) {
+export function nsFail(k: any) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -121,7 +121,7 @@ export function nsFail(k) {
  * @param {object} [env] 用于节流落盘
  * @returns {void}
  */
-export function nsSpeed(k, bps, bytes, env) {
+export function nsSpeed(k: any, bps: any, bytes: any, env: any) {
   if (!k || !(bps > 0)) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -134,7 +134,7 @@ export function nsSpeed(k, bps, bytes, env) {
 }
 
 /** 记录卡顿时长（背压累计） */
-export function nsStall(k, stallMs, runMs) {
+export function nsStall(k: any, stallMs: any, runMs: any) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -144,7 +144,7 @@ export function nsStall(k, stallMs, runMs) {
 }
 
 /** 记录本地实测延迟（探活用） */
-export function nsLatency(k, ms) {
+export function nsLatency(k: any, ms: any) {
   if (!k || !(ms > 0)) return;
   const s = nsGet(k);   // 必须走 nsGet，否则缺 stallMs/runMs 会让 pStall 变 NaN
   s.msLocal = s.msLocal ? Math.round(s.msLocal * 0.6 + ms * 0.4) : Math.round(ms);
@@ -157,7 +157,7 @@ export function nsLatency(k, ms) {
  * @param {object} s 统计对象
  * @returns {number} 0~0.9 的失败概率估计
  */
-export function pFailOf(s) {
+export function pFailOf(s: any) {
   if (!s) return 0.4;
   const ok = s.tS || 0;
   const bad = s.tF || 0;
@@ -168,7 +168,7 @@ export function pFailOf(s) {
 }
 
 /** 可用性（小样本用后验均值，大样本用 Wilson 下界） */
-export function availOf(s) {
+export function availOf(s: any) {
   if (!s) return 0.5;
   const ok = s.tS || 0, bad = s.tF || 0;
   const n = ok + bad;
@@ -183,7 +183,7 @@ export function availOf(s) {
 }
 
 /** 卡顿占比（无数据 = 0.05） */
-export function pStallOf(s) {
+export function pStallOf(s: any) {
   if (!s) return 0.05;
   return (s.stallMs + 50) / (s.runMs + 1000);
 }
@@ -196,7 +196,7 @@ export function pStallOf(s) {
  * @param {number} q 0~1
  * @returns {number} 字节/秒
  */
-export function pctOf(s, q) {
+export function pctOf(s: any, q: any) {
   if (!s || !s.hist) return 0;
   let tot = 0;
   for (let i = 0; i < HIST_N; i++) tot += s.hist[i];
@@ -215,20 +215,20 @@ export function pctOf(s, q) {
 }
 
 /** 本地直方图的 p90（落盘用；导入值不能再写回去，否则自我强化） */
-export function p90Local(s) { return pctOf(s, 0.9); }
+export function p90Local(s: any) { return pctOf(s, 0.9); }
 
 /**
  * 一次遍历同时得到 p50 / p90 / cap，避免三次重复扫描直方图
  * @param {object} s 统计对象
  * @returns {{p50:number,p90:number,cap:number}} 分位与能力值
  */
-export function pcts(s) {
+export function pcts(s: any) {
   if (!s || !s.hist) return { p50: 0, p90: 0, cap: s && s.seedBps ? s.seedBps : 0 };
   let tot = 0;
   for (let i = 0; i < HIST_N; i++) tot += s.hist[i];
   if (!(tot > 0)) return { p50: 0, p90: 0, cap: s.seedBps || 0 };
   let acc = 0, p50 = 0, p90 = 0;
-  const at = (i, prev, target) => HIST_BASE * Math.pow(2, i - 0.5 + (s.hist[i] > 0 ? Math.max(0, Math.min(1, (target - prev) / s.hist[i])) : 1));
+  const at = (i: any, prev: any, target: any) => HIST_BASE * Math.pow(2, i - 0.5 + (s.hist[i] > 0 ? Math.max(0, Math.min(1, (target - prev) / s.hist[i])) : 1));
   for (let i = 0; i < HIST_N; i++) {
     const prev = acc;
     acc += s.hist[i];
@@ -241,7 +241,7 @@ export function pcts(s) {
 }
 
 /** 用于排序的"能力值"：p90 与 p50 取折中，单次突发不能定生死 */
-export function capOf(s) {
+export function capOf(s: any) {
   if (!s) return 0;
   const p90 = pctOf(s, 0.9);
   const p50 = pctOf(s, 0.5);
@@ -251,7 +251,7 @@ export function capOf(s) {
 }
 
 /** 近期吞吐峰值（p90，带衰减的直方图插值） */
-export function p90Of(s) { return pctOf(s, 0.9); }
+export function p90Of(s: any) { return pctOf(s, 0.9); }
 
 /**
  * 节点代价（毫秒当量，越小越好）。lat=速率优先，tput=吞吐优先。
@@ -259,12 +259,17 @@ export function p90Of(s) { return pctOf(s, 0.9); }
  * @param {string} mode "lat" | "tput"
  * @returns {number} 代价
  */
-export const ZERO_STAT = { tcp: 0, tls: 0, okW: 0, failW: 0, stallMs: 0, runMs: 0, tS: 0, tF: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0) };
+export const ZERO_STAT: NodeStats = {
+  ok: 0, fail: 0, at: 0, msLocal: 0, streak: 0, blackUntil: 0, freeUntil: 0, lastTry: 0,
+  pN: 0, pSum: 0, pSumSq: 0, pF: 0, tcp: 0, tls: 0,
+  tS: 0, tF: 0, okW: 0, failW: 0, eCloseP: 0, eCloseD: 0,
+  stallMs: 0, runMs: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0), seedBps: 0, counted: 0,
+};
 
 export const TEN_MB = 10 * 1048576;
 export const E10_PRIOR = (TEN_MB / SC.PRIOR_BPS) * 1000;   // 无吞吐样本时的先验代价（≈51 秒）
 
-export function costOf(k, mode) {
+export function costOf(k: any, mode: any) {
   const m = mode === "tput" ? "tput" : "lat";
   const s = S.nstat.get(k) || ZERO_STAT;   // 空对象会让 pStall 变 NaN，必须用带零值的占位
   const a = (S.alive.get(k) || {}) as NodeEntry;
@@ -300,20 +305,20 @@ export function costOf(k, mode) {
 }
 
 /** 面板展示用的分值（越小越好） */
-export function scoreMerged(k, _ns?) { return costOf(k, "lat"); }
+export function scoreMerged(k: any, _ns?: any) { return costOf(k, "lat"); }
 
 /** 是否处于冷却期 */
-export function isBlack(k) {
+export function isBlack(k: any) {
   const s = S.nstat.get(k);
   return !!(s && s.blackUntil > Date.now());
 }
 /** 是否被回滚冻结 */
-export function isFrozen(k) {
+export function isFrozen(k: any) {
   const s = S.nstat.get(k);
   return !!(s && s.freeUntil > Date.now());
 }
 /** 冻结一个刚出问题的节点 */
-export function freezeNode(k) {
+export function freezeNode(k: any) {
   if (!k) return;
   const s = nsGet(k);
   s.freeUntil = Date.now() + SC.ROLL_FREEZE;
@@ -326,7 +331,7 @@ export function freezeNode(k) {
  * @param {string} k "host:port"
  * @returns {boolean} 是否可疑
  */
-export function emptyCloseSuspect(k) {
+export function emptyCloseSuspect(k: any) {
   const s = S.nstat.get(k);
   if (!s) return false;
   const viaP = s.eCloseP || 0;
@@ -335,11 +340,11 @@ export function emptyCloseSuspect(k) {
 }
 
 /** 候选列表（已过滤黑名单/冻结，按代价升序） */
-export function candsFor(mode) {
-  const out = [];
+export function candsFor(mode: any) {
+  const out: any[] = [];
   for (const k of S.alive.keys()) {
     if (isBlack(k) || isFrozen(k)) continue;
-    const s = (S.nstat.get(k) || {}) as NodeStats;
+    const s = (S.nstat.get(k) || ZERO_STAT);
     const n = (s.tS || 0) + (s.tF || 0);
     if (n >= 5 && availOf(s) < 0.75) continue;        // 可用性硬门槛
     if (emptyCloseSuspect(k)) continue;               // 中转后仍大量空关闭
@@ -355,14 +360,14 @@ export function candsFor(mode) {
  * @param {string} avoid 要避开的节点
  * @returns {string} 节点 key，没有可换的返回 ""
  */
-export function nextNode(mode, avoid) {
+export function nextNode(mode: any, avoid: any) {
   const c = candsFor(mode);
   for (const x of c) if (x.k !== avoid) return x.k;
   return "";
 }
 
 /** 当前最优 */
-export function bestFor(mode) {
+export function bestFor(mode: any) {
   const c = candsFor(mode);
   return c.length ? c[0].k : "";
 }

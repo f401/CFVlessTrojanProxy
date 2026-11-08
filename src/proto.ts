@@ -20,7 +20,7 @@ export async function loadUsers(env: Env): Promise<Auth> {
   let managed: Partial<UserRec>[] = [];
   try {
     managed = (await kvGet<UserRec[]>(env, "users")) || [];
-  } catch (e) {
+  } catch (e: any) {
     managed = [];
   }
 
@@ -90,8 +90,8 @@ export function invalidateUsers() {
  * @param {Array<object>} list 完整用户列表
  * @returns {Promise<void>}
  */
-export async function saveUsers(env: Env, list) {
-  const clean = list.filter((x) => x.managed).map((x) => ({
+export async function saveUsers(env: Env, list: any) {
+  const clean = list.filter((x: any) => x.managed).map((x: any) => ({
     id: x.id,
     pwd: x.pwd || "",
     note: x.note || "",
@@ -113,7 +113,7 @@ export async function saveUsers(env: Env, list) {
  * @param {number} to 结束下标（不含）
  * @returns {boolean} 全部是 0-9a-fA-F 时返回 true
  */
-export function isHexAscii(u8, from, to) {
+export function isHexAscii(u8: any, from: any, to: any) {
   for (let i = from; i < to; i++) {
     const c = u8[i];
     const ok = (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x66) || (c >= 0x41 && c <= 0x46);
@@ -127,7 +127,7 @@ export function isHexAscii(u8, from, to) {
  * @param {Uint8Array} u8 客户端首个载荷
  * @returns {'vless'|'trojan'} 协议名
  */
-export function detectProtocol(u8) {
+export function detectProtocol(u8: any) {
   if (u8.length >= 58 && u8[56] === 0x0d && u8[57] === 0x0a && isHexAscii(u8, 0, 56)) {
     return "trojan";
   }
@@ -140,7 +140,7 @@ export function detectProtocol(u8) {
  * @param {number} atyp 原始地址类型字节
  * @returns {number} 归一化后的 atyp（1=IPv4 3=域名 4=IPv6）
  */
-export function normAtyp(proto: string, atyp: number): string {
+export function normAtyp(proto: string, atyp: number): string | null {
   if (proto === "vless") {
     return atyp === 1 ? "v4" : atyp === 2 ? "dom" : atyp === 3 ? "v6" : null;
   }
@@ -204,7 +204,7 @@ export function parseVLESS(u8: Uint8Array, auth: Auth): ParseResult {
   const kind = normAtyp("vless", atyp);
   if (!kind) return { ok: false, err: "不支持的地址类型" };
   const a = readAddr(u8, off, kind);
-  if (a.err) return { ok: false, err: a.err };
+  if (a.err !== undefined) return { ok: false, err: a.err };
 
   const udp = cmd === 2;
   if (cmd !== 1 && cmd !== 2) return { ok: false, err: "不支持的命令" };
@@ -241,7 +241,7 @@ export function parseTrojan(u8: Uint8Array, auth: Auth): ParseResult {
   const kind = normAtyp("trojan", atyp);
   if (!kind) return { ok: false, err: "不支持的地址类型" };
   const a = readAddr(u8, off, kind);
-  if (a.err) return { ok: false, err: a.err };
+  if (a.err !== undefined) return { ok: false, err: a.err };
   off = a.next;
 
   if (u8.length < off + 2) return { ok: false, err: "Trojan 头部不完整" };

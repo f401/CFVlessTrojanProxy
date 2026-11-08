@@ -56,7 +56,7 @@ export class Meter {
         try {
           await this.save();
           for (const k of ["c", "e", "s", "g"]) await this.st.storage.delete(k);
-        } catch (e) {}
+        } catch (e: any) {}
       }
     });
   }
@@ -90,7 +90,7 @@ export class Meter {
       let d: MeterBody = {};
       try {
         d = await req.json();
-      } catch (e) {}
+      } catch (e: any) {}
       const c = this.c;
       // 计数搭便车：同一次 /add 请求把 isolate 的日计数也带上来，0 额外请求
       if (d.c && typeof d.c === "object") {
@@ -143,7 +143,7 @@ export class Meter {
       let d: MeterBody = {};
       try {
         d = await req.json();
-      } catch (e) {}
+      } catch (e: any) {}
       if ((this.c.up || 0) + (this.c.down || 0) + (this.c.conns || 0) === 0) {
         this.c.up = Number(d.up) || 0;
         this.c.down = Number(d.down) || 0;
@@ -160,7 +160,7 @@ export class Meter {
       let d: MeterBody = {};
       try {
         d = await req.json();
-      } catch (e) {}
+      } catch (e: any) {}
       const cur = (this.c.up || 0) + (this.c.down || 0);
       const want = (Number(d.up) || 0) + (Number(d.down) || 0);
       if (want > cur) {

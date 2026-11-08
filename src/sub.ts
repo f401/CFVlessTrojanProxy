@@ -30,10 +30,10 @@ export const COLO_CITY = {
 };
 
 /** 把入口地址压成可放进 URL 的标签：104.16.0.1 → 104-16-0-1 */
-export const tagOf = (h) => String(h).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+export const tagOf = (h: any) => String(h).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 /** 节点唯一标签 = 入口 + 端口（同一域名的 443/8443 是两个节点） */
-export const nodeTag = (n) => `${tagOf(n.host)}-${n.port}`;
+export const nodeTag = (n: any) => `${tagOf(n.host)}-${n.port}`;
 
 /**
  * 解析 env.nodes 配置成入口节点列表（host:port:mode）。
@@ -41,7 +41,7 @@ export const nodeTag = (n) => `${tagOf(n.host)}-${n.port}`;
  * @param {string} host 当前请求的 Host
  * @returns {Array<{host:string,port:number,mode:string}>} 节点数组
  */
-export function loadNodes(env: Env, host) {
+export function loadNodes(env: Env, host: any) {
   const raw = String(env.nodes || "").trim();
   if (raw) {
     return raw
@@ -66,7 +66,7 @@ export function loadNodes(env: Env, host) {
  * @param {boolean} hasTrojanOverride 是否被查询参数强制指定
  * @returns {string[]} 协议名数组
  */
-export function pickProtos(env: Env, url, hasTrojanOverride?) {
+export function pickProtos(env: Env, url: any, hasTrojanOverride?: boolean) {
   const hasTrojan = hasTrojanOverride === undefined
     ? Boolean(secretPwd(env))
     : !!hasTrojanOverride;
@@ -82,7 +82,7 @@ export function pickProtos(env: Env, url, hasTrojanOverride?) {
  * @param {string} id 用户 UUID
  * @returns {string} 密码，没有则空串
  */
-export function trojanPasswordOf(env: Env, id) {
+export function trojanPasswordOf(env: Env, id: any) {
   const raw = secretPwd(env);
   if (!raw) return "";
   // 单密码模式：一个公共密码，所有用户共用
@@ -101,13 +101,13 @@ export function trojanPasswordOf(env: Env, id) {
  * @param {object} learned RTT 学习结果
  * @returns {Array<object>} 排序后的节点数组
  */
-export function orderNodes(nodes, learned) {
+export function orderNodes(nodes: any, learned: any) {
   return nodes
-    .map((n, i) => {
+    .map((n: any, i: any) => {
       const info = learned[nodeTag(n)];
       return { ...n, _i: i, _rtt: info && typeof info.rtt === "number" ? info.rtt : null, _colo: (info && info.colo) || "" };
     })
-    .sort((a, b) => {
+    .sort((a: any, b: any) => {
       // 未测过的按"中性值"处理：快的一定在前，慢的排后，未测的居中
       const av = a._rtt == null ? 120 : a._rtt;
       const bv = b._rtt == null ? 120 : b._rtt;
@@ -121,10 +121,10 @@ export function orderNodes(nodes, learned) {
  * @param {object} n 节点对象
  * @returns {string} 展示名
  */
-export function nodeLabel(n) {
+export function nodeLabel(n: any) {
   const tag = nodeTag(n);
   if (n._colo) {
-    const city = COLO_CITY[n._colo] || "";
+    const city = (COLO_CITY as Record<string, string>)[n._colo] || "";
     return `${n._colo}${city ? "-" + city : ""}-${tag}`;
   }
   return tag;
@@ -135,7 +135,7 @@ export function nodeLabel(n) {
  * @param {object} n 节点对象
  * @returns {string} 路径标识
  */
-export function nodePath(n) {
+export function nodePath(n: any) {
   return `/?ed=2560&ip=${nodeTag(n)}`;
 }
 
@@ -147,8 +147,8 @@ export function nodePath(n) {
  * @param {string[]} protos 要输出的协议
  * @returns {Array<object>} 地区节点数组
  */
-export function regionEntries(regions, host, pass, protos) {
-  const out = [];
+export function regionEntries(regions: any, host: any, pass: any, protos: any) {
+  const out: any[] = [];
   for (const cc of regions) {
     for (const proto of protos) {
       if (proto === "trojan" && !pass) continue;
@@ -175,19 +175,19 @@ export function regionEntries(regions, host, pass, protos) {
  * @param {string[]} [regions] 地区列表
  * @returns {string} YAML 文本
  */
-export function renderClash(env: Env, url, id, host, learned = {}, regions = []) {
+export function renderClash(env: Env, url: any, id: any, host: any, learned: Record<string, any> = {}, regions: string[] = []) {
   const nodes = orderNodes(loadNodes(env, host), learned);
   const protos = pickProtos(env, url);
   const pass = trojanPasswordOf(env, id);
-  const out = [];
-  const byMode = { lat: [], tput: [] };
+  const out: any[] = [];
+  const byMode: Record<string, any[]> = { lat: [], tput: [] };
   const all = [];
   const G_LAT = "\u26a1 \u901f\u7387\u4f18\u5148";
   const G_TPUT = "\ud83d\ude80 \u541e\u5410\u4f18\u5148";
   const G_REG = "\ud83c\udf0d \u5730\u533a";
   const G_MAN = "\ud83c\udfaf \u624b\u52a8";
 
-  const emit = (name, proto, server, port, path, tls, extra) => {
+  const emit = (name: any, proto: any, server: any, port: any, path: any, tls: any, extra: any) => {
     out.push(`  - name: "${name}"`);
     out.push(`    type: ${proto}`);
     out.push(`    server: ${server}`);
@@ -226,8 +226,8 @@ export function renderClash(env: Env, url, id, host, learned = {}, regions = [])
     all.push(e.name);
   }
 
-  const q = (arr) => `    proxies: [${arr.map((x) => `"${x}"`).join(", ")}]`;
-  const pick = (arr, n) => arr.slice(0, Math.max(1, Math.min(n, arr.length)));
+  const q = (arr: any) => `    proxies: [${arr.map((x: any) => `"${x}"`).join(", ")}]`;
+  const pick = (arr: any, n: any) => arr.slice(0, Math.max(1, Math.min(n, arr.length)));
 
   const groups = [];
   groups.push(`  - name: "${G_TPUT}"`);
@@ -281,12 +281,12 @@ export function renderClash(env: Env, url, id, host, learned = {}, regions = [])
   ].join("\n");
 }
 
-export function renderSingbox(env: Env, url, id, host, learned = {}, regions = []) {
+export function renderSingbox(env: Env, url: any, id: any, host: any, learned: Record<string, any> = {}, regions: string[] = []) {
   const nodes = orderNodes(loadNodes(env, host), learned);
   const protos = pickProtos(env, url);
   const pass = trojanPasswordOf(env, id);
   const outs = [];
-  const byMode = { lat: [], tput: [] };
+  const byMode: Record<string, any[]> = { lat: [], tput: [] };
   const tags = [];
   const G_LAT = "\u26a1 \u901f\u7387\u4f18\u5148";
   const G_TPUT = "\ud83d\ude80 \u541e\u5410\u4f18\u5148";
@@ -330,7 +330,7 @@ export function renderSingbox(env: Env, url, id, host, learned = {}, regions = [
     outs.push(o);
   }
 
-  const pick = (arr, n) => arr.slice(0, Math.max(1, Math.min(n, arr.length)));
+  const pick = (arr: any, n: any) => arr.slice(0, Math.max(1, Math.min(n, arr.length)));
   const groups = [
     {
       type: "urltest",
@@ -372,7 +372,7 @@ export function renderSingbox(env: Env, url, id, host, learned = {}, regions = [
   );
 }
 
-export function renderLinks(env: Env, url, id, host, learned = {}, regions = []) {
+export function renderLinks(env: Env, url: any, id: any, host: any, learned: Record<string, any> = {}, regions: string[] = []) {
   const nodes = orderNodes(loadNodes(env, host), learned);
   const protos = pickProtos(env, url);
   const pass = trojanPasswordOf(env, id);

@@ -21,7 +21,7 @@ export const PEND_FLUSH_BYTES = 16 * 1024 * 1024;  // 大文件传输时别频�
  * @param {boolean} [isNew] 是否为新连接（用于连接数统计）
  * @returns {void}
  */
-export function pendAdd(id, up, down, isNew) {
+export function pendAdd(id: any, up: any, down: any, isNew: any) {
   if (!id) return;
   const p = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
   p.up += up || 0;
@@ -38,7 +38,7 @@ export function pendAdd(id, up, down, isNew) {
  * @param {number} [delay] 自定义延迟（毫秒），传 0 表示尽快
  * @returns {void}
  */
-export function scheduleFlush(env: Env, delay) {
+export function scheduleFlush(env: Env, delay: any) {
   if (S.tflush) return;
   const d = delay === undefined ? S.pendMs : delay;
   S.tflush = setTimeout(() => {
@@ -86,7 +86,7 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
         if (!r.ok) throw new Error("do " + r.status);
         S.doCalls += 1;
         S.meterCache.delete(id);      // 刚推过增量，缓存立即失效，避免读数倒退
-      } catch (e) {
+      } catch (e: any) {
         bad += 1;
         const cur = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
         S.pend.set(id, { up: cur.up + d.up, down: cur.down + d.down, conns: cur.conns + d.conns });
@@ -107,7 +107,7 @@ export const METER_TTL = 15000;
  * @param {string} id 用户 UUID
  * @returns {Promise<{up:number,down:number,conns:number,first?:number,ts?:number}|null>} 累计值
  */
-export async function meterGet(env: Env, id) {
+export async function meterGet(env: Env, id: any) {
   if (!env || !env.METER || !id) return null;
   const hit = S.meterCache.get(id);
   if (hit && Date.now() - hit.t < METER_TTL) return hit.v;
@@ -121,7 +121,7 @@ export async function meterGet(env: Env, id) {
       if (S.meterCache.size > 500) S.meterCache.clear();
       S.meterCache.set(id, { v, t: Date.now() });
       return v;
-    } catch (e) {
+    } catch (e: any) {
       if (i === 0) await new Promise((res) => setTimeout(res, 120));
     }
   }
@@ -138,7 +138,7 @@ export const USAGE_SNAP_KEY = "usage:snap";
 export async function usageSnapGet(env: Env) {
   try {
     return (await kvGet<UsageSnap>(env, USAGE_SNAP_KEY)) || null;
-  } catch (e) {
+  } catch (e: any) {
     return null;
   }
 }
@@ -154,7 +154,7 @@ export async function usageSnapWrite(env: Env) {
   // 灾备快照，2 小时一次足够（cron 是 30 分钟一轮，别每轮都写一遍）
   if (Date.now() - (prev.ts || 0) < 2 * 3600e3) return;
   const { list } = await loadUsers(env);
-  const out = { ts: Date.now(), users: {} };
+  const out: any = { ts: Date.now(), users: {} };
   for (const u of list) {
     const v = await meterGet(env, u.id);
     const old = (prev.users || {})[u.id];
@@ -169,7 +169,7 @@ export async function usageSnapWrite(env: Env) {
   if (!Object.keys(out.users).length) return;
   try {
     await kvSet(env, USAGE_SNAP_KEY, out, { expirationTtl: 86400 * 90 });
-  } catch (e) {
+  } catch (e: any) {
     /* 额度耗尽：下次再写 */
   }
 }
@@ -182,7 +182,7 @@ export async function usageSnapWrite(env: Env) {
  * @param {object} [snap] 已读到的 usage:snap；不传则现读
  * @returns {Promise<object|null>} 恢复后的累计值
  */
-export async function restoreUsage(env: Env, id, snap?) {
+export async function restoreUsage(env: Env, id: any, snap?: any) {
   if (!env || !env.METER) return null;
   const s = snap || (await usageSnapGet(env));
   const u = s && s.users && s.users[id];
@@ -194,7 +194,7 @@ export async function restoreUsage(env: Env, id, snap?) {
     const v = await r.json();
     S.meterCache.set(id, { v, t: Date.now() });
     return v;
-  } catch (e) {
+  } catch (e: any) {
     return null;
   }
 }
@@ -215,7 +215,7 @@ export const SNAP_TTL = 300000;
  * @param {boolean} isNewConn 是否新连接
  * @returns {void}
  */
-export function statBump(id, up, down, isNewConn) {
+export function statBump(id: any, up: any, down: any, isNewConn: any) {
   if (!id) return;
   pendAdd(id, up, down, isNewConn);   // 全局帐本（DO）
   let s = S.stats.get(id);
@@ -245,14 +245,14 @@ export function statBump(id, up, down, isNewConn) {
  * 密钥由 secret 绑定 kek 派生。没有 kek 时退化为明文（保证老部署还能跑）。
  * 读取兼容明文：解析失败当明文 JSON 处理，下次写入自动转成密文。
  */
-export let AEK = null;
-export function b64e(u8) {
+export let AEK: CryptoKey | null = null;
+export function b64e(u8: any) {
   let s = "";
   const CH = 0x8000;
   for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
   return btoa(s);
 }
-export function b64d(str) {
+export function b64d(str: any) {
   const bin = atob(str);
   const u8 = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
@@ -284,7 +284,7 @@ export async function unseal(env: Env, raw: unknown): Promise<any> {
   if (raw == null) return null;
   if (typeof raw !== "string") return raw;
   if (!raw.startsWith("ENC1:")) {
-    try { return JSON.parse(raw); } catch (e) { return null; }
+    try { return JSON.parse(raw); } catch (e: any) { return null; }
   }
   const k = await aesKey(env);
   if (!k) return null;
@@ -296,7 +296,7 @@ export async function unseal(env: Env, raw: unknown): Promise<any> {
       b64d(parts[2])
     );
     return JSON.parse(new TextDecoder().decode(pt));
-  } catch (e) {
+  } catch (e: any) {
     return null;
   }
 }
@@ -305,7 +305,7 @@ export async function unseal(env: Env, raw: unknown): Promise<any> {
 export async function kvGet<T = any>(env: Env, key: string): Promise<T | null> {
   if (!env || !env.STATS) return null;
   let raw = null;
-  try { raw = await env.STATS.get(key); } catch (e) { return null; }
+  try { raw = await env.STATS.get(key); } catch (e: any) { return null; }
   return (await unseal(env, raw)) as T | null;
 }
 
@@ -314,7 +314,7 @@ export async function kvSet(env: Env, key: string, obj: unknown, opts?: { expira
   return kvPut(env.STATS, key, await seal(env, obj), opts);
 }
 
-export async function kvPut(kv, key, val, opts) {
+export async function kvPut(kv: any, key: any, val: any, opts: any) {
   // 10048 = 当日写额度耗尽。既然写不进去，10 分钟内别再试，
   // 免得每个连接都白跑一次 KV 调用并刷日志。
   // 注意：熔断期必须"抛错"而不是静默返回 —— 调用方（flushSnap 等）
@@ -329,7 +329,7 @@ export async function kvPut(kv, key, val, opts) {
   try {
     await kv.put(key, val, opts);
     S.kvStat = { ok: true, key, at: Date.now() };
-  } catch (e) {
+  } catch (e: any) {
     // 10048 = 当日写入额度耗尽；此时所有改动只在内存里生效，必须让调用方知道
     const emsg = String((e && e.message) || e);
     S.kvStat = {
@@ -418,7 +418,7 @@ export async function flushSnap(env: Env, force?: boolean): Promise<void> {
     S.stats.clear();
     S.rtt.clear();
     S.errs.length = 0;
-  } catch (e) {
+  } catch (e: any) {
     /* 额度耗尽：保持内存，下次再试 */
   }
 }
@@ -436,7 +436,7 @@ export async function getSnap(env: Env, fresh?: boolean) {
   let v = null;
   try {
     v = (await kvGet<SnapDoc>(env, "snap")) || null;
-  } catch (e) {
+  } catch (e: any) {
     v = null;
   }
   const out = v || { v: 1, date: "", stats: {}, rtt: {}, errs: [] };
@@ -451,7 +451,7 @@ export async function getSnap(env: Env, fresh?: boolean) {
  * @param {string} id 用户 UUID
  * @returns {Promise<object>} 用量对象
  */
-export async function readStatsCached(env: Env, id) {
+export async function readStatsCached(env: Env, id: any) {
   const hit = S.statCache.get(id);
   if (hit && Date.now() - hit.t < 60000) return hit.v;
   const v = await readStats(env, id);
@@ -466,7 +466,7 @@ export async function readStatsCached(env: Env, id) {
  * @param {string} id 用户 UUID
  * @returns {Promise<{up:number,down:number,conns:number,backend:string}>} 含 backend 标记数据来源
  */
-export async function readStats(env: Env, id) {
+export async function readStats(env: Env, id: any) {
   const local = S.stats.get(id) || { up: 0, down: 0, conns: 0, first: 0, last: 0 };
   const p = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
 
@@ -485,7 +485,7 @@ export async function readStats(env: Env, id) {
           doTotal = await r.json();
           S.meterCache.set(id, { v: doTotal, t: Date.now() });
         }
-      } catch (e) {}
+      } catch (e: any) {}
     }
   }
 
@@ -512,7 +512,7 @@ export async function readStats(env: Env, id) {
     try {
       const snap = await getSnap(env);
       stored = (snap.stats || {})[id] || null;
-    } catch (e) {
+    } catch (e: any) {
       stored = null;
     }
   }
