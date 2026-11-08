@@ -9,7 +9,7 @@ export const PEND_FLUSH_BYTES = 16 * 1024 * 1024;  // 大文件传输时别频�
 
 export const METER_TTL = 15000;
 
-export function pendAdd(id: any, up: any, down: any, isNew: any) {
+export function pendAdd(id: string, up: number, down: number, isNew?: boolean) {
   if (!id) return;
   const p = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
   p.up += up || 0;
@@ -20,7 +20,7 @@ export function pendAdd(id: any, up: any, down: any, isNew: any) {
   S.pend.set(id, p);
 }
 
-export function scheduleFlush(env: Env, delay: any) {
+export function scheduleFlush(env: Env, delay?: number) {
   if (S.tflush) return;
   const d = delay === undefined ? S.pendMs : delay;
   S.tflush = setTimeout(() => {
@@ -47,7 +47,7 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
     batch.map(async ([id, d]) => {
       try {
         const stub = env.METER.get(env.METER.idFromName(id));
-        const body = { ...d };
+        const body: Record<string, unknown> = { ...d };
         const mine = !primary || String(id).toLowerCase() === primary;
         if (!attached && mine) {
           attached = true;
@@ -62,7 +62,7 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
         if (!r.ok) throw new Error("do " + r.status);
         S.doCalls += 1;
         S.meterCache.delete(id);      // 刚推过增量，缓存立即失效，避免读数倒退
-      } catch (e: any) {
+      } catch (e) {
         bad += 1;
         const cur = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
         S.pend.set(id, { up: cur.up + d.up, down: cur.down + d.down, conns: cur.conns + d.conns });
@@ -74,7 +74,7 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
   else S.pendMs = Math.max(30000, Math.round(S.pendMs / 2));
 }
 
-export async function meterGet(env: Env, id: any) {
+export async function meterGet(env: Env, id: string) {
   if (!env || !env.METER || !id) return null;
   const hit = S.meterCache.get(id);
   if (hit && Date.now() - hit.t < METER_TTL) return hit.v;
@@ -88,14 +88,14 @@ export async function meterGet(env: Env, id: any) {
       if (S.meterCache.size > 500) S.meterCache.clear();
       S.meterCache.set(id, { v, t: Date.now() });
       return v;
-    } catch (e: any) {
+    } catch (e) {
       if (i === 0) await new Promise((res) => setTimeout(res, 120));
     }
   }
   return hit ? hit.v : null;
 }
 
-export function statBump(id: any, up: any, down: any, isNewConn: any) {
+export function statBump(id: string, up: number, down: number, isNewConn?: boolean) {
   if (!id) return;
   pendAdd(id, up, down, isNewConn);   // 全局帐本（DO）
   let s = S.stats.get(id);
@@ -110,7 +110,7 @@ export function statBump(id: any, up: any, down: any, isNewConn: any) {
   s.last = Date.now();
 }
 
-export async function readStatsCached(env: Env, id: any) {
+export async function readStatsCached(env: Env, id: string) {
   const hit = S.statCache.get(id);
   if (hit && Date.now() - hit.t < 60000) return hit.v;
   const v = await readStats(env, id);
@@ -119,7 +119,7 @@ export async function readStatsCached(env: Env, id: any) {
   return v;
 }
 
-export async function readStats(env: Env, id: any) {
+export async function readStats(env: Env, id: string) {
   const local = S.stats.get(id) || { up: 0, down: 0, conns: 0, first: 0, last: 0 };
   const p = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
 
@@ -138,7 +138,7 @@ export async function readStats(env: Env, id: any) {
           doTotal = await r.json();
           S.meterCache.set(id, { v: doTotal, t: Date.now() });
         }
-      } catch (e: any) {}
+      } catch (e) {}
     }
   }
 
@@ -164,8 +164,8 @@ export async function readStats(env: Env, id: any) {
   if (env.STATS) {
     try {
       const snap = await getSnap(env);
-      stored = (snap.stats || {})[id] || null;
-    } catch (e: any) {
+      stored = (snap.stats && snap.stats[id]) || null;
+    } catch (e) {
       stored = null;
     }
   }

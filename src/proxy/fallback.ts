@@ -2,9 +2,10 @@
 import { connect } from "cloudflare:sockets";
 import { nextNode } from "../nodes/score";
 import { logErr } from "../nodes/metrics";
+import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 
-export async function dialAnother(env: Env, st: Connection, mode: string, tag?: string): Promise<any> {
+export async function dialAnother(env: Env, st: Connection, mode: Mode, tag?: string | null): Promise<Socket | null> {
   const alt = nextNode(mode, st.node);
   if (!alt) return null;
   const i = alt.lastIndexOf(":");
@@ -17,7 +18,7 @@ export async function dialAnother(env: Env, st: Connection, mode: string, tag?: 
     st.pxTries = (st.pxTries || 1) + 1;
     logErr(`retry another node ${alt}`, tag || "");
     return s;
-  } catch (e: any) {
+  } catch (e) {
     return null;
   }
 }

@@ -10,14 +10,14 @@ export interface RouteCtx {
   auth: Auth;
   pageKey: string;
   keyOk: boolean;
-  cf: any;
+  cf: CfMeta;
 }
 
 /** 已通过 UUID 校验的上下文 */
 export interface UserCtx extends RouteCtx {
   id: string;
   /** RTT 学习表：订阅排序用 */
-  learned: Record<string, any>;
+  learned: Record<string, RttEntry>;
   /** 地区列表 */
   regions: string[];
 }

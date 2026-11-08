@@ -4,14 +4,14 @@ import { enc } from "../core/util";
 
 const KEY_BOX: { aek: CryptoKey | null } = { aek: null };
 
-export function b64e(u8: any) {
+export function b64e(u8: Uint8Array) {
   let s = "";
   const CH = 0x8000;
-  for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
+  for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH) as unknown as number[]);
   return btoa(s);
 }
 
-export function b64d(str: any) {
+export function b64d(str: string) {
   const bin = atob(str);
   const u8 = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
@@ -36,11 +36,11 @@ export async function seal(env: Env, obj: unknown): Promise<string> {
   return "ENC1:" + b64e(iv) + ":" + b64e(ct);
 }
 
-export async function unseal(env: Env, raw: unknown): Promise<any> {
+export async function unseal<T = unknown>(env: Env, raw: unknown): Promise<T | null> {
   if (raw == null) return null;
-  if (typeof raw !== "string") return raw;
+  if (typeof raw !== "string") return raw as T;
   if (!raw.startsWith("ENC1:")) {
-    try { return JSON.parse(raw); } catch (e: any) { return null; }
+    try { return JSON.parse(raw); } catch (e) { return null; }
   }
   const k = await aesKey(env);
   if (!k) return null;
@@ -52,7 +52,7 @@ export async function unseal(env: Env, raw: unknown): Promise<any> {
       b64d(parts[2])
     );
     return JSON.parse(new TextDecoder().decode(pt));
-  } catch (e: any) {
+  } catch (e) {
     return null;
   }
 }

@@ -1,3 +1,4 @@
+import type { Socket } from "cloudflare:sockets";
 import { logErr } from "../nodes/metrics";
 import { checkTarget } from "../proxy/dial";
 import { aliveList } from "./pool";
@@ -42,7 +43,7 @@ export const PX_LINE = /^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?(?:[#,:]|\s|$)/
  * @param {Map<string,object>} seen 去重表（key = ip:port）
  * @returns {boolean} 是否为有效新增
  */
-export function takePoolLine(line: any, src: any, seen: any) {
+export function takePoolLine(line: string, src: string, seen: Map<string, PoolEntry>) {
   const m = PX_LINE.exec(line.trim());
   if (!m) return false;
   const ip = m[1];
@@ -83,7 +84,7 @@ export function pxPolicy(env: Env) {
  * @param {number} p 候选端口
  * @returns {Promise<{h:string,p:number,ms:number,ts:number,bad?:string}|null>} 成功返回节点信息，失败返回 null
  */
-export async function probeProxy(h: any, p: any) {
+export async function probeProxy(h: string, p: number) {
   if (checkTarget(h, p)) return null;      // 纵深防御：任何路径都不许探内网
   const t0 = Date.now();
   let sock = null;
@@ -108,14 +109,14 @@ export async function probeProxy(h: any, p: any) {
       const wait = Math.max(200, deadline - Date.now());
       let got = null;
       try {
-        got = await Promise.race([
+        got = (await Promise.race([
           r.read(),
           new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), wait)),
-        ]);
-      } catch (e: any) {
+        ])) as { value?: Uint8Array };
+      } catch (e) {
         break;                       // 超时/断开：跳出，走下面的诊断返回
       }
-      const v = (got as any) && (got as any).value;
+      const v = got && got.value;
       if (!v || !v.length) break;
       const merged = new Uint8Array(buf.length + v.length);
       merged.set(buf, 0);
@@ -129,10 +130,10 @@ export async function probeProxy(h: any, p: any) {
       }
     }
     return { h, p, ms: Date.now() - t0, tcp, tls: 0, ts: Date.now(), bad: "no-cf-cert", len: buf.length, head: toHex(buf.slice(0, 24)) };
-  } catch (e: any) {
+  } catch (e) {
     return null;
   } finally {
-    try { sock && sock.close(); } catch (e: any) {}
+    try { sock && sock.close(); } catch (e) {}
   }
 }
 
@@ -157,7 +158,7 @@ export async function refillPool(env: Env) {
       if (!r.ok) continue;
       const txt = await r.text();
       for (const line of txt.split("\n")) takePoolLine(line, src, seen);
-    } catch (e: any) {
+    } catch (e) {
       /* 换下一个源 */
     }
   }
@@ -175,8 +176,8 @@ export async function refillPool(env: Env) {
  * @param {string[]} ips IP 列表
  * @returns {Promise<Record<string,string>>} IP → 两位国家码
  */
-export async function geoLabel(ips: any) {
-  const out: Record<string, any> = {};
+export async function geoLabel(ips: string[]) {
+  const out: Record<string, string> = {};
   if (!ips.length) return out;
   try {
     const r = await fetch("http://ip-api.com/batch?fields=status,countryCode", {
@@ -186,11 +187,11 @@ export async function geoLabel(ips: any) {
     });
     if (r.ok) {
       const arr = await r.json();
-      arr.forEach((x: any, i: any) => {
+      (arr as IpApiRow[]).forEach((x, i) => {
         if (x && x.status === "success" && x.countryCode) out[ips[i]] = String(x.countryCode).toUpperCase();
       });
     }
-  } catch (e: any) {
+  } catch (e) {
     /* 查不到就不打标，不影响可用性 */
   }
   return out;
@@ -260,10 +261,10 @@ export function tlsHello(sni: string): Uint8Array {
  * @param {number} [ms] 超时毫秒
  * @returns {Promise<{tcp:number, hs?:number, err:string}>} 结果
  */
-export async function probeSni(nodeHost: string, nodePort: number, sni: string, ms = 2500): Promise<any> {
+export async function probeSni(nodeHost: string, nodePort: number, sni: string, ms = 2500): Promise<SniProbe> {
   if (checkTarget(nodeHost, nodePort)) return { err: "denied" };
   const t0 = Date.now();
-  let sock: any = null;
+  let sock: Socket | null = null;
   try {
     sock = await connect({ hostname: nodeHost, port: nodePort });
     // 注意：Workers 的 connect() 是惰性的，真正的 TCP 建连发生在第一次 write/read，
@@ -277,13 +278,13 @@ export async function probeSni(nodeHost: string, nodePort: number, sni: string, 
     let buf = new Uint8Array(0);
     while (Date.now() < deadline && buf.length < 8) {
       const wait = Math.max(150, deadline - Date.now());
-      let got: any = null;
+      let got: { value?: Uint8Array } | null = null;
       try {
-        got = await Promise.race([
+        got = (await Promise.race([
           r.read(),
           new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), wait)),
-        ]);
-      } catch (e: any) {
+        ])) as { value?: Uint8Array };
+      } catch (e) {
         break;
       }
       const v = got && got.value;
@@ -296,10 +297,10 @@ export async function probeSni(nodeHost: string, nodePort: number, sni: string, 
     if (!buf.length) return { err: "no-data" };
     if (buf[0] !== 0x16) return { err: "not-tls", head: toHex(buf.slice(0, 8)) };
     return { hs: Math.max(0, Date.now() - t0), err: "" };
-  } catch (e: any) {
+  } catch (e) {
     return { err: "tcp" };
   } finally {
-    try { if (sock) sock.close(); } catch (e: any) {}
+    try { if (sock) sock.close(); } catch (e) {}
   }
 }
 
@@ -319,7 +320,7 @@ export async function regionListAsync(env: Env) {
       .slice(0, 6);
   }
   const list = await aliveList(env);
-  const set: any[] = [];
+  const set: string[] = [];
   for (const x of list) {
     const cc = (x.cc || "").toUpperCase();
     if (cc && !set.includes(cc)) set.push(cc);

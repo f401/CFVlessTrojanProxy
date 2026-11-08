@@ -30,9 +30,9 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
         px0,
         aliveList(env),
       ]);
-      const f: any = S.funnel || {};
+      const f: Record<string, number> = S.funnel || {};
       const ftot = (f.direct || 0) + (f.node || 0) + (f.v6 || 0);
-      const pctOf = (x: any) => (ftot > 0 ? Math.round((x / ftot) * 1000) / 10 + "%" : "-");
+      const pctOf = (x: number) => (ftot > 0 ? Math.round((x / ftot) * 1000) / 10 + "%" : "-");
       const info = {
         regions,
         curPx,
@@ -83,7 +83,7 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
       if (url.searchParams.get("format") === "html") {
         const alive = await aliveList(env);
         // 明细只算要展示的节点（以前是为整张 nstat 生成，能到几千条）
-        const nsMap = nsOf(alive.map((x: any) => x.h + ":" + x.p));
+        const nsMap = nsOf(alive.map((x) => x.h + ":" + x.p));
         return new Response(renderStatsHtml(env, id, s, learned, alive, nsMap), {
           headers: { "content-type": "text/html;charset=utf-8" },
         });

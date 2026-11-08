@@ -1,12 +1,11 @@
-import { closeQuietly, toU8 } from "../core/util";
+import type { Socket } from "cloudflare:sockets";
+import { closeQuietly, errMsg, safeSend, toU8 } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
 import { nsGet } from "../nodes/score";
 import { cnt } from "../px/pool";
-
 import type { Connection } from "./connection";
-import { safeSend } from "../core/util";
 
-export function pipeBack(sock: any, ws: WebSocketLike, st: Connection, onClose?: (gotData: boolean) => void): void {
+export function pipeBack(sock: Socket, ws: WebSocketLike, st: Connection, onClose?: (gotData: boolean) => void): void {
   sock.readable
     .pipeTo(
       new WritableStream({
@@ -35,7 +34,7 @@ export function pipeBack(sock: any, ws: WebSocketLike, st: Connection, onClose?:
         close() {
           if (onClose) onClose(st.down > 0);
           else {
-            try { ws.close(1000, "done"); } catch (e: any) {}
+            try { ws.close(1000, "done"); } catch (e) {}
           }
         },
         abort() {
@@ -43,8 +42,8 @@ export function pipeBack(sock: any, ws: WebSocketLike, st: Connection, onClose?:
         },
       })
     )
-    .catch((err: any) => {
-      logErr("pipe: " + ((err && err.message) || err), st && st.node ? st.node : "");
+    .catch((err) => {
+      logErr("pipe: " + (errMsg(err)), st && st.node ? st.node : "");
       closeQuietly(sock);
       // 已经传过数据却异常结束 = 中途断流，算这个节点一次失败（以前只在空关闭时记账）
       if (st && st.down > 0) {
@@ -59,6 +58,6 @@ export function pipeBack(sock: any, ws: WebSocketLike, st: Connection, onClose?:
           if (!st.hostTrial) sn.freeUntil = Math.max(sn.freeUntil || 0, Date.now() + 60000);
         }
       }
-      try { ws.close(1011, "pipe error"); } catch (e: any) {}
+      try { ws.close(1011, "pipe error"); } catch (e) {}
     });
 }

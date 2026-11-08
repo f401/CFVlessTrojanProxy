@@ -4,7 +4,7 @@ import { enc, toHex } from "../core/util";
 
 export const RL_MEM = new Map();   // ip -> { n, t }
 
-export function getCookie(req: any, name: any) {
+export function getCookie(req: Request, name: string) {
   const raw = req.headers.get("cookie") || "";
   for (const part of raw.split(";")) {
     const i = part.indexOf("=");
@@ -14,7 +14,7 @@ export function getCookie(req: any, name: any) {
   return "";
 }
 
-export async function sha256Hex(str: any) {
+export async function sha256Hex(str: string) {
   const d = await crypto.subtle.digest("SHA-256", enc.encode(str));
   return toHex(new Uint8Array(d));
 }
@@ -24,7 +24,7 @@ export async function sessionToken(env: Env) {
   return t.slice(0, 40);
 }
 
-export async function adminAuthed(request: any, url: any, env: any) {
+export async function adminAuthed(request: Request, url: URL, env: Env) {
   const k = url.searchParams.get("k");
   if (k && env.adminKey && k === env.adminKey) return true;
   const tok = getCookie(request, "adm");
@@ -32,7 +32,7 @@ export async function adminAuthed(request: any, url: any, env: any) {
   return tok === (await sessionToken(env));
 }
 
-export function rlTake(ip: any, limit: any) {
+export function rlTake(ip: string, limit: number) {
   const now = Date.now();
   const e = RL_MEM.get(ip);
   if (e && now - e.t < 600000) {
@@ -45,7 +45,7 @@ export function rlTake(ip: any, limit: any) {
   return true;
 }
 
-export function rlReset(ip: any) {
+export function rlReset(ip: string) {
   RL_MEM.delete(ip);
 }
 
@@ -54,7 +54,7 @@ export function newNonce() {
   return Date.now().toString(16) + "." + toHex(b);
 }
 
-export function randomPwd(n: any) {
+export function randomPwd(n: number) {
   const A = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const b = crypto.getRandomValues(new Uint8Array(n || 16));
   let s = "";

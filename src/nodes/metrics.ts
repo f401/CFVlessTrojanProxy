@@ -14,7 +14,7 @@ export const ERR_SEEN = new Map<string, number>();
  * @param {boolean} ok 是否成功
  * @returns {void}
  */
-export function rttMark(id: any, tag: any, ok: any) {
+export function rttMark(id: string | null, tag: string | null, ok: boolean) {
   if (!id || !tag) return;
   let bucket = S.rtt.get(id);
   if (!bucket) {
@@ -35,7 +35,7 @@ export function rttMark(id: any, tag: any, ok: any) {
  * @param {string} id 用户 UUID
  * @returns {void}
  */
-export function rttLearn(cf: any, tag: any, id: any) {
+export function rttLearn(cf: CfMeta | null, tag: string | null, id: string | null) {
   if (!cf || !tag || !id) return;
   const rtt = cf.clientTcpRtt;
   if (typeof rtt !== "number" || rtt <= 0) return;
@@ -68,18 +68,18 @@ export function rttLearn(cf: any, tag: any, id: any) {
  * @param {string} id 用户 UUID
  * @returns {Promise<object>} 入口标签 → RTT 信息
  */
-export async function loadRtt(env: Env, id: any) {
+export async function loadRtt(env: Env, id: string) {
   if (!id) return {};
   const mem = S.rtt.get(id) || {};
   if (!env.STATS) return mem;
   try {
     const snap = await getSnap(env);
-    let stored = (snap.rtt || {})[id] || {};
+    let stored: Record<string, RttEntry> = ((snap.rtt || {}) as Record<string, Record<string, RttEntry>>)[id] || {};
     if (!Object.keys(stored).length) {
       stored = (await kvGet<Record<string, RttEntry>>(env, `rtt:${id}`)) || {};
     }
     return { ...stored, ...mem };
-  } catch (e: any) {
+  } catch (e) {
     return mem;
   }
 }
@@ -121,7 +121,7 @@ export function hostKey(host: string): string {
  * @param {number} now 当前时间
  * @returns {number} 分数
  */
-export function hostScore(s: any, now: number): number {
+export function hostScore(s: HNStat, now: number): number {
   const fail = (s.bad + 1) / (s.n + 6);            // 小样本往坏里估
   const stale = now - (s.at || 0) > 6 * 3600e3 ? 300 : 0;   // 6 小时没更新就降权
   const ttfb = s.ttfb > 0 ? s.ttfb : 800;
@@ -134,7 +134,7 @@ export function hostScore(s: any, now: number): number {
  * @param {string} mode "lat" | "tput"
  * @returns {Array<{k:string,v:number}>} 升序
  */
-export function hostRank(host: string, mode: string) {
+export function hostRank(host: string, mode: Mode) {
   const fam = hostKey(host);
   if (!fam) return [];
   const mkey = fam + "|" + (mode === "lat" ? "lat" : "tput");
@@ -143,7 +143,7 @@ export function hostRank(host: string, mode: string) {
   if (hit && now - hit.t < 30000) return hit.v;
 
   const m = S.hostNode.get(fam);
-  const out: any[] = [];
+  const out: RankRow[] = [];
   if (m) {
     for (const [k, s] of m) {
       if (!S.alive.has(k) || isBlack(k) || isFrozen(k)) continue;
@@ -170,7 +170,7 @@ export function hostRank(host: string, mode: string) {
  * @param {string} mode 模式
  * @returns {string} 节点 key，没有返回 ""
  */
-export function hostUntried(host: string, mode: string) {
+export function hostUntried(host: string, mode: Mode) {
   const m = S.hostNode.get(hostKey(host));
   let best = "", bv = Infinity;
   for (const k of S.alive.keys()) {
@@ -188,7 +188,7 @@ export function hostUntried(host: string, mode: string) {
  * @param {string} [tag] 关联标签（域名或入口）
  * @returns {void}
  */
-export function logErr(msg: any, tag?: string) {
+export function logErr(msg: unknown, tag?: string | null) {
   const m = String(msg).slice(0, 200);
   // 同一个错误 5 秒内只记一次：节点大面积抖动时，每条连接都刷一行
   // console.error 既费 CPU 又把真正有用的日志冲掉（面板也只留 50 条）。
@@ -202,10 +202,10 @@ export function logErr(msg: any, tag?: string) {
   try {
     S.errs.push({ t: now0, m, tag: tag || "" });
     while (S.errs.length > 50) S.errs.shift();
-  } catch (e: any) {}
+  } catch (e) {}
   try {
     console.error("[err]", msg);
-  } catch (e: any) {}
+  } catch (e) {}
 }
 
 /* ==================================================================
@@ -222,7 +222,7 @@ export const HN_MAX_NODES = 12;    // 每个域名最多记 12 个节点
  * @param {{ok:boolean, bad:boolean, bytes:number, ttfb:number}} o 本次结果
  * @returns {void}
  */
-export function hostNodeMark(host: any, node: any, o: any) {
+export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
   if (!host || !node) return;
   const fam = hostKey(host);
   if (!fam) return;
@@ -255,7 +255,8 @@ export function hostNodeMark(host: any, node: any, o: any) {
   if (o.ok) s.ok += 1;
   if (o.bad) s.bad += 1;
   s.bytes += o.bytes || 0;
-  if (o.ttfb > 0) s.ttfb = s.ttfb ? Math.round(s.ttfb * 0.6 + o.ttfb * 0.4) : Math.round(o.ttfb);
+  const ttfb = o.ttfb || 0;
+  if (ttfb > 0) s.ttfb = s.ttfb ? Math.round(s.ttfb * 0.6 + ttfb * 0.4) : Math.round(ttfb);
   s.at = Date.now();
   // 排行缓存失效（两个模式各一份）
   S.hostRankCache.delete(fam + "|lat");
@@ -268,7 +269,7 @@ export function hostNodeMark(host: any, node: any, o: any) {
  * @param {boolean} ok 直连是否成功拿到数据
  * @returns {void}
  */
-export function hostDirectMark(host: any, ok: any) {
+export function hostDirectMark(host: string, ok: boolean) {
   if (!host) return;
   if (S.hostDirect.size >= HN_MAX_HOSTS) {
     let oldK = "", oldT = Infinity;
@@ -287,9 +288,9 @@ export function hostDirectMark(host: any, ok: any) {
  * @param {{ok:number,bad:number}} direct 直连对照
  * @returns {{kind:string, verdict:string, suspect:string[]}}
  */
-export function diagVerdict(rows: any, direct: any) {
-  const tested = (rows || []).filter((r: any) => r.n > 0);
-  const suspect = tested.filter((r: any) => r.bad >= 1 && r.bad * 2 >= r.n);
+export function diagVerdict(rows: Array<{ node: string; n: number; ok: number; bad: number; cc?: string }> | null, direct: HDirect | null) {
+  const tested = (rows || []).filter((r) => r.n > 0);
+  const suspect = tested.filter((r) => r.bad >= 1 && r.bad * 2 >= r.n);
   const d = direct || { ok: 0, bad: 0 };
 
   if (!tested.length) {
@@ -306,9 +307,9 @@ export function diagVerdict(rows: any, direct: any) {
       suspect: [],
     };
   }
-  const names = suspect.map((r: any) => r.node);
+  const names = suspect.map((r) => r.node);
   if (suspect.length < tested.length) {
-    const ccs = [...new Set(suspect.map((r: any) => String(r.cc || "").toUpperCase()).filter(Boolean))];
+    const ccs = [...new Set(suspect.map((r) => String(r.cc || "").toUpperCase()).filter(Boolean))];
     if (ccs.length === 1 && suspect.length >= 2) {
       return {
         kind: "geo",

@@ -35,6 +35,35 @@ interface Env {
   [k: string]: any;
 }
 
+/** ip-api 批量查询返回的一行 */
+interface IpApiRow { status?: string; countryCode?: string }
+
+/** 站点诊断的一行（真实样本或主动探测） */
+interface DiagRow { node: string; n: number; ok: number; bad: number; cc?: string; bytes?: number; ttfb?: number }
+
+/** 控制页模板的数据 */
+interface PanelInfo {
+  regions: string[]; curPx: string; curLat: string; curTput: string; colo: string;
+  cnt: Record<string, unknown>;
+  funnel: string; aliveCount: number;
+  used: string; today: string; quota: string; expire: string; policy: string;
+  [k: string]: unknown;
+}
+
+/** SNI 探测结果 */
+interface SniProbe { err: string; hs?: number; head?: string }
+
+/** DNS-over-HTTPS 的 Answer 元素 */
+interface DohAnswer { type: number; data: string }
+
+/** 订阅里的入口节点 */
+interface SubNode { host: string; port: number; tls: boolean; name: string; cc?: string }
+interface RegionEntry { name: string; proto: string; server: string; port: number; path: string; cc?: string }
+interface RankedNode extends SubNode { _i?: number; _rtt?: number | null; _colo?: string }
+
+/** 选路模式 */
+type Mode = "lat" | "tput";
+
 /** 单个节点的统计（NSTAT 的值） */
 interface NodeStats {
   ok: number;
@@ -123,6 +152,29 @@ interface Seed {
   cnt?: Record<string, any> | null;
   lastColo?: string;
 }
+
+
+/** 本 isolate 的本地计数 */
+interface StatsLocal { up: number; down: number; conns: number; first: number; last: number }
+
+/** 对外展示的用量视图（DO / KV / 本地合并后） */
+interface StatsView {
+  up: number; down: number; conns: number;
+  todayUp: number; todayDown: number;
+  firstSeen: number | null; lastSeen: number | null;
+  isolateLocal?: { up: number; down: number; conns: number };
+  backend?: string; persisted?: boolean;
+  [k: string]: unknown;
+}
+
+/** 待推送的计量增量 */
+interface PendEntry { up: number; down: number; conns: number }
+
+/** 节点排行一行 */
+interface RankRow { k: string; v: number }
+
+/** 面板块速率限制 */
+interface RlBucket { n: number; t: number }
 
 /** 采样窗口 */
 interface ConnWin {
@@ -213,6 +265,16 @@ interface PoolEntry {
 }
 
 /** RTT 学习表里的一条（按入口标签聚合） */
+/** request.cf 里我们用到的字段 */
+interface CfMeta {
+  colo?: string;
+  clientTcpRtt?: number;
+  asn?: number;
+  city?: string;
+  edgeL4?: { deliveryRate?: number };
+  [k: string]: unknown;
+}
+
 interface RttEntry {
   rtt: number;
   colo?: string;
@@ -234,9 +296,9 @@ interface SnapDoc {
   v: number;
   ts: number;
   date: string;
-  stats: Record<string, { up: number; down: number; conns: number; first?: number; last?: number }>;
-  rtt: Record<string, RttEntry>;
-  errs: any[];
+  stats: Record<string, StatsLocal>;
+  rtt: Record<string, Record<string, RttEntry>>;
+  errs: ErrItem[];
   cnt?: Record<string, number>;
 }
 
@@ -261,9 +323,12 @@ interface MeterBody {
   down?: number;
   conns?: number;
   first?: number;
-  c?: Record<string, any>;
+  c?: Record<string, number | string>;
   spd?: Record<string, NodeSnap>;
   e?: ErrItem[];
+  /** 老快照：全局计数 / 节点快照 */
+  g?: Record<string, number>;
+  s?: Record<string, NodeSnap>;
 }
 
 /** 一条错误日志 */

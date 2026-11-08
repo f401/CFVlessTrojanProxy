@@ -10,7 +10,7 @@ export async function admin(c: RouteCtx): Promise<Response> {
       /* ---------- 管理面板（会话登录） ---------- */
       if (first === "admin") {
         const adminKey = String(env.adminKey || "");
-        const safeHtml = (body: any, status: any = 200) =>
+        const safeHtml = (body: string, status = 200) =>
           new Response(body, {
             status: status || 200,
             headers: {
@@ -114,7 +114,7 @@ export async function admin(c: RouteCtx): Promise<Response> {
         // 用量从 Meter DO 取（和 /stats 同一个口径）。
         // 以前读的是 `stats:<date>` 这个早已废弃的键 —— 迁移到 snap/DO 之后
         // 它再也没人写，"今日用量" 永远是 0。
-        const statsMap: Record<string, any> = {};
+        const statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }> = {};
         for (const u of users.list) {
           try {
             const s = await readStats(env, u.id);
@@ -122,7 +122,7 @@ export async function admin(c: RouteCtx): Promise<Response> {
               up: s.up || 0, down: s.down || 0,
               todayUp: s.todayUp || 0, todayDown: s.todayDown || 0,
             };
-          } catch (e: any) {}
+          } catch (e) {}
         }
         return safeHtml(renderAdmin(url, users, statsMap));
       }

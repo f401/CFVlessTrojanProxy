@@ -1,3 +1,5 @@
+import { errMsg } from "../core/util";
+
 import { SC } from "../core/const";
 import { S } from "../core/state";
 import { dial } from "../proxy/dial";
@@ -29,7 +31,7 @@ export async function proxyip(c: UserCtx): Promise<Response> {
                 const j = await r.json();
                 g = j && j.g;
                 nodesSnap = (j && j.s) || {};
-              } catch (e: any) {}
+              } catch (e) {}
             }
             return json({ date: (g && g.d) || "", cnt: g || {}, nodes: nodesSnap, local: cntView(), localSpd: spdSnapshot(), now: Date.now() });
           }
@@ -52,12 +54,12 @@ export async function proxyip(c: UserCtx): Promise<Response> {
             S.scanN = Number.isFinite(sn) && sn > 12 ? sn : 12;
             if (Date.now() - S.lastManual > 5000) {
               S.lastManual = Date.now();
-              await cronScan(env).catch((e: any) => logErr("cron: " + (e && e.message ? e.message : e)));
+              await cronScan(env).catch((e) => logErr("cron: " + (errMsg(e))));
             }
           }
           const px = await pxGet(env);
           const alive = px.alive || [];
-          const stat: any = px.state || {};
+          const stat: Record<string, unknown> = px.state || {};
           const aliveKeys = (alive || []).map((x) => x.h + ":" + x.p);
           const nsMap = nsOf(aliveKeys);
           const modeQ = url.searchParams.get("mode") === "lat" ? "lat" : "tput";
@@ -65,7 +67,7 @@ export async function proxyip(c: UserCtx): Promise<Response> {
           const blacklist = [...S.nstat.entries()].filter(([, s]) => s.blackUntil > Date.now()).map(([k]) => k);
           const rows = (alive || []).map((x) => {
             const k = x.h + ":" + x.p;
-            const ns: any = (nsMap as Record<string, any>)[k] || {};
+            const ns: Record<string, number> = (nsMap as Record<string, Record<string, number>>)[k] || {};
             return {
               node: k,
               ms: x.ms,
@@ -86,7 +88,7 @@ export async function proxyip(c: UserCtx): Promise<Response> {
             };
           }).sort((a, b) => (modeQ === "lat" ? a.lat - b.lat : a.tput - b.tput));
 
-          const out: any = {
+          const out: Record<string, unknown> = {
             mode: String(env.proxyip || "").trim().toLowerCase() === "auto" ? "auto" : "manual",
             colo: stat.colo || "??",
             cnt: cntView(),
@@ -173,7 +175,7 @@ export async function debug(c: UserCtx): Promise<Response> {
             for (const a of alive) ccOf[a.h + ":" + a.p] = a.cc || "";
 
             const fam = hostKey(diagHost);
-            const rows: any[] = [];
+            const rows: DiagRow[] = [];
             const m = S.hostNode.get(fam);
             if (m) {
               for (const [node, s] of m) {
@@ -186,7 +188,7 @@ export async function debug(c: UserCtx): Promise<Response> {
 
             // 主动探测：不信历史样本时，直接拿每个节点试一次
             // （只验"能不能把这个 SNI 转出去"，看不到 HTTP 状态）
-            let probe: any[] | null = null;
+            let probe: Array<{ node: string; cc: string } & SniProbe> | null = null;
             if (url.searchParams.get("probe") === "1") {
               probe = await Promise.all(
                 alive.slice(0, 8).map(async (a) => {
@@ -236,7 +238,7 @@ export async function debug(c: UserCtx): Promise<Response> {
             return json({ probe: pr, ok: !!r, result: r });
           }
           if (url.searchParams.get("refill") === "1") {
-            const counts: Record<string, any> = {};
+            const counts: Record<string, { lines: number; ok: number }> = {};
             const merged = new Map();
             let total = 0;
             for (const src of POOL_SOURCES) {
@@ -253,7 +255,7 @@ export async function debug(c: UserCtx): Promise<Response> {
                 } else {
                   lines = -r.status;
                 }
-              } catch (e: any) {
+              } catch (e) {
                 lines = -1;
               }
               counts[src] = { lines, ok: one.size };
@@ -264,7 +266,7 @@ export async function debug(c: UserCtx): Promise<Response> {
               if (!merged.has(h + ":443")) merged.set(h + ":443", { h, p: 443, src: "builtin" });
             }
             // 默认提交（debug 端点已有 UUID 鉴权）；&dry=1 只看不写，&force=1 无视线池 60% 守卫
-            let commit: any = { ok: true, skipped: true };
+            let commit: Record<string, unknown> = { ok: true, skipped: true };
             if (merged.size && url.searchParams.get("dry") !== "1") {
               commit = await commitPool(env, [...merged.values()], url.searchParams.get("force") === "1");
             }
@@ -312,23 +314,23 @@ export async function debug(c: UserCtx): Promise<Response> {
               });
               seeded = await r.json();
               S.meterCache.set(id, { v: seeded, t: Date.now() });
-            } catch (e: any) {
-              return json({ ok: false, error: String((e && e.message) || e) });
+            } catch (e) {
+              return json({ ok: false, error: String(errMsg(e)) });
             }
             return json({ ok: true, seeded });
           }
 
           const h = url.searchParams.get("host") || "x.com";
-          const out: any = { host: h, aaaa: null, a: null, v6Connect: null };
-          try { out.aaaa = await resolveAAAA(h); } catch (e: any) { out.aaaa = "ERR " + e.message; }
-          try { out.a = await dohQuery(h, "A"); } catch (e: any) { out.a = "ERR " + e.message; }
+          const out: Record<string, unknown> = { host: h, aaaa: null, a: null, v6Connect: null };
+          try { out.aaaa = await resolveAAAA(h); } catch (e) { out.aaaa = "ERR " + errMsg(e); }
+          try { out.a = await dohQuery(h, "A"); } catch (e) { out.a = "ERR " + errMsg(e); }
           if (out.aaaa && typeof out.aaaa === "string" && out.aaaa.includes(":")) {
             try {
               const s6 = await connect({ hostname: expandV6(out.aaaa), port: 443 });
               out.v6Connect = "ok";
-              try { s6.close(); } catch (e: any) {}
-            } catch (e: any) {
-              out.v6Connect = "ERR " + (e && e.message ? e.message : e);
+              try { s6.close(); } catch (e) {}
+            } catch (e) {
+              out.v6Connect = "ERR " + (errMsg(e));
             }
           }
           return json(out);

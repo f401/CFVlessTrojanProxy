@@ -21,10 +21,10 @@ export class Meter {
       // 会被吃掉 4 倍；一个持续活跃的 isolate 就要 3.4 万行/天。
       const all = await this.st.storage.get("a");
       if (all) {
-        const o = await unseal(env, all);
+        const o = await unseal<MeterBody>(env, all);
         if (o && typeof o === "object") {
           if (o.c && typeof o.c === "object") this.c = { ...this.c, ...o.c };
-          if (o.g && typeof o.g === "object") this.g = o.g;
+          if (o.g && typeof o.g === "object") this.g = o.g as CounterDoc;
           if (o.s && typeof o.s === "object") this.s = o.s;
           if (Array.isArray(o.e)) this.e = o.e;
         }
@@ -34,29 +34,29 @@ export class Meter {
       let migrated = false;
       const v = await this.st.storage.get("c");
       if (v) {
-        const obj = await unseal(env, v);      // 兼容老的明文对象
+        const obj = await unseal<Record<string, number>>(env, v);      // 兼容老的明文对象
         if (obj) { this.c = { ...this.c, ...obj }; migrated = true; }
       }
       const ev = await this.st.storage.get("e");
       if (ev) {
-        const o4 = await unseal(env, ev);
+        const o4 = await unseal<ErrItem[]>(env, ev);
         if (Array.isArray(o4)) { this.e = o4; migrated = true; }
       }
       const sv = await this.st.storage.get("s");
       if (sv) {
-        const o3 = await unseal(env, sv);
+        const o3 = await unseal<Record<string, NodeSnap>>(env, sv);
         if (o3 && typeof o3 === "object") { this.s = o3; migrated = true; }
       }
       const gv = await this.st.storage.get("g");
       if (gv) {
-        const obj2 = await unseal(env, gv);
-        if (obj2 && typeof obj2 === "object") { this.g = obj2; migrated = true; }
+        const obj2 = await unseal<Record<string, number>>(env, gv);
+        if (obj2 && typeof obj2 === "object") { this.g = obj2 as CounterDoc; migrated = true; }
       }
       if (migrated) {
         try {
           await this.save();
           for (const k of ["c", "e", "s", "g"]) await this.st.storage.delete(k);
-        } catch (e: any) {}
+        } catch (e) {}
       }
     });
   }
@@ -90,11 +90,11 @@ export class Meter {
       let d: MeterBody = {};
       try {
         d = await req.json();
-      } catch (e: any) {}
+      } catch (e) {}
       const c = this.c;
       // 计数搭便车：同一次 /add 请求把 isolate 的日计数也带上来，0 额外请求
       if (d.c && typeof d.c === "object") {
-        const d0 = d.c.d || new Date().toISOString().slice(0, 10);
+        const d0 = String(d.c.d || new Date().toISOString().slice(0, 10));
         if (!this.g || this.g.d !== d0) this.g = { d: d0 };
         for (const [k, v] of Object.entries(d.c)) {
           if (k === "d" || !(Number(v) > 0)) continue;
@@ -143,7 +143,7 @@ export class Meter {
       let d: MeterBody = {};
       try {
         d = await req.json();
-      } catch (e: any) {}
+      } catch (e) {}
       if ((this.c.up || 0) + (this.c.down || 0) + (this.c.conns || 0) === 0) {
         this.c.up = Number(d.up) || 0;
         this.c.down = Number(d.down) || 0;
@@ -160,7 +160,7 @@ export class Meter {
       let d: MeterBody = {};
       try {
         d = await req.json();
-      } catch (e: any) {}
+      } catch (e) {}
       const cur = (this.c.up || 0) + (this.c.down || 0);
       const want = (Number(d.up) || 0) + (Number(d.down) || 0);
       if (want > cur) {

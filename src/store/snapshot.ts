@@ -15,7 +15,7 @@ export const SNAP_TTL = 300000;
 export async function usageSnapGet(env: Env) {
   try {
     return (await kvGet<UsageSnap>(env, USAGE_SNAP_KEY)) || null;
-  } catch (e: any) {
+  } catch (e) {
     return null;
   }
 }
@@ -26,7 +26,7 @@ export async function usageSnapWrite(env: Env) {
   // 灾备快照，2 小时一次足够（cron 是 30 分钟一轮，别每轮都写一遍）
   if (Date.now() - (prev.ts || 0) < 2 * 3600e3) return;
   const { list } = await loadUsers(env);
-  const out: any = { ts: Date.now(), users: {} };
+  const out: UsageSnap = { ts: Date.now(), users: {} };
   for (const u of list) {
     const v = await meterGet(env, u.id);
     const old = (prev.users || {})[u.id];
@@ -41,12 +41,12 @@ export async function usageSnapWrite(env: Env) {
   if (!Object.keys(out.users).length) return;
   try {
     await kvSet(env, USAGE_SNAP_KEY, out, { expirationTtl: 86400 * 90 });
-  } catch (e: any) {
+  } catch (e) {
     /* 额度耗尽：下次再写 */
   }
 }
 
-export async function restoreUsage(env: Env, id: any, snap?: any) {
+export async function restoreUsage(env: Env, id: string, snap?: UsageSnap) {
   if (!env || !env.METER) return null;
   const s = snap || (await usageSnapGet(env));
   const u = s && s.users && s.users[id];
@@ -58,7 +58,7 @@ export async function restoreUsage(env: Env, id: any, snap?: any) {
     const v = await r.json();
     S.meterCache.set(id, { v, t: Date.now() });
     return v;
-  } catch (e: any) {
+  } catch (e) {
     return null;
   }
 }
@@ -85,7 +85,7 @@ export async function flushSnap(env: Env, force?: boolean): Promise<void> {
   if (now - (prev.ts || 0) < FLUSH_GAP) return;
 
   const day = new Date().toISOString().slice(0, 10);
-  const next = {
+  const next: SnapDoc = {
     v: 1,
     ts: now,
     date: day,
@@ -134,7 +134,7 @@ export async function flushSnap(env: Env, force?: boolean): Promise<void> {
     S.stats.clear();
     S.rtt.clear();
     S.errs.length = 0;
-  } catch (e: any) {
+  } catch (e) {
     /* 额度耗尽：保持内存，下次再试 */
   }
 }
@@ -144,10 +144,10 @@ export async function getSnap(env: Env, fresh?: boolean) {
   let v = null;
   try {
     v = (await kvGet<SnapDoc>(env, "snap")) || null;
-  } catch (e: any) {
+  } catch (e) {
     v = null;
   }
-  const out = v || { v: 1, date: "", stats: {}, rtt: {}, errs: [] };
+  const out: SnapDoc = (v as SnapDoc) || { v: 1, ts: 0, date: "", stats: {}, rtt: {}, errs: [] };
   S.snapCache = { v: out, t: Date.now() };
   return out;
 }

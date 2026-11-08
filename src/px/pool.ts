@@ -1,3 +1,5 @@
+import { errMsg } from "../core/util";
+
 import { SEED_WRITE_GAP } from "../core/const";
 import { HIST_BASE, HIST_N, SC } from "../core/const";
 import { logErr } from "../nodes/metrics";
@@ -23,7 +25,7 @@ export const SEED_VER = 6;
 
 export { SC, HIST_BASE, HIST_N } from "../core/const";
 
-export const MODES = ["lat", "tput"];
+export const MODES: Mode[] = ["lat", "tput"];
 
 
 
@@ -44,15 +46,15 @@ export const BOOT = [
  * @param {number} [n] 增量
  * @returns {void}
  */
-export function cnt(k: any, n: number = 1) {
+export function cnt(k: string, n: number = 1) {
   if (!S.cntKeys.includes(k)) {
-    try { console.error("[cnt] unknown key", k); } catch (e: any) {}
+    try { console.error("[cnt] unknown key", k); } catch (e) {}
     return;
   }
   const d = new Date().toISOString().slice(0, 10);
-  if (S.cnt.d !== d) {
-    S.cnt = { d, conn: 0, direct: 0, node: 0, eCloseD: 0, eCloseP: 0, sw: 0, noCand: 0, tput: 0, stall: 0, cut: 0, dead: 0, noPayload: 0, noAuth: 0, wsFail: 0 };
-    S.cntSent = { conn: 0, direct: 0, node: 0, eCloseD: 0, eCloseP: 0, sw: 0, noCand: 0, tput: 0, stall: 0, cut: 0, dead: 0, noPayload: 0, noAuth: 0, wsFail: 0 };
+  if (S.cntDay !== d) {
+    S.cntDay = d;
+    for (const key of S.cntKeys) { S.cnt[key] = 0; S.cntSent[key] = 0; }
   }
   S.cnt[k] = (S.cnt[k] || 0) + (n === undefined ? 1 : n);
 }
@@ -62,7 +64,7 @@ export function cnt(k: any, n: number = 1) {
  * @returns {object} { "h:p": {med,p90,cap,n,ts,tf,at} }
  */
 export function spdSnapshot() {
-  const out: Record<string, any> = {};
+  const out: Record<string, NodeSnap> = {};
   let i = 0;
   for (const [k, s] of S.nstat) {
     const n = (s.tS || 0) + (s.tF || 0);
@@ -89,7 +91,7 @@ export function spdSnapshot() {
  * @param {string} id 用户 UUID
  * @returns {void}
  */
-export function kickFlush(env: Env, id: any) {
+export function kickFlush(env: Env, id: string | null) {
   if (!env || !id || !env.METER) return;
   if (!S.pend.has(id)) S.pend.set(id, { up: 0, down: 0, conns: 0 });
   scheduleFlush(env, 0);
@@ -97,11 +99,11 @@ export function kickFlush(env: Env, id: any) {
 
 /** 取出"上次落盘之后"的增量，并把基线推到当前值 */
 export function cntView() {
-  return { ...S.cnt, d: S.cnt.d || new Date().toISOString().slice(0, 10) };
+  return { ...S.cnt, d: S.cntDay || new Date().toISOString().slice(0, 10) };
 }
 
 export function cntDelta() {
-  const out: Record<string, any> = {};
+  const out: Record<string, number> = {};
   for (const k of S.cntKeys) {
     const v = (S.cnt[k] || 0) - (S.cntSent[k] || 0);
     if (v) out[k] = v;
@@ -110,7 +112,7 @@ export function cntDelta() {
   return out;
 }
 
-export const keyOf = (x: any) => x.h + ":" + x.p;
+export const keyOf = (x: NodeEntry) => x.h + ":" + x.p;
 
 /** 候选项池：内存 → KV(poolGen) → 空；空时由 cronScan 触发重建 */
 export async function ensurePool(env: Env) {
@@ -124,12 +126,12 @@ export async function ensurePool(env: Env) {
       S.pool = v;
       S.poolGen = gen;
     }
-  } catch (e: any) {}
+  } catch (e) {}
   return S.pool;
 }
 
 /** 两阶段提交新候选池：先写新代际键，成功后再改 seed.poolGen */
-export async function commitPool(env: Env, fresh: any, allowShrink = false) {
+export async function commitPool(env: Env, fresh: PoolEntry[], allowShrink = false) {
   const oldN = S.pool.length || Number(S.seed.poolN) || 0;
   const newN = fresh.length;
   if (!newN) return { ok: false, reason: "empty" };
@@ -139,8 +141,8 @@ export async function commitPool(env: Env, fresh: any, allowShrink = false) {
   const gen = (S.poolGen || S.seed.poolGen || 0) + 1;
   try {
     await kvSet(env, "px:pool:" + gen, fresh, { expirationTtl: PX_TTL });
-  } catch (e: any) {
-    return { ok: false, reason: "kv " + String((e && e.message) || e).slice(0, 60) };
+  } catch (e) {
+    return { ok: false, reason: "kv " + String(errMsg(e)).slice(0, 60) };
   }
   S.pool = fresh;
   S.poolGen = gen;
@@ -227,8 +229,8 @@ export async function pxGet(env: Env) {
  * @param {Iterable<string>} keys "host:port" 列表
  * @returns {object} "host:port" → 统计明细
  */
-export function nsOf(keys: any) {
-  const m: Record<string, any> = {};
+export function nsOf(keys: string[]) {
+  const m: Record<string, Record<string, number>> = {};
   let i = 0;
   for (const k of keys) {
     if (++i > 64) break;                       // 面板最多展示几十行，别被异常输入拖死
@@ -252,11 +254,11 @@ export function nsOf(keys: any) {
 }
 
 /** 兼容旧调用：只改内存，不落盘 */
-export async function pxSet(env: Env, patch: any) {
+export async function pxSet(env: Env, patch: { cur?: string | null; alive?: NodeEntry[] }) {
   if (!patch) return pxGet(env);
   if (typeof patch.cur === "string") { S.curs.tput = patch.cur; S.curs.lat = patch.cur; }
   if (Array.isArray(patch.alive)) {
-    S.alive = new Map(patch.alive.map((x: any) => [keyOf(x), x]));
+    S.alive = new Map(patch.alive.map((x) => [keyOf(x), x]));
   }
   return pxGet(env);
 }
@@ -308,7 +310,7 @@ export async function cronScan(env: Env) {
   for (const x of hits) {
     if (!x) continue;
     const k = keyOf(x);
-    S.alive.set(k, { h: x.h, p: x.p, cc: (x as any).cc || ((S.alive.get(k) || {}) as NodeEntry).cc || "", ms: x.ms, src: "probe" });
+    S.alive.set(k, { h: x.h, p: x.p, cc: (x as { cc?: string }).cc || ((S.alive.get(k) || {}) as NodeEntry).cc || "", ms: x.ms, src: "probe" });
     nsLatency(k, x.ms);
     nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
   }

@@ -20,7 +20,7 @@ export async function loadUsers(env: Env): Promise<Auth> {
   let managed: Partial<UserRec>[] = [];
   try {
     managed = (await kvGet<UserRec[]>(env, "users")) || [];
-  } catch (e: any) {
+  } catch (e) {
     managed = [];
   }
 
@@ -90,8 +90,8 @@ export function invalidateUsers() {
  * @param {Array<object>} list 完整用户列表
  * @returns {Promise<void>}
  */
-export async function saveUsers(env: Env, list: any) {
-  const clean = list.filter((x: any) => x.managed).map((x: any) => ({
+export async function saveUsers(env: Env, list: UserRec[]) {
+  const clean = list.filter((x) => x.managed).map((x) => ({
     id: x.id,
     pwd: x.pwd || "",
     note: x.note || "",
@@ -113,7 +113,7 @@ export async function saveUsers(env: Env, list: any) {
  * @param {number} to 结束下标（不含）
  * @returns {boolean} 全部是 0-9a-fA-F 时返回 true
  */
-export function isHexAscii(u8: any, from: any, to: any) {
+export function isHexAscii(u8: Uint8Array, from: number, to: number) {
   for (let i = from; i < to; i++) {
     const c = u8[i];
     const ok = (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x66) || (c >= 0x41 && c <= 0x46);
@@ -127,7 +127,7 @@ export function isHexAscii(u8: any, from: any, to: any) {
  * @param {Uint8Array} u8 客户端首个载荷
  * @returns {'vless'|'trojan'} 协议名
  */
-export function detectProtocol(u8: any) {
+export function detectProtocol(u8: Uint8Array) {
   if (u8.length >= 58 && u8[56] === 0x0d && u8[57] === 0x0a && isHexAscii(u8, 0, 56)) {
     return "trojan";
   }

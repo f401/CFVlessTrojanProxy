@@ -1,3 +1,5 @@
+import { errMsg } from "./core/util";
+
 
 import { handleUpgrade } from "./proxy/session";
 import { Meter } from "./store/meter";
@@ -99,8 +101,8 @@ export default {
         default:
           return new Response("Not Found", { status: 404 });
       }
-    } catch (e: any) {
-      const msg = e && e.message ? e.message : String(e);
+    } catch (e) {
+      const msg = errMsg(e);
       logErr(`router: ${msg}`);
       let dbg = "";
       try {

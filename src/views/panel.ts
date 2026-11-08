@@ -19,7 +19,7 @@ import { P_T, VERSION, enc, toHex } from "../core/util";
  * @param {object} info 展示用信息
  * @returns {string} HTML
  */
-export function renderHtml(env: Env, url: any, id: any, host: any, key: any, info: any) {
+export function renderHtml(env: Env, url: URL, id: string, host: string, key: string, info: PanelInfo) {
   const base = `${url.origin}/${id}`;
   const kq = key ? `?k=${encodeURIComponent(key)}` : "";
   const kk = key ? "&k=" + encodeURIComponent(key) : "";
@@ -29,13 +29,13 @@ export function renderHtml(env: Env, url: any, id: any, host: any, key: any, inf
   const regions = i.regions || [];
   const nodeCount = loadNodes(env, host).length * protos.length + regions.length * protos.length;
 
-  const row = (k: any, v: any, mono: any) =>
+  const row = (k: string, v: string, mono = false) =>
     `<tr><td class="k">${k}</td><td class="${mono ? "u" : ""}">${v}</td></tr>`;
 
-  const link = (path: any, desc: any, tag: any) =>
+  const link = (path: string, desc: string, tag: string) =>
     `<tr><td class="t">${tag || "GET"}</td><td class="u"><a href="${base}${path}${kq}" target="_blank">${base}${path}${kq}</a></td><td class="d">${desc}</td></tr>`;
 
-  const topLink = (path: any, desc: any, tag: any) =>
+  const topLink = (path: string, desc: string, tag: string) =>
     `<tr><td class="t">${tag || "GET"}</td><td class="u"><a href="${url.origin}${path}${kq}" target="_blank">${url.origin}${path}${kq}</a></td><td class="d">${desc}</td></tr>`;
 
   return `<!doctype html><html lang="zh"><meta charset="utf-8">
@@ -71,7 +71,7 @@ li{margin:3px 0}
 <h2>身份</h2>
 <table>
 ${row("UUID", id, true)}
-${row("密码", i[P_T + "Pwd"] || "（未配置）", true)}
+${row("密码", String(i[P_T + "Pwd"] || "（未配置）"), true)}
 ${row("WS 路径", "<code>/?ed=2560</code>", false)}
 ${row("协议", protos.join(" + "), false)}
 </table>
@@ -198,7 +198,7 @@ ${row("?k=", "页面口令（配置了 pageKey 才生效）", false)}
  * @param {string} [err] 错误提示
  * @returns {string} HTML
  */
-export function renderLogin(nonce: any, err: any) {
+export function renderLogin(nonce: string, err?: string | null) {
   return `<!doctype html><html lang="zh"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>登录</title>
@@ -271,9 +271,9 @@ export function renderAdminHint() {
  * @param {Map<string,object>} statsMap 用量表
  * @returns {string} HTML
  */
-export function renderAdmin(url: any, users: any, statsMap: any) {
+export function renderAdmin(url: URL, users: { list: UserRec[] }, statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }>) {
   const rows = users.list
-    .map((u: any) => {
+    .map((u: UserRec) => {
       const s = statsMap[u.id] || {};
       const used = fmtBytes((s.up || 0) + (s.down || 0));
       const today = fmtBytes((s.todayUp || 0) + (s.todayDown || 0));
@@ -298,7 +298,7 @@ export function renderAdmin(url: any, users: any, statsMap: any) {
     })
     .join("");
 
-  const total = users.list.filter((x: any) => x.enabled !== false).length;
+  const total = users.list.filter((x) => x.enabled !== false).length;
 
   return `<!doctype html><html lang="zh"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -367,12 +367,12 @@ ${rows || '<tr><td colspan="7" class="mu">还没有用户</td></tr>'}
  * @param {object} learned RTT 学习结果
  * @returns {string} HTML
  */
-export function renderStatsHtml(env: Env, id: any, s: any, learned: any, alive: any, nsMap: any) {
+export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Record<string, RttEntry>, alive: NodeEntry[], nsMap: Record<string, Record<string, number>>) {
   const usedBytes = (s.up || 0) + (s.down || 0);
   const total = effectiveQuota(env, usedBytes);
   const pct = total > 0 ? Math.min(100, Math.round((usedBytes / total) * 100)) : 0;
 
-  const rttRows = (Object.entries(learned || {}) as [string, any][])
+  const rttRows = (Object.entries(learned || {}) as [string, RttEntry][])
     .sort((a, b) => a[1].rtt - b[1].rtt)
     .map(([tag, v]) => {
       const city = v.colo ? `${v.colo}${(COLO_CITY as Record<string, string>)[v.colo] ? "-" + (COLO_CITY as Record<string, string>)[v.colo] : ""}` : "-";
@@ -384,7 +384,7 @@ export function renderStatsHtml(env: Env, id: any, s: any, learned: any, alive: 
     .join("");
 
   const nodeRows = (alive || [])
-    .map((x: any) => {
+    .map((x: NodeEntry) => {
       const k = x.h + ":" + x.p;
       const a1 = (S.nstat.get(k) || ZERO_STAT);
       const b1 = (nsMap && nsMap[k]) || {};
@@ -399,10 +399,10 @@ export function renderStatsHtml(env: Env, id: any, s: any, learned: any, alive: 
       const kbps = st.bps ? Math.round(st.bps / 1024) + " KB/s" : "未用";
       return { x, k, score: scoreMerged(k, nsMap), kbps, rate, ok, bad, cc: x.cc || "" };
     })
-    .sort((a: any, b: any) => a.score - b.score)
+    .sort((a, b) => a.score - b.score)
     .slice(0, 10)
     .map(
-      (n: any) =>
+      (n) =>
         `<tr><td class="u">${n.k}</td><td>${n.cc || "-"}</td><td>${n.x.ms} ms</td><td>${n.kbps}</td><td>${n.rate}</td><td><b>${Math.round(n.score)}</b></td></tr>`
     )
     .join("");

@@ -1,3 +1,7 @@
+import type { Socket } from "cloudflare:sockets";
+import { errMsg } from "../core/util";
+import { pipeBack } from "./tunnel";
+
 import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../px/pool";
 import { availOf, markSeedDirty, nsFail, nsOk, nsSpeed, nsStall } from "../nodes/score";
@@ -28,7 +32,7 @@ export class Connection {
   ipTag: string;
   node = "";
   host = "";              // 目标域名（按站点的节点画像用）
-  mode: string;
+  mode: Mode;
   trial = false;
   via = "direct";
 
@@ -53,9 +57,9 @@ export class Connection {
   counted = 0;
 
   // —— 上游 ——
-  sock: any = null;
-  writer: any = null;
-  header: any = null;
+  sock: Socket | null = null;
+  writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
+  header: Uint8Array | null = null;
   headerSent = false;
 
   // —— 结算 ——
@@ -74,7 +78,7 @@ export class Connection {
   env: Env;
   ctx: ExecutionContext;
 
-  constructor(env: Env, ctx: ExecutionContext, mode: string, ipTag: string) {
+  constructor(env: Env, ctx: ExecutionContext, mode: Mode, ipTag: string) {
     this.env = env;
     this.ctx = ctx;
     this.mode = mode;
@@ -113,8 +117,8 @@ export class Connection {
 
       this.flush(false);
       return await this.backpressure(ws);
-    } catch (e: any) {
-      logErr("tick: " + ((e && e.message) || e), this.node || "");
+    } catch (e) {
+      logErr("tick: " + (errMsg(e)), this.node || "");
       return true;   // 统计出错绝不影响数据面
     }
   }
@@ -135,7 +139,7 @@ export class Connection {
       if ((ws.bufferedAmount || 0) > WS_MAX_BUFFER || Date.now() > deadline) {
         cnt("stall");
         this.stallMs += Date.now() - t0;
-        try { ws.close(1011, "stall"); } catch (e: any) {}
+        try { ws.close(1011, "stall"); } catch (e) {}
         closeQuietly(this.sock);
         return false;
       }
@@ -175,8 +179,8 @@ export class Connection {
         if (this.host) {
           if (this.node) {
             hostNodeMark(this.host, this.node, {
-              ok: !this.failed && this.down > 0,
-              bad: this.failed,
+              ok: !this.failed && this.down > 0 ? 1 : 0,
+              bad: this.failed ? 1 : 0,
               bytes: this.down,
               ttfb: this.ttfb,
             });

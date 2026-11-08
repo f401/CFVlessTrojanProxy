@@ -1,3 +1,4 @@
+import type { Connection } from "../proxy/connection";
 import { SC } from "../core/const";
 import { hostRank, hostUntried, logErr } from "./metrics";
 import { MODES, aliveList, cnt, keyOf, pxGet } from "../px/pool";
@@ -9,7 +10,7 @@ import { S } from "../core/state";
 /* 节点选择：挑谁 / 何时换 / 失败怎么办 */
 export class Selector {
 /** 按国家挑一个节点（地区出口） */
-async region(env: Env, cc: any) {
+async region(env: Env, cc: string | null) {
   const want = String(cc || "").toUpperCase();
   if (!want) return null;
   const list = await aliveList(env);
@@ -25,7 +26,7 @@ async region(env: Env, cc: any) {
  *   ② 冷启动（这个站试过的节点 <3）：一半概率去试一个没试过的
  *   ③ 都没有 → 回到全局游标 + 影子流量
  */
-pick(env: Env, mode: any, st: any) {
+pick(env: Env, mode: Mode, st: Connection | null) {
   const m = mode === "lat" ? "lat" : "tput";
   const cur = S.curs[m] || bestFor(m);
   if (!cur) cnt("noCand");
@@ -86,7 +87,7 @@ pick(env: Env, mode: any, st: any) {
 }
 
 /** 待测队列：样本不足的节点，最久没试的优先 */
-trial(mode: any) {
+trial(mode: Mode) {
   const pool = [];
   for (const k of S.alive.keys()) {
     if (k === S.curs[mode] || isBlack(k) || isFrozen(k)) continue;
@@ -102,7 +103,7 @@ trial(mode: any) {
 }
 
 /** 重新评估是否该换节点（cron 与失败路径共用） */
-maybeSwitch(env: Env, mode: any) {
+maybeSwitch(env: Env, mode: Mode) {
   const m = mode === "lat" ? "lat" : "tput";
   const now = Date.now();
   const cur = S.curs[m];
@@ -142,7 +143,7 @@ maybeSwitch(env: Env, mode: any) {
  * @param {boolean} trial 是否为影子连接
  * @returns {void}
  */
-onFail(env: Env, mode: any, k: any, trial: any) {
+onFail(env: Env, mode: Mode, k: string, trial: boolean) {
   if (!k) return;
   nsFail(k);
   if (trial) { freezeNode(k); return; }
@@ -169,12 +170,12 @@ onFail(env: Env, mode: any, k: any, trial: any) {
 }
 
 /** 只记一次全局失败，不动游标也不冻结（站点级试探失败用） */
-async softFail(k: any) {
+async softFail(k: string) {
   if (k) nsFail(k);
 }
 
 /** 记一次失败；连续到阈值就换节点。兼容旧调用。 */
-async bumpFail(env: Env, mode: any, k: any, trial: any) {
+async bumpFail(env: Env, mode: Mode, k: string, trial: boolean) {
   S.pxFailSeen = 1;
   S.pxFailMem += 1;
   const node = k || S.curs[mode === "lat" ? "lat" : "tput"] || S.curs.tput || S.curs.lat || "";
@@ -190,7 +191,7 @@ async bumpFail(env: Env, mode: any, k: any, trial: any) {
 }
 
 /** 链路健康：清零计数并把当前节点记为成功 */
-async resetFail(env: Env, k: any) {
+async resetFail(env: Env, k: string) {
   if (!S.pxFailSeen) return;
   S.pxFailSeen = 0;
   S.pxFailMem = 0;
@@ -199,7 +200,7 @@ async resetFail(env: Env, k: any) {
 }
 
 /** 当前节点（"auto" 模式才用池子；手动配置直接返回） */
-async current(env: Env, mode: any, st: any) {
+async current(env: Env, mode: Mode, st: Connection | null) {
   const raw = String(env.proxyip || "").trim();
   if (!raw) return "";
   const m = mode === "lat" ? "lat" : "tput";

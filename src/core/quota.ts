@@ -1,7 +1,7 @@
 
 /* 配额与订阅头：纯计算，不碰 IO */
 
-export function effectiveQuota(env: Env, used: any) {
+export function effectiveQuota(env: Env, used: number) {
   const base = Number(env.quotaBytes) > 0 ? Number(env.quotaBytes) : 1024 ** 4;  // 默认 1 TB
   const u = Number(used);
   if (!Number.isFinite(u) || u <= 0) return base;
@@ -10,7 +10,7 @@ export function effectiveQuota(env: Env, used: any) {
   return total;
 }
 
-export function subHeaders(env: Env, stats: any) {
+export function subHeaders(env: Env, stats: { up?: number; down?: number }) {
   const used = (stats.up || 0) + (stats.down || 0);
   const total = effectiveQuota(env, used);
 

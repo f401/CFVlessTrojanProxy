@@ -42,10 +42,16 @@ const problems = [];
 const graph = new Map();
 
 for (const f of files) {
-  const src = fs.readFileSync(f, "utf8");
+  // 类型导入在编译后消失，不算分层依赖
+  const src = fs.readFileSync(f, "utf8").split("\n").map((l) => l.startsWith("import type") ? "" : l).join("\n");
   const rel = path.relative(ROOT, f);
   const lines = src.split("\n").length;
   if (lines > 560) problems.push(`${rel}: ${lines} 行，超过 560 行上限`);
+
+  // 禁止 any：边界用 unknown + 收窄，别把类型系统关掉
+  if (/(:\s*any\b|as any\b|<any>|any\[\]|Record<[^>]*\bany\b)/.test(src)) {
+    problems.push(`${rel}: 出现 any（请用 unknown / 具体类型）`);
+  }
 
   // 顶层 let / var：只允许 const
   const topLet = src.match(/^(?:export\s+)?(?:let|var)\s+[A-Za-z_$]/m);

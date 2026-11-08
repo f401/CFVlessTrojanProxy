@@ -1,3 +1,5 @@
+import { errMsg } from "../core/util";
+
 import { SC } from "../core/const";
 import { PX_TTL, SEED_KEY, SEED_MAX, SEED_TTL, SEED_VER, cnt, cntDelta } from "./pool";
 import { costOf, nsGet, p90Local , ZERO_STAT } from "../nodes/score";
@@ -21,7 +23,7 @@ bucket() {
 }
 
 /** 把一条统计压成可存的形状 */
-packNode(k: any) {
+packNode(k: string) {
   const s = (S.nstat.get(k) || ZERO_STAT);
   const a = (S.alive.get(k) || {}) as NodeEntry;
   const i = k.lastIndexOf(":");
@@ -42,14 +44,14 @@ packNode(k: any) {
 }
 
 /** 只存"名字"（cron 用：不知道自己在哪个机房，就不该写延迟） */
-packName(k: any) {
+packName(k: string) {
   const a = (S.alive.get(k) || {}) as NodeEntry;
   const i = k.lastIndexOf(":");
   return { k, h: a.h || k.slice(0, i), p: a.p || (Number(k.slice(i + 1)) || 443), cc: a.cc || "", ms: Math.round(a.ms || 0) || undefined };
 }
 
 /** 把存下来的形状合并回本地统计（只增不减） */
-unpackNode(o: any) {
+unpackNode(o: SeedNode & { ok?: number; fail?: number }) {
   if (!o || !o.k) return;
   const s = nsGet(o.k);
   if (!s.tcp && o.tcp) s.tcp = o.tcp;
@@ -61,8 +63,8 @@ unpackNode(o: any) {
     s.okW = Math.max(0, nn - ff);
     s.failW = ff;
   }
-  if (o.b > 0 && !(s.seedBps > 0) && !(s.bytesDown > 0)) {
-    s.seedBps = Math.min(o.b, 8 * 1048576);        // 只作为"参考值"，不进直方图
+  if ((o.b || 0) > 0 && !(s.seedBps > 0) && !(s.bytesDown > 0)) {
+    s.seedBps = Math.min(o.b || 0, 8 * 1048576);        // 只作为"参考值"，不进直方图
     s.bytesDown = SC.MIN_BYTES;                    // 让它有资格进 tput 排名
   }
   if (o.at && !s.at) s.at = o.at;
@@ -76,7 +78,7 @@ unpackNode(o: any) {
 async read(env: Env) {
   if (S.seedAt && Date.now() - S.seedAt < SEED_TTL) return S.seed;
   let v = null;
-  try { v = await kvGet<Seed>(env, SEED_KEY); } catch (e: any) {}
+  try { v = await kvGet<Seed>(env, SEED_KEY); } catch (e) {}
   if (v && Array.isArray(v.nodes) && !v.byColo) {
     // 旧结构：整张表属于"当前机房"，迁移时不做跨机房假设
     v = { v: SEED_VER, ts: v.ts || 0, poolGen: v.poolGen || 0, poolN: v.poolN || 0, builtAt: v.builtAt || 0, byColo: { [S.colo || "??"]: { nodes: v.nodes, ts: v.ts || 0 } } };
@@ -97,7 +99,7 @@ async read(env: Env) {
       byColo: v.byColo || {},
       cnt: v.cnt || null,
     };
-    S.gcnt = v.cnt || null;
+    S.gcnt = (v.cnt || null) as CounterDoc | null;
     S.poolBuilt = Number(v.builtAt) || 0;
     for (const n of this.bucket().nodes || []) this.unpackNode(n);
     // 站点偏好：同机房的 isolate 共享一份，冷启动不用重新学
@@ -172,13 +174,13 @@ async write(env: Env, listOnly = false, force = false) {
     try {
       await kvSet(env, SEED_KEY, S.seed, { expirationTtl: PX_TTL });
       return { ok: true, empty: true };
-    } catch (e: any) {
-      return { ok: false, err: String((e && e.message) || e).slice(0, 80) };
+    } catch (e) {
+      return { ok: false, err: String(errMsg(e)).slice(0, 80) };
     }
   }
   // 全局日计数合并进 seed（跨 isolate 聚合，最多 20 分钟延迟）
   const d0 = new Date().toISOString().slice(0, 10);
-  const gc: Record<string, any> = S.seed.cnt && S.seed.cnt.d === d0 ? { ...S.seed.cnt } : { d: d0 };
+  const gc: CounterDoc = S.seed.cnt && S.seed.cnt.d === d0 ? { ...S.seed.cnt } as CounterDoc : { d: d0 };
   const dlt = cntDelta();
   for (const [k, n] of Object.entries(dlt)) gc[k] = (gc[k] || 0) + n;
 
@@ -198,7 +200,7 @@ async write(env: Env, listOnly = false, force = false) {
   hpAll.sort((a, b) => b.n - a.n);
   // 和桶里已有的合并：每个 isolate 只有自己看到的那部分，直接覆盖会把
   // 别的 isolate 学到的条目冲掉。按 (族,节点) 去重，样本多的留下。
-  const mergedHp = new Map<string, any>();
+  const mergedHp = new Map<string, { h: string; k: string; ttfb: number; n: number; bad: number; at: number }>();
   for (const e of ((this.bucket() as SeedBucket).hp || [])) {
     if (e && e.h && e.k) mergedHp.set(e.h + "|" + e.k, { ...e });
   }
@@ -235,14 +237,14 @@ async write(env: Env, listOnly = false, force = false) {
     byColo,
     cnt: gc,
   };
-  S.gcnt = gc;
+  S.gcnt = gc as CounterDoc;
   S.seedDirty = false;
   S.seedAt = Date.now();
   try {
     await kvSet(env, SEED_KEY, S.seed, { expirationTtl: PX_TTL });
     return { ok: true };
-  } catch (e: any) {
-    return { ok: false, err: String((e && e.message) || e).slice(0, 80) };
+  } catch (e) {
+    return { ok: false, err: String(errMsg(e)).slice(0, 80) };
   }
 }
 

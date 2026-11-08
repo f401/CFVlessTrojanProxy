@@ -12,7 +12,7 @@ export const DENY_PORTS = new Set([
  * @param {string} h 主机名或 IP 字面量
  * @returns {boolean} 命中保留地址返回 true
  */
-export function isPrivateHost(h: any) {
+export function isPrivateHost(h: string) {
   if (!h) return true;
   const host = h.toLowerCase();
 
@@ -47,7 +47,7 @@ export function isPrivateHost(h: any) {
  * @param {number} port 目标端口
  * @returns {string|null} 不允许时返回中文原因，允许返回 null
  */
-export function checkTarget(host: any, port: any) {
+export function checkTarget(host: string, port: number) {
   if (!host) return "空目标";
   if (!(port > 0 && port < 65536)) return "端口非法";
   if (DENY_PORTS.has(port)) return `端口 ${port} 被策略禁止`;
@@ -69,7 +69,7 @@ export const DOH_ENDPOINTS = [
  * @param {'A'|'AAAA'} type 记录类型
  * @returns {Promise<string|null>} 解析到的地址，全部失败返回 null
  */
-export async function dohQuery(domain: any, type: any) {
+export async function dohQuery(domain: string, type: "A" | "AAAA") {
   for (const base of DOH_ENDPOINTS) {
     try {
       const url = `${base}?name=${encodeURIComponent(domain)}&type=${type}`;
@@ -77,9 +77,9 @@ export async function dohQuery(domain: any, type: any) {
       if (!r.ok) continue;
       const j = await r.json();
       const want = String(type).toUpperCase() === "AAAA" ? 28 : 1;
-      const rec = (j.Answer || []).find((x: any) => x.type === want);
+      const rec = ((j.Answer || []) as DohAnswer[]).find((x) => x.type === want);
       if (rec && rec.data) return rec.data;
-    } catch (e: any) {
+    } catch (e) {
       /* 换下一个 */
     }
   }
@@ -91,7 +91,7 @@ export async function dohQuery(domain: any, type: any) {
  * @param {string} domain 域名
  * @returns {Promise<string|null>} IPv6 地址或 null
  */
-export async function resolveAAAA(domain: any) {
+export async function resolveAAAA(domain: string) {
   const hit = S.aaaaCache.get(domain);
   if (hit && Date.now() - hit.t < 300000) return hit.ip;
   const ip = await dohQuery(domain, "AAAA");
@@ -101,14 +101,14 @@ export async function resolveAAAA(domain: any) {
   return ip;
 }
 
-export const isV6Literal = (h: any) => typeof h === "string" && h.includes(":");
+export const isV6Literal = (h: string) => typeof h === "string" && h.includes(":");
 
 /**
  * 把压缩写法的 IPv6 展开成 8 段完整形式（connect() 对压缩形式不友好）。
  * @param {string} a IPv6 字符串
  * @returns {string} 展开后的 IPv6
  */
-export function expandV6(a: any) {
+export function expandV6(a: string) {
   if (!a.includes("::")) return a;
   const [head, tail] = a.split("::");
   const h = head ? head.split(":") : [];
@@ -122,7 +122,7 @@ export function expandV6(a: any) {
  * @param {string} domain 域名
  * @returns {Promise<string>} IPv4 地址
  */
-export async function resolveV4(domain: any) {
+export async function resolveV4(domain: string) {
   const hit = S.dnsCache.get(domain);
   if (hit && Date.now() - hit.t < 300000) return hit.ip;
   const ip = await dohQuery(domain, "A");
@@ -137,20 +137,20 @@ export async function resolveV4(domain: any) {
  * @param {string} ip 点分 IPv4
  * @returns {string} 形如 [2001:67c:2960:6464::xxxx:xxxx] 的地址
  */
-export function nat64FromV4(ip: any) {
-  const p = ip.split(".").map((x: any) => Number(x).toString(16).padStart(2, "0"));
+export function nat64FromV4(ip: string) {
+  const p = ip.split(".").map((x) => Number(x).toString(16).padStart(2, "0"));
   if (p.length !== 4) throw new Error("IPv4 非法");
   return `[2001:67c:2960:6464::${p[0]}${p[1]}:${p[2]}${p[3]}]`;
 }
 
-export const isV4Literal = (h: any) => /^\d{1,3}(\.\d{1,3}){3}$/.test(h);
+export const isV4Literal = (h: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(h);
 
 /**
  * 解析 proxyip 配置字符串。
  * @param {string} raw 支持 "host" / "host:port" / "[v6]:port"
  * @returns {{host: string, port: number}|null} 解析结果，空串返回 null
  */
-export function parseProxyIp(raw: any) {
+export function parseProxyIp(raw: string) {
   const s = String(raw || "").trim();
   if (!s) return null;
   const m6 = /^\[([^\]]+)\](?::(\d+))?$/.exec(s);
@@ -166,19 +166,19 @@ export function parseProxyIp(raw: any) {
  * @param {number} port 目标端口
  * @returns {Promise<Socket>} 已建立的连接
  */
-export async function dial(host: any, port: any) {
+export async function dial(host: string, port: number) {
   let lastErr = null;
 
   try {
     return await connect({ hostname: host, port });
-  } catch (e: any) {
+  } catch (e) {
     lastErr = e;
   }
 
   if (isV4Literal(host)) {
     try {
       return await connect({ hostname: `${host}.sslip.io`, port });
-    } catch (e: any) {
+    } catch (e) {
       lastErr = e;
     }
   }

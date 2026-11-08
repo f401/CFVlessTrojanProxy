@@ -9,19 +9,19 @@ export const SEC_HEADERS: Record<string, string> = {
 };
 
 /** JSON 响应（对象自动 2 空格缩进，便于人眼看 /health） */
-export function json(obj: any, extra?: Record<string, string>): Response {
+export function json(obj: unknown, extra?: Record<string, string>): Response {
   return new Response(typeof obj === "string" ? obj : JSON.stringify(obj, null, 2), {
     headers: { "content-type": "application/json;charset=utf-8", ...(extra || {}) },
   });
 }
 
 /** 纯文本响应（订阅 / 错误） */
-export function text(s: any, extra?: Record<string, string>): Response {
+export function text(s: string, extra?: Record<string, string>): Response {
   return new Response(s, { headers: { "content-type": "text/plain;charset=utf-8", ...(extra || {}) } });
 }
 
 /** HTML 响应（面板类页面一律带安全头 + no-store） */
-export function html(body: any, status = 200, extra?: Record<string, string>): Response {
+export function html(body: string, status = 200, extra?: Record<string, string>): Response {
   return new Response(body, {
     status: status || 200,
     headers: {

@@ -1,7 +1,7 @@
 
 /* HTML 小工具：转义与字节格式化 */
 
-export function fmtBytes(n: any) {
+export function fmtBytes(n: number) {
   const u = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
   let v = Number(n) || 0;
@@ -12,7 +12,7 @@ export function fmtBytes(n: any) {
   return `${v.toFixed(i ? 1 : 0)} ${u[i]}`;
 }
 
-export function escapeHtml(s: any) {
+export function escapeHtml(s: unknown) {
   const MAP: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   return String(s).replace(/[&<>"']/g, (c) => MAP[c]);
 }
