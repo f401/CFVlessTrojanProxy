@@ -267,5 +267,34 @@ const lj = await (await legacy.m.fetch(new Request("https://m/get"))).json();
 eq("老数据能读出来", [lj.up, lj.down, lj.conns], [100, 200, 3]);
 eq("迁移后只剩新键", [...legacy.store.keys()], ["a"]);
 
+/* ---------- 9. 站点级选路 ---------- */
+reset();
+node("fast:443", { tcp: 50, tS: 10 });
+node("slow:443", { tcp: 400, tS: 10 });
+for (let i = 0; i < 3; i++) {
+  W.hostNodeMark("site.test", "fast:443", { ok: true, bad: false, bytes: 1000, ttfb: 60 });
+  W.hostNodeMark("site.test", "slow:443", { ok: true, bad: false, bytes: 1000, ttfb: 500 });
+}
+eq("站点排行：快的在前", W.hostRank("site.test", "tput")[0].k, "fast:443");
+
+const st1 = { host: "site.test" };
+eq("按站点选节点", W.SEL.pick({ pxShadow: 0 }, "tput", st1), "fast:443");
+eq("命中偏好不算试探", st1.hostTrial, false);
+
+// 冻结的节点不能出现在站点排行里
+W.nsGet("fast:443").freeUntil = Date.now() + 60000;
+eq("冻结节点被跳过", W.hostRank("site.test", "tput")[0].k, "slow:443");
+W.nsGet("fast:443").freeUntil = 0;
+
+// 冷启动：新域名第一次一定挑一个没试过的节点
+reset();
+node("a:443", { tcp: 50 });
+node("b:443", { tcp: 80 });
+const st2 = { host: "brand-new.test" };
+const p2 = W.SEL.pick({ pxShadow: 0 }, "tput", st2);
+eq("新域名挑全局最优的未试节点", p2, "a:443");
+eq("标记为站点试探", st2.hostTrial, true);
+eq("试探节点写回 st.node", st2.node, "a:443");
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

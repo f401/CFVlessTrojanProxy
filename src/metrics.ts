@@ -82,6 +82,59 @@ async function loadRtt(env: Env, id) {
 
 
 /**
+ * 某个节点在某个站点上的代价（毫秒当量）。
+ * 有真实样本就用首字节时间，没有就用全局分 + 不确定性惩罚 —— 惩罚保证
+ * "没试过的节点"不会因为先验乐观而一直霸占榜首。
+ * @param {string} host 目标域名
+ * @param {string} k "host:port"
+ * @param {string} mode "lat" | "tput"
+ * @returns {number} 代价，越小越好
+ */
+function hostCost(host: string, k: string, mode: string): number {
+  const m = S.hostNode.get(host);
+  const s = m && m.get(k);
+  const g = costOf(k, mode);
+  if (!s || !s.n) return g + 300;
+  const fail = (s.bad + 1) / (s.n + 6);          // 小样本往坏里估，但不一票否决
+  const ttfb = s.ttfb > 0 ? s.ttfb : Math.min(g, 800);
+  return ttfb + fail * 4000 + (s.n < 2 ? 150 : 0);
+}
+
+/**
+ * 某个站点上的节点排行（只算 alive 且没被黑/冻结的）。
+ * @param {string} host 目标域名
+ * @param {string} mode 模式
+ * @returns {Array<{k:string,v:number}>} 升序
+ */
+function hostRank(host: string, mode: string) {
+  const out = [];
+  for (const k of S.alive.keys()) {
+    if (isBlack(k) || isFrozen(k)) continue;
+    out.push({ k, v: hostCost(host, k, mode) });
+  }
+  out.sort((a, b) => a.v - b.v);
+  return out;
+}
+
+/**
+ * 这个站还没试过、且全局分最好的节点（冷启动用）。
+ * @param {string} host 目标域名
+ * @param {string} mode 模式
+ * @returns {string} 节点 key，没有返回 ""
+ */
+function hostUntried(host: string, mode: string) {
+  const m = S.hostNode.get(host);
+  let best = "", bv = Infinity;
+  for (const k of S.alive.keys()) {
+    if (isBlack(k) || isFrozen(k)) continue;
+    if (m && m.has(k)) continue;
+    const v = costOf(k, mode);
+    if (v < bv) { bv = v; best = k; }
+  }
+  return best;
+}
+
+/**
  * 记录一条错误日志（只保留最近 50 条，同时打到 console）。
  * @param {string} msg 错误信息
  * @param {string} [tag] 关联标签（域名或入口）

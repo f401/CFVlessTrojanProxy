@@ -447,6 +447,24 @@ export default {
           };
 
           if (url.searchParams.get("why") === "1") {
+            // 站点级偏好：哪些站被钉在了哪个节点上（最多 12 条，按样本数排）
+            const hp = [...S.hostNode.entries()]
+              .map(([h, m]) => {
+                let n = 0, ok = 0, bad = 0, ttfb = 0;
+                for (const s of m.values()) {
+                  n += s.n; ok += s.ok; bad += s.bad;
+                  if (s.ttfb && (!ttfb || s.ttfb < ttfb)) ttfb = s.ttfb;
+                }
+                const rank = hostRank(h, modeQ);
+                return {
+                  host: h, nodes: m.size, n, ok, bad, bestTtfb: ttfb,
+                  pick: rank.length ? rank[0].k : "",
+                  pickV: rank.length ? Math.round(rank[0].v) : 0,
+                };
+              })
+              .sort((a, b) => b.n - a.n)
+              .slice(0, 12);
+            out.hostPref = hp;
             out.explain = rows.slice(0, 8).map((r) => {
               const s = S.nstat.get(r.node) || {};
               const tcp = Math.round(s.tcp || r.ms || SC.P_TCP);

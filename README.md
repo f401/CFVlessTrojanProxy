@@ -29,7 +29,7 @@ VLESS / Trojan over WebSocket，跑在 Cloudflare Workers 上。
 `src/index.ts` | 路由 + 入口（fetch / scheduled） |
 `src/state.ts` | `AppState`：全部可变状态（`S` 单例） |
 `src/connection.ts` | `Connection`：一条连接的字节/采样/背压 |
-`src/selector.ts` | `Selector`：挑谁 / 何时换 / 失败处理 |
+`src/selector.ts` | `Selector`：挑谁 / 何时换 / 失败处理（全局游标 + 按站点偏好） |
 `src/px-seed.ts` | `SeedStore`：信誉表按机房分桶读写 |
 `src/px-score.ts` | 评分纯函数（毫秒当量、LCB、可用性） |
 `src/px-probe.ts` | 探活（TLS 验真）与候选池抓取 |

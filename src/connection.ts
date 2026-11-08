@@ -38,6 +38,7 @@ class Connection {
   markedOk = false;
   markedFail = false;
   failed = false;         // 中途断流/异常（由 pipeBack 的 catch 置位），不算成功
+  hostTrial = false;      // 站点级试探：失败只记账，不动全局游标/不冻结
   retried = false;
   pxTries = 0;
   triedV6 = false;

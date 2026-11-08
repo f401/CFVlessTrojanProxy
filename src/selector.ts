@@ -11,11 +11,51 @@ async region(env: Env, cc) {
   return hit[0];
 }
 
-/** 选一个节点：90% 走粘滞游标，10% 走"待测"（影子流量） */
+/**
+ * 选一个节点。
+ *   ① 先看"这个站"的历史：有样本就按站点分选（hostCost）
+ *   ② 冷启动（这个站试过的节点 <3）：一半概率去试一个没试过的
+ *   ③ 都没有 → 回到全局游标 + 影子流量
+ */
 pick(env: Env, mode, st) {
   const m = mode === "lat" ? "lat" : "tput";
   const cur = S.curs[m] || bestFor(m);
   if (!cur) cnt("noCand");
+  const host = st && st.host ? String(st.host) : "";
+  if (st) st.hostTrial = false;
+
+  if (host) {
+    const tried = (S.hostNode.get(host) || new Map()).size;
+
+    // ① 冷启动：头几次连接故意岔开，否则第一个碰上的节点会被永久锁死
+    if (tried < 3 && !(st && st.retried) && Math.random() < (tried === 0 ? 1 : 0.5)) {
+      const t = hostUntried(host, m);
+      if (t) {
+        nsGet(t).lastTry = Date.now();
+        if (st) { st.hostTrial = true; st.node = t; }
+        return t;
+      }
+    }
+
+    // ② 有站点样本 → 按站点分选
+    const rank = hostRank(host, m);
+    if (rank.length) {
+      const best = rank[0].k;
+      const bs = (S.hostNode.get(host) || new Map()).get(best);
+      // 样本够了才敢覆盖全局游标；只有 1 次样本时跟着走风险太大
+      if (bs && bs.n >= 2) {
+        // 稳定期留 2% 给次优节点，保持样本新鲜（不然一次侥幸定终身）
+        if (rank.length > 1 && !(st && st.retried) && Math.random() < 0.02) {
+          if (st) st.node = rank[1].k;
+          return rank[1].k;
+        }
+        if (st) st.node = best;
+        return best;
+      }
+    }
+  }
+
+  // ③ 全局：粘滞游标 + 影子流量
   const dual = (S.curs.lat ? 1 : 0) + (S.curs.tput ? 1 : 0);
   let base = Number(env && env.pxShadow);
   if (!Number.isFinite(base) || base < 0) base = 0.1;
@@ -115,6 +155,11 @@ onFail(env: Env, mode, k, trial) {
       logErr(`fail-switch(${m}) ${k} -> ${b}`, "");
     }
   }
+}
+
+/** 只记一次全局失败，不动游标也不冻结（站点级试探失败用） */
+async softFail(k) {
+  if (k) nsFail(k);
 }
 
 /** 记一次失败；连续到阈值就换节点。兼容旧调用。 */

@@ -42,5 +42,8 @@ export {
   hostNodeMark,
   hostDirectMark,
   diagVerdict,
+  hostRank,
+  hostCost,
+  hostUntried,
   tlsHello,
 };

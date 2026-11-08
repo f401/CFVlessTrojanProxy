@@ -197,7 +197,8 @@ async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext):
               const alt = await dialAnother(env, st, mode, r.host);
               if (alt) sock = alt;
               else {
-                await SEL.bumpFail(env, st.mode, st.node, st.trial);
+                if (st.hostTrial) await SEL.softFail(st.node);
+                else await SEL.bumpFail(env, st.mode, st.node, st.trial);
                 throw e2;
               }
             }
@@ -241,7 +242,8 @@ async function handleUpgrade(request: Request, env: Env, ctx: ExecutionContext):
                   }
                 }
                 cnt("dead"); kickFlush(env, st.id);                       // 换节点也不通 → 这个目标走不了中转
-                await SEL.bumpFail(env, st.mode, st.node, st.trial);
+                if (st.hostTrial) await SEL.softFail(st.node);
+                else await SEL.bumpFail(env, st.mode, st.node, st.trial);
                 try { serverWS.close(1000, "done"); } catch (e) {}
                 return;
               }
@@ -388,7 +390,8 @@ function pipeBack(sock: any, ws: WebSocketLike, st: Connection, onClose?: (gotDa
           sn.tF = (sn.tF || 0) + 1;
           // 中途断流的节点先凉 60 秒：客户端的重试就会落到别的节点上，
           // 否则重试大概率还选同一个，用户看到的就是"这个下载一直失败"。
-          sn.freeUntil = Math.max(sn.freeUntil || 0, Date.now() + 60000);
+          // 站点级试探的连接不冻结（它可能只是对这个站不行，别的站还好）。
+          if (!st.hostTrial) sn.freeUntil = Math.max(sn.freeUntil || 0, Date.now() + 60000);
         }
       }
       try { ws.close(1011, "pipe error"); } catch (e) {}
