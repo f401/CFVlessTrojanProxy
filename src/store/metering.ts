@@ -9,6 +9,27 @@ export const PEND_FLUSH_BYTES = 16 * 1024 * 1024;  // 大文件传输时别频�
 
 export const METER_TTL = 15000;
 
+/**
+ * 取 Meter DO 里的节点快照（跨 isolate）。
+ * 面板跑在哪个 isolate 全看运气，只看本地 nstat 会永远显示"未用"。
+ */
+export async function nodeSnapGet(env: Env, id: string): Promise<Record<string, NodeSnap>> {
+  if (!env || !env.METER || !id) return {};
+  const hit = S.nodeSnapCache;
+  if (hit.t && Date.now() - hit.t < 60000) return hit.v;
+  try {
+    const stub = env.METER.get(env.METER.idFromName(id));
+    const r = await stub.fetch("https://meter/cnt");
+    if (!r.ok) throw new Error("do " + r.status);
+    const j = await r.json();
+    const v = (j && j.s && typeof j.s === "object" ? j.s : {}) as Record<string, NodeSnap>;
+    S.nodeSnapCache = { t: Date.now(), v };
+    return v;
+  } catch (e) {
+    return hit.v || {};
+  }
+}
+
 export function pendAdd(id: string, up: number, down: number, isNew?: boolean) {
   if (!id) return;
   const p = S.pend.get(id) || { up: 0, down: 0, conns: 0 };

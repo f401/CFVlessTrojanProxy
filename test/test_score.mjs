@@ -409,5 +409,37 @@ eq("族键读写一致", W.hostRank("github.com", "lat")[0].k, "g1:443");
 const stFam = { host: "api.github.com" };
 eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1:443");
 
+/* ---------- 11. 跨 isolate 节点快照 ---------- */
+{
+  let calls = 0;
+  const body = { s: { "a:443": { med: 100, p90: 200, cap: 210, n: 7, at: 1 } } };
+  const mkEnv = () => ({
+    METER: {
+      idFromName: (n) => n,
+      get: () => ({ fetch: async () => { calls++; return new Response(JSON.stringify(body)); } }),
+    },
+  });
+  W.S.nodeSnapCache = { t: 0, v: {} };
+  const snap = await W.nodeSnapGet(mkEnv(), "u1");
+  eq("nodeSnapGet 拿到 DO 里的节点快照", Object.keys(snap), ["a:443"]);
+  const again = await W.nodeSnapGet(mkEnv(), "u1");
+  eq("60 秒内走缓存，不再打 DO", calls, 1);
+  eq("缓存内容一致", again["a:443"].p90, 200);
+
+  const bad = { METER: { idFromName: (n) => n, get: () => ({ fetch: async () => { throw new Error("do down"); } }) } };
+  W.S.nodeSnapCache = { t: 0, v: {} };
+  eq("DO 挂了返回空表而不是抛错", await W.nodeSnapGet(bad, "u1"), {});
+}
+
+// 面板渲染：KB/s 带样本数；没有样本显示"未用"
+{
+  const html1 = W.renderStatsHtml({}, "u", { up: 0, down: 0, todayUp: 0, todayDown: 0 },
+    {}, [{ h: "a", p: 443, ms: 10, cc: "US" }], { "a:443": { bps: 2048 * 1024, n: 7 } });
+  ok("面板显示 KB/s 与样本数", html1.includes("2048 KB/s (n=7)"), html1.match(/\d+ KB\/s[^<]*/)?.[0]);
+  const html2 = W.renderStatsHtml({}, "u", { up: 0, down: 0, todayUp: 0, todayDown: 0 },
+    {}, [{ h: "b", p: 443, ms: 10, cc: "US" }], {});
+  ok("没有吞吐样本显示未用", html2.includes("未用"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -27,3 +27,5 @@ export { nsGet, nsSpeed, nsOk, nsFail, pcts, p90Of, capOf, costOf, scoreParts, e
 export { nsOf, pxGet } from "./px/pool";
 export { logErr, hostNodeMark, hostDirectMark, diagVerdict, hostRank, hostScore, hostKey, hostUntried } from "./nodes/metrics";
 export { tlsHello } from "./px/probe";
+export { nodeSnapGet } from "./store/index";
+export { renderStatsHtml } from "./views/panel";

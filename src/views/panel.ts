@@ -392,11 +392,12 @@ export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Rec
         ok: Math.max(a1.ok || 0, Number(b1.ok) || 0),
         fail: Math.max(a1.fail || 0, Number(b1.fail) || 0),
         bps: Number(b1.bps) || p90Of(a1) || 0,
+        samples: Number(b1.n) || 0,
       };
       const ok = st.ok || 0;
       const bad = st.fail || 0;
       const rate = ok + bad > 0 ? Math.round((ok / (ok + bad)) * 100) + "% (" + ok + "/" + (ok + bad) + ")" : "-";
-      const kbps = st.bps ? Math.round(st.bps / 1024) + " KB/s" : "未用";
+      const kbps = st.bps ? Math.round(st.bps / 1024) + " KB/s" + (st.samples ? ` (n=${st.samples})` : "") : "未用";
       return { x, k, score: scoreMerged(k, nsMap), kbps, rate, ok, bad, cc: x.cc || "" };
     })
     .sort((a, b) => a.score - b.score)

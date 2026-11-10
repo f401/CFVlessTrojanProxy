@@ -5,7 +5,7 @@ import { renderStatsHtml, renderHtml } from "../views/panel";
 import { fmtBytes } from "../views/html";
 import { effectiveQuota, subHeaders } from "../core/quota";
 import { renderClash, renderSingbox, renderLinks, trojanPasswordOf } from "../views/sub";
-import { readStatsCached } from "../store/index";
+import { readStatsCached, nodeSnapGet } from "../store/index";
 import { aliveList, cntView, nsOf, pxGet } from "../px/pool";
 import { json, text } from "../edge/respond";
 import type { UserCtx } from "../edge/types";
@@ -84,6 +84,20 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
         const alive = await aliveList(env);
         // 明细只算要展示的节点（以前是为整张 nstat 生成，能到几千条）
         const nsMap = nsOf(alive.map((x) => x.h + ":" + x.p));
+        // 吞吐是 isolate 本地样本：再并上 Meter DO 里的跨 isolate 快照，
+        // 否则换一个 isolate 打开面板就全是"未用"
+        const snap = await nodeSnapGet(env, id);
+        for (const [k, v] of Object.entries(snap)) {
+          if (!v) continue;
+          const cur = nsMap[k] || {};
+          nsMap[k] = {
+            ...cur,
+            bps: Math.max(Number(cur.bps) || 0, v.p90 || 0),
+            bpsMed: Math.max(Number(cur.bpsMed) || 0, v.med || 0),
+            bpsCap: Math.max(Number(cur.bpsCap) || 0, v.cap || 0),
+            n: Math.max(Number(cur.n) || 0, v.n || 0),
+          };
+        }
         return new Response(renderStatsHtml(env, id, s, learned, alive, nsMap), {
           headers: { "content-type": "text/html;charset=utf-8" },
         });

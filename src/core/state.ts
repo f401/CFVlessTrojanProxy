@@ -55,6 +55,8 @@ export class AppState {
   meterCache: Map<string, { v: UsageMeter | null; t: number }> = new Map();
   statCache: Map<string, { v: StatsView; t: number }> = new Map();
   snapCache: { v: SnapDoc | null; t: number } = { v: null, t: 0 };
+  /** 跨 isolate 的节点快照（Meter DO 里的 s），面板用；60 秒缓存 */
+  nodeSnapCache: { t: number; v: Record<string, NodeSnap> } = { t: 0, v: {} };
   snapWritten = 0;
   snapBytes = 0;
   kvw = 0;

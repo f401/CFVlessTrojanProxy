@@ -7,6 +7,7 @@ import { dial } from "../proxy/dial";
 import { json, text } from "../edge/respond";
 import { diagVerdict, hostKey, hostRank, logErr } from "../nodes/metrics";
 import { ZERO_STAT, capOf, costOf, scoreParts, nsGet, p90Of, pFailOf, pStallOf, pctOf } from "../nodes/score";
+import { nodeSnapGet } from "../store/index";
 import { checkTarget, dohQuery, expandV6, resolveAAAA } from "../proxy/dial";
 import { aliveList, cnt, cntView, commitPool, cronScan, flushPx, nsOf, pxGet, pxSet, spdSnapshot } from "../px/pool";
 import { EXTRA_HOSTS, POOL_SOURCES, PX_LINE, probeProxy, probeSni, regionListAsync, takePoolLine } from "../px/probe";
@@ -62,6 +63,19 @@ export async function proxyip(c: UserCtx): Promise<Response> {
           const stat: Record<string, unknown> = px.state || {};
           const aliveKeys = (alive || []).map((x) => x.h + ":" + x.p);
           const nsMap = nsOf(aliveKeys);
+          // 并上 DO 里的跨 isolate 快照：否则换 isolate 看就是一片 kbps=0
+          const snapS = await nodeSnapGet(env, id);
+          for (const [k, v] of Object.entries(snapS)) {
+            if (!v) continue;
+            const cur = nsMap[k] || {};
+            nsMap[k] = {
+              ...cur,
+              bps: Math.max(Number(cur.bps) || 0, v.p90 || 0),
+              bpsMed: Math.max(Number(cur.bpsMed) || 0, v.med || 0),
+              bpsCap: Math.max(Number(cur.bpsCap) || 0, v.cap || 0),
+              n: Math.max(Number(cur.n) || 0, v.n || 0),
+            };
+          }
           const modeQ = url.searchParams.get("mode") === "lat" ? "lat" : "tput";
           const poolSize = Number(stat.poolN) || 0;
           const blacklist = [...S.nstat.entries()].filter(([, s]) => s.blackUntil > Date.now()).map(([k]) => k);
