@@ -161,7 +161,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
           if (ipRegion) {
             try {
               const p = await SEL.region(env, ipRegion);
-              if (p) {
+              if (p && !checkTarget(p.h, p.p)) {
                 sock = await connect({ hostname: p.h, port: p.p });
                 st.node = p.h + ":" + p.p;
                 st.via = "node";
@@ -191,8 +191,10 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
             st.retried = true;
             st.pxTries = 1;
             try {
-              sock = await connect({ hostname: px0.host, port: px0.port });
+              // 纵深防御：种子池来自外部名单，进 connect 之前再验一次地址
               st.node = px0.host + ":" + px0.port;
+              if (checkTarget(px0.host, px0.port)) throw new Error("proxyip 被策略禁止");
+              sock = await connect({ hostname: px0.host, port: px0.port });
               st.via = "node";
             } catch (e2) {
               // 这个中转连不上，换一个再试一次
@@ -298,6 +300,10 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
               // 6 小时足够覆盖一次浏览会话；真变回可直连也只是多走一跳，不会坏。
               S.needPx.set(r.host, Date.now() + 6 * 3600e3);
               logErr(`empty close -> proxyip ${px.host}`, r.host);
+              if (checkTarget(px.host, px.port)) {
+                try { serverWS.close(1011, "proxyip blocked"); } catch (e) {}
+                return;
+              }
               try {
                 const s3 = await connect({ hostname: px.host, port: px.port });
                 st.node = px.host + ":" + px.port;

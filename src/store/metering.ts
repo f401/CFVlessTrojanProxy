@@ -9,6 +9,11 @@ export const PEND_FLUSH_BYTES = 16 * 1024 * 1024;  // 大文件传输时别频�
 
 export const METER_TTL = 15000;
 
+/** 主 UUID：计数器/节点快照只挂在这个 DO 上（uuid 可能是逗号列表，取第一个） */
+export function primaryId(env: Env): string {
+  return String((env && (env.uuid || env.uuids)) || "").split(",")[0].trim().toLowerCase();
+}
+
 /**
  * 取 Meter DO 里的节点快照（跨 isolate）。
  * 面板跑在哪个 isolate 全看运气，只看本地 nstat 会永远显示"未用"。
@@ -18,7 +23,8 @@ export async function nodeSnapGet(env: Env, id: string): Promise<Record<string, 
   const hit = S.nodeSnapCache;
   if (hit.t && Date.now() - hit.t < 60000) return hit.v;
   try {
-    const stub = env.METER.get(env.METER.idFromName(id));
+    // 快照只写在主 uuid 的 DO 上：用别人的 id 去读永远是空的
+    const stub = env.METER.get(env.METER.idFromName(primaryId(env) || id));
     const r = await stub.fetch("https://meter/cnt");
     if (!r.ok) throw new Error("do " + r.status);
     const j = await r.json();
@@ -26,7 +32,9 @@ export async function nodeSnapGet(env: Env, id: string): Promise<Record<string, 
     S.nodeSnapCache = { t: Date.now(), v };
     return v;
   } catch (e) {
-    return hit.v || {};
+    // 失败也记时间：DO 挂掉时不要每个面板请求都重试一次
+    S.nodeSnapCache = { t: Date.now(), v: hit.v || {} };
+    return S.nodeSnapCache.v;
   }
 }
 
@@ -63,7 +71,7 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
   let attached = false;
   // 快照固定挂在主 uuid 的对象上：挂到"批次第一个"会挂到另一个用户，
   // 结果面板（读主 uuid）永远看不到更新。
-  const primary = String(env.uuid || "").trim().toLowerCase();
+  const primary = primaryId(env);
   await Promise.all(
     batch.map(async ([id, d]) => {
       try {
@@ -87,6 +95,7 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
         bad += 1;
         const cur = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
         S.pend.set(id, { up: cur.up + d.up, down: cur.down + d.down, conns: cur.conns + d.conns });
+        S.pendBytes += (d.up || 0) + (d.down || 0);   // 回滚失败批次：健康页与立即刷新的判断要准
       }
     })
   );
@@ -98,7 +107,10 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
 export async function meterGet(env: Env, id: string) {
   if (!env || !env.METER || !id) return null;
   const hit = S.meterCache.get(id);
-  if (hit && Date.now() - hit.t < METER_TTL) return hit.v;
+  if (hit) {
+    // 成功缓存 15 秒；失败（v=null）只缓存 10 秒，避免 DO 抖动时每次翻页都等两次超时
+    if (Date.now() - hit.t < (hit.v ? METER_TTL : 10000)) return hit.v;
+  }
 
   for (let i = 0; i < 2; i++) {
     try {
@@ -113,6 +125,8 @@ export async function meterGet(env: Env, id: string) {
       if (i === 0) await new Promise((res) => setTimeout(res, 120));
     }
   }
+  if (S.meterCache.size > 500) S.meterCache.clear();
+  S.meterCache.set(id, { v: hit ? hit.v : null, t: Date.now() });
   return hit ? hit.v : null;
 }
 

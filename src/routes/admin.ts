@@ -115,15 +115,16 @@ export async function admin(c: RouteCtx): Promise<Response> {
         // 以前读的是 `stats:<date>` 这个早已废弃的键 —— 迁移到 snap/DO 之后
         // 它再也没人写，"今日用量" 永远是 0。
         const statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }> = {};
-        for (const u of users.list) {
+        // 并行读：用户一多，串行 await 会把面板拖到几秒（每次都是一次 DO 往返）
+        await Promise.all(users.list.map(async (u) => {
           try {
             const s = await readStats(env, u.id);
             statsMap[u.id] = {
               up: s.up || 0, down: s.down || 0,
               todayUp: s.todayUp || 0, todayDown: s.todayDown || 0,
             };
-          } catch (e) {}
-        }
+          } catch (e) { /* 单个用户读失败不影响整页 */ }
+        }));
         return safeHtml(renderAdmin(url, users, statsMap, pageKey));
       }
 

@@ -11,11 +11,21 @@ import { nodeSnapGet } from "../store/index";
 import { checkTarget, dohQuery, expandV6, resolveAAAA } from "../proxy/dial";
 import { aliveList, cnt, cntView, commitPool, cronScan, flushPx, nsOf, pxGet, pxSet, spdSnapshot } from "../px/pool";
 import { EXTRA_HOSTS, POOL_SOURCES, PX_LINE, probeProxy, probeSni, regionListAsync, takePoolLine } from "../px/probe";
-import { restoreUsage } from "../store/index";
+import { restoreUsage, primaryId } from "../store/index";
+import { adminAuthed } from "../views/auth";
 
 import type { RouteCtx } from "../edge/types";
 
 type UserCtx = RouteCtx & { id: string };
+
+/** 会改全局状态/花 KV 额度的调试动作：要求管理员会话或 &k=adminKey */
+async function adminOnly(c: UserCtx): Promise<Response | null> {
+  if (await adminAuthed(c.request, c.url, c.env)) return null;
+  return new Response(JSON.stringify({ ok: false, error: "需要管理员登录 /admin，或加 &k=<adminKey>" }), {
+    status: 403,
+    headers: { "content-type": "application/json;charset=utf-8" },
+  });
+}
 
 /** /<uuid>/proxyip：中转池现状（?why=1 带选择原因） */
 export async function proxyip(c: UserCtx): Promise<Response> {
@@ -27,7 +37,7 @@ export async function proxyip(c: UserCtx): Promise<Response> {
             let nodesSnap = {};
             if (env.METER) {
               try {
-                const stub = env.METER.get(env.METER.idFromName(id));
+                const stub = env.METER.get(env.METER.idFromName(primaryId(env) || id));
                 const r = await stub.fetch("https://meter/cnt");
                 const j = await r.json();
                 g = j && j.g;
@@ -38,6 +48,8 @@ export async function proxyip(c: UserCtx): Promise<Response> {
           }
           // 清空 alive，让下一轮扫描重新挑（用于洗掉早期误判进来的节点）
           if (url.searchParams.get("reset") === "1") {
+            const deny = await adminOnly(c);
+            if (deny) return deny;
             S.alive = new Map();
             S.nstat = new Map();
             S.curs = { lat: "", tput: "" };
@@ -51,6 +63,8 @@ export async function proxyip(c: UserCtx): Promise<Response> {
           }
 
           if (url.searchParams.get("refresh") === "1") {
+            const deny = await adminOnly(c);
+            if (deny) return deny;
             const sn = Number(url.searchParams.get("scan"));
             S.scanN = Number.isFinite(sn) && sn > 12 ? sn : 12;
             if (Date.now() - S.lastManual > 5000) {
@@ -252,6 +266,8 @@ export async function debug(c: UserCtx): Promise<Response> {
             return json({ probe: pr, ok: !!r, result: r });
           }
           if (url.searchParams.get("refill") === "1") {
+            const deny = await adminOnly(c);
+            if (deny) return deny;
             const counts: Record<string, { lines: number; ok: number }> = {};
             const merged = new Map();
             let total = 0;
@@ -298,6 +314,8 @@ export async function debug(c: UserCtx): Promise<Response> {
 
           // 手动指定当前节点：?cur=1.2.3.4:443（用于对比不同节点的真实速度）
           if (url.searchParams.get("cur")) {
+            const deny = await adminOnly(c);
+            if (deny) return deny;
             const want = String(url.searchParams.get("cur")).trim();
             if (!/^[0-9a-zA-Z.\-]+:\d+$/.test(want)) return json({ ok: false, error: "格式应为 host:port" });
             await pxSet(env, { cur: want });
@@ -316,6 +334,8 @@ export async function debug(c: UserCtx): Promise<Response> {
 
           // 手动回填用量（仅在 DO 累计为 0 时生效，用于重建脚本后恢复历史数字）
           if (url.searchParams.get("seed")) {
+            const deny = await adminOnly(c);
+            if (deny) return deny;
             const [u0, d0, c0] = String(url.searchParams.get("seed")).split(",").map((x) => Number(x) || 0);
             const px0 = await pxGet(env);
             void px0;

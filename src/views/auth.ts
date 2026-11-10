@@ -19,9 +19,11 @@ export async function sha256Hex(str: string) {
   return toHex(new Uint8Array(d));
 }
 
-export async function sessionToken(env: Env) {
-  const t = await sha256Hex(`adm|${env.adminKey || ""}|${env.adminHash || ""}`);
-  return t.slice(0, 40);
+/** 会话令牌：exp 参与签名，过期即失效（以前是永久不变的静态值）。 */
+export async function sessionToken(env: Env, exp?: number) {
+  const e = Math.floor(exp || (Date.now() + 12 * 3600e3));
+  const sig = await sha256Hex(`adm|${e}|${env.adminKey || ""}|${env.adminHash || ""}`);
+  return `${e.toString(36)}.${sig.slice(0, 40)}`;
 }
 
 export async function adminAuthed(request: Request, url: URL, env: Env) {
@@ -29,7 +31,11 @@ export async function adminAuthed(request: Request, url: URL, env: Env) {
   if (k && env.adminKey && k === env.adminKey) return true;
   const tok = getCookie(request, "adm");
   if (!tok) return false;
-  return tok === (await sessionToken(env));
+  const dot = tok.indexOf(".");
+  if (dot <= 0) return false;
+  const exp = parseInt(tok.slice(0, dot), 36);
+  if (!(exp > Date.now())) return false;
+  return tok === (await sessionToken(env, exp));
 }
 
 export function rlTake(ip: string, limit: number) {

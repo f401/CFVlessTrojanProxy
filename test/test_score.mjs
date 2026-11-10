@@ -559,6 +559,38 @@ const hs = W.S.hostNode.get("site-bps.test").get("bs:443");
 eq("中途吞吐采样不算连接样本", hs.n, 1);
 ok("站点 bps 记录下来了", hs.bps > 0, String(hs.bps));
 
+// 站点倾向要能跨 isolate：hp 必须把 bps 一起写进 seed，否则换个实例只剩 ttfb
+reset();
+node("hpb:443", { tcp: 50 });
+for (let i = 0; i < 3; i++) W.hostNodeMark("site-seed.test", "hpb:443", { ok: 1, bad: 0, bytes: 1024, ttfb: 80 });
+W.hostNodeMark("site-seed.test", "hpb:443", { bps: 2 * 1048576 });
+{
+  const box = new Map();
+  const env = { STATS: { get: async (k) => box.get(k) || null, put: async (k, v) => { box.set(k, v); } } };
+  W.S.colo = "TST";
+  W.S.seedAt = 0;
+  await W.SEEDS.write(env, false, true);
+  const doc = JSON.parse(box.get([...box.keys()][0]));
+  const row = doc.byColo.TST.hp.find((x) => x.h === "site-seed.test" && x.k === "hpb:443");
+  eq("seed 的站点偏好带上了 bps", Math.round((row && row.bps) || 0), 2 * 1048576);
+  // 模拟另一个 isolate 冷启动
+  W.S.hostNode.clear(); W.S.seedAt = 0; W.S.seed = { v: 0, ts: 0, poolGen: 0, poolN: 0, builtAt: 0, byColo: {} };
+  await W.SEEDS.read(env);
+  const back = W.S.hostNode.get("site-seed.test").get("hpb:443");
+  eq("别的 isolate 能读到站点级 bps", Math.round((back && back.bps) || 0), 2 * 1048576);
+}
+
+// 跨 isolate 快照按流量挑前 16 个，而不是 Map 的前 16 个
+reset();
+for (let i = 0; i < 20; i++) {
+  node(`sn${i}:443`, {});
+  W.nsGet(`sn${i}:443`).bytesDown = i * 1024 * 1024;
+  W.nsGet(`sn${i}:443`).tS = i + 1;
+}
+const snapN = W.spdSnapshot();
+ok("快照包含流量最大的节点", !!snapN["sn19:443"], Object.keys(snapN).join(","));
+eq("快照最多 16 个", Object.keys(snapN).length, 16);
+
 reset();
 node("ln:443", { tcp: 50, pN: 4, okW: 4 });
 eq("latN = 探活 + 成功连接", W.scoreParts("ln:443", "lat").latN, 8);

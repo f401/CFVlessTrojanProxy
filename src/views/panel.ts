@@ -457,7 +457,7 @@ export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Rec
     .slice(0, 10)
     .map(
       (n) =>
-        `<tr title="${escapeHtml(n.tip)}"><td class="u">${n.k}</td><td>${n.cc || "-"}</td><td>${n.x.ms} ms</td><td>${n.kbps}</td><td>${n.rate}</td><td><b>${Math.round(n.score)}</b></td></tr>`
+        `<tr title="${escapeHtml(n.tip)}"><td class="u">${escapeHtml(n.k)}</td><td>${escapeHtml(n.cc || "-")}</td><td>${n.x.ms} ms</td><td>${n.kbps}</td><td>${n.rate}</td><td><b>${Math.round(n.score)}</b></td></tr>`
     )
     .join("");
 

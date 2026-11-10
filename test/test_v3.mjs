@@ -1,4 +1,6 @@
 import * as W from "./_bundle.mjs";
+import { webcrypto } from "node:crypto";
+if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 let pass = 0, fail = 0;
 const eq = (name, got, want) => {
@@ -213,6 +215,24 @@ ok("expire 被转成秒", /expire=1[78]\d{8}/.test(h["Subscription-Userinfo"]));
   ok("admin 每行有 sb 订阅复制", html.includes(`https://edge.example.com/${UUID}/sb?k=KEY42`), "");
   ok("admin 有复制脚本", html.includes("navigator.clipboard") && html.includes('data-copy'), "");
 }
+
+/* ---------- 管理会话：过期令牌不再永久有效 ---------- */
+{
+  const env2 = { adminKey: "0123456789abcdef" };
+  const tok = await W.sessionToken(env2);
+  const withTok = (t) => new Request("https://edge.example.com/admin", { headers: { cookie: `adm=${t}` } });
+  const u2 = new URL("https://edge.example.com/admin");
+  eq("有效会话令牌放行", await W.adminAuthed(withTok(tok), u2, env2), true);
+  const oldTok = await W.sessionToken(env2, Date.now() - 1000);
+  eq("过期令牌拒绝", await W.adminAuthed(withTok(oldTok), u2, env2), false);
+  eq("换 adminKey 后旧令牌失效", await W.adminAuthed(withTok(tok), u2, { adminKey: "fedcba9876543210" }), false);
+  eq("?k= 直连仍然可用", await W.adminAuthed(new Request("https://edge.example.com/admin?k=0123456789abcdef"), new URL("https://edge.example.com/admin?k=0123456789abcdef"), env2), true);
+}
+
+/* ---------- 主 UUID / 跨 isolate 归属 ---------- */
+eq("主 UUID 取列表第一个（小写）", W.primaryId({ uuid: "AAA-BBB,CCC-DDD" }), "aaa-bbb");
+eq("没有 uuid 时回落 uuids", W.primaryId({ uuids: "EEE-FFF" }), "eee-fff");
+eq("都没有返回空串", W.primaryId({}), "");
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

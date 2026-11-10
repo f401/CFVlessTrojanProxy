@@ -1,5 +1,5 @@
 import { S } from "../core/state";
-import { getSnap } from "../store/index";
+import { getSnap, primaryId } from "../store/index";
 import { json } from "../edge/respond";
 import type { RouteCtx } from "../edge/types";
 
@@ -17,7 +17,8 @@ export async function logs(c: UserCtx): Promise<Response> {
           let fromDo: ErrItem[] = [];
           if (env.METER) {
             try {
-              const stub = env.METER.get(env.METER.idFromName(id));
+              // 错误环形只挂在主 uuid 的 DO 上：用别人的 id 读永远为空
+              const stub = env.METER.get(env.METER.idFromName(primaryId(env) || id));
               const r = await stub.fetch("https://meter/cnt");
               const j = await r.json();
               fromDo = (j && j.e) || [];

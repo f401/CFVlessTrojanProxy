@@ -24,10 +24,11 @@ export { SEL } from "./nodes/selector";
 export { SEEDS } from "./px/seed";
 export { Connection } from "./proxy/connection";
 export { nsGet, nsSpeed, nsOk, nsFail, nsSiteFail, nsEmptyClose, pFailFast, pcts, p90Of, capOf, costOf, scoreParts, effView, ageFactor, candsFor, bestFor, availOf, pFailOf, emptyCloseSuspect, freezeNode } from "./nodes/score";
-export { nsOf, pxGet } from "./px/pool";
+export { nsOf, pxGet, spdSnapshot } from "./px/pool";
 export { logErr, hostNodeMark, hostDirectMark, diagVerdict, hostRank, hostScore, hostKey, hostUntried } from "./nodes/metrics";
 export { tlsHello } from "./px/probe";
-export { nodeSnapGet } from "./store/index";
+export { nodeSnapGet, primaryId } from "./store/index";
 export { renderStatsHtml } from "./views/panel";
 
 export { renderAdmin } from "./views/panel";
+export { adminAuthed, sessionToken } from "./views/auth";

@@ -1,13 +1,12 @@
 import { P_T } from "../core/util";
 import { S } from "../core/state";
 import { SC } from "../core/const";
-import { renderStatsHtml, renderHtml } from "../views/panel";
-import { fmtBytes } from "../views/html";
+import { renderStatsHtml, renderHtml } from "../views/panel";import { fmtBytes } from "../views/html";
 import { effectiveQuota, subHeaders } from "../core/quota";
 import { renderClash, renderSingbox, renderLinks, trojanPasswordOf } from "../views/sub";
 import { readStatsCached, nodeSnapGet } from "../store/index";
 import { aliveList, cntView, nsOf, pxGet } from "../px/pool";
-import { json, text } from "../edge/respond";
+import { html, json, text } from "../edge/respond";
 import type { UserCtx } from "../edge/types";
 
 /**
@@ -98,9 +97,7 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
             n: Math.max(Number(cur.n) || 0, v.n || 0),
           };
         }
-        return new Response(renderStatsHtml(env, id, s, learned, alive, nsMap), {
-          headers: { "content-type": "text/html;charset=utf-8" },
-        });
+        return html(renderStatsHtml(env, id, s, learned, alive, nsMap));
       }
       return json(s);
     }

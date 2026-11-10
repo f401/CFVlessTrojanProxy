@@ -146,13 +146,27 @@ interface SeedNode {
   at?: number;
 }
 
+/** 站点偏好的一条（跨 isolate 共享：延迟 + 站点级吞吐） */
+interface SeedHp {
+  h: string;
+  k: string;
+  ttfb?: number;
+  n?: number;
+  bad?: number;
+  at?: number;
+  /** 站点级吞吐 EWMA（字节/秒）与样本数、采集时刻 */
+  bps?: number;
+  bpsN?: number;
+  bpsAt?: number;
+}
+
 /** 一个机房的桶 */
 interface SeedBucket {
   ts?: number;
   lastSwitch?: number;
   nodes?: SeedNode[];
-  /** 站点偏好：{h:族名, k:节点, ttfb, n, bad, at}，只存样本够的 */
-  hp?: any[];
+  /** 站点偏好：只存样本够的 */
+  hp?: SeedHp[];
 }
 
 /** px:seed 的整体结构 */

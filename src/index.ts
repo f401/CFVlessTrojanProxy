@@ -62,15 +62,13 @@ export default {
       const id = first;
       const sub = (seg[1] || "").toLowerCase();
       const base = { request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf };
-      const learned = await loadRtt(env, id);
-      const regions = await regionListAsync(env);
 
-      // 订阅 / 看用量之前：先把本 isolate 还没送达的增量推给 DO，并跳过 60s 读缓存，
-      // 这样客户端刷订阅看到的就是"截至此刻"的准数
+      // 订阅 / 看用量之前：把本 isolate 还没送达的增量推给 DO，并跳过 60s 读缓存。
+      // 用 pendFlush 自带的 30 秒节流，不再 force —— 订阅刷新再快也不该每 10 秒打一次 DO；
+      // 而且 readStats 会把尚未推上去的 S.pend 直接加回来，数字本来就是准的。
       if (env.METER && ["", "cl", "pcl", "sb", "psb", "ty", "pty", "stats"].includes(sub)) {
-        // 订阅场景要尽量新鲜，但 10 秒内的重复刷新就不必再打了（客户端轮询会放大请求量）
-        await pendFlush(env, Date.now() - S.pendAt > 10000);
-        S.statCache.clear();
+        await pendFlush(env);
+        S.statCache.delete(id);
         S.meterCache.delete(id);
       }
 
@@ -83,6 +81,9 @@ export default {
         case "ty":
         case "pty":
         case "stats": {
+          // 只有订阅/统计需要 RTT 与地区列表：/logs、/debug 不再白读 KV
+          const learned = await loadRtt(env, id);
+          const regions = await regionListAsync(env);
           return subscription({ ...base, id, learned, regions }, sub === "" ? "page" : sub);
         }
 

@@ -116,6 +116,7 @@ async read(env: Env) {
         S.hostNode.set(e.h, hm);
       }
       const cur = hm.get(e.k);
+      const freshBps = (e.bps || 0) > 0 && Date.now() - (e.bpsAt || 0) <= SC.SAMPLE_TTL;
       if (!cur || (e.n || 0) > cur.n) {
         hm.set(e.k, {
           n: e.n || 0,
@@ -124,7 +125,18 @@ async read(env: Env) {
           bytes: 0,
           ttfb: e.ttfb || 0,
           at: e.at || 0,
+          bps: freshBps ? e.bps : 0,
+          bpsN: freshBps ? e.bpsN || 0 : 0,
+          bpsAt: freshBps ? e.bpsAt || 0 : 0,
         });
+      }
+      // 站点级吞吐单独合并：另一台 isolate 的窗口样本比本地新就采纳，
+      // 否则站点 tput 只能在本实例内生效，换个实例又退回全局分。
+      const tgt = hm.get(e.k);
+      if (tgt && freshBps && (e.bpsAt || 0) > (tgt.bpsAt || 0)) {
+        tgt.bps = e.bps;
+        tgt.bpsN = e.bpsN || 1;
+        tgt.bpsAt = e.bpsAt;
       }
     }
   }
@@ -191,30 +203,41 @@ async write(env: Env, listOnly = false, force = false) {
   const byColo = { ...(S.seed.byColo || {}) };
   // 站点偏好：只写"样本够"（族内 ≥3 次）的，按样本数取前 40 —— 约 2KB，
   // 跟 seed 同一次写，不增加任何 KV 写入次数。
-  const hpAll = [];
+  const hpAll: SeedHp[] = [];
   for (const [h, hm] of S.hostNode) {
     let tot = 0;
     for (const s of hm.values()) tot += s.n;
     if (tot < 3) continue;
     for (const [k, s] of hm) {
       if (!s.n) continue;
-      hpAll.push({ h, k, ttfb: s.ttfb || 0, n: s.n, bad: s.bad || 0, at: s.at || 0 });
+      hpAll.push({
+        h, k, ttfb: s.ttfb || 0, n: s.n, bad: s.bad || 0, at: s.at || 0,
+        bps: s.bps || 0, bpsN: s.bpsN || 0, bpsAt: s.bpsAt || 0,
+      });
     }
   }
-  hpAll.sort((a, b) => b.n - a.n);
+  hpAll.sort((a, b) => (b.n || 0) - (a.n || 0));
   // 和桶里已有的合并：每个 isolate 只有自己看到的那部分，直接覆盖会把
-  // 别的 isolate 学到的条目冲掉。按 (族,节点) 去重，样本多的留下。
-  const mergedHp = new Map<string, { h: string; k: string; ttfb: number; n: number; bad: number; at: number }>();
+  // 别的 isolate 学到的条目冲掉。按 (族,节点) 去重，各字段取更新的那份。
+  const mergedHp = new Map<string, SeedHp>();
   for (const e of ((this.bucket() as SeedBucket).hp || [])) {
     if (e && e.h && e.k) mergedHp.set(e.h + "|" + e.k, { ...e });
   }
   for (const e of hpAll) {
     const key = e.h + "|" + e.k;
     const old = mergedHp.get(key);
-    if (!old || e.n > old.n) mergedHp.set(key, e);
+    if (!old) { mergedHp.set(key, { ...e }); continue; }
+    const row: SeedHp = { ...old };
+    if ((e.n || 0) >= (old.n || 0)) {
+      row.n = e.n; row.bad = e.bad; row.at = e.at || row.at;
+      if (e.ttfb) row.ttfb = e.ttfb;
+    }
+    if ((e.bpsAt || 0) > (old.bpsAt || 0)) {
+      row.bps = e.bps; row.bpsN = e.bpsN; row.bpsAt = e.bpsAt;
+    }
+    mergedHp.set(key, row);
   }
-  const hpTop = [...mergedHp.values()].sort((a, b) => (b.n || 0) - (a.n || 0)).slice(0, 40);
-  byColo[this.coloKey()] = { ts: Date.now(), lastSwitch: Math.max(S.lastSwitch.lat || 0, S.lastSwitch.tput || 0), nodes, hp: hpTop };
+  const hpTop = [...mergedHp.values()].sort((a, b) => (b.n || 0) - (a.n || 0)).slice(0, 40);  byColo[this.coloKey()] = { ts: Date.now(), lastSwitch: Math.max(S.lastSwitch.lat || 0, S.lastSwitch.tput || 0), nodes, hp: hpTop };
   // 第一次落盘时顺手建一份"全局候选名单"（只有名字，没有统计），
   // 让还没跑过 cron 的机房也能拿到节点，而不是干等 30 分钟。
   // 名单桶：任何一次落盘都用"当轮实测 ms"刷新一次。它只是给还没测过的机房的参考值，

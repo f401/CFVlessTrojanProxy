@@ -65,11 +65,14 @@ export function cnt(k: string, n: number = 1) {
  */
 export function spdSnapshot() {
   const out: Record<string, NodeSnap> = {};
-  let i = 0;
-  for (const [k, s] of S.nstat) {
+  // 按累计下行挑前 16 个：以前取 Map 的前 16 个（首次触碰顺序），
+  // 真正在跑的大流量节点经常排在后面，面板就一直看不到它的 KB/s。
+  const rows = [...S.nstat.entries()]
+    .filter(([k, s]) => S.alive.has(k) && ((s.tS || 0) + (s.tF || 0) > 0 || (s.bytesDown || 0) > 0))
+    .sort((a, b) => (b[1].bytesDown || 0) - (a[1].bytesDown || 0))
+    .slice(0, 16);
+  for (const [k, s] of rows) {
     const n = (s.tS || 0) + (s.tF || 0);
-    if (!n && !(s.bytesDown > 0)) continue;
-    if (++i > 16) break;
     const q = pcts(s);
     out[k] = {
       med: Math.round(q.p50 || 0),
