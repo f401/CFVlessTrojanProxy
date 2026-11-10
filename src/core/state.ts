@@ -62,6 +62,7 @@ export class AppState {
   /** 跨 isolate 的节点快照（Meter DO 里的 s），面板用；60 秒缓存 */
   nodeSnapCache: { t: number; v: Record<string, NodeSnap> } = { t: 0, v: {} };
   snapWritten = 0;
+  snapBusy = false;        // flushSnap 在飞：并发收尾只允许一个写
   snapBytes = 0;
   kvw = 0;
   kvStat: { ok: boolean | null; key: string; at: number; err?: string; quota?: boolean; quotaAt?: number } = { ok: null, key: "", at: 0 };
@@ -79,6 +80,7 @@ export class AppState {
   usersCache: { v: Auth | null; t: number } = { v: null, t: 0 };
   usersSig = "";
   rtt: Map<string, Record<string, RttEntry>> = new Map();
+  rttMiss: Map<string, number> = new Map();   // rtt:<id> 不存在时的负缓存（省 KV 读）
   errs: ErrItem[] = [];
 
   // —— DNS 缓存 ——

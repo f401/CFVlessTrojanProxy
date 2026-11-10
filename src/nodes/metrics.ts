@@ -77,8 +77,14 @@ export async function loadRtt(env: Env, id: string) {
   try {
     const snap = await getSnap(env);
     let stored: Record<string, RttEntry> = ((snap.rtt || {}) as Record<string, Record<string, RttEntry>>)[id] || {};
-    if (!Object.keys(stored).length) {
+    if (!Object.keys(stored).length && (S.rttMiss.get(id) || 0) < Date.now()) {
+      // 老键 rtt:<id> 只用于迁移；不存在时记住 10 分钟，避免每次刷订阅都打一次 KV
       stored = (await kvGet<Record<string, RttEntry>>(env, `rtt:${id}`)) || {};
+      if (Object.keys(stored).length) S.rttMiss.delete(id);
+      else {
+        if (S.rttMiss.size > 500) S.rttMiss.clear();
+        S.rttMiss.set(id, Date.now() + 10 * 60000);
+      }
     }
     return { ...stored, ...mem };
   } catch (e) {

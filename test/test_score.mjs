@@ -670,5 +670,17 @@ for (const row of W.S.hostNode.get("thr.test").values()) row.at = Date.now() - 3
 W.S.hostRankCache.clear();
 eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { host: "thr.test" }), "g1:443");
 
+// rtt 老键不存在时只读一次 KV：订阅轮询不能每次都打一次
+{
+  W.S.snapCache = { v: { v: 1, ts: 1, date: "", stats: {}, rtt: {}, errs: [] }, t: Date.now() };
+  W.S.rttMiss.clear();
+  let reads = 0;
+  const envR = { STATS: { get: async () => { reads += 1; return null; } } };
+  await W.loadRtt(envR, "miss-u");
+  eq("rtt 缺失第一次读 KV", reads, 1);
+  await W.loadRtt(envR, "miss-u");
+  eq("rtt 缺失 10 分钟内不再读", reads, 1);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

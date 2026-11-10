@@ -76,7 +76,18 @@ export async function flushSnap(env: Env, force?: boolean): Promise<void> {
   // 免费额度（1000/天）打爆。
   const due = !!force || (S.snapBytes >= FLUSH_DIRTY && since >= FLUSH_MIN_MS) || since >= FLUSH_MAX_MS;
   if (!due) return;
+  // 同一 isolate 只允许一个落盘在飞：连接收尾会并发调 flushSnap，
+  // 没有这个闩时 50 条连接同时关闭就可能各写一次 KV（写额度 1000/天）。
+  if (S.snapBusy) return;
+  S.snapBusy = true;
+  try {
+    await writeSnap(env, now);
+  } finally {
+    S.snapBusy = false;
+  }
+}
 
+async function writeSnap(env: Env, now: number): Promise<void> {
   // 第二个闸门是"全局"的：每个 isolate 各写各的会让写次数随实例数线性增长
   // （实测 8 个 isolate × 24 次/天 = 192 次）。快照本身就是合并写入，
   // 45 分钟内别人写过就跳过，自己的增量留在内存里下一轮合并，一条不丢。
