@@ -166,6 +166,12 @@ eq("singbox 首个为 urltest", sb.outbounds[0].type, "urltest");
 const ty = atob(W.renderLinks(env, url, UUID, "a.example.com"));
 ok("分享串含 vless://", ty.includes("vless://" + UUID + "@a.example.com:443"));
 ok("分享串含 trojan://", ty.includes("trojan://"));
+eq("分享串 2 节点 x 2 协议 x 2 模式", (ty.match(/^(vless|trojan):\/\//gm) || []).length, 8);
+{
+  const tyD = decodeURIComponent(ty);
+  ok("分享串含 mode=tput / mode=lat", tyD.includes("mode=tput") && tyD.includes("mode=lat"));
+  ok("分享串节点名带 T/L 后缀", tyD.includes("-T") && tyD.includes("-L"));
+}
 
 const onlyVless = W.renderClash({ ...env }, new URL("https://x/?proto=vless"), UUID, "a.example.com");
 eq("proto=vless 只出 vless", (onlyVless.match(/^    type: (vless|trojan)$/gm) || []).length, 4);
