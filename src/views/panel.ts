@@ -271,7 +271,7 @@ export function renderAdminHint() {
  * @param {Map<string,object>} statsMap 用量表
  * @returns {string} HTML
  */
-export function renderAdmin(url: URL, users: { list: UserRec[] }, statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }>) {
+export function renderAdmin(url: URL, users: { list: UserRec[] }, statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }>, pageKey = "") {
   const rows = users.list
     .map((u: UserRec) => {
       const s = statsMap[u.id] || {};
@@ -286,6 +286,13 @@ export function renderAdmin(url: URL, users: { list: UserRec[] }, statsMap: Reco
              <button name="op" value="del" onclick="return confirm('确定删除？')">删除</button>
            </form>`
         : `<span class="mu">环境变量，不可改</span>`;
+      // 控制页/订阅都要带 pageKey（设了访问口令时）
+      const kq = pageKey ? "?k=" + encodeURIComponent(pageKey) : "";
+      const base = url.origin + "/" + encodeURIComponent(u.id);
+      const panelHref = base + kq;
+      const subClash = base + "/cl" + kq;
+      const subSb = base + "/sb" + kq;
+      const subTy = base + "/ty" + kq;
       return `<tr class="${dis ? "off" : ""}">
         <td class="u">${escapeHtml(u.id)}</td>
         <td class="u">${u.pwd ? escapeHtml(u.pwd) : "<span class='mu'>—</span>"}</td>
@@ -293,6 +300,12 @@ export function renderAdmin(url: URL, users: { list: UserRec[] }, statsMap: Reco
         <td>${dis ? "已禁用" : "正常"}</td>
         <td>${today}</td>
         <td>${used}</td>
+        <td class="lnk">
+          <a class="btn" href="${escapeHtml(panelHref)}" target="_blank" rel="noreferrer">打开</a>
+          <button data-copy="${escapeHtml(subClash)}" title="复制 Clash 订阅">cl</button>
+          <button data-copy="${escapeHtml(subSb)}" title="复制 sing-box 订阅">sb</button>
+          <button data-copy="${escapeHtml(subTy)}" title="复制明文链接订阅">ty</button>
+        </td>
         <td>${ops}</td>
       </tr>`;
     })
@@ -315,6 +328,9 @@ th{background:#fafbfc}
 tr.off td{opacity:.5}
 button{padding:3px 8px;font-size:12px;margin:1px;border:1px solid #d1d5db;background:#fff;border-radius:4px;cursor:pointer}
 button:hover{background:#f3f4f6}
+.lnk{white-space:nowrap}
+a.btn{display:inline-block;padding:3px 8px;font-size:12px;border:1px solid #d1d5db;border-radius:4px;color:#1f2328;text-decoration:none;background:#fff}
+a.btn:hover{background:#f3f4f6}
 .add{margin:16px 0;padding:12px;border:1px solid #e3e6ea;border-radius:8px;background:#fafbfc}
 input[type=text]{padding:5px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:13px}
 code{background:#f3f4f6;padding:1px 5px;border-radius:4px}
@@ -329,13 +345,40 @@ code{background:#f3f4f6;padding:1px 5px;border-radius:4px}
 </form>
 
 <table>
-<tr><th>UUID</th><th>Trojan 密码</th><th>备注</th><th>状态</th><th>今日</th><th>累计</th><th>操作</th></tr>
-${rows || '<tr><td colspan="7" class="mu">还没有用户</td></tr>'}
+<tr><th>UUID</th><th>Trojan 密码</th><th>备注</th><th>状态</th><th>今日</th><th>累计</th><th>入口</th><th>操作</th></tr>
+${rows || '<tr><td colspan="8" class="mu">还没有用户</td></tr>'}
 </table>
 
 <div class="sub" style="margin-top:18px">
 新增后把 UUID / 密码发给对方：控制页 <code>${url.origin}/&lt;uuid&gt;</code>，订阅 <code>/&lt;uuid&gt;/cl</code>。
+每行「打开」直达该用户控制页，cl/sb/ty 按钮复制对应订阅地址（含访问口令）。
 </div>
+<script>
+(function () {
+  function flash(b, t) {
+    var old = b.getAttribute("data-label") || b.textContent;
+    b.textContent = t;
+    setTimeout(function () { b.textContent = old; }, 1200);
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("button[data-copy]") : null;
+    if (!b) return;
+    var text = b.getAttribute("data-copy");
+    function done() { flash(b, "已复制"); }
+    function fallback() {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select();
+        document.execCommand("copy"); document.body.removeChild(ta); done();
+      } catch (err) { window.prompt("手动复制：", text); }
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else fallback();
+  });
+})();
+</script>
 </body></html>`;
 }
 

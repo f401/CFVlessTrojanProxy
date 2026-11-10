@@ -29,3 +29,5 @@ export { logErr, hostNodeMark, hostDirectMark, diagVerdict, hostRank, hostScore,
 export { tlsHello } from "./px/probe";
 export { nodeSnapGet } from "./store/index";
 export { renderStatsHtml } from "./views/panel";
+
+export { renderAdmin } from "./views/panel";

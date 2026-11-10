@@ -195,5 +195,16 @@ ok("Subscription-Userinfo 含总量", h["Subscription-Userinfo"].includes("total
 ok("Subscription-Userinfo 含用量", h["Subscription-Userinfo"].includes("upload=111") && h["Subscription-Userinfo"].includes("download=222"));
 ok("expire 被转成秒", /expire=1[78]\d{8}/.test(h["Subscription-Userinfo"]));
 
+/* ---------- admin 入口链接 / 订阅复制 ---------- */
+{
+  const html = W.renderAdmin(new URL("https://edge.example.com/admin"), {
+    list: [{ id: UUID, pwd: "pw123", note: "n", enabled: true, managed: true }],
+  }, {}, "KEY42");
+  ok("admin 每行有控制页跳转", html.includes(`https://edge.example.com/${UUID}?k=KEY42`), "");
+  ok("admin 每行有 cl 订阅复制", html.includes(`https://edge.example.com/${UUID}/cl?k=KEY42`), "");
+  ok("admin 每行有 sb 订阅复制", html.includes(`https://edge.example.com/${UUID}/sb?k=KEY42`), "");
+  ok("admin 有复制脚本", html.includes("navigator.clipboard") && html.includes('data-copy'), "");
+}
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

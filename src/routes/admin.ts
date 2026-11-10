@@ -6,7 +6,7 @@ import type { RouteCtx } from "../edge/types";
 
 /** /admin：登录（挑战-应答）+ 用户增删改。未设 adminKey 时整个面板关闭 */
 export async function admin(c: RouteCtx): Promise<Response> {
-  const { env, url, request, host, first, seg } = c;
+  const { env, url, request, host, first, seg, pageKey } = c;
       /* ---------- 管理面板（会话登录） ---------- */
       if (first === "admin") {
         const adminKey = String(env.adminKey || "");
@@ -124,7 +124,7 @@ export async function admin(c: RouteCtx): Promise<Response> {
             };
           } catch (e) {}
         }
-        return safeHtml(renderAdmin(url, users, statsMap));
+        return safeHtml(renderAdmin(url, users, statsMap, pageKey));
       }
 
   return new Response("Not Found", { status: 404 });
