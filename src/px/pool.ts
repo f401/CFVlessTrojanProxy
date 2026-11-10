@@ -323,9 +323,12 @@ export async function cronScan(env: Env) {
     nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
   }
 
-  // ② 重测当前 + 前 3 名（失败即进冷却）
+  // ② 重测当前 + 分数前 3 名（失败即进冷却）
+  //    以前这里取的是 alive 的前三个 key（插入顺序），跟"前 3 名"没关系，
+  //    真正该复测的头部节点反而一直轮不到。
   const cur = S.curs.tput || S.curs.lat || "";
-  const recheck = [cur, ...[...S.alive.keys()].filter((k) => k !== cur).slice(0, 3)].filter(Boolean).slice(0, 4);
+  const top3 = candsFor("tput").map((x) => x.k).filter((k) => k !== cur).slice(0, 3);
+  const recheck = [cur, ...top3].filter(Boolean).slice(0, 4);
   const rres = await Promise.all(
     recheck.map(async (k) => {
       const i = k.lastIndexOf(":");
@@ -344,7 +347,10 @@ export async function cronScan(env: Env) {
   }
 
   // ②b 其余 alive：只刷新延迟，不参与拉黑（抖动不该把 alive 打死）
-  const rest = [...S.alive.keys()].filter((k) => !recheck.includes(k)).slice(0, 12);
+  //    从 poolIdx 开始轮转，别每次都测同样 12 个（插入顺序靠前的会一直被溺爱）
+  const allRest = [...S.alive.keys()].filter((k) => !recheck.includes(k));
+  const start = allRest.length ? (S.poolIdx % allRest.length) : 0;
+  const rest = [...allRest.slice(start), ...allRest.slice(0, start)].slice(0, 12);
   if (rest.length) {
     const rres2 = await Promise.all(
       rest.map(async (k) => {
