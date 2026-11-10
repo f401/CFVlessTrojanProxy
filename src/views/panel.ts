@@ -397,7 +397,11 @@ export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Rec
       const ok = st.ok || 0;
       const bad = st.fail || 0;
       const rate = ok + bad > 0 ? Math.round((ok / (ok + bad)) * 100) + "% (" + ok + "/" + (ok + bad) + ")" : "-";
-      const kbps = st.bps ? Math.round(st.bps / 1024) + " KB/s" + (st.samples ? ` (n=${st.samples})` : "") : "未用";
+      // bps 来自"真实下载窗口"的 p90：本实例没有样本时，面板会去读 Meter DO 里的跨实例快照
+      const nSamp = Number(b1.nEff) || st.samples || 0;
+      const kbps = st.bps
+        ? Math.round(st.bps / 1024) + " KB/s" + (nSamp ? ` (n=${Math.round(nSamp)})` : "")
+        : "未用（本实例无下载样本）";
       return { x, k, score: scoreMerged(k, nsMap), kbps, rate, ok, bad, cc: x.cc || "" };
     })
     .sort((a, b) => a.score - b.score)
