@@ -103,6 +103,11 @@ interface NodeStats {
   sumW2: number;
   recentBytesW: number;
   lastSampleAt: number;
+  /** 10 分钟滑动窗口：近期成功/失败（用于快速反映劣化与抖动） */
+  winAt: number;
+  winOk: number;
+  winFail: number;
+
   /** seed 先验：速率、可靠性伪计数、采集时刻 */
   seedBps: number;
   seedN: number;

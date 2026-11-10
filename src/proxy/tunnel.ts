@@ -1,7 +1,7 @@
 import type { Socket } from "cloudflare:sockets";
-import { closeQuietly, errMsg, safeSend, toU8 } from "../core/util";
+import { WS_OPEN, closeQuietly, errMsg, safeSend, toU8 } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
-import { nsGet } from "../nodes/score";
+import { nsGet, nsSiteFail } from "../nodes/score";
 import { cnt } from "../px/pool";
 import type { Connection } from "./connection";
 
@@ -45,19 +45,26 @@ export function pipeBack(sock: Socket, ws: WebSocketLike, st: Connection, onClos
     .catch((err) => {
       logErr("pipe: " + (errMsg(err)), st && st.node ? st.node : "");
       closeQuietly(sock);
-      // 已经传过数据却异常结束 = 中途断流，算这个节点一次失败（以前只在空关闭时记账）
+      const clientGone = !ws || ws.readyState !== WS_OPEN;
       if (st && st.down > 0) {
-        st.failed = true;
-        cnt("cut");
-        if (st.node) {
-          const sn = nsGet(st.node);
-          sn.tF = (sn.tF || 0) + 1;
-          // 中途断流的节点先凉 60 秒：客户端的重试就会落到别的节点上，
-          // 否则重试大概率还选同一个，用户看到的就是"这个下载一直失败"。
-          // 站点级试探的连接不冻结（它可能只是对这个站不行，别的站还好）。
-          if (!st.hostTrial) sn.freeUntil = Math.max(sn.freeUntil || 0, Date.now() + 60000);
+        if (clientGone) {
+          // 客户端自己走了（切网 / 关标签 / 取消）：不是节点的问题，不记失败、不冻结
+          cnt("ccut");
+        } else {
+          st.failed = true;
+          cnt("cut");
+          if (st.node) {
+            if (st.siteFail) {
+              nsSiteFail(st.node);            // 站点侧：只轻记
+            } else {
+              const sn = nsGet(st.node);
+              sn.tF = (sn.tF || 0) + 1;
+              // 中途断流的节点先凉 60 秒；站点级试探不冻结（可能只是对这个站不行）
+              if (!st.hostTrial) sn.freeUntil = Math.max(sn.freeUntil || 0, Date.now() + 60000);
+            }
+          }
         }
       }
-      try { ws.close(1011, "pipe error"); } catch (e) {}
+      if (!clientGone) { try { ws.close(1011, "pipe error"); } catch (e) {} }
     });
 }

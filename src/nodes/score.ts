@@ -22,6 +22,7 @@ export function nsGet(k: string): NodeStats {
       bytesDown: 0, hist: new Array(HIST_N).fill(0),
       sumW: 0, sumW2: 0, recentBytesW: 0, lastSampleAt: 0,
       seedBps: 0, seedN: 0, seedFail: 0, seedAt: 0, counted: 0,
+      winAt: 0, winOk: 0, winFail: 0,
     };
     S.nstat.set(k, s);
   }
@@ -81,10 +82,24 @@ export function effView(s: NodeStats, now = Date.now()) {
  * @param {number} [tls] TLS 往返毫秒
  * @returns {void}
  */
+function bumpWin(s: NodeStats, now: number, ok: boolean) {
+  if (!s.winAt || now - s.winAt > SC.WIN_MS) { s.winAt = now; s.winOk = 0; s.winFail = 0; }
+  if (ok) s.winOk += 1; else s.winFail += 1;
+}
+
+/** 近期（10 分钟）失败率；样本不足返回 0（= 不参与） */
+export function pFailFast(s: NodeStats, now = Date.now()): number {
+  if (!s || !s.winAt || now - s.winAt > SC.WIN_MS) return 0;
+  const n = s.winOk + s.winFail;
+  if (n < 2) return 0;
+  return (s.winFail + 1) / (n + 10);
+}
+
 export function nsOk(k: string, tcp: number, tls: number) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
+  bumpWin(s, now, true);
   s.okW += 1; s.ok += 1; s.tS = (s.tS || 0) + 1;
   s.streak = 0; s.blackUntil = 0; s.at = now;
   if (tcp > 0) s.tcp = s.tcp ? s.tcp * (1 - SC.A) + tcp * SC.A : tcp;
@@ -134,14 +149,36 @@ export function nsFail(k: string) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
+  bumpWin(s, now, false);
   s.failW += 1; s.fail += 1; s.tF = (s.tF || 0) + 1;
   s.streak = (s.streak || 0) + 1;
   const ladder = [60000, 300000, 900000, 3600000];
   s.blackUntil = now + ladder[Math.min(s.streak, 4) - 1];
   if (s.streak >= 4) s.streak = 0;     // 给第五次机会
+  // 抖动：10 分钟内成败参半（≥4 次）→ 冷却 5 分钟，而不是等"连续"失败
+  const wn = s.winOk + s.winFail;
+  if (wn >= 4 && s.winFail / wn >= 0.5) {
+    s.blackUntil = Math.max(s.blackUntil || 0, now + 5 * 60000);
+  }
   s.at = now;
   S.hostRankCache.clear();             // 冷却中的节点不该继续被站点排行推荐
   S.rankCache.t = 0;                   // 失败改变了排序前提
+}
+
+/**
+ * 站点侧失败：连上了节点，但目标站 0 字节关闭 / 拒绝。
+ * 只轻记全局（0.2 次），不动连续失败阶梯 —— 一个站封了这个 IP，不该毁掉节点在别处的排名。
+ */
+export function nsSiteFail(k: string) {
+  if (!k) return;
+  const s = nsGet(k), now = Date.now();
+  nsDecay(s, now);
+  s.failW += 0.2;
+  s.fail += 1;
+  s.tF = (s.tF || 0) + 0.2;
+  s.at = now;
+  S.hostRankCache.clear();
+  S.rankCache.t = 0;
 }
 
 /**
@@ -322,6 +359,7 @@ export const ZERO_STAT: NodeStats = {
   stallMs: 0, runMs: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0),
   sumW: 0, sumW2: 0, recentBytesW: 0, lastSampleAt: 0,
   seedBps: 0, seedN: 0, seedFail: 0, seedAt: 0, counted: 0,
+  winAt: 0, winOk: 0, winFail: 0,
 };
 
 export const TEN_MB = 10 * 1048576;
@@ -373,7 +411,7 @@ export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = f
   const e10Ms = confB * e10Local + (1 - confB) * e10Prior;
 
   // —— 风险 ——
-  const pFailRisk = pFailOf(s, now, e);
+  const pFailRisk = Math.max(pFailOf(s, now, e), pFailFast(s, now));
   const pStall = pStallOf(s, now, e);
   const N = e.okW + e.failW;
 

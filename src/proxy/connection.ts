@@ -47,6 +47,8 @@ export class Connection {
   sampleDown = 0;
   lastEmit = 0;
   sampleW = 0;            // 本连接已贡献给直方图的权重（上限 SC.CONN_W_CAP）
+  inflightKey = "";       // 已经计入在途的节点（变更时迁移）
+  stallMark = 0;          // 上次采样时的累计背压毫秒（算窗口 stall 占比）
   siteAt = 0;             // 站点吞吐：上一次采样时刻
   siteDown = 0;           // 站点吞吐：上一次采样时的下行字节
 
@@ -54,6 +56,7 @@ export class Connection {
   markedOk = false;
   markedFail = false;
   failed = false;         // 中途断流/异常（由 pipeBack 的 catch 置位），不算成功
+  siteFail = false;       // 失败归因：连上了节点但目标侧拒绝（只轻记全局）
   hostTrial = false;      // 站点级试探：失败只记账，不动全局游标/不冻结
   retried = false;
   pxTries = 0;
@@ -108,7 +111,10 @@ export class Connection {
       if (this.sampleAt && dt >= 800 && now - this.lastEmit >= 15000) {
         const bytes = this.down - this.sampleDown;
         if (this.node && bytes >= 65536) {
-          const w = this.takeWeight(bytes, dt);
+          let w = this.takeWeight(bytes, dt);
+          // 窗口里一半以上时间在背压 = 瓶颈在客户端，这个样本不代表节点能力
+          const stallWin = this.stallMs - this.stallMark;
+          if (stallWin > dt * 0.5) w *= 0.3;
           if (w > 0) {
             this.lastEmit = now;
             nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
@@ -117,6 +123,7 @@ export class Connection {
         }
         this.sampleAt = now;
         this.sampleDown = this.down;
+        this.stallMark = this.stallMs;
       }
       // 站点级吞吐：长连接（看视频）每 60 秒补一个窗口，别等连接结束
       if (this.node && this.host) {
@@ -132,6 +139,7 @@ export class Connection {
       if (!this.sampleAt) {
         this.sampleAt = now;
         this.sampleDown = this.down;
+        this.stallMark = this.stallMs;
       }
 
       this.flush(false);
@@ -168,6 +176,25 @@ export class Connection {
     return true;
   }
 
+  /** 把"在途连接数"对齐到当前节点（切换节点时会迁移） */
+  syncInflight(): void {
+    const k = this.node;
+    if (k === this.inflightKey) return;
+    if (this.inflightKey) {
+      const n = (S.inflight.get(this.inflightKey) || 1) - 1;
+      if (n > 0) S.inflight.set(this.inflightKey, n); else S.inflight.delete(this.inflightKey);
+    }
+    this.inflightKey = k || "";
+    if (k) S.inflight.set(k, (S.inflight.get(k) || 0) + 1);
+  }
+
+  clearInflight(): void {
+    if (!this.inflightKey) return;
+    const n = (S.inflight.get(this.inflightKey) || 1) - 1;
+    if (n > 0) S.inflight.set(this.inflightKey, n); else S.inflight.delete(this.inflightKey);
+    this.inflightKey = "";
+  }
+
   /**
    * 本次窗口应贡献多少直方图权重。
    * 512KB / 1s 是"一个标准样本"；短窗口或小样本按比例降权，单连接累计封顶。
@@ -183,6 +210,7 @@ export class Connection {
 
   /** 把"尚未上报"的字节推给 PEND；closing=true 时补一个收尾样本 */
   flush(closing?: boolean): void {
+    if (closing) this.clearInflight();
     if (!this.id) return;
 
     // 收尾逻辑必须在"零字节"提前返回之前：
@@ -193,7 +221,9 @@ export class Connection {
       const dt = now - this.sampleAt;
       const bytes = this.down - this.sampleDown;
       if (this.node && this.sampleAt && dt >= 300 && bytes >= 32768 && now - this.lastEmit >= 5000) {
-        const w = this.takeWeight(bytes, dt);
+        let w = this.takeWeight(bytes, dt);
+        const stallWin = this.stallMs - this.stallMark;
+        if (stallWin > dt * 0.5) w *= 0.3;
         if (w > 0) {
           nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
           S.cnt.tput = (S.cnt.tput || 0) + 1;

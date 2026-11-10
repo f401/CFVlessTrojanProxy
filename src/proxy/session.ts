@@ -209,6 +209,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
           // 把客户端首个载荷（TLS ClientHello 含目标 SNI）写给目标/中转，
           // 目标是 CF 托管站点时首个连接会被静默丢弃，此时靠 onClose 重试到 proxyip
           const attach = async (s2: Socket) => {
+            st.syncInflight();
             st.sock = s2;
             st.writer = s2.writable.getWriter();
             st.headerSent = false;
@@ -244,8 +245,11 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
                   }
                 }
                 cnt("dead"); kickFlush(env, st.id);                       // 换节点也不通 → 这个目标走不了中转
+                // 站点侧失败：连上了中转，但目标 0 字节关闭 —— 不当作节点故障
+                st.failed = true;
+                st.siteFail = true;
                 if (st.hostTrial) await SEL.softFail(st.node);
-                else await SEL.bumpFail(env, st.mode, st.node, st.trial);
+                else await SEL.bumpFail(env, st.mode, st.node, st.trial, "site");
                 try { serverWS.close(1000, "done"); } catch (e) {}
                 return;
               }

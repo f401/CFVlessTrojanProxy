@@ -3,7 +3,7 @@ import { SC } from "../core/const";
 import { hostKey, hostRank, hostUntried, logErr } from "./metrics";
 import { MODES, aliveList, cnt, keyOf, pxGet } from "../px/pool";
 import { pxPolicy } from "../px/probe";
-import { bestFor, candsFor, costOf, freezeNode, isBlack, isFrozen, nsFail, nsGet, nsOk , ZERO_STAT } from "./score";
+import { bestFor, candsFor, costOf, freezeNode, isBlack, isFrozen, nsFail, nsGet, nsOk, ZERO_STAT, nsSiteFail } from "./score";
 import { SEEDS } from "../px/seed";
 import { S } from "../core/state";
 
@@ -28,7 +28,8 @@ async region(env: Env, cc: string | null) {
  */
 pick(env: Env, mode: Mode, st: Connection | null) {
   const m = mode === "lat" ? "lat" : "tput";
-  const cur = S.curs[m] || bestFor(m);
+  const now = Date.now();
+  let cur = S.curs[m] || bestFor(m);
   if (!cur) cnt("noCand");
   const host = st && st.host ? String(st.host) : "";
   if (st) st.hostTrial = false;
@@ -57,7 +58,9 @@ pick(env: Env, mode: Mode, st: Connection | null) {
       // 这个站至少有两个节点有样本（有对比才有意义），才敢覆盖全局游标
       let sampled = 0;
       for (const s of hm.values()) if (s.n > 0) sampled++;
-      if (bs && bs.n > 0 && (bs.n >= 2 || sampled >= 2)) {
+      // 至少 3 个节点有样本、且首选样本不超过 2 小时，才敢用站点偏好覆盖全局
+      const fresh = now - (bs ? bs.at || 0 : 0) <= 2 * 3600e3;
+      if (bs && bs.n > 0 && sampled >= 3 && fresh) {
         // 稳定期留 2% 给次优节点，保持样本新鲜（不然一次侥幸定终身）
         if (rank.length > 1 && !(st && st.retried) && Math.random() < 0.02) {
           if (st) st.node = rank[1].k;
@@ -98,6 +101,18 @@ pick(env: Env, mode: Mode, st: Connection | null) {
       if (st) { st.trial = true; st.node = t; }
       return t;
     }
+  }
+  // ④ 负载感知：当前节点在途连接多的时候，允许溢出到分数接近的空闲候选
+  if (cur && (S.inflight.get(cur) || 0) >= 2) {
+    const cv = costOf(cur, m);
+    let alt = "", bv = Infinity;
+    for (const x of candsFor(m).slice(0, 3)) {
+      if (x.k === cur) continue;
+      if (x.v > cv * 1.5) continue;
+      if ((S.inflight.get(x.k) || 0) >= (S.inflight.get(cur) || 0)) continue;
+      if (x.v < bv) { bv = x.v; alt = x.k; }
+    }
+    if (alt) cur = alt;
   }
   if (st) st.node = cur;
   return cur;
@@ -196,11 +211,17 @@ onFail(env: Env, mode: Mode, k: string, trial: boolean) {
 
 /** 只记一次全局失败，不动游标也不冻结（站点级试探失败用） */
 async softFail(k: string) {
-  if (k) nsFail(k);
+  // 站点级试探失败：只轻记全局，不动主游标
+  if (k) nsSiteFail(k);
 }
 
 /** 记一次失败；连续到阈值就换节点。兼容旧调用。 */
-async bumpFail(env: Env, mode: Mode, k: string, trial: boolean) {
+async bumpFail(env: Env, mode: Mode, k: string, trial: boolean, kind: "node" | "site" = "node") {
+  if (kind === "site") {
+    // 目标站侧的问题：不推进失败计数、不换全局游标，只轻记节点
+    if (k) nsSiteFail(k);
+    return;
+  }
   S.pxFailSeen = 1;
   S.pxFailMem += 1;
   const node = k || S.curs[mode === "lat" ? "lat" : "tput"] || S.curs.tput || S.curs.lat || "";

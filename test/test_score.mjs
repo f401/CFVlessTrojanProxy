@@ -514,5 +514,68 @@ reset();
 node("ln:443", { tcp: 50, pN: 4, okW: 4 });
 eq("latN = 探活 + 成功连接", W.scoreParts("ln:443", "lat").latN, 8);
 
+/* ---------- 13. 归因 / 负载 / 快速窗口 / 站点门槛 ---------- */
+reset();
+{
+  const s = W.nsGet("sitefail:443");
+  const beforeFail = s.failW, beforeBlack = s.blackUntil;
+  W.nsSiteFail("sitefail:443");
+  ok("站点失败只加 0.2 全局权重", Math.abs(s.failW - beforeFail - 0.2) < 1e-9, String(s.failW));
+  eq("站点失败不进冷却阶梯", s.blackUntil, beforeBlack);
+}
+
+reset();
+node("fk:443", {});
+const sfk = W.nsGet("fk:443");
+W.nsOk("fk:443", 0, 0);
+W.nsFail("fk:443");
+W.nsFail("fk:443");
+ok("10 分钟窗口内 2 次失败会抬高近期风险", W.pFailFast(sfk) > 0.15, String(W.pFailFast(sfk)));
+ok("总分用 max(慢, 快)", W.scoreParts("fk:443", "lat").pFailRisk >= W.pFailFast(sfk));
+
+reset();
+{
+  const s = W.nsGet("flap:443");
+  s.winAt = Date.now(); s.winOk = 2; s.winFail = 3;
+  W.nsFail("flap:443");
+  ok("抖动（窗口内成败参半）触发 5 分钟冷却", s.blackUntil - Date.now() > 4 * 60000, String(s.blackUntil - Date.now()));
+}
+
+reset();
+const cIn = new W.Connection({}, {}, "tput", "");
+cIn.node = "load:443";
+cIn.syncInflight();
+eq("attach 记在途", W.S.inflight.get("load:443"), 1);
+cIn.node = "load2:443";
+cIn.syncInflight();
+eq("换节点迁移在途", [W.S.inflight.get("load:443") || 0, W.S.inflight.get("load2:443")], [0, 1]);
+cIn.clearInflight();
+eq("收尾清在途", W.S.inflight.get("load2:443") || 0, 0);
+
+reset();
+node("busy:443", { tcp: 50, okW: 10 });
+node("idle:443", { tcp: 60, okW: 10 });
+S.curs.tput = "busy:443";
+W.S.inflight.set("busy:443", 3);
+const stLoad = { host: "" };
+eq("当前节点过载时溢出到空闲候选", W.SEL.pick({ pxShadow: 0 }, "tput", stLoad), "idle:443");
+W.S.inflight.clear();
+
+reset();
+node("g1:443", { tcp: 50, okW: 10 });
+node("g2:443", { tcp: 300, okW: 10 });
+node("g3:443", { tcp: 400, okW: 10 });
+// 只有 2 个节点有站点样本：不够 3 个，应该退回全局（g1）
+W.hostNodeMark("thr.test", "g1:443", { ok: 1, bad: 0, bytes: 100, ttfb: 800 });
+W.hostNodeMark("thr.test", "g2:443", { ok: 1, bad: 0, bytes: 100, ttfb: 60 });
+eq("站点样本不足 3 个节点 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { host: "thr.test" }), "g1:443");
+// 补第三个节点样本后，站点偏好生效
+W.hostNodeMark("thr.test", "g3:443", { ok: 1, bad: 0, bytes: 100, ttfb: 400 });
+eq("3 个节点有样本 → 站点偏好生效", W.SEL.pick({ pxShadow: 0 }, "lat", { host: "thr.test" }), "g2:443");
+// 样本过期（>2h）→ 退回全局
+for (const row of W.S.hostNode.get("thr.test").values()) row.at = Date.now() - 3 * 3600e3;
+W.S.hostRankCache.clear();
+eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { host: "thr.test" }), "g1:443");
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
