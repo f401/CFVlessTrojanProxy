@@ -3,7 +3,7 @@ import { SC } from "../core/const";
 import { hostKey, hostRank, hostUntried, logErr } from "./metrics";
 import { MODES, aliveList, cnt, keyOf, pxGet } from "../px/pool";
 import { pxPolicy } from "../px/probe";
-import { bestFor, candsFor, costOf, freezeNode, isBlack, isFrozen, nsFail, nsGet, nsOk, ZERO_STAT, nsSiteFail } from "./score";
+import { bestFor, candsFor, costOf, freezeNode, isBlack, isFrozen, nsFail, nsGet, ZERO_STAT, nsSiteFail } from "./score";
 import { SEEDS } from "../px/seed";
 import { S } from "../core/state";
 
@@ -29,45 +29,46 @@ async region(env: Env, cc: string | null) {
 pick(env: Env, mode: Mode, st: Connection | null) {
   const m = mode === "lat" ? "lat" : "tput";
   const now = Date.now();
-  let cur = S.curs[m] || bestFor(m);
+  let cur = S.curs[m];
+  // 游标可能是上一代候选池里的节点：池子刷新后 alive 里已经没有它了。
+  // 以前会一直把连接拨到这个死地址，直到 cron 的 maybeSwitch 才发现。
+  if (!cur || !S.alive.has(cur) || isBlack(cur) || isFrozen(cur)) {
+    cur = bestFor(m);
+    if (cur) S.curs[m] = cur;
+  }
   if (!cur) cnt("noCand");
   const host = st && st.host ? String(st.host) : "";
   if (st) st.hostTrial = false;
 
   // 画像按"域名族"存（api.x.com 与 pbs.twimg.com 共用 x.com），读写必须用同一个键
   const fam = host ? hostKey(host) : "";
-  if (host) {
-    const tried = (S.hostNode.get(fam) || new Map()).size;
+  if (host && fam) {
+    const hm = S.hostNode.get(fam);
+    const tried = hm ? hm.size : 0;
 
-    // ① 冷启动：头几次连接故意岔开，否则第一个碰上的节点会被永久锁死
-    if (tried < 3 && !(st && st.retried) && Math.random() < (tried === 0 ? 1 : 0.5)) {
-      const t = hostUntried(host, m);
-      if (t) {
-        nsGet(t).lastTry = Date.now();
-        if (st) { st.hostTrial = true; st.node = t; }
-        return t;
-      }
-    }
-
-    // ② 有站点样本 → 按站点分选
-    const rank = hostRank(host, m);
-    if (rank.length) {
-      const best = rank[0].k;
-      const hm = S.hostNode.get(fam) || new Map();
-      const bs = hm.get(best);
-      // 这个站至少有两个节点有样本（有对比才有意义），才敢覆盖全局游标
-      let sampled = 0;
-      for (const s of hm.values()) if (s.n > 0) sampled++;
-      // 至少 3 个节点有样本、且首选样本不超过 2 小时，才敢用站点偏好覆盖全局
-      const fresh = now - (bs ? bs.at || 0 : 0) <= 2 * 3600e3;
-      if (bs && bs.n > 0 && sampled >= 3 && fresh) {
-        // 稳定期留 2% 给次优节点，保持样本新鲜（不然一次侥幸定终身）
-        if (rank.length > 1 && !(st && st.retried) && Math.random() < 0.02) {
-          if (st) st.node = rank[1].k;
-          return rank[1].k;
+    // ① 有站点样本 → 按站点分选。
+    //    少于 3 个节点有样本时排序没有比较意义（门槛在下面也要求 sampled>=3），
+    //    直接跳过：省掉一次遍历全部节点的 hostRank 构建。
+    if (tried >= 3) {
+      const rank = hostRank(host, m);
+      if (rank.length) {
+        const best = rank[0].k;
+        const bs = hm!.get(best);
+        // 至少 3 个节点有样本、且首选样本不超过 2 小时，才敢用站点偏好覆盖全局
+        let sampled = 0;
+        for (const s of hm!.values()) if (s.n > 0) sampled++;
+        const fresh = now - (bs ? bs.at || 0 : 0) <= 2 * 3600e3;
+        if (bs && bs.n > 0 && sampled >= 3 && fresh) {
+          // 稳定期留 2% 给次优节点，保持样本新鲜（不然一次侥幸定终身）。
+          // 但次优和首选差太多时不换：那不是"保持新鲜"，是主动跳坑。
+          const second = rank[1];
+          if (second && second.v <= rank[0].v * 1.3 + 100 && !(st && st.retried) && Math.random() < 0.02) {
+            if (st) st.node = second.k;
+            return second.k;
+          }
+          if (st) st.node = best;
+          return best;
         }
-        if (st) st.node = best;
-        return best;
       }
     }
   }
@@ -84,8 +85,8 @@ pick(env: Env, mode: Mode, st: Connection | null) {
   if (cur && canTrial && exploreP > 0 && Math.random() < exploreP) {
     // 这个站还没试够节点：先补站点样本（仍受同一个预算约束）
     if (host && fam) {
-      const tried = (S.hostNode.get(fam) || new Map()).size;
-      if (tried < 3) {
+      const hm = S.hostNode.get(fam);
+      if (!hm || hm.size < 3) {
         const t0 = hostUntried(host, m);
         if (t0) {
           nsGet(t0).lastTry = Date.now();
@@ -125,9 +126,9 @@ pick(env: Env, mode: Mode, st: Connection | null) {
     return (s.sumW * s.sumW) / s.sumW2;
   }
 
-/** 待测队列：样本不足的节点，最久没试的优先 */
+/** 待测队列：样本不足的节点，最久没试的优先（单遍扫描，不排序） */
 trial(mode: Mode) {
-  const pool = [];
+  let best = "", bestT = Infinity;
   for (const k of S.alive.keys()) {
     if (k === S.curs[mode] || isBlack(k) || isFrozen(k)) continue;
     const a = (S.alive.get(k) || {}) as NodeEntry;
@@ -136,10 +137,10 @@ trial(mode: Mode) {
     const n = (s.okW || 0) + (s.failW || 0);
     // 样本够了就不再试探：按有效吞吐窗口数判断，而不是累计字节
     if (this.nEffOf(k) >= SC.N_EFF_MIN && n >= SC.TRIAL_N) continue;
-    pool.push({ k, t: s.lastTry || 0 });
+    const t = s.lastTry || 0;
+    if (t < bestT) { bestT = t; best = k; }
   }
-  pool.sort((a, b) => a.t - b.t);
-  return pool.length ? pool[0].k : "";
+  return best;
 }
 
 /** 重新评估是否该换节点（cron 与失败路径共用） */
@@ -236,13 +237,11 @@ async bumpFail(env: Env, mode: Mode, k: string, trial: boolean, kind: "node" | "
   this.maybeSwitch(env, "tput");
 }
 
-/** 链路健康：清零计数并把当前节点记为成功 */
-async resetFail(env: Env, k: string) {
+/** 链路健康：清零计数。成功样本由 Connection.flush 在收尾时统一记一次。 */
+async resetFail(_env: Env, _k: string) {
   if (!S.pxFailSeen) return;
   S.pxFailSeen = 0;
   S.pxFailMem = 0;
-  const node = k || S.curs.tput || S.curs.lat || "";
-  if (node) nsOk(node, 0, 0);
 }
 
 /** 当前节点（"auto" 模式才用池子；手动配置直接返回） */

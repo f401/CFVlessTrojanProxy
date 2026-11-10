@@ -1,5 +1,5 @@
 import { SC } from "../core/const";
-import { costOf, isBlack, isFrozen } from "./score";
+import { candsFor, costOf, isBlack, isFrozen } from "./score";
 import { S } from "../core/state";
 import { TEN_MB } from "./score";
 import { getSnap, kvGet } from "../store/index";
@@ -166,10 +166,9 @@ export function hostRank(host: string, mode: Mode) {
   }
   // 只有样本少于 2 个时才把"没试过的节点"按全局分补进来（冷启动用）
   if (out.length < 2) {
-    for (const k of S.alive.keys()) {
-      if (isBlack(k) || isFrozen(k)) continue;
-      if (m && m.has(k)) continue;
-      out.push({ k, v: costOf(k, mode) + 300 });
+    for (const r of candsFor(mode)) {
+      if (m && m.has(r.k)) continue;
+      out.push({ k: r.k, v: r.v + 300 });
     }
   }
   out.sort((a, b) => a.v - b.v);
@@ -186,14 +185,13 @@ export function hostRank(host: string, mode: Mode) {
  */
 export function hostUntried(host: string, mode: Mode) {
   const m = S.hostNode.get(hostKey(host));
-  let best = "", bv = Infinity;
-  for (const k of S.alive.keys()) {
-    if (isBlack(k) || isFrozen(k)) continue;
-    if (m && m.has(k)) continue;
-    const v = costOf(k, mode);
-    if (v < bv) { bv = v; best = k; }
+  // 直接用全局排行（20 秒缓存）：它就是按 costOf 升序排好的，
+  // 取第一个没在这个站试过的即可。以前这里对每个节点现算 costOf，
+  // 200 个候选时单次 pick 要 1 ms，全花在重复计算上。
+  for (const r of candsFor(mode)) {
+    if (!m || !m.has(r.k)) return r.k;
   }
-  return best;
+  return "";
 }
 
 /**
@@ -266,10 +264,15 @@ export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
     m.set(node, s);
   }
   // 只带 bps 的调用是"中途采样"，不能当成一条新的连接样本
-  if (o.ok !== undefined || o.bad !== undefined) {
+  const isConn = o.ok !== undefined || o.bad !== undefined;
+  if (isConn) {
     s.n += 1;
     if (o.ok) s.ok += 1;
     if (o.bad) s.bad += 1;
+    // 缓存失效（两个模式各一份）。中途 bps 采样不失效：
+    // 一次视频播放每 60 秒就刷一次，排行 30 秒本来也会过期。
+    S.hostRankCache.delete(fam + "|lat");
+    S.hostRankCache.delete(fam + "|tput");
   }
   s.bytes += o.bytes || 0;
   const ttfb = o.ttfb || 0;
@@ -281,9 +284,6 @@ export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
     s.bpsAt = Date.now();
   }
   s.at = Date.now();
-  // 排行缓存失效（两个模式各一份）
-  S.hostRankCache.delete(fam + "|lat");
-  S.hostRankCache.delete(fam + "|tput");
 }
 
 /**

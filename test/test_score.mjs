@@ -113,6 +113,14 @@ eq("seed 先验来源", pSeed.priorSource, "seed");
 ok("seed 把先验拉到约 15s", pSeed.e10Ms > 12000 && pSeed.e10Ms < 18000, String(pSeed.e10Ms));
 sSeed.seedAt = Date.now() - 48 * 3600e3;
 eq("seed 过期回落默认先验", W.scoreParts("seed:443", "tput").priorSource, "prior");
+// 到期前后不能跳变：24h 整那一刻置信度应该已经衰减到 0，而不是 0.125 → 0
+{
+  sSeed.seedAt = Date.now() - 23.9 * 3600e3;
+  const eA = W.scoreParts("seed:443", "tput").e10Ms;
+  sSeed.seedAt = Date.now() - 24.1 * 3600e3;
+  const eB = W.scoreParts("seed:443", "tput").e10Ms;
+  ok("seed 到期平滑回落（跳变 < 1s）", Math.abs(eA - eB) < 1000, `${Math.round(eA)} vs ${Math.round(eB)}`);
+}
 
 /* ---------- 3. 门槛与过滤 ---------- */
 reset();
@@ -134,6 +142,14 @@ reset();
 node("e:443", { tS: 0, eCloseP: 6, tcp: 50 });
 eq("中转后大量空关闭 → 可疑", W.emptyCloseSuspect("e:443"), true);
 eq("可疑节点被排除", W.candsFor("lat").some((x) => x.k === "e:443"), false);
+// 空关闭计数必须跟着半衰期衰减，否则老账永远赖着，节点一旦攒够 5 次就被永久排除
+{
+  const se = W.nsGet("e:443");
+  se.at = Date.now() - 12 * 3600e3;          // 两个半衰期
+  W.nsEmptyClose("e:443", true);             // 触发衰减后再 +1
+  ok("空关闭计数按半衰期衰减", se.eCloseP > 2 && se.eCloseP < 2.6, String(se.eCloseP));
+  eq("衰减后不再可疑", W.emptyCloseSuspect("e:443"), false);
+}
 
 /* ---------- 4. Selector ---------- */
 reset();
@@ -233,6 +249,23 @@ c6.id = "u3"; c6.node = "ok2:443"; c6.down = 2048;
 c6.flush(true);
 eq("成功连接记一次 ok", (W.S.nstat.get("ok2:443") || {}).okW, 1);
 eq("成功连接进入可用性样本", (W.S.nstat.get("ok2:443") || {}).tS, 1);
+
+// 长连接已经每 60 秒写过站点 bps，收尾不能再用"一生平均"把它拉低
+reset();
+node("sc:443", {});
+const cBps = new W.Connection({}, {}, "tput", "");
+cBps.id = "u-bps"; cBps.node = "sc:443"; cBps.host = "stream.test";
+cBps.down = 2 * 1024 * 1024; cBps.tAttach = Date.now() - 1000; cBps.siteEmitted = 2;
+cBps.flush(true);
+eq("长连接收尾不覆盖站点 bps", (W.S.hostNode.get("stream.test").get("sc:443") || {}).bps, undefined);
+
+// resetFail 只清计数：成功样本由 flush 统一记一次，不能在这里重复 +1
+reset();
+node("rf:443", {});
+S.pxFailSeen = 1; S.pxFailMem = 2;
+await W.SEL.resetFail({}, "rf:443");
+eq("resetFail 不重复记成功", W.nsGet("rf:443").okW, 0);
+eq("resetFail 清零记忆", S.pxFailMem, 0);
 
 reset();
 const c7 = new W.Connection({}, {}, "tput", "");
@@ -355,6 +388,22 @@ Math.random = rnd0;
 eq("新域名挑全局最优的未试节点", p2, "a:443");
 eq("标记为站点试探", st2.hostTrial, true);
 eq("试探节点写回 st.node", st2.node, "a:443");
+
+// 未试节点直接从全局排行里取：和"逐个 costOf 找最小"结果一致，但不再重算
+reset();
+node("u1:443", { tcp: 50 });
+node("u2:443", { tcp: 80 });
+node("u3:443", { tcp: 300 });
+W.hostNodeMark("untried.test", "u1:443", { ok: 1, bad: 0, bytes: 10, ttfb: 50 });
+eq("未试节点 = 全局最优且没在这个站出现过", W.hostUntried("untried.test", "lat"), "u2:443");
+
+// 游标指向上一代候选池的节点：pick 必须自愈，而不是继续拨死地址
+reset();
+node("v1:443", { tcp: 50 });
+node("v2:443", { tcp: 80 });
+S.curs.lat = "gone:443";
+eq("游标失效 → 选当前最优", W.SEL.pick({ pxShadow: 0 }, "lat", null), "v1:443");
+eq("游标自愈写回", S.curs.lat, "v1:443");
 
 // 两个节点各 1 次样本：有对比就该按站点选，不用等 n>=2
 reset();
@@ -522,6 +571,9 @@ reset();
   W.nsSiteFail("sitefail:443");
   ok("站点失败只加 0.2 全局权重", Math.abs(s.failW - beforeFail - 0.2) < 1e-9, String(s.failW));
   eq("站点失败不进冷却阶梯", s.blackUntil, beforeBlack);
+  W.S.rankCache.t = 12345;
+  W.nsSiteFail("sitefail:443");
+  eq("站点失败不再清空全局排行缓存", W.S.rankCache.t, 12345);
 }
 
 reset();
@@ -565,10 +617,19 @@ reset();
 node("g1:443", { tcp: 50, okW: 10 });
 node("g2:443", { tcp: 300, okW: 10 });
 node("g3:443", { tcp: 400, okW: 10 });
+// 站点样本不足 3 个节点 → 退回全局（pxShadow=0 时不许再偷偷冷启动探索）
+reset();
+node("g1:443", { tcp: 50, okW: 10 });
+node("g2:443", { tcp: 300, okW: 10 });
+node("g3:443", { tcp: 400, okW: 10 });
 // 只有 2 个节点有站点样本：不够 3 个，应该退回全局（g1）
 W.hostNodeMark("thr.test", "g1:443", { ok: 1, bad: 0, bytes: 100, ttfb: 800 });
 W.hostNodeMark("thr.test", "g2:443", { ok: 1, bad: 0, bytes: 100, ttfb: 60 });
-eq("站点样本不足 3 个节点 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { host: "thr.test" }), "g1:443");
+const rndThr = Math.random;
+Math.random = () => 0;                   // 即使掷出 0 也不能进冷启动分支
+const pThr = W.SEL.pick({ pxShadow: 0 }, "lat", { host: "thr.test" });
+Math.random = rndThr;
+eq("站点样本不足 3 个节点 → 退回全局", pThr, "g1:443");
 // 补第三个节点样本后，站点偏好生效
 W.hostNodeMark("thr.test", "g3:443", { ok: 1, bad: 0, bytes: 100, ttfb: 400 });
 eq("3 个节点有样本 → 站点偏好生效", W.SEL.pick({ pxShadow: 0 }, "lat", { host: "thr.test" }), "g2:443");

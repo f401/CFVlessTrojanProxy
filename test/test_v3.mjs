@@ -127,6 +127,14 @@ eq("trojan IPv6 port", t6.port, 443);
 
 /* ---------- 4. 目标策略 ---------- */
 eq("拦 127.0.0.1", !!W.checkTarget("127.0.0.1", 80), true);
+eq("拦 localhost. 末尾点", !!W.checkTarget("localhost.", 80), true);
+eq("拦 127.1 简写", !!W.checkTarget("127.1", 80), true);
+eq("拦 2130706433 整数写法", !!W.checkTarget("2130706433", 80), true);
+eq("拦 0177.0.0.1 八进制写法", !!W.checkTarget("0177.0.0.1", 80), true);
+eq("拦 ::ffff:127.0.0.1", !!W.checkTarget("::ffff:127.0.0.1", 80), true);
+eq("拦 ::ffff:7f00:1", !!W.checkTarget("::ffff:7f00:1", 80), true);
+eq("拦 NAT64 编码的 127.0.0.1", !!W.checkTarget("64:ff9b::7f00:1", 80), true);
+eq("拦 198.18.0.1 基准测试段", !!W.checkTarget("198.18.0.1", 80), true);
 eq("拦 10.1.2.3", !!W.checkTarget("10.1.2.3", 80), true);
 eq("拦 169.254.169.254", !!W.checkTarget("169.254.169.254", 80), true);
 eq("拦 192.168.1.1", !!W.checkTarget("192.168.1.1", 80), true);

@@ -8,7 +8,7 @@ import { logErr, rttLearn, rttMark } from "../nodes/metrics";
 import { checkTarget, dial, expandV6, isV6Literal, parseProxyIp } from "./dial";
 import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./protocol";
 import { cnt, kickFlush } from "../px/pool";
-import { nextNode, nsGet } from "../nodes/score";
+import { nextNode, nsEmptyClose } from "../nodes/score";
 import { SEL } from "../nodes/selector";
 import { S } from "../core/state";
 import { flushSnap, pendFlush, statBump } from "../store/index";
@@ -235,7 +235,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
               // 已经走 proxyip 了还是 0 字节关闭 → 这次中转失败，必须计数
               if (st.retried) {
                 cnt("eCloseP");                       // 中转后仍空关闭：才算节点的问题
-                if (st.node) { const sn = nsGet(st.node); sn.eCloseP = (sn.eCloseP || 0) + 1; }
+                nsEmptyClose(st.node, true);
                 // 这个中转不通，换一个再试一次；直接放弃就是用户看到的"下载失败"
                 if ((st.pxTries || 1) < 2) {
                   const s2 = await dialAnother(env, st, st.mode, r.host);
@@ -281,7 +281,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
               if (!px || st.retried) {
                 cnt("dead"); kickFlush(env, st.id);
                 cnt("eCloseD");                       // 直连空关闭：目标站的问题，不算节点
-                if (st.node) { const sd = nsGet(st.node); sd.eCloseD = (sd.eCloseD || 0) + 1; }
+                nsEmptyClose(st.node, false);
                 try { serverWS.close(1000, "done"); } catch (e) {}
                 return;
               }

@@ -42,6 +42,9 @@ export function nsDecay(s: NodeStats, now: number) {
   if (k >= 0.9999) return;
   s.okW *= k; s.failW *= k; s.stallMs *= k; s.runMs *= k;
   s.pN *= k; s.pSum *= k; s.pSumSq *= k; s.pF *= k; s.tS *= k; s.tF *= k;
+  // 空关闭计数必须一起衰减：tS 衰减而它不衰减，比值会单调涨，
+  // 最终把曾经抽风过一次的节点永久踢出候选表。
+  s.eCloseP *= k; s.eCloseD *= k;
   s.sumW *= k; s.sumW2 *= k * k; s.recentBytesW *= k;
   if (s.hist) for (let i = 0; i < HIST_N; i++) s.hist[i] *= k;
   s.at = now;
@@ -76,12 +79,17 @@ export function effView(s: NodeStats, now = Date.now()) {
 }
 
 /**
- * 记一次成功（同时更新握手耗时 EWMA）。
- * @param {string} k "host:port"
- * @param {number} [tcp] TCP 建连毫秒
- * @param {number} [tls] TLS 往返毫秒
- * @returns {void}
+ * 记一次空关闭（连接建立后 0 字节结束）。viaP=true 表示已经过了中转。
  */
+export function nsEmptyClose(k: string, viaP: boolean) {
+  if (!k) return;
+  const s = nsGet(k), now = Date.now();
+  nsDecay(s, now);
+  if (viaP) s.eCloseP = (s.eCloseP || 0) + 1;
+  else s.eCloseD = (s.eCloseD || 0) + 1;
+  s.at = now;
+}
+
 function bumpWin(s: NodeStats, now: number, ok: boolean) {
   if (!s.winAt || now - s.winAt > SC.WIN_MS) { s.winAt = now; s.winOk = 0; s.winFail = 0; }
   if (ok) s.winOk += 1; else s.winFail += 1;
@@ -95,6 +103,7 @@ export function pFailFast(s: NodeStats, now = Date.now()): number {
   return (s.winFail + 1) / (n + 10);
 }
 
+/** 记一次成功（同时更新握手耗时 EWMA）。 */
 export function nsOk(k: string, tcp: number, tls: number) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
@@ -136,7 +145,12 @@ export function nsProbeFail(k: string) {
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
   s.pF += 1;
-  if (s.pF >= 2) s.blackUntil = Math.max(s.blackUntil || 0, now + 10 * 60000);
+  if (s.pF >= 2) {
+    s.blackUntil = Math.max(s.blackUntil || 0, now + 10 * 60000);
+    // 探活也能拉黑节点：排行缓存里可能还留着它，下次 pick 不能继续推荐
+    S.hostRankCache.clear();
+    S.rankCache.t = 0;
+  }
   s.at = now;
 }
 
@@ -174,11 +188,11 @@ export function nsSiteFail(k: string) {
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
   s.failW += 0.2;
-  s.fail += 1;
+  s.fail += 0.2;       // 面板成功率与 failW 用同一份权重，别让一个被封的站把节点显示成 50%
   s.tF = (s.tF || 0) + 0.2;
   s.at = now;
-  S.hostRankCache.clear();
-  S.rankCache.t = 0;
+  // 这里不再清排行缓存：站点失败对全局分的影响只有 0.2 次，
+  // 而清缓存会让下一个请求重算 200 个节点。站点级画像在 hostNodeMark 里精确失效。
 }
 
 /**
@@ -236,14 +250,15 @@ export function pFailOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof e
   if (!s) return 0.1;
   const e = e0 || effView(s, now);
   const N = e.okW + e.failW;
-  const LN2 = Math.LN2;
 
   // seed 只修正 Beta 先验，不计入本地 N（也不影响可用性门槛）
   let a0 = SC.BETA_A, b0 = SC.BETA_B;
   const seedN = s.seedN || 0;
   const seedAge = s.seedAt ? now - s.seedAt : Infinity;
   if (seedN > 0 && seedAge <= SC.SEED_TTL) {
-    const seedW = Math.min(2, 0.25 * seedN) * Math.exp((-seedAge / SC.SEED_TTL) * LN2);
+    // 线性退火：到期权重正好归零。原来用 2^(-age/TTL)，到 TTL 时还剩 0.5，
+    // 再往后直接跳成 0，节点分会在过期那一刻突然抖一下。
+    const seedW = Math.min(2, 0.25 * seedN) * Math.max(0, 1 - seedAge / SC.SEED_TTL);
     const failRate = Math.min(1, (s.seedFail || 0) / Math.max(seedN, 1));
     a0 += seedW * failRate;
     b0 += seedW * (1 - failRate);
@@ -404,7 +419,8 @@ export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = f
     confB = Math.min(1, e.recentBytesW / SC.RECENT_MIN) * (1 - Math.exp(-nEff / 4));
   }
   const seedAge = s.seedAt ? now - s.seedAt : Infinity;
-  const cSeed = !s.seedBps || seedAge > SC.SEED_TTL ? 0 : SC.SEED_CONF * Math.pow(2, -seedAge / SC.SEED_TTL);
+  const seedLeft = Math.max(0, Math.min(1, 1 - seedAge / SC.SEED_TTL));
+  const cSeed = !s.seedBps ? 0 : SC.SEED_CONF * seedLeft;
   const priorBps = cSeed > 0 ? cSeed * s.seedBps + (1 - cSeed) * SC.PRIOR_BPS : SC.PRIOR_BPS;
   const e10Prior = (TEN_MB / priorBps) * 1000;
   const e10Local = (TEN_MB / Math.max(capBps, 8 * 1024)) * 1000;

@@ -51,6 +51,7 @@ export class Connection {
   stallMark = 0;          // 上次采样时的累计背压毫秒（算窗口 stall 占比）
   siteAt = 0;             // 站点吞吐：上一次采样时刻
   siteDown = 0;           // 站点吞吐：上一次采样时的下行字节
+  siteEmitted = 0;        // 已写过几次站点级 bps（写过就别再用"一生平均"覆盖）
 
   // —— 生命周期 ——
   markedOk = false;
@@ -131,7 +132,10 @@ export class Connection {
         else if (now - this.siteAt >= 60000) {
           const sb = this.down - this.siteDown;
           const sdt = now - this.siteAt;
-          if (sb >= 262144) hostNodeMark(this.host, this.node, { bps: Math.round((sb * 1000) / sdt), bytes: sb });
+          if (sb >= 262144) {
+            hostNodeMark(this.host, this.node, { bps: Math.round((sb * 1000) / sdt), bytes: sb });
+            this.siteEmitted++;
+          }
           this.siteAt = now;
           this.siteDown = this.down;
         }
@@ -244,7 +248,7 @@ export class Connection {
         if (this.host) {
           if (this.node) {
             const life = this.tAttach ? Math.max(1, Date.now() - this.tAttach) : 0;
-            const siteBps = life > 500 && this.down >= 512 * 1024 ? Math.round((this.down * 1000) / life) : 0;
+            const siteBps = !this.siteEmitted && life > 500 && this.down >= 512 * 1024 ? Math.round((this.down * 1000) / life) : 0;
             hostNodeMark(this.host, this.node, {
               ok: !this.failed && this.down > 0 ? 1 : 0,
               bad: this.failed ? 1 : 0,
