@@ -265,9 +265,12 @@ export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
     s = { n: 0, ok: 0, bad: 0, bytes: 0, ttfb: 0, at: 0 };
     m.set(node, s);
   }
-  s.n += 1;
-  if (o.ok) s.ok += 1;
-  if (o.bad) s.bad += 1;
+  // 只带 bps 的调用是"中途采样"，不能当成一条新的连接样本
+  if (o.ok !== undefined || o.bad !== undefined) {
+    s.n += 1;
+    if (o.ok) s.ok += 1;
+    if (o.bad) s.bad += 1;
+  }
   s.bytes += o.bytes || 0;
   const ttfb = o.ttfb || 0;
   if (ttfb > 0) s.ttfb = s.ttfb ? Math.round(s.ttfb * 0.6 + ttfb * 0.4) : Math.round(ttfb);

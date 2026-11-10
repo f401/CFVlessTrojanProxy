@@ -69,6 +69,8 @@ export function effView(s: NodeStats, now = Date.now()) {
     sumW2: s.sumW2 * k * k,
     recentBytesW: s.recentBytesW * k,
     pN: s.pN * k,
+    // 延迟观测数：探活 + 成功连接（两者都提供握手耗时）
+    latN: (s.pN + s.okW) * k,
   };
 }
 
@@ -139,6 +141,7 @@ export function nsFail(k: string) {
   if (s.streak >= 4) s.streak = 0;     // 给第五次机会
   s.at = now;
   S.hostRankCache.clear();             // 冷却中的节点不该继续被站点排行推荐
+  S.rankCache.t = 0;                   // 失败改变了排序前提
 }
 
 /**
@@ -327,7 +330,8 @@ export const E10_PRIOR = (TEN_MB / SC.PRIOR_BPS) * 1000;   // 无吞吐样本时
 export interface ScoreParts {
   mode: Mode; score: number; latencyMs: number; e10Ms: number;
   pFailRisk: number; pStall: number; capBps: number; confB: number;
-  nEff: number; sampleAgeMs: number; priorSource: "seed" | "prior"; gate: string;
+  nEff: number; latN: number; sampleAgeMs: number;
+  priorSource: "seed" | "prior"; gate: string;
 }
 
 /**
@@ -349,7 +353,7 @@ export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = f
   const Lobs = tcp + tls * SC.TLS_G + Math.max(0, tls - 2 * tcp - SC.LOSS_SLACK) * SC.LOSS_G;
   const Lprior = (a && a.ms) || (SC.P_TCP + SC.P_TLS * SC.TLS_G);
   // 真实连接也提供了握手观测，和探活样本一起算延迟置信度
-  const confL = 1 - Math.exp(-(e.pN + e.okW) / 4);
+  const confL = 1 - Math.exp(-e.latN / 4);
   const latencyMs = confL * Lobs + (1 - confL) * Lprior;
 
   // —— 吞吐（只有 tput 才需要扫直方图）——
@@ -389,7 +393,7 @@ export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = f
 
   return {
     mode: m, score, latencyMs, e10Ms, pFailRisk, pStall, capBps, confB,
-    nEff, sampleAgeMs: Number.isFinite(sampleAge) ? sampleAge : -1,
+    nEff, latN: e.latN, sampleAgeMs: Number.isFinite(sampleAge) ? sampleAge : -1,
     priorSource: cSeed > 0 ? "seed" : "prior", gate,
   };
 }
@@ -417,6 +421,7 @@ export function freezeNode(k: string) {
   const s = nsGet(k);
   s.freeUntil = Date.now() + SC.ROLL_FREEZE;
   S.hostRankCache.clear();     // 站点排行里不能再推荐它
+  S.rankCache.t = 0;
 }
 
 /**
@@ -434,7 +439,19 @@ export function emptyCloseSuspect(k: string) {
 }
 
 /** 候选列表（已过滤黑名单/冻结，按代价升序） */
+const CAND_TTL = 20000;      // 排行缓存有效期
+const CAND_CACHE_MIN = 24;   // 候选少的时候不必缓存（重算也就几十 µs）
+
 export function candsFor(mode: Mode) {
+  const m: Mode = mode === "tput" ? "tput" : "lat";
+  const useCache = S.alive.size >= CAND_CACHE_MIN;
+  if (useCache) {
+    const c = S.rankCache;
+    if (c.t && Date.now() - c.t < CAND_TTL && c.v[m]) {
+      // 缓存只冻结排序，不冻结"能不能用"：黑名单/冻结每次都要重新过滤
+      return c.v[m].filter((r) => S.alive.has(r.k) && !isBlack(r.k) && !isFrozen(r.k));
+    }
+  }
   const out: { k: string; v: number }[] = [];
   for (const k of S.alive.keys()) {
     if (isBlack(k) || isFrozen(k)) continue;
@@ -444,10 +461,11 @@ export function candsFor(mode: Mode) {
     // 小样本只做软惩罚（pFailRisk），别让一两次失败直接失去候选资格
     if (n >= 8 && availOf(s) < 0.4) continue;
     if (emptyCloseSuspect(k)) continue;               // 中转后仍大量空关闭
-    out.push({ k, v: costOf(k, mode) });
+    out.push({ k, v: costOf(k, m) });
   }
   out.sort((a, b) => a.v - b.v);
   S.candN = out.length;
+  if (useCache) S.rankCache = { t: Date.now(), v: { ...S.rankCache.v, [m]: out } };
   return out;
 }
 

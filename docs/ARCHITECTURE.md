@@ -115,6 +115,11 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
    个伪计数修正 α0/β0，不增加本地 N、不参与可用性门槛、不影响 confB。
 9. **自适应探索**：当前节点 `nEff<3` 时探索上限 10%，样本够了回落到 `pxShadow`（默认 5%）；
    站点冷启动与全局影子共用同一次掷骰，`pxShadow=0` 视为关闭。候选数记录在 `S.candN`（`/health.candidates`）。
+10. **排行缓存**：`alive≥24` 时 `candsFor` 结果缓存 20 秒，且**只缓存排序、不缓存可用性**——
+    黑名单/冻结每次返回前都会重新过滤；`nsFail`/`freezeNode`/候选池换代会把缓存打掉。
+    200 候选实测 0.98ms → 0.15ms。
+11. **站点吞吐中途采样**：长连接每 60 秒补一个站点级 bps 窗口（≥256KB 才记），
+    这类采样只带 `bps`，不计入 `n/ok/bad`，避免把一条长连接算成多条连接样本。
 
 `/<uuid>/debug?diag=<host>` 与 `/proxyip?why=1` 输出的是同一份分项：
 `latencyMs / e10Ms / pFailRisk / pStall / capBps / confB / nEff / sampleAgeMs / priorSource / gate`。

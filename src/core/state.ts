@@ -26,6 +26,8 @@ export class AppState {
   colo = "";
   funnel: Record<string, number> = { direct: 0, node: 0, v6: 0 };
   candN = 0;               // 最近一次 candsFor 的候选数（观测用）
+  // 候选排行缓存：只在大规模（alive≥24）时启用，20 秒一轮
+  rankCache: { t: number; v: Record<string, RankRow[]> } = { t: 0, v: {} };
 
   // —— 日计数 ——
   cntKeys = ["conn", "direct", "node", "eCloseD", "eCloseP", "sw", "noCand",

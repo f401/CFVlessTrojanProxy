@@ -125,6 +125,7 @@ export async function ensurePool(env: Env) {
     if (Array.isArray(v) && v.length) {
       S.pool = v;
       S.poolGen = gen;
+      S.rankCache.t = 0;
     }
   } catch (e) {}
   return S.pool;
@@ -146,6 +147,7 @@ export async function commitPool(env: Env, fresh: PoolEntry[], allowShrink = fal
   }
   S.pool = fresh;
   S.poolGen = gen;
+  S.rankCache.t = 0;
   S.poolBuilt = Date.now();
   S.seed.poolGen = gen;
   await SEEDS.write(env, S.colo ? undefined : true, true);
@@ -252,6 +254,7 @@ export function nsOf(keys: string[]) {
       e10: Math.round(tp.e10Ms),
       confB: Math.round(tp.confB * 1000) / 1000,
       nEff: Math.round(tp.nEff * 10) / 10,
+      latN: Math.round(lat.latN * 10) / 10,
       gate: tp.gate,
     };
   }

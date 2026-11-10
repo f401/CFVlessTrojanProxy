@@ -47,6 +47,8 @@ export class Connection {
   sampleDown = 0;
   lastEmit = 0;
   sampleW = 0;            // 本连接已贡献给直方图的权重（上限 SC.CONN_W_CAP）
+  siteAt = 0;             // 站点吞吐：上一次采样时刻
+  siteDown = 0;           // 站点吞吐：上一次采样时的下行字节
 
   // —— 生命周期 ——
   markedOk = false;
@@ -115,7 +117,19 @@ export class Connection {
         }
         this.sampleAt = now;
         this.sampleDown = this.down;
-      } else if (!this.sampleAt) {
+      }
+      // 站点级吞吐：长连接（看视频）每 60 秒补一个窗口，别等连接结束
+      if (this.node && this.host) {
+        if (!this.siteAt) { this.siteAt = now; this.siteDown = this.down; }
+        else if (now - this.siteAt >= 60000) {
+          const sb = this.down - this.siteDown;
+          const sdt = now - this.siteAt;
+          if (sb >= 262144) hostNodeMark(this.host, this.node, { bps: Math.round((sb * 1000) / sdt), bytes: sb });
+          this.siteAt = now;
+          this.siteDown = this.down;
+        }
+      }
+      if (!this.sampleAt) {
         this.sampleAt = now;
         this.sampleDown = this.down;
       }

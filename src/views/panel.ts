@@ -402,13 +402,19 @@ export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Rec
       const kbps = st.bps
         ? Math.round(st.bps / 1024) + " KB/s" + (nSamp ? ` (n=${Math.round(nSamp)})` : "")
         : "未用（本实例无下载样本）";
-      return { x, k, score: scoreMerged(k, nsMap), kbps, rate, ok, bad, cc: x.cc || "" };
+      const p = (nsMap && nsMap[k]) || {};
+      const tip =
+        `lat ${Math.round(Number(p.lat) || 0)}ms · tput ${Math.round(Number(p.tput) || 0)}ms` +
+        ` · E10 ${Math.round(Number(p.e10) || 0)}ms · pFail ${Number(p.pFail) || 0}` +
+        ` · pStall ${Number(p.pStall) || 0} · confB ${Number(p.confB) || 0}` +
+        ` · nEff ${Number(p.nEff) || 0} · latN ${Number(p.latN) || 0} · ${p.gate || "ok"}`;
+      return { x, k, score: scoreMerged(k, nsMap), kbps, rate, ok, bad, cc: x.cc || "", tip };
     })
     .sort((a, b) => a.score - b.score)
     .slice(0, 10)
     .map(
       (n) =>
-        `<tr><td class="u">${n.k}</td><td>${n.cc || "-"}</td><td>${n.x.ms} ms</td><td>${n.kbps}</td><td>${n.rate}</td><td><b>${Math.round(n.score)}</b></td></tr>`
+        `<tr title="${escapeHtml(n.tip)}"><td class="u">${n.k}</td><td>${n.cc || "-"}</td><td>${n.x.ms} ms</td><td>${n.kbps}</td><td>${n.rate}</td><td><b>${Math.round(n.score)}</b></td></tr>`
     )
     .join("");
 

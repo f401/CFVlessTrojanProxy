@@ -493,5 +493,26 @@ node("c2:443", { tcp: 60 });
 W.candsFor("lat");
 eq("候选数被记录（观测用）", W.S.candN, 2);
 
+/* ---------- 12. 排行缓存 / 站点中途采样 / latN ---------- */
+reset();
+for (let i = 0; i < 30; i++) node(`m${i}:443`, { tcp: 50 + i, okW: 10 });
+const c30 = W.candsFor("lat");
+eq("30 个候选全部返回", c30.length, 30);
+ok("大规模下启用了排行缓存", W.S.rankCache.t > 0);
+W.nsGet(c30[0].k).blackUntil = Date.now() + 60000;
+eq("缓存之外仍会过滤黑名单", W.candsFor("lat").some((x) => x.k === c30[0].k), false);
+
+reset();
+node("bs:443", {});
+W.hostNodeMark("site-bps.test", "bs:443", { ok: 1, bad: 0, ttfb: 50 });
+W.hostNodeMark("site-bps.test", "bs:443", { bps: 1048576 });
+const hs = W.S.hostNode.get("site-bps.test").get("bs:443");
+eq("中途吞吐采样不算连接样本", hs.n, 1);
+ok("站点 bps 记录下来了", hs.bps > 0, String(hs.bps));
+
+reset();
+node("ln:443", { tcp: 50, pN: 4, okW: 4 });
+eq("latN = 探活 + 成功连接", W.scoreParts("ln:443", "lat").latN, 8);
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
