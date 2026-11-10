@@ -17,7 +17,7 @@ export { sha224Bytes, toHex, VERSION } from "./core/util";
 export { detectProtocol, parseVLESS, parseTrojan, loadUsers } from "./proxy/protocol";
 export { checkTarget, isPrivateHost } from "./proxy/dial";
 export { renderClash, renderSingbox, renderLinks, orderNodes, nodeLabel, tagOf, loadNodes, COLO_CITY, trojanPasswordOf } from "./views/sub";
-export { loadRtt, rttLearn } from "./nodes/metrics";
+export { loadRtt, rttLearn, rttMark } from "./nodes/metrics";
 export { subHeaders, effectiveQuota } from "./core/quota";
 export { S } from "./core/state";
 export { SEL } from "./nodes/selector";

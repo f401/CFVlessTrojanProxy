@@ -120,6 +120,18 @@ eq("seed 过期回落默认先验", W.scoreParts("seed:443", "tput").priorSource
   sSeed.seedAt = Date.now() - 24.1 * 3600e3;
   const eB = W.scoreParts("seed:443", "tput").e10Ms;
   ok("seed 到期平滑回落（跳变 < 1s）", Math.abs(eA - eB) < 1000, `${Math.round(eA)} vs ${Math.round(eB)}`);
+// 一条短样本不该抹掉 8MB/s 的 seed 先验；够 3 个有效窗口才作废
+{
+  reset();
+  node("sp:443", {});
+  const sp = W.nsGet("sp:443");
+  sp.seedBps = 8 * 1048576; sp.seedAt = Date.now();
+  W.nsSpeed("sp:443", 512 * 1024, 512 * 1024, {}, 1);
+  eq("单条本地样本保留 seed", sp.seedBps, 8 * 1048576);
+  W.nsSpeed("sp:443", 512 * 1024, 512 * 1024, {}, 1);
+  W.nsSpeed("sp:443", 512 * 1024, 512 * 1024, {}, 1);
+  eq("3 个有效窗口后 seed 作废", sp.seedBps, 0);
+}
 }
 
 /* ---------- 3. 门槛与过滤 ---------- */
@@ -491,6 +503,9 @@ eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1
   const html2 = W.renderStatsHtml({}, "u", { up: 0, down: 0, todayUp: 0, todayDown: 0 },
     {}, [{ h: "b", p: 443, ms: 10, cc: "US" }], {});
   ok("没有吞吐样本显示未用", html2.includes("未用"));
+  const html3 = W.renderStatsHtml({}, "u", { up: 0, down: 0, todayUp: 0, todayDown: 0 },
+    { "<img src=x onerror=alert(1)>": { rtt: 10, colo: "HKG", hits: 1, ok: 1, fail: 0, ts: 1 } }, [], {});
+  ok("入口标签做了 HTML 转义", !html3.includes("<img src=x"), html3.slice(0, 80));
 }
 
 /* ---------- 11. v2.1：风险先验 / seed 伪计数 / 自适应探索 ---------- */
@@ -680,6 +695,11 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
   eq("rtt 缺失第一次读 KV", reads, 1);
   await W.loadRtt(envR, "miss-u");
   eq("rtt 缺失 10 分钟内不再读", reads, 1);
+  // ?ip= 是用户可传的：每个用户的标签数必须有上限，否则能把 snap 写成超大 KV 值
+  for (let i = 0; i < 40; i++) W.rttMark("cap-u", "t" + i, true);
+  const capB = W.S.rtt.get("cap-u");
+  eq("rtt 标签最多 24 个", Object.keys(capB).length, 24);
+  ok("保留的是最新的标签", !!capB.t39 && !capB.t0);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

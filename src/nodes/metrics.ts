@@ -1,4 +1,5 @@
 import { SC } from "../core/const";
+import { RTT_MAX } from "../core/const";
 import { candsFor, costOf, isBlack, isFrozen } from "./score";
 import { S } from "../core/state";
 import { TEN_MB } from "./score";
@@ -8,6 +9,14 @@ import { getSnap, kvGet } from "../store/index";
 
 /** 错误日志去重表：msg|tag → 上次记录时间（5 秒窗口） */
 export const ERR_SEEN = new Map<string, number>();
+
+/** 控制每个用户的入口标签数：?ip= 是用户可传的，不设上限能把 snap 写成超大 KV 值 */
+function trimRtt(bucket: Record<string, RttEntry>) {
+  const keys = Object.keys(bucket);
+  if (keys.length <= RTT_MAX) return;
+  keys.sort((a, b) => (bucket[a].ts || 0) - (bucket[b].ts || 0));
+  for (let i = 0; i < keys.length - RTT_MAX; i++) delete bucket[keys[i]];
+}
 
 /**
  * 记录某个入口的一次成功/失败（用于 RTT 学习）。
@@ -28,6 +37,7 @@ export function rttMark(id: string | null, tag: string | null, ok: boolean) {
   else e.fail = (e.fail || 0) + 1;
   e.ts = Date.now();
   bucket[tag] = e;
+  trimRtt(bucket);
 }
 
 /**
@@ -62,6 +72,7 @@ export function rttLearn(cf: CfMeta | null, tag: string | null, id: string | nul
   } else {
     bucket[tag] = { rtt, colo: cf.colo || "", bw, hits: 1, ts: Date.now() };
   }
+  trimRtt(bucket);
 }
 
 /**

@@ -1,7 +1,8 @@
 import { P_T } from "../core/util";
 import { S } from "../core/state";
 import { SC } from "../core/const";
-import { renderStatsHtml, renderHtml } from "../views/panel";import { fmtBytes } from "../views/html";
+import { renderStatsHtml, renderHtml } from "../views/panel";
+import { fmtBytes } from "../views/html";
 import { effectiveQuota, subHeaders } from "../core/quota";
 import { renderClash, renderSingbox, renderLinks, trojanPasswordOf } from "../views/sub";
 import { readStatsCached, nodeSnapGet } from "../store/index";
@@ -51,6 +52,7 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
       return new Response(renderHtml(env, url, id, host, pageKey, info), {
         headers: {
           "content-type": "text/html;charset=utf-8",
+          "cache-control": "no-store",
           "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
           "x-frame-options": "DENY",
           "x-content-type-options": "nosniff",

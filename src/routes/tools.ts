@@ -359,7 +359,9 @@ export async function debug(c: UserCtx): Promise<Response> {
           try { out.aaaa = await resolveAAAA(h); } catch (e) { out.aaaa = "ERR " + errMsg(e); }
           try { out.a = await dohQuery(h, "A"); } catch (e) { out.a = "ERR " + errMsg(e); }
           if (out.aaaa && typeof out.aaaa === "string" && out.aaaa.includes(":")) {
-            try {
+            const bad6 = checkTarget(out.aaaa, 443);
+            if (bad6) out.v6Connect = "denied: " + bad6;
+            else try {
               const s6 = await connect({ hostname: expandV6(out.aaaa), port: 443 });
               out.v6Connect = "ok";
               try { s6.close(); } catch (e) {}

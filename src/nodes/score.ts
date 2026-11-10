@@ -216,7 +216,11 @@ export function nsSpeed(k: string, bps: number, bytes: number, env: Env, w = 1) 
   s.sumW2 += weight * weight;
   s.recentBytesW += (bytes || 0) * weight;
   s.lastSampleAt = now;
-  s.seedBps = 0; s.seedAt = 0;                     // 本地有样本了，导入的先验作废
+  // 本地样本够 3 个有效窗口才让导入的先验作废：
+  // 第一条 512KB 的短样本（nEff=1）本身不参与 confB，却会把 8MB/s 的 seed
+  // 直接抹成 200KB/s 默认先验，节点会被误判成慢节点。
+  const nEff = s.sumW2 > 0 ? (s.sumW * s.sumW) / s.sumW2 : 0;
+  if (nEff >= SC.N_EFF_MIN) { s.seedBps = 0; s.seedAt = 0; }
   s.bytesDown = (s.bytesDown || 0) + (bytes || 0);
   s.at = now;
   S.seedDirty = true;

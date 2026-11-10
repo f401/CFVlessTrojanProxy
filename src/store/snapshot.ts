@@ -1,4 +1,5 @@
 import { S } from "../core/state";
+import { RTT_MAX } from "../core/const";
 import { loadUsers } from "../proxy/protocol";
 import { kvGet, kvSet } from "./kv";
 import { meterGet } from "./metering";
@@ -133,6 +134,13 @@ async function writeSnap(env: Env, now: number): Promise<void> {
         : { ...v, ok: v.ok || 0, fail: v.fail || 0 };
     }
     next.rtt[id] = tgt;
+  }
+  // 老快照可能已经攒了很多标签：落盘前统一裁到 RTT_MAX（按最后活跃时间）
+  for (const tgt of Object.values(next.rtt)) {
+    const keys = Object.keys(tgt);
+    if (keys.length <= RTT_MAX) continue;
+    keys.sort((a, b) => (tgt[a].ts || 0) - (tgt[b].ts || 0));
+    for (let i = 0; i < keys.length - RTT_MAX; i++) delete tgt[keys[i]];
   }
 
   if (S.errs.length) next.errs = next.errs.concat(S.errs).slice(-50);

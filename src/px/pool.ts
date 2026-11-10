@@ -3,8 +3,8 @@ import { errMsg } from "../core/util";
 import { SEED_WRITE_GAP } from "../core/const";
 import { HIST_BASE, HIST_N, SC } from "../core/const";
 import { logErr } from "../nodes/metrics";
-import { POOL_TTL_MS, geoLabel, probeProxy, refillPool } from "./probe";
-import { candsFor, capOf, costOf, scoreParts, isBlack, nsLatency, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, pcts } from "../nodes/score";
+import { POOL_MAX, POOL_TTL_MS, geoLabel, probeProxy, refillPool } from "./probe";
+import { candsFor, capOf, costOf, scoreParts, nsLatency, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, pcts } from "../nodes/score";
 import { BUCKET_DEF, SEEDS } from "./seed";
 import { SEL } from "../nodes/selector";
 import { S } from "../core/state";
@@ -126,7 +126,7 @@ export async function ensurePool(env: Env) {
   try {
     const v = await kvGet<PoolEntry[]>(env, "px:pool:" + gen);
     if (Array.isArray(v) && v.length) {
-      S.pool = v;
+      S.pool = v.slice(0, POOL_MAX);
       S.poolGen = gen;
       S.rankCache.t = 0;
     }
@@ -373,9 +373,13 @@ export async function cronScan(env: Env) {
     }
   }
 
-  // ③ 裁掉已经不可用的节点（冷却超过 1 天的直接移出 alive）
+  // ③ 只裁「重罚」节点：连续失败 4 次会冷却 1 小时，这种才移出 alive；
+  //    以前只要 isBlack 就删，一次 1 分钟的小冷却也会把好节点踢出池子，
+  //    要等下一轮扫描（最长 8 小时）才回来。
   for (const k of [...S.alive.keys()]) {
-    if (isBlack(k) && k !== S.curs.tput && k !== S.curs.lat) S.alive.delete(k);
+    const s = S.nstat.get(k);
+    const ban = s ? (s.blackUntil || 0) - Date.now() : 0;
+    if (ban > 30 * 60000 && k !== S.curs.tput && k !== S.curs.lat) S.alive.delete(k);
   }
 
   // ④ 国家码补全

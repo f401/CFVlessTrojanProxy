@@ -53,11 +53,13 @@ export function takePoolLine(line: string, src: string, seen: Map<string, PoolEn
   const oct = ip.split(".").map(Number);
   if (oct.some((x) => !(x >= 0 && x <= 255))) return false;
   const key = ip + ":" + port;
+  if (seen.size >= POOL_MAX) return false;   // 上游源可能大到离谱，硬上限防内存/ KV 值爆掉
   if (!seen.has(key)) seen.set(key, { h: ip, p: port, src });
   return true;
 }
 
 export const POOL_TTL_MS = 24 * 3600e3;    // 候选池重建周期（上游源每天都会变）
+export const POOL_MAX = 800;               // 候选池硬上限
 // 换节点策略（可用环境变量覆盖）
 //   pxDwellMin : 切换后最少驻留多少分钟（默认 360 = 6 小时）
 //   pxFailMax  : 连续失败多少次才允许换（默认 5）
@@ -156,14 +158,17 @@ export async function refillPool(env: Env) {
         },
       });
       if (!r.ok) continue;
-      const txt = await r.text();
+      const txt = (await r.text()).slice(0, 2 * 1024 * 1024);   // 防异常大响应把 CPU/内存打满
       for (const line of txt.split("\n")) takePoolLine(line, src, seen);
     } catch (e) {
       /* 换下一个源 */
     }
   }
   for (const h of EXTRA_HOSTS) {
-    if (!seen.has(h)) seen.set(h, { h, p: 443, src: "builtin" });
+    // seen 的键是 "ip:port"：以前用不带端口的 h 去重，永远判不存在，
+    // 上游列表里已有同名条目时会插进两条一样的节点。
+    const key = h + ":443";
+    if (!seen.has(key)) seen.set(key, { h, p: 443, src: "builtin" });
   }
 
   const pool = [...seen.values()];

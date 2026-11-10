@@ -11,7 +11,7 @@ export const SEC_HEADERS: Record<string, string> = {
 /** JSON 响应（对象自动 2 空格缩进，便于人眼看 /health） */
 export function json(obj: unknown, extra?: Record<string, string>): Response {
   return new Response(typeof obj === "string" ? obj : JSON.stringify(obj, null, 2), {
-    headers: { "content-type": "application/json;charset=utf-8", ...(extra || {}) },
+    headers: { "content-type": "application/json;charset=utf-8", "cache-control": "no-store", ...(extra || {}) },
   });
 }
 

@@ -14,7 +14,7 @@ async region(env: Env, cc: string | null) {
   const want = String(cc || "").toUpperCase();
   if (!want) return null;
   const list = await aliveList(env);
-  const hit = list.filter((x) => String(x.cc || "").toUpperCase() === want && !isBlack(keyOf(x)));
+  const hit = list.filter((x) => String(x.cc || "").toUpperCase() === want && !isBlack(keyOf(x)) && !isFrozen(keyOf(x)));
   if (!hit.length) return null;
   hit.sort((a, b) => costOf(keyOf(a), "tput") - costOf(keyOf(b), "tput"));
   return hit[0];

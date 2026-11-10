@@ -71,7 +71,7 @@ li{margin:3px 0}
 <h2>身份</h2>
 <table>
 ${row("UUID", id, true)}
-${row("密码", String(i[P_T + "Pwd"] || "（未配置）"), true)}
+${row("密码", escapeHtml(String(i[P_T + "Pwd"] || "（未配置）")), true)}
 ${row("WS 路径", "<code>/?ed=2560</code>", false)}
 ${row("协议", protos.join(" + "), false)}
 </table>
@@ -88,11 +88,11 @@ ${link("/ty", "Base64 分享串（v2rayN / Shadowrocket）", "B64")}
 
 <h2>状态</h2>
 <table>
-${row("节点数", nodeCount + " 个（含地区节点 " + regions.length * 2 + " 个）", false)}
-${row("地区出口", regions.length ? regions.join(" / ") : "暂无可用的地区 proxyip", false)}
-${row("本机房", i.colo + "　|　" + (i.funnel || "-"), false)}
-${row("当前节点 · 吞吐优先", i.curTput || "（未定）", true)}
-${row("当前节点 · 速率优先", i.curLat || "（未定）", true)}
+${row("节点数", nodeCount + " 个（含地区节点 " + regions.length * protos.length + " 个）", false)}
+${row("地区出口", escapeHtml(regions.length ? regions.join(" / ") : "暂无可用的地区 proxyip"), false)}
+${row("本机房", escapeHtml(i.colo + "　|　" + (i.funnel || "-")), false)}
+${row("当前节点 · 吞吐优先", escapeHtml(i.curTput || "（未定）"), true)}
+${row("当前节点 · 速率优先", escapeHtml(i.curLat || "（未定）"), true)}
 ${row("备用节点", (i.aliveCount || 0) + " 个", false)}
 ${row("用量", (i.used || "0 B") + " / " + (i.quota || "不限"), false)}
 ${row("今日", i.today || "0 B", false)}
@@ -422,7 +422,7 @@ export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Rec
       const ok = v.ok || 0, bad = v.fail || 0;
       const rate = ok + bad > 0 ? Math.round((ok / (ok + bad)) * 100) + "% (" + ok + "/" + (ok + bad) + ")" : "-";
       const cls = ok + bad >= 5 && ok / (ok + bad) < 0.8 ? ' style="color:#dc2626"' : "";
-      return `<tr><td class="u">${tag}</td><td>${city}</td><td>${v.rtt} ms</td><td>${v.hits}</td><td${cls}>${rate}</td></tr>`;
+      return `<tr><td class="u">${escapeHtml(tag)}</td><td>${escapeHtml(city)}</td><td>${v.rtt} ms</td><td>${v.hits}</td><td${cls}>${rate}</td></tr>`;
     })
     .join("");
 
