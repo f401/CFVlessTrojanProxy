@@ -15,6 +15,7 @@ export function health(c: RouteCtx): Response {
     statEntries: S.stats.size,
     rttBuckets: S.rtt.size,
     hostPrefs: S.hostNode.size,
+    candidates: S.candN,
     errors: S.errs.length,
     colo: (c.cf && c.cf.colo) || "",
     cnt: cntView(),

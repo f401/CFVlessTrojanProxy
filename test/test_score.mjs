@@ -348,7 +348,10 @@ reset();
 node("a:443", { tcp: 50 });
 node("b:443", { tcp: 80 });
 const st2 = { host: "brand-new.test" };
-const p2 = W.SEL.pick({ pxShadow: 0 }, "tput", st2);
+const rnd0 = Math.random;
+Math.random = () => 0;                   // 强制走探索分支
+const p2 = W.SEL.pick({ pxShadow: 0.05 }, "tput", st2);
+Math.random = rnd0;
 eq("新域名挑全局最优的未试节点", p2, "a:443");
 eq("标记为站点试探", st2.hostTrial, true);
 eq("试探节点写回 st.node", st2.node, "a:443");
@@ -440,6 +443,55 @@ eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1
     {}, [{ h: "b", p: 443, ms: 10, cc: "US" }], {});
   ok("没有吞吐样本显示未用", html2.includes("未用"));
 }
+
+/* ---------- 11. v2.1：风险先验 / seed 伪计数 / 自适应探索 ---------- */
+reset();
+eq("无样本 pFailRisk = 0.1（不加不确定性溢价）", W.pFailOf(W.nsGet("fresh:443")), 0.1);
+
+{
+  const s = W.nsGet("seedrel:443");
+  s.seedN = 10; s.seedFail = 5; s.seedAt = Date.now();
+  const p = W.pFailOf(s);
+  ok("seed 只修正先验均值（≈0.167）", p > 0.15 && p < 0.18, String(p));
+  s.seedAt = Date.now() - 48 * 3600e3;
+  eq("seed 过期回落到 0.1", W.pFailOf(s), 0.1);
+}
+
+{
+  const s = W.nsGet("oneok:443");
+  s.okW = 1;
+  const p = W.pFailOf(s);
+  ok("第一条成功不额外惩罚", p <= 0.101, String(p));
+}
+
+reset();
+node("e1:443", { tcp: 50 });
+node("e2:443", { tcp: 60 });
+S.curs.tput = "e1:443";
+const stE = { host: "explore.test" };
+const rnd1 = Math.random;
+Math.random = () => 0.07;               // 7%：样本不足(10%)会探索，样本够了(5%)不探索
+const picked1 = W.SEL.pick({ pxShadow: 0.05 }, "tput", stE);
+const explored1 = stE.trial === true || stE.hostTrial === true;
+ok("样本不足时 7% 也会探索", explored1, `picked=${picked1}`);
+
+reset();
+node("f1:443", { tcp: 50 });
+node("f2:443", { tcp: 60 });
+const sf = W.S.nstat.get("f1:443");
+sf.hist[7] = 4; sf.sumW = 4; sf.sumW2 = 4; sf.recentBytesW = 8 * 1048576; sf.lastSampleAt = Date.now();
+S.curs.tput = "f1:443";
+const stF = { host: "steady.test" };
+const picked2 = W.SEL.pick({ pxShadow: 0.05 }, "tput", stF);
+Math.random = rnd1;
+eq("样本够了 7% 不再探索", picked2, "f1:443");
+eq("没有标记试探", stF.trial === true, false);
+
+reset();
+node("c1:443", { tcp: 50 });
+node("c2:443", { tcp: 60 });
+W.candsFor("lat");
+eq("候选数被记录（观测用）", W.S.candN, 2);
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -103,8 +103,10 @@ interface NodeStats {
   sumW2: number;
   recentBytesW: number;
   lastSampleAt: number;
-  /** seed 先验速率与采集时刻 */
+  /** seed 先验：速率、可靠性伪计数、采集时刻 */
   seedBps: number;
+  seedN: number;
+  seedFail: number;
   seedAt: number;
 
   /** 其它 */

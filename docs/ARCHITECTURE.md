@@ -90,7 +90,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 
 | 维度 | 存什么 | 怎么用 |
 |---|---|---|
-| traffic | `okW` / `failW`（真实连接） | Beta(1,9) 风险上界 `pFailRisk`，以及可用性门槛 |
+| traffic | `okW` / `failW`（真实连接） | Beta 后验均值 `pFailRisk`，以及可用性门槛 |
 | latency | `tcp`/`tls` EWMA、探活 `pN` | `confL = 1−e^(−(pN+okW)/4)`，向 `alive.ms` 先验收缩 |
 | throughput | 加权直方图 `hist`、`sumW`、`sumW2`、`recentBytesW`、`lastSampleAt` | `confB` 由**有效窗口数** `nEff=sumW²/sumW2` 决定，不看连接数 |
 | stall | `stallMs`/`runMs` | `pStall=(stall+50)/(run+1000)` |
@@ -109,6 +109,12 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
    `bps` 样本，没有就回退全局同模式分，不允许拿 TTFB 冒充吞吐。
 6. **门槛**：只有 `N≥8` 且 Wilson 下界 <0.4 才硬排除，其余靠 `pFailRisk` 软惩罚，
    避免小样本一两次失败就出局。
+7. **风险先验**：`pMean=α/(α+β)`，α=α0+failW、β=β0+okW；溢价 `0.5·√var·(1−e^(−N/4))`
+   随样本量才打开 —— **无本地样本时 pFailRisk 恰为 0.1**，不把"未知"当"坏"。
+8. **seed 修正先验而非样本**：同 colo、24h 内的 seed 以 `seedW=min(2,0.25×seedN)×2^(−age/24h)`
+   个伪计数修正 α0/β0，不增加本地 N、不参与可用性门槛、不影响 confB。
+9. **自适应探索**：当前节点 `nEff<3` 时探索上限 10%，样本够了回落到 `pxShadow`（默认 5%）；
+   站点冷启动与全局影子共用同一次掷骰，`pxShadow=0` 视为关闭。候选数记录在 `S.candN`（`/health.candidates`）。
 
 `/<uuid>/debug?diag=<host>` 与 `/proxyip?why=1` 输出的是同一份分项：
 `latencyMs / e10Ms / pFailRisk / pStall / capBps / confB / nEff / sampleAgeMs / priorSource / gate`。

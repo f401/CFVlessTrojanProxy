@@ -25,6 +25,7 @@ export class AppState {
   needPx: Map<string, number> = new Map();
   colo = "";
   funnel: Record<string, number> = { direct: 0, node: 0, v6: 0 };
+  candN = 0;               // 最近一次 candsFor 的候选数（观测用）
 
   // —— 日计数 ——
   cntKeys = ["conn", "direct", "node", "eCloseD", "eCloseP", "sw", "noCand",

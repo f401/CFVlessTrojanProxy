@@ -33,9 +33,9 @@ pick(env: Env, mode: Mode, st: Connection | null) {
   const host = st && st.host ? String(st.host) : "";
   if (st) st.hostTrial = false;
 
+  // 画像按"域名族"存（api.x.com 与 pbs.twimg.com 共用 x.com），读写必须用同一个键
+  const fam = host ? hostKey(host) : "";
   if (host) {
-    // 画像按"域名族"存（api.x.com 与 pbs.twimg.com 共用 x.com），读写必须用同一个键
-    const fam = hostKey(host);
     const tried = (S.hostNode.get(fam) || new Map()).size;
 
     // ① 冷启动：头几次连接故意岔开，否则第一个碰上的节点会被永久锁死
@@ -69,13 +69,28 @@ pick(env: Env, mode: Mode, st: Connection | null) {
     }
   }
 
-  // ③ 全局：粘滞游标 + 影子流量
-  const dual = (S.curs.lat ? 1 : 0) + (S.curs.tput ? 1 : 0);
+  // ③ 全局：粘滞游标 + 自适应探索
+  //   样本不足（nEff<3）→ 最多 10%，样本够了 → 回落到 pxShadow（默认 5%）
+  //   站点冷启动和全局影子共用这一次掷骰，避免两层探索叠加
   let base = Number(env && env.pxShadow);
   if (!Number.isFinite(base) || base < 0) base = 0.1;
-  const ps = dual >= 2 ? base / 2 : base;
-  const canTrial = !(st && st.retried);       // 已经是重试的请求，别再拿它试新节点
-  if (cur && canTrial && ps > 0 && Math.random() < ps) {
+  const needRate = cur ? this.nEffOf(cur) < SC.N_EFF_MIN : true;
+  // pxShadow=0 视为"关闭探索"；否则样本不足时最高放到 EXPLORE_MAX
+  const exploreP = base <= 0 ? 0 : Math.min(1, needRate ? Math.max(base, SC.EXPLORE_MAX) : base);
+  const canTrial = !(st && st.retried);
+  if (cur && canTrial && exploreP > 0 && Math.random() < exploreP) {
+    // 这个站还没试够节点：先补站点样本（仍受同一个预算约束）
+    if (host && fam) {
+      const tried = (S.hostNode.get(fam) || new Map()).size;
+      if (tried < 3) {
+        const t0 = hostUntried(host, m);
+        if (t0) {
+          nsGet(t0).lastTry = Date.now();
+          if (st) { st.hostTrial = true; st.node = t0; }
+          return t0;
+        }
+      }
+    }
     const t = this.trial(m);
     if (t) {
       const s = nsGet(t);
@@ -88,6 +103,13 @@ pick(env: Env, mode: Mode, st: Connection | null) {
   return cur;
 }
 
+  /** 有效吞吐窗口数：sumW²/sumW2（样本不足就不值得长期驻留） */
+  nEffOf(k: string): number {
+    const s = S.nstat.get(k);
+    if (!s || !(s.sumW2 > 0)) return 0;
+    return (s.sumW * s.sumW) / s.sumW2;
+  }
+
 /** 待测队列：样本不足的节点，最久没试的优先 */
 trial(mode: Mode) {
   const pool = [];
@@ -97,7 +119,8 @@ trial(mode: Mode) {
     if (!a.ms || a.ms > 250) continue;       // 只试"探活不慢"的节点，慢的试了只会更慢
     const s = (S.nstat.get(k) || ZERO_STAT);
     const n = (s.okW || 0) + (s.failW || 0);
-    if ((s.bytesDown || 0) >= SC.MIN_BYTES && n >= SC.TRIAL_N) continue;
+    // 样本够了就不再试探：按有效吞吐窗口数判断，而不是累计字节
+    if (this.nEffOf(k) >= SC.N_EFF_MIN && n >= SC.TRIAL_N) continue;
     pool.push({ k, t: s.lastTry || 0 });
   }
   pool.sort((a, b) => a.t - b.t);

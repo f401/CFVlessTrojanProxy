@@ -58,12 +58,18 @@ unpackNode(o: SeedNode & { ok?: number; fail?: number }) {
   if (!s.tcp && o.tcp) s.tcp = o.tcp;
   if (!s.tls && o.tls) s.tls = o.tls;
   if (!s.msLocal && o.ms) s.msLocal = o.ms;
-  // 可靠性样本不搬进来：seed 是"别的 isolate 的观测"，混进本地活动失败率会虚增置信度。
-  // 它只通过 seedBps / ms 作为先验参与评分（见 scoreParts 的 cSeed）。
+  // seed 是"别的 isolate 的观测"：不混进本地 okW/failW，只修正 Beta 先验。
+  const at = o.at || Date.now();
+  const sn = o.n || 0;
+  if (sn > 0 && !(s.seedN > 0)) {
+    s.seedN = sn;
+    s.seedFail = o.f || 0;
+    if (!s.seedAt) s.seedAt = at;
+  }
   const sb = (o.sb || 0) > 0 ? o.sb! : (o.b || 0);
   if (sb > 0 && !(s.seedBps > 0) && !(s.lastSampleAt > 0)) {
     s.seedBps = Math.min(sb, 8 * 1048576);
-    s.seedAt = o.at || Date.now();
+    if (!s.seedAt) s.seedAt = at;
   }
   if (o.at && !s.at) s.at = o.at;
 }

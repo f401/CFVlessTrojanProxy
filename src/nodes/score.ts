@@ -21,7 +21,7 @@ export function nsGet(k: string): NodeStats {
       eCloseP: 0, eCloseD: 0,                  // 空关闭：中转后 / 直连
       bytesDown: 0, hist: new Array(HIST_N).fill(0),
       sumW: 0, sumW2: 0, recentBytesW: 0, lastSampleAt: 0,
-      seedBps: 0, seedAt: 0, counted: 0,
+      seedBps: 0, seedN: 0, seedFail: 0, seedAt: 0, counted: 0,
     };
     S.nstat.set(k, s);
   }
@@ -193,13 +193,29 @@ export function nsLatency(k: string, ms: number) {
  * @returns {number} 0~0.9 的失败概率估计
  */
 export function pFailOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
-  if (!s) return 0.4;
+  if (!s) return 0.1;
   const e = e0 || effView(s, now);
   const N = e.okW + e.failW;
-  const A = SC.BETA_A, B = SC.BETA_B;
-  const pMean = (e.failW + A) / (N + A + B);
-  const varr = ((e.failW + A) * (e.okW + B)) / ((N + A + B) * (N + A + B) * (N + A + B + 1));
-  return Math.min(0.9, Math.max(0, pMean + SC.RISK_Z * Math.sqrt(varr)));
+  const LN2 = Math.LN2;
+
+  // seed 只修正 Beta 先验，不计入本地 N（也不影响可用性门槛）
+  let a0 = SC.BETA_A, b0 = SC.BETA_B;
+  const seedN = s.seedN || 0;
+  const seedAge = s.seedAt ? now - s.seedAt : Infinity;
+  if (seedN > 0 && seedAge <= SC.SEED_TTL) {
+    const seedW = Math.min(2, 0.25 * seedN) * Math.exp((-seedAge / SC.SEED_TTL) * LN2);
+    const failRate = Math.min(1, (s.seedFail || 0) / Math.max(seedN, 1));
+    a0 += seedW * failRate;
+    b0 += seedW * (1 - failRate);
+  }
+
+  const a = a0 + e.failW;
+  const b = b0 + e.okW;
+  const pMean = a / (a + b);
+  const varr = (a * b) / ((a + b) * (a + b) * (a + b + 1));
+  // 无本地样本时不加不确定性溢价：先验均值就是 0.1，别把"未知"当"坏"
+  const premium = 0.5 * Math.sqrt(varr) * (1 - Math.exp(-N / 4));
+  return Math.min(0.9, Math.max(0, pMean + premium));
 }
 
 /** 可用性（小样本用后验均值，大样本用 Wilson 下界） */
@@ -302,7 +318,7 @@ export const ZERO_STAT: NodeStats = {
   tS: 0, tF: 0, okW: 0, failW: 0, eCloseP: 0, eCloseD: 0,
   stallMs: 0, runMs: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0),
   sumW: 0, sumW2: 0, recentBytesW: 0, lastSampleAt: 0,
-  seedBps: 0, seedAt: 0, counted: 0,
+  seedBps: 0, seedN: 0, seedFail: 0, seedAt: 0, counted: 0,
 };
 
 export const TEN_MB = 10 * 1048576;
@@ -431,6 +447,7 @@ export function candsFor(mode: Mode) {
     out.push({ k, v: costOf(k, mode) });
   }
   out.sort((a, b) => a.v - b.v);
+  S.candN = out.length;
   return out;
 }
 
