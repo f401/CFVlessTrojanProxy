@@ -4,7 +4,7 @@ import { SEED_WRITE_GAP } from "../core/const";
 import { HIST_BASE, HIST_N, SC } from "../core/const";
 import { logErr } from "../nodes/metrics";
 import { POOL_TTL_MS, geoLabel, probeProxy, refillPool } from "./probe";
-import { candsFor, capOf, costOf, isBlack, nsLatency, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, pcts } from "../nodes/score";
+import { candsFor, capOf, costOf, scoreParts, isBlack, nsLatency, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, pcts } from "../nodes/score";
 import { BUCKET_DEF, SEEDS } from "./seed";
 import { SEL } from "../nodes/selector";
 import { S } from "../core/state";
@@ -230,13 +230,14 @@ export async function pxGet(env: Env) {
  * @returns {object} "host:port" → 统计明细
  */
 export function nsOf(keys: string[]) {
-  const m: Record<string, Record<string, number>> = {};
+  const m: Record<string, Record<string, number | string>> = {};
   let i = 0;
   for (const k of keys) {
     if (++i > 64) break;                       // 面板最多展示几十行，别被异常输入拖死
     const s = S.nstat.get(k);
     if (!s) continue;
     const n = (s.okW || 0) + (s.failW || 0);
+    const lat = scoreParts(k, "lat"), tp = scoreParts(k, "tput");
     m[k] = {
       ok: s.ok || 0, fail: s.fail || 0, at: s.at || 0,
       bps: Math.round(p90Of(s) || s.seedBps || 0),
@@ -246,8 +247,12 @@ export function nsOf(keys: string[]) {
       bytes: Math.round(s.bytesDown || 0),
       pFail: Math.round(pFailOf(s) * 1000) / 1000,
       pStall: Math.round(pStallOf(s) * 1000) / 1000,
-      lat: Math.round(costOf(k, "lat")),
-      tput: Math.round(costOf(k, "tput")),
+      lat: Math.round(lat.score),
+      tput: Math.round(tp.score),
+      e10: Math.round(tp.e10Ms),
+      confB: Math.round(tp.confB * 1000) / 1000,
+      nEff: Math.round(tp.nEff * 10) / 10,
+      gate: tp.gate,
     };
   }
   return m;

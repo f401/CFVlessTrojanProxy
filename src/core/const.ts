@@ -21,6 +21,17 @@ export const SC = {
   ROLL_WIN: 60000,
   ROLL_FREEZE: 30 * 60000,
   TRIAL_N: 3,
+
+  // —— v2 评分 ——
+  BETA_A: 1,              // 失败率先验 α（无数据时均值 10%）
+  BETA_B: 9,
+  RISK_Z: 1.28,           // 保守风险上界（约 90% 单侧）
+  N_EFF_MIN: 3,           // 有效吞吐窗口数下限
+  RECENT_MIN: 3 * 1048576,// 近期有效字节门槛
+  SAMPLE_TTL: 24 * 3600e3,// 吞吐样本保质期
+  CONN_W_CAP: 4,          // 单条连接对直方图的累计权重上限
+  SEED_CONF: 0.25,        // seed 先验最大置信度
+  SEED_TTL: 24 * 3600e3,  // seed 先验保质期
 };
 export const HIST_BASE = 16 * 1024;   // 直方图起点 16 KB/s
 export const HIST_N = 12;             // 16K ~ 32M

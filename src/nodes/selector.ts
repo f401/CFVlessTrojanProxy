@@ -1,6 +1,6 @@
 import type { Connection } from "../proxy/connection";
 import { SC } from "../core/const";
-import { hostRank, hostUntried, logErr } from "./metrics";
+import { hostKey, hostRank, hostUntried, logErr } from "./metrics";
 import { MODES, aliveList, cnt, keyOf, pxGet } from "../px/pool";
 import { pxPolicy } from "../px/probe";
 import { bestFor, candsFor, costOf, freezeNode, isBlack, isFrozen, nsFail, nsGet, nsOk , ZERO_STAT } from "./score";
@@ -34,7 +34,9 @@ pick(env: Env, mode: Mode, st: Connection | null) {
   if (st) st.hostTrial = false;
 
   if (host) {
-    const tried = (S.hostNode.get(host) || new Map()).size;
+    // 画像按"域名族"存（api.x.com 与 pbs.twimg.com 共用 x.com），读写必须用同一个键
+    const fam = hostKey(host);
+    const tried = (S.hostNode.get(fam) || new Map()).size;
 
     // ① 冷启动：头几次连接故意岔开，否则第一个碰上的节点会被永久锁死
     if (tried < 3 && !(st && st.retried) && Math.random() < (tried === 0 ? 1 : 0.5)) {
@@ -50,7 +52,7 @@ pick(env: Env, mode: Mode, st: Connection | null) {
     const rank = hostRank(host, m);
     if (rank.length) {
       const best = rank[0].k;
-      const hm = S.hostNode.get(host) || new Map();
+      const hm = S.hostNode.get(fam) || new Map();
       const bs = hm.get(best);
       // 这个站至少有两个节点有样本（有对比才有意义），才敢覆盖全局游标
       let sampled = 0;

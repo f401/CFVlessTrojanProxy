@@ -1,3 +1,4 @@
+import { SC } from "../core/const";
 import type { Socket } from "cloudflare:sockets";
 import { errMsg } from "../core/util";
 import { pipeBack } from "./tunnel";
@@ -45,6 +46,7 @@ export class Connection {
   sampleAt = 0;
   sampleDown = 0;
   lastEmit = 0;
+  sampleW = 0;            // 本连接已贡献给直方图的权重（上限 SC.CONN_W_CAP）
 
   // —— 生命周期 ——
   markedOk = false;
@@ -104,9 +106,12 @@ export class Connection {
       if (this.sampleAt && dt >= 800 && now - this.lastEmit >= 15000) {
         const bytes = this.down - this.sampleDown;
         if (this.node && bytes >= 65536) {
-          this.lastEmit = now;
-          nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env);
-          S.cnt.tput = (S.cnt.tput || 0) + 1;
+          const w = this.takeWeight(bytes, dt);
+          if (w > 0) {
+            this.lastEmit = now;
+            nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
+            S.cnt.tput = (S.cnt.tput || 0) + 1;
+          }
         }
         this.sampleAt = now;
         this.sampleDown = this.down;
@@ -149,6 +154,19 @@ export class Connection {
     return true;
   }
 
+  /**
+   * 本次窗口应贡献多少直方图权重。
+   * 512KB / 1s 是"一个标准样本"；短窗口或小样本按比例降权，单连接累计封顶。
+   */
+  takeWeight(bytes: number, dt: number): number {
+    const room = SC.CONN_W_CAP - this.sampleW;
+    if (room <= 0) return 0;
+    const w = Math.min(1, bytes / (512 * 1024)) * Math.min(1, dt / 1000);
+    const use = Math.min(room, w);
+    this.sampleW += use;
+    return use;
+  }
+
   /** 把"尚未上报"的字节推给 PEND；closing=true 时补一个收尾样本 */
   flush(closing?: boolean): void {
     if (!this.id) return;
@@ -161,8 +179,11 @@ export class Connection {
       const dt = now - this.sampleAt;
       const bytes = this.down - this.sampleDown;
       if (this.node && this.sampleAt && dt >= 300 && bytes >= 32768 && now - this.lastEmit >= 5000) {
-        nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env);
-        S.cnt.tput = (S.cnt.tput || 0) + 1;
+        const w = this.takeWeight(bytes, dt);
+        if (w > 0) {
+          nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
+          S.cnt.tput = (S.cnt.tput || 0) + 1;
+        }
       }
       if (this.node && this.stallMs) {
         nsStall(this.node, this.stallMs, Math.max(1000, now - this.t0));
@@ -178,11 +199,14 @@ export class Connection {
         // 按站点的节点画像：谁对这个站行、谁不行（诊断与站点级选路用）
         if (this.host) {
           if (this.node) {
+            const life = this.tAttach ? Math.max(1, Date.now() - this.tAttach) : 0;
+            const siteBps = life > 500 && this.down >= 512 * 1024 ? Math.round((this.down * 1000) / life) : 0;
             hostNodeMark(this.host, this.node, {
               ok: !this.failed && this.down > 0 ? 1 : 0,
               bad: this.failed ? 1 : 0,
               bytes: this.down,
               ttfb: this.ttfb,
+              bps: siteBps,
             });
             if (this.directFail) hostDirectMark(this.host, false);
           } else {

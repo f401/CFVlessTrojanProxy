@@ -82,3 +82,33 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 - 注释写"为什么"，不写"是什么"。
 - 所有跨模块符号必须显式 import；禁止再引入 `ORDER` 之类的隐式顺序。
 - 新增端点 = `routes/xxx.ts` 导出一个 `(c: RouteCtx) => Response`，在 `index.ts` 分发处加一行。
+
+## 7 评分 v2（读时衰减 + 加权吞吐）
+
+评分是纯计算：`nodes/score.ts` 的 `scoreParts(k, mode)` 同时供排序与面板使用，
+`costOf()` 只是取 `.score`。四个维度各有独立语义：
+
+| 维度 | 存什么 | 怎么用 |
+|---|---|---|
+| traffic | `okW` / `failW`（真实连接） | Beta(1,9) 风险上界 `pFailRisk`，以及可用性门槛 |
+| latency | `tcp`/`tls` EWMA、探活 `pN` | `confL = 1−e^(−(pN+okW)/4)`，向 `alive.ms` 先验收缩 |
+| throughput | 加权直方图 `hist`、`sumW`、`sumW2`、`recentBytesW`、`lastSampleAt` | `confB` 由**有效窗口数** `nEff=sumW²/sumW2` 决定，不看连接数 |
+| stall | `stallMs`/`runMs` | `pStall=(stall+50)/(run+1000)` |
+
+关键点：
+
+1. **读时衰减**：存储值是"上次写入时刻"的权重，`effView()` 按 `2^(−age/HL)` 折算出当前有效值；
+   读分不修改状态，空闲节点会自己变旧。`HL=6h`。
+2. **吞吐准入**：`nEff≥3`、`recentBytesW≥3MiB`、样本 ≤24h 三者同时满足才有 `confB`；
+   累计 `bytesDown` 只用于展示，不能复活旧样本。
+3. **权重**：每个窗口 `w=min(1,bytes/512KiB)×min(1,dt/1s)`，单连接累计封顶 4，
+   一条长连接刷不出"高置信度"。
+4. **seed 只是先验**：`cSeed=0.25×2^(−seedAge/24h)`，只影响 `priorBps`，不进本地 `nEff`、
+   也不混进 `okW/failW`；导入的可靠性样本不再伪装成本地观测。
+5. **站点画像**：`hostKey(host)` 是唯一索引，读写都用它；`lat` 用 TTFB，`tput` 必须有站点级
+   `bps` 样本，没有就回退全局同模式分，不允许拿 TTFB 冒充吞吐。
+6. **门槛**：只有 `N≥8` 且 Wilson 下界 <0.4 才硬排除，其余靠 `pFailRisk` 软惩罚，
+   避免小样本一两次失败就出局。
+
+`/<uuid>/debug?diag=<host>` 与 `/proxyip?why=1` 输出的是同一份分项：
+`latencyMs / e10Ms / pFailRisk / pStall / capBps / confB / nEff / sampleAgeMs / priorSource / gate`。

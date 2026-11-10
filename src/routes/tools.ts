@@ -6,7 +6,7 @@ import { dial } from "../proxy/dial";
 
 import { json, text } from "../edge/respond";
 import { diagVerdict, hostKey, hostRank, logErr } from "../nodes/metrics";
-import { ZERO_STAT, capOf, costOf, nsGet, p90Of, pFailOf, pStallOf, pctOf } from "../nodes/score";
+import { ZERO_STAT, capOf, costOf, scoreParts, nsGet, p90Of, pFailOf, pStallOf, pctOf } from "../nodes/score";
 import { checkTarget, dohQuery, expandV6, resolveAAAA } from "../proxy/dial";
 import { aliveList, cnt, cntView, commitPool, cronScan, flushPx, nsOf, pxGet, pxSet, spdSnapshot } from "../px/pool";
 import { EXTRA_HOSTS, POOL_SOURCES, PX_LINE, probeProxy, probeSni, regionListAsync, takePoolLine } from "../px/probe";
@@ -130,27 +130,26 @@ export async function proxyip(c: UserCtx): Promise<Response> {
               .slice(0, 12);
             out.hostPref = hp;
             out.explain = rows.slice(0, 8).map((r) => {
-              const s = S.nstat.get(r.node) || ZERO_STAT;
-              const tcp = Math.round(s.tcp || r.ms || SC.P_TCP);
-              const tls = Math.round(s.tls || SC.P_TLS);
-              const pf = pFailOf(s), pst = pStallOf(s);
-              const bps = capOf(s);
-              const e10 = bps > 0 ? Math.round((10 * 1048576 / bps) * 1000) : Math.round((10 * 1048576 / SC.PRIOR_BPS) * 1000);
-              const terms = modeQ === "tput"
-                ? { e10mb: e10, tcp: Math.round(tcp * 0.5), fail: Math.round(pf * SC.FAIL), stall: Math.round(pst * SC.STALL), gate: 0 }
-                : { tcp, tls: Math.round(tls * SC.TLS_G), loss: Math.round(Math.max(0, tls - 2 * tcp - SC.LOSS_SLACK) * SC.LOSS_G), fail: Math.round(pf * SC.FAIL), stall: Math.round(pst * SC.STALL), gate: 0 };
+              const sp = scoreParts(r.node, modeQ);
               return {
                 k: r.node,
-                v: modeQ === "lat" ? r.lat : r.tput,
+                v: Math.round(sp.score),
                 chosen: S.curs[modeQ] === r.node,
-                terms,
+                // 与排序用的是同一份分项，不再另写一套诊断公式
+                parts: {
+                  latencyMs: Math.round(sp.latencyMs),
+                  e10Ms: Math.round(sp.e10Ms),
+                  pFailRisk: Math.round(sp.pFailRisk * 1000) / 1000,
+                  pStall: Math.round(sp.pStall * 1000) / 1000,
+                  capBps: Math.round(sp.capBps),
+                  confB: Math.round(sp.confB * 1000) / 1000,
+                  nEff: Math.round(sp.nEff * 10) / 10,
+                  sampleAgeMs: sp.sampleAgeMs < 0 ? -1 : Math.round(sp.sampleAgeMs),
+                  priorSource: sp.priorSource,
+                  gate: sp.gate,
+                },
                 n: r.n,
                 bytes: r.bytes,
-                pFail: Math.round(pf * 1000) / 1000,
-                pStall: Math.round(pst * 1000) / 1000,
-                bps_p90: Math.round(p90Of(s) || s.seedBps || 0),
-                bps_med: Math.round(pctOf(s, 0.5) || 0),
-                bps_cap: Math.round(bps),
               };
             });
           }

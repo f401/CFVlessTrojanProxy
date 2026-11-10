@@ -98,7 +98,14 @@ interface NodeStats {
   runMs: number;
   bytesDown: number;
   hist: number[];
+  /** 加权直方图：权重和、权重平方和、近期有效字节、最后样本时刻 */
+  sumW: number;
+  sumW2: number;
+  recentBytesW: number;
+  lastSampleAt: number;
+  /** seed 先验速率与采集时刻 */
   seedBps: number;
+  seedAt: number;
 
   /** 其它 */
   counted: number;
@@ -127,6 +134,8 @@ interface SeedNode {
   n?: number;
   f?: number;
   b?: number;
+  /** 先验速率（别的 isolate 测到的 p90） */
+  sb?: number;
   at?: number;
 }
 
@@ -306,7 +315,11 @@ interface SnapDoc {
 interface UsageMeter { up: number; down: number; conns: number; first: number; ts: number; d?: string; dU?: number; dD?: number }
 
 /** 某个节点在某个站点上的画像（诊断用：谁对这个站不行） */
-interface HNStat { n: number; ok: number; bad: number; bytes: number; ttfb: number; at: number }
+interface HNStat {
+  n: number; ok: number; bad: number; bytes: number; ttfb: number; at: number;
+  /** 站点级吞吐样本（EWMA）与样本数、采集时刻 */
+  bps?: number; bpsN?: number; bpsAt?: number;
+}
 
 /** 直连对照：这个站直连到底通不通 */
 interface HDirect { ok: number; bad: number; at: number }

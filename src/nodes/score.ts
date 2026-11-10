@@ -20,7 +20,8 @@ export function nsGet(k: string): NodeStats {
       tS: 0, tF: 0,                            // 真实流量（只用于可用性）
       eCloseP: 0, eCloseD: 0,                  // 空关闭：中转后 / 直连
       bytesDown: 0, hist: new Array(HIST_N).fill(0),
-      seedBps: 0, counted: 0,
+      sumW: 0, sumW2: 0, recentBytesW: 0, lastSampleAt: 0,
+      seedBps: 0, seedAt: 0, counted: 0,
     };
     S.nstat.set(k, s);
   }
@@ -40,8 +41,35 @@ export function nsDecay(s: NodeStats, now: number) {
   if (k >= 0.9999) return;
   s.okW *= k; s.failW *= k; s.stallMs *= k; s.runMs *= k;
   s.pN *= k; s.pSum *= k; s.pSumSq *= k; s.pF *= k; s.tS *= k; s.tF *= k;
+  s.sumW *= k; s.sumW2 *= k * k; s.recentBytesW *= k;
   if (s.hist) for (let i = 0; i < HIST_N; i++) s.hist[i] *= k;
   s.at = now;
+}
+
+/** 时间衰减因子：2^(-age/HL)。读到旧样本时用它折算，不改存储状态。 */
+const LN2 = Math.LN2;
+export function ageFactor(ms: number): number {
+  if (!(ms > 0)) return 1;
+  return Math.exp((-ms / SC.HL) * LN2);
+}
+
+/**
+ * 读时有效视图（纯函数）。
+ * 存储里的权重是"上次写入时刻"的值；隔了多久就按半衰期折算多少。
+ */
+export function effView(s: NodeStats, now = Date.now()) {
+  const k = ageFactor(now - (s.at || now));
+  return {
+    k,
+    okW: s.okW * k,
+    failW: s.failW * k,
+    stallMs: s.stallMs * k,
+    runMs: s.runMs * k,
+    sumW: s.sumW * k,
+    sumW2: s.sumW2 * k * k,
+    recentBytesW: s.recentBytesW * k,
+    pN: s.pN * k,
+  };
 }
 
 /**
@@ -121,13 +149,20 @@ export function nsFail(k: string) {
  * @param {object} [env] 用于节流落盘
  * @returns {void}
  */
-export function nsSpeed(k: string, bps: number, bytes: number, env: Env) {
+export function nsSpeed(k: string, bps: number, bytes: number, env: Env, w = 1) {
   if (!k || !(bps > 0)) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
+  const weight = Math.max(0, Math.min(w, SC.CONN_W_CAP));
+  if (!(weight > 0)) return;
   const i = Math.max(0, Math.min(HIST_N - 1, Math.round(Math.log2(Math.max(bps, 1) / HIST_BASE))));
-  s.hist[i] += 1;
-  s.seedBps = 0;                                   // 本地有样本了，导入值作废
+  // 加权直方图：一个 8MB/s 的长连接和一个 200KB/s 的短连接不该等权
+  s.hist[i] += weight;
+  s.sumW += weight;
+  s.sumW2 += weight * weight;
+  s.recentBytesW += (bytes || 0) * weight;
+  s.lastSampleAt = now;
+  s.seedBps = 0; s.seedAt = 0;                     // 本地有样本了，导入的先验作废
   s.bytesDown = (s.bytesDown || 0) + (bytes || 0);
   s.at = now;
   S.seedDirty = true;
@@ -157,20 +192,21 @@ export function nsLatency(k: string, ms: number) {
  * @param {object} s 统计对象
  * @returns {number} 0~0.9 的失败概率估计
  */
-export function pFailOf(s: NodeStats) {
+export function pFailOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
   if (!s) return 0.4;
-  const ok = s.tS || 0;
-  const bad = s.tF || 0;
-  const n = ok + bad;
-  const p = (bad + 1) / (n + 10);
-  const se = Math.sqrt(Math.max(p * (1 - p), 0.01) / (n + 1));
-  return Math.min(0.9, p + se);
+  const e = e0 || effView(s, now);
+  const N = e.okW + e.failW;
+  const A = SC.BETA_A, B = SC.BETA_B;
+  const pMean = (e.failW + A) / (N + A + B);
+  const varr = ((e.failW + A) * (e.okW + B)) / ((N + A + B) * (N + A + B) * (N + A + B + 1));
+  return Math.min(0.9, Math.max(0, pMean + SC.RISK_Z * Math.sqrt(varr)));
 }
 
 /** 可用性（小样本用后验均值，大样本用 Wilson 下界） */
-export function availOf(s: NodeStats) {
+export function availOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
   if (!s) return 0.5;
-  const ok = s.tS || 0, bad = s.tF || 0;
+  const e = e0 || effView(s, now);
+  const ok = e.okW, bad = e.failW;
   const n = ok + bad;
   if (n >= 30) {
     const phat = ok / n, z = 1.96;
@@ -183,9 +219,10 @@ export function availOf(s: NodeStats) {
 }
 
 /** 卡顿占比（无数据 = 0.05） */
-export function pStallOf(s: NodeStats) {
+export function pStallOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
   if (!s) return 0.05;
-  return (s.stallMs + 50) / (s.runMs + 1000);
+  const e = e0 || effView(s, now);
+  return (e.stallMs + 50) / (e.runMs + 1000);
 }
 
 /**
@@ -263,48 +300,89 @@ export const ZERO_STAT: NodeStats = {
   ok: 0, fail: 0, at: 0, msLocal: 0, streak: 0, blackUntil: 0, freeUntil: 0, lastTry: 0,
   pN: 0, pSum: 0, pSumSq: 0, pF: 0, tcp: 0, tls: 0,
   tS: 0, tF: 0, okW: 0, failW: 0, eCloseP: 0, eCloseD: 0,
-  stallMs: 0, runMs: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0), seedBps: 0, counted: 0,
+  stallMs: 0, runMs: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0),
+  sumW: 0, sumW2: 0, recentBytesW: 0, lastSampleAt: 0,
+  seedBps: 0, seedAt: 0, counted: 0,
 };
 
 export const TEN_MB = 10 * 1048576;
 export const E10_PRIOR = (TEN_MB / SC.PRIOR_BPS) * 1000;   // 无吞吐样本时的先验代价（≈51 秒）
 
-export function costOf(k: string, mode: Mode) {
-  const m = mode === "tput" ? "tput" : "lat";
-  const s = S.nstat.get(k) || ZERO_STAT;   // 空对象会让 pStall 变 NaN，必须用带零值的占位
-  const a = (S.alive.get(k) || {}) as NodeEntry;
-  const tcp = s.tcp || Number(a.ms) || SC.P_TCP;
-  const tls = s.tls || SC.P_TLS;
-  // 置信度必须跟 pFail 用同一套计数（tS/tF），否则会出现
-  // "失败率变了、分数却不动"的诡异现象（单测抓到的）
-  const n = (s.tS || 0) + (s.tF || 0) || (s.okW || 0) + (s.failW || 0);
-
-  // 只有"没观测到"的那部分才向先验收缩。
-  // 早先整条 v 一起收缩，导致 tput 在没有吞吐样本时所有节点被压成同一个数，
-  // 排序退化成随机 —— 下载就会随机落在一个慢节点上。
-  const confF = 1 - Math.exp(-n / 4);
-  const pF = pFailOf(s) * confF + 0.1 * (1 - confF);
-  const pS = pStallOf(s);
-
-  let v;
-  let cap = 0;                                   // tput 模式下的能力值，只算一次
-  if (m === "tput") {
-    cap = capOf(s);
-    const okB = (s.bytesDown || 0) >= 3 * 1048576 && n >= 3 && cap > 0;
-    const confB = okB ? 1 - Math.exp(-n / 8) : 0;
-    const e10 = okB ? (TEN_MB / cap) * 1000 : E10_PRIOR;
-    v = e10 * confB + E10_PRIOR * (1 - confB) + tcp * 0.5 + pF * SC.FAIL + pS * SC.STALL;
-  } else {
-    v = tcp + tls * SC.TLS_G + Math.max(0, tls - 2 * tcp - SC.LOSS_SLACK) * SC.LOSS_G
-      + pF * SC.FAIL + pS * SC.STALL;
-  }
-  if (pS > 0.25 && n >= 5) v += 400;
-  // 吞吐低到 8 KB/s 以下基本等于不可用（早先这里又算了一遍 capOf）
-  if (m === "tput" && cap > 0 && cap < 8 * 1024 && n >= 5) v += 400;
-  return v;
+export interface ScoreParts {
+  mode: Mode; score: number; latencyMs: number; e10Ms: number;
+  pFailRisk: number; pStall: number; capBps: number; confB: number;
+  nEff: number; sampleAgeMs: number; priorSource: "seed" | "prior"; gate: string;
 }
 
-/** 面板展示用的分值（越小越好） */
+/**
+ * 评分明细（v2）：排序与面板共用同一份分项，避免"面板一套公式、选路另一套"。
+ *
+ *   延迟 L = confL × Lobs + (1-confL) × Lprior
+ *   吞吐 E10 = confB × (10MiB/cap) + (1-confB) × (10MiB/prior)
+ *   score = 目标项 + FAIL×pFailRisk + STALL×pStall
+ */
+export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = false): ScoreParts {
+  const m: Mode = mode === "tput" ? "tput" : "lat";
+  const s = S.nstat.get(k) || ZERO_STAT;
+  const a = S.alive.get(k);
+  const e = effView(s, now);
+
+  // —— 延迟 ——
+  const tcp = s.tcp || (a && a.ms) || SC.P_TCP;
+  const tls = s.tls || SC.P_TLS;
+  const Lobs = tcp + tls * SC.TLS_G + Math.max(0, tls - 2 * tcp - SC.LOSS_SLACK) * SC.LOSS_G;
+  const Lprior = (a && a.ms) || (SC.P_TCP + SC.P_TLS * SC.TLS_G);
+  // 真实连接也提供了握手观测，和探活样本一起算延迟置信度
+  const confL = 1 - Math.exp(-(e.pN + e.okW) / 4);
+  const latencyMs = confL * Lobs + (1 - confL) * Lprior;
+
+  // —— 吞吐（只有 tput 才需要扫直方图）——
+  const q = m === "tput" ? pcts(s) : { p50: 0, p90: 0, cap: 0 };
+  const capBps = q.cap || 0;
+  const nEff = e.sumW2 > 0 ? (e.sumW * e.sumW) / e.sumW2 : 0;
+  const sampleAge = s.lastSampleAt ? now - s.lastSampleAt : Infinity;
+  let confB = 0;
+  if (nEff >= SC.N_EFF_MIN && e.recentBytesW >= SC.RECENT_MIN && sampleAge <= SC.SAMPLE_TTL && capBps > 0) {
+    confB = Math.min(1, e.recentBytesW / SC.RECENT_MIN) * (1 - Math.exp(-nEff / 4));
+  }
+  const seedAge = s.seedAt ? now - s.seedAt : Infinity;
+  const cSeed = !s.seedBps || seedAge > SC.SEED_TTL ? 0 : SC.SEED_CONF * Math.pow(2, -seedAge / SC.SEED_TTL);
+  const priorBps = cSeed > 0 ? cSeed * s.seedBps + (1 - cSeed) * SC.PRIOR_BPS : SC.PRIOR_BPS;
+  const e10Prior = (TEN_MB / priorBps) * 1000;
+  const e10Local = (TEN_MB / Math.max(capBps, 8 * 1024)) * 1000;
+  const e10Ms = confB * e10Local + (1 - confB) * e10Prior;
+
+  // —— 风险 ——
+  const pFailRisk = pFailOf(s, now, e);
+  const pStall = pStallOf(s, now, e);
+  const N = e.okW + e.failW;
+
+  let score = m === "tput"
+    ? e10Ms + 0.5 * latencyMs + SC.FAIL * pFailRisk + SC.STALL * pStall
+    : latencyMs + SC.FAIL * pFailRisk + SC.STALL * pStall;
+
+  // 低速惩罚只在"确实测出来"时才加，避免对无数据节点重复处罚
+  if (m === "tput" && confB > 0.25 && capBps > 0 && capBps < 8 * 1024) score += 400;
+  if (pStall > 0.25 && N >= 5) score += 400;
+
+  let gate = "";
+  if (withGate) {
+    gate = !S.alive.has(k) ? "not-alive" : isBlack(k) ? "black" : isFrozen(k) ? "frozen"
+      : (N >= 8 && availOf(s, now, e) < 0.4) ? "low-avail" : "ok";
+  }
+
+  return {
+    mode: m, score, latencyMs, e10Ms, pFailRisk, pStall, capBps, confB,
+    nEff, sampleAgeMs: Number.isFinite(sampleAge) ? sampleAge : -1,
+    priorSource: cSeed > 0 ? "seed" : "prior", gate,
+  };
+}
+
+/** 节点代价（毫秒当量，越小越好） */
+export function costOf(k: string, mode: Mode, now = Date.now()): number {
+  return scoreParts(k, mode, now).score;
+}
+
 export function scoreMerged(k: string, _ns?: unknown) { return costOf(k, "lat"); }
 
 /** 是否处于冷却期 */
@@ -345,8 +423,10 @@ export function candsFor(mode: Mode) {
   for (const k of S.alive.keys()) {
     if (isBlack(k) || isFrozen(k)) continue;
     const s = (S.nstat.get(k) || ZERO_STAT);
-    const n = (s.tS || 0) + (s.tF || 0);
-    if (n >= 5 && availOf(s) < 0.75) continue;        // 可用性硬门槛
+    const e = effView(s);
+    const n = e.okW + e.failW;
+    // 小样本只做软惩罚（pFailRisk），别让一两次失败直接失去候选资格
+    if (n >= 8 && availOf(s) < 0.4) continue;
     if (emptyCloseSuspect(k)) continue;               // 中转后仍大量空关闭
     out.push({ k, v: costOf(k, mode) });
   }

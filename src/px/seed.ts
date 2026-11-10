@@ -39,6 +39,7 @@ packNode(k: string) {
     n: Math.round(n),
     f: Math.round((s.failW || 0) * 10) / 10,
     b: Math.round(p90Local(s) || 0),
+    sb: Math.round(s.seedBps || 0),
     at: s.at || 0,
   };
 }
@@ -57,15 +58,12 @@ unpackNode(o: SeedNode & { ok?: number; fail?: number }) {
   if (!s.tcp && o.tcp) s.tcp = o.tcp;
   if (!s.tls && o.tls) s.tls = o.tls;
   if (!s.msLocal && o.ms) s.msLocal = o.ms;
-  const nn = o.n != null ? o.n : ((o.ok || 0) + (o.fail || 0));
-  if (!(s.okW + s.failW) && nn) {
-    const ff = o.f != null ? o.f : (o.fail || 0);
-    s.okW = Math.max(0, nn - ff);
-    s.failW = ff;
-  }
-  if ((o.b || 0) > 0 && !(s.seedBps > 0) && !(s.bytesDown > 0)) {
-    s.seedBps = Math.min(o.b || 0, 8 * 1048576);        // 只作为"参考值"，不进直方图
-    s.bytesDown = SC.MIN_BYTES;                    // 让它有资格进 tput 排名
+  // 可靠性样本不搬进来：seed 是"别的 isolate 的观测"，混进本地活动失败率会虚增置信度。
+  // 它只通过 seedBps / ms 作为先验参与评分（见 scoreParts 的 cSeed）。
+  const sb = (o.sb || 0) > 0 ? o.sb! : (o.b || 0);
+  if (sb > 0 && !(s.seedBps > 0) && !(s.lastSampleAt > 0)) {
+    s.seedBps = Math.min(sb, 8 * 1048576);
+    s.seedAt = o.at || Date.now();
   }
   if (o.at && !s.at) s.at = o.at;
 }

@@ -1,5 +1,7 @@
+import { SC } from "../core/const";
 import { costOf, isBlack, isFrozen } from "./score";
 import { S } from "../core/state";
+import { TEN_MB } from "./score";
 import { getSnap, kvGet } from "../store/index";
 
 /* metrics */
@@ -121,10 +123,20 @@ export function hostKey(host: string): string {
  * @param {number} now 当前时间
  * @returns {number} 分数
  */
-export function hostScore(s: HNStat, now: number): number {
+/**
+ * 站点画像打分。返回 -1 表示"这个模式没有站点级样本"，调用方回退全局分。
+ *   lat  → 首字节 + 失败风险
+ *   tput → 站点级 10MB 估算 + 0.5×首字节 + 失败风险（没有吞吐样本就不要拿 TTFB 冒充）
+ */
+export function hostScore(s: HNStat, mode: Mode, now: number): number {
   const fail = (s.bad + 1) / (s.n + 6);            // 小样本往坏里估
   const stale = now - (s.at || 0) > 6 * 3600e3 ? 300 : 0;   // 6 小时没更新就降权
   const ttfb = s.ttfb > 0 ? s.ttfb : 800;
+  if (mode === "tput") {
+    const bpsAge = now - (s.bpsAt || 0);
+    if (!(s.bpsN && s.bps && s.bps > 0) || bpsAge > SC.SAMPLE_TTL) return -1;
+    return (TEN_MB / s.bps) * 1000 + 0.5 * ttfb + fail * 4000 + stale;
+  }
   return ttfb + fail * 4000 + (s.n < 2 ? 150 : 0) + stale;
 }
 
@@ -147,7 +159,9 @@ export function hostRank(host: string, mode: Mode) {
   if (m) {
     for (const [k, s] of m) {
       if (!S.alive.has(k) || isBlack(k) || isFrozen(k)) continue;
-      out.push({ k, v: hostScore(s, now) });
+      const hs = hostScore(s, mode, now);
+      // 站点级没有该模式的样本：回退全局同模式分数，别用另一种模式冒充
+      out.push({ k, v: hs >= 0 ? hs : costOf(k, mode) });
     }
   }
   // 只有样本少于 2 个时才把"没试过的节点"按全局分补进来（冷启动用）
@@ -257,6 +271,12 @@ export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
   s.bytes += o.bytes || 0;
   const ttfb = o.ttfb || 0;
   if (ttfb > 0) s.ttfb = s.ttfb ? Math.round(s.ttfb * 0.6 + ttfb * 0.4) : Math.round(ttfb);
+  const bps = o.bps || 0;
+  if (bps > 0) {
+    s.bps = s.bps ? Math.round(s.bps * 0.6 + bps * 0.4) : bps;
+    s.bpsN = (s.bpsN || 0) + 1;
+    s.bpsAt = Date.now();
+  }
   s.at = Date.now();
   // 排行缓存失效（两个模式各一份）
   S.hostRankCache.delete(fam + "|lat");

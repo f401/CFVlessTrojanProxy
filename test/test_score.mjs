@@ -38,41 +38,97 @@ const q2 = W.pcts(s2);
 ok("p90 被单次突发拉高（> p50）", q2.p90 > q2.p50, `${q2.p90} / ${q2.p50}`);
 ok("cap 抑制了突发", q2.cap <= q2.p50 * 2.5 + 1);
 
-/* ---------- 2. 打分 ---------- */
+/* ---------- 2. 打分（v2：读时衰减 + 加权吞吐） ---------- */
 reset();
-node("a:443", { tcp: 50, tls: 60, tS: 20, tF: 0 });
-node("b:443", { tcp: 200, tls: 60, tS: 20, tF: 0 });
+node("a:443", { tcp: 50, tls: 60, okW: 20 });
+node("b:443", { tcp: 200, tls: 60, okW: 20 });
 ok("lat：低延迟更优", W.costOf("a:443", "lat") < W.costOf("b:443", "lat"),
   `${W.costOf("a:443", "lat")} vs ${W.costOf("b:443", "lat")}`);
 
 reset();
-node("good:443", { tcp: 50, tls: 60, tS: 20, tF: 0 });
-node("bad:443", { tcp: 50, tls: 60, tS: 20, tF: 6 });
+node("good:443", { tcp: 50, tls: 60, okW: 20 });
+node("bad:443", { tcp: 50, tls: 60, okW: 20, failW: 6 });
 ok("失败率高更差", W.costOf("bad:443", "lat") > W.costOf("good:443", "lat"));
 
 reset();
 node("t1:443", { tcp: 50 });
-ok("tput：无样本时等于先验", Math.round(W.costOf("t1:443", "tput")) === 52175 || W.costOf("t1:443", "tput") > 50000,
-  W.costOf("t1:443", "tput"));
-const t2 = W.nsGet("t2:443");
-node("t2:443", { tcp: 50, bytesDown: 5 * 1048576, tS: 5 });
-t2.hist[7] = 8;                        // 2MB/s，n>=3 且 bytes 够
-// n 小的时候置信度低，会向先验(≈51s)收缩；这里只要求"比无样本时更低"
-ok("tput：有样本时低于先验",
-  W.costOf("t2:443", "tput") < W.costOf("t1:443", "tput") - 3000,
+ok("tput：无样本时用先验（≈51s）", W.costOf("t1:443", "tput") > 50000, W.costOf("t1:443", "tput"));
+
+node("t2:443", { tcp: 50 });
+const st2n = W.S.nstat.get("t2:443");
+st2n.hist[7] = 5; st2n.sumW = 5; st2n.sumW2 = 5;
+st2n.recentBytesW = 5 * 1048576; st2n.lastSampleAt = Date.now();
+ok("tput：有效样本后低于先验", W.costOf("t2:443", "tput") < W.costOf("t1:443", "tput") - 3000,
   `${W.costOf("t2:443", "tput")} vs ${W.costOf("t1:443", "tput")}`);
+
+// 累计字节不能"复活"旧速率：没有近期权重就不该有吞吐置信度
+reset();
+node("cum:443", { tcp: 50 });
+const sc = W.S.nstat.get("cum:443");
+sc.bytesDown = 200 * 1048576; sc.hist[7] = 5;
+eq("旧累计字节不通过吞吐准入", W.scoreParts("cum:443", "tput").confB, 0);
+
+// 读时衰减：不产生新事件，旧样本自己变旧
+reset();
+node("age:443", { tcp: 50, okW: 10 });
+const sa = W.S.nstat.get("age:443");
+const beforeW = W.effView(sa).okW;
+sa.at = Date.now() - 6 * 3600e3;
+ok("6 小时后有效权重减半", Math.abs(W.effView(sa).okW - beforeW / 2) < 0.01,
+  `${beforeW} → ${W.effView(sa).okW}`);
+ok("老化后分数变差", W.costOf("age:443", "lat") > 0);
+
+// 吞吐置信度看"有效窗口数"，不看连接数
+reset();
+node("one:443", { tcp: 50 });
+node("many:443", { tcp: 50 });
+const sOne = W.S.nstat.get("one:443");
+sOne.hist[7] = 4; sOne.sumW = 4; sOne.sumW2 = 16; sOne.recentBytesW = 8 * 1048576; sOne.lastSampleAt = Date.now();
+const sMany = W.S.nstat.get("many:443");
+sMany.hist[7] = 4; sMany.sumW = 4; sMany.sumW2 = 4; sMany.recentBytesW = 8 * 1048576; sMany.lastSampleAt = Date.now();
+ok("一个 4 权重样本 nEff=1", Math.abs(W.scoreParts("one:443", "tput").nEff - 1) < 0.01,
+  String(W.scoreParts("one:443", "tput").nEff));
+ok("四个独立样本 nEff=4", Math.abs(W.scoreParts("many:443", "tput").nEff - 4) < 0.01,
+  String(W.scoreParts("many:443", "tput").nEff));
+ok("多样本置信度更高", W.scoreParts("many:443", "tput").confB > W.scoreParts("one:443", "tput").confB);
+
+// 偶然一次高速不能长期占首位
+reset();
+node("lucky:443", { tcp: 50 });
+const sL = W.S.nstat.get("lucky:443");
+sL.hist[11] = 1; sL.sumW = 1; sL.sumW2 = 1; sL.recentBytesW = 1048576; sL.lastSampleAt = Date.now();
+node("steady:443", { tcp: 50 });
+const sS = W.S.nstat.get("steady:443");
+sS.hist[7] = 8; sS.sumW = 8; sS.sumW2 = 8; sS.recentBytesW = 12 * 1048576; sS.lastSampleAt = Date.now();
+ok("偶然高速样本不算数", W.costOf("steady:443", "tput") < W.costOf("lucky:443", "tput"),
+  `${W.costOf("steady:443", "tput")} vs ${W.costOf("lucky:443", "tput")}`);
+
+// seed 只作为先验：置信度封顶 0.25，过期即回落
+reset();
+node("seed:443", { tcp: 50 });
+const sSeed = W.S.nstat.get("seed:443");
+sSeed.seedBps = 2 * 1048576; sSeed.seedAt = Date.now();
+const pSeed = W.scoreParts("seed:443", "tput");
+eq("seed 先验来源", pSeed.priorSource, "seed");
+ok("seed 把先验拉到约 15s", pSeed.e10Ms > 12000 && pSeed.e10Ms < 18000, String(pSeed.e10Ms));
+sSeed.seedAt = Date.now() - 48 * 3600e3;
+eq("seed 过期回落默认先验", W.scoreParts("seed:443", "tput").priorSource, "prior");
 
 /* ---------- 3. 门槛与过滤 ---------- */
 reset();
 eq("无样本 avail = 0.5", W.availOf(W.nsGet("z:443")), 0.5);
-equiv: {
+{
   const s = W.nsGet("z2:443");
-  s.tS = 1; s.tF = 5;
+  s.okW = 1; s.failW = 5;
   ok("1 成功 5 失败 → avail < 0.75", W.availOf(s) < 0.75, W.availOf(s));
 }
 reset();
-node("u:443", { tS: 1, tF: 5, tcp: 50 });
-eq("可用性不足会被 candsFor 排除", W.candsFor("lat").some((x) => x.k === "u:443"), false);
+node("u:443", { okW: 2, failW: 8, tcp: 50 });
+eq("长期低可用被排除", W.candsFor("lat").some((x) => x.k === "u:443"), false);
+
+reset();
+node("small:443", { okW: 0, failW: 1, tcp: 50 });
+ok("小样本失败只软惩罚，不出局", W.candsFor("lat").some((x) => x.k === "small:443"), true);
 
 reset();
 node("e:443", { tS: 0, eCloseP: 6, tcp: 50 });
@@ -82,8 +138,8 @@ eq("可疑节点被排除", W.candsFor("lat").some((x) => x.k === "e:443"), fals
 /* ---------- 4. Selector ---------- */
 reset();
 S.lastSwitch = { lat: 0, tput: 0 };
-node("cur:443", { tcp: 400, tls: 60, tS: 20, tF: 0 });
-node("new:443", { tcp: 50, tls: 60, tS: 20, tF: 0 });
+node("cur:443", { tcp: 400, tls: 60, okW: 20 });
+node("new:443", { tcp: 50, tls: 60, okW: 20 });
 S.curs.lat = "cur:443";
 const switched = W.SEL.maybeSwitch({ pxDwellMin: 0 }, "lat");
 eq("明显更优 → 切换", switched, true);
@@ -91,21 +147,21 @@ eq("切换后 CUR 指向新节点", S.curs.lat, "new:443");
 
 reset();
 S.lastSwitch = { lat: 0, tput: 0 };
-node("c1:443", { tcp: 100, tls: 60, tS: 20, tF: 0 });
-node("c2:443", { tcp: 105, tls: 60, tS: 20, tF: 0 });
+node("c1:443", { tcp: 100, tls: 60, okW: 20 });
+node("c2:443", { tcp: 105, tls: 60, okW: 20 });
 S.curs.lat = "c1:443";
 eq("差距小于滞回 → 不切", W.SEL.maybeSwitch({ pxDwellMin: 0 }, "lat"), false);
 
 reset();
-node("d1:443", { tcp: 300, tls: 60, tS: 20, tF: 0 });
-node("d2:443", { tcp: 50, tls: 60, tS: 20, tF: 0 });
+node("d1:443", { tcp: 300, tls: 60, okW: 20 });
+node("d2:443", { tcp: 50, tls: 60, okW: 20 });
 S.curs.lat = "d1:443";
 S.lastSwitch.lat = Date.now();          // 刚切过 → 驻留期内
 eq("驻留期内不切", W.SEL.maybeSwitch({ pxDwellMin: 0 }, "lat"), false);
 
 reset();
-node("f1:443", { tcp: 100, tS: 10, tF: 0 });
-node("f2:443", { tcp: 200, tS: 10, tF: 0 });
+node("f1:443", { tcp: 100, okW: 10 });
+node("f2:443", { tcp: 200, okW: 10 });
 S.curs.lat = "f1:443"; S.prev.lat = "f2:443"; S.lastSwitch.lat = Date.now();
 W.SEL.onFail({}, "lat", "f1:443", false);
 eq("切换后 60s 内失败 → 回滚", S.curs.lat, "f2:443");
@@ -154,8 +210,8 @@ eq("零字节收尾也计入 node", W.S.cnt.node, nBefore + 1);
 
 // 面板明细按需生成：只算要展示的节点
 reset();
-node("p1:443", { tcp: 50, tS: 5 });
-node("p2:443", { tcp: 60, tS: 5 });
+node("p1:443", { tcp: 50, okW: 5 });
+node("p2:443", { tcp: 60, okW: 5 });
 const only = W.nsOf(["p1:443"]);
 eq("nsOf 只算传入的节点", Object.keys(only), ["p1:443"]);
 ok("nsOf 带出评分", typeof only["p1:443"].lat === "number" && only["p1:443"].lat > 0);
@@ -270,13 +326,13 @@ eq("迁移后只剩新键", [...legacy.store.keys()], ["a"]);
 
 /* ---------- 9. 站点级选路 ---------- */
 reset();
-node("fast:443", { tcp: 50, tS: 10 });
-node("slow:443", { tcp: 400, tS: 10 });
+node("fast:443", { tcp: 50, okW: 10 });
+node("slow:443", { tcp: 400, okW: 10 });
 for (let i = 0; i < 3; i++) {
   W.hostNodeMark("site.test", "fast:443", { ok: true, bad: false, bytes: 1000, ttfb: 60 });
   W.hostNodeMark("site.test", "slow:443", { ok: true, bad: false, bytes: 1000, ttfb: 500 });
 }
-eq("站点排行：快的在前", W.hostRank("site.test", "tput")[0].k, "fast:443");
+eq("站点排行：快的在前", W.hostRank("site.test", "lat")[0].k, "fast:443");
 
 const st1 = { host: "site.test" };
 eq("按站点选节点", W.SEL.pick({ pxShadow: 0 }, "tput", st1), "fast:443");
@@ -320,7 +376,7 @@ node("f2:443", { tcp: 60 });
 W.hostNodeMark("api.x.com", "f1:443", { ok: true, bad: false, bytes: 100, ttfb: 70 });
 W.hostNodeMark("pbs.twimg.com", "f2:443", { ok: true, bad: false, bytes: 100, ttfb: 200 });
 eq("同族两个域名共用一张表", W.S.hostNode.get("x.com").size, 2);
-eq("族内按首字节排序", W.hostRank("x.com", "tput")[0].k, "f1:443");
+eq("族内按首字节排序", W.hostRank("x.com", "lat")[0].k, "f1:443");
 
 // 保质期：7 小时前的样本降权 300ms
 reset();
@@ -330,11 +386,28 @@ W.hostNodeMark("stale.test", "old:443", { ok: true, bad: false, bytes: 1, ttfb: 
 W.hostNodeMark("stale.test", "new:443", { ok: true, bad: false, bytes: 1, ttfb: 300 });
 W.S.hostNode.get("stale.test").get("old:443").at = Date.now() - 7 * 3600e3;
 W.S.hostRankCache.clear();
-eq("过期样本被降权", W.hostRank("stale.test", "tput")[0].k, "new:443");
+eq("过期样本被降权", W.hostRank("stale.test", "lat")[0].k, "new:443");
 
 // 新样本要让缓存失效
 W.hostNodeMark("stale.test", "old:443", { ok: true, bad: false, bytes: 1, ttfb: 50 });
-eq("新样本刷新排行", W.hostRank("stale.test", "tput")[0].k, "old:443");
+eq("新样本刷新排行", W.hostRank("stale.test", "lat")[0].k, "old:443");
+
+// 站点级 lat 与 tput 可以选出不同节点（TTFB 快 ≠ 带宽大）
+reset();
+node("fast-ttfb:443", { tcp: 50 });
+node("fat-pipe:443", { tcp: 300 });
+W.hostNodeMark("speed.test", "fast-ttfb:443", { ok: 1, bad: 0, bytes: 100, ttfb: 50, bps: 1048576 });
+W.hostNodeMark("speed.test", "fat-pipe:443", { ok: 1, bad: 0, bytes: 100, ttfb: 300, bps: 8 * 1048576 });
+eq("站点 lat：首字节快的优先", W.hostRank("speed.test", "lat")[0].k, "fast-ttfb:443");
+eq("站点 tput：带宽大的优先", W.hostRank("speed.test", "tput")[0].k, "fat-pipe:443");
+
+// 域名族：写入用 api.x.com，读取用 x.com 也要命中同一张表
+reset();
+node("g1:443", { tcp: 50 });
+W.hostNodeMark("api.github.com", "g1:443", { ok: 1, bad: 0, bytes: 100, ttfb: 60 });
+eq("族键读写一致", W.hostRank("github.com", "lat")[0].k, "g1:443");
+const stFam = { host: "api.github.com" };
+eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1:443");
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -367,7 +367,7 @@ ${rows || '<tr><td colspan="7" class="mu">还没有用户</td></tr>'}
  * @param {object} learned RTT 学习结果
  * @returns {string} HTML
  */
-export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Record<string, RttEntry>, alive: NodeEntry[], nsMap: Record<string, Record<string, number>>) {
+export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Record<string, RttEntry>, alive: NodeEntry[], nsMap: Record<string, Record<string, number | string>>) {
   const usedBytes = (s.up || 0) + (s.down || 0);
   const total = effectiveQuota(env, usedBytes);
   const pct = total > 0 ? Math.min(100, Math.round((usedBytes / total) * 100)) : 0;
@@ -389,9 +389,9 @@ export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Rec
       const a1 = (S.nstat.get(k) || ZERO_STAT);
       const b1 = (nsMap && nsMap[k]) || {};
       const st = {
-        ok: Math.max(a1.ok || 0, b1.ok || 0),
-        fail: Math.max(a1.fail || 0, b1.fail || 0),
-        bps: b1.bps || p90Of(a1) || 0,
+        ok: Math.max(a1.ok || 0, Number(b1.ok) || 0),
+        fail: Math.max(a1.fail || 0, Number(b1.fail) || 0),
+        bps: Number(b1.bps) || p90Of(a1) || 0,
       };
       const ok = st.ok || 0;
       const bad = st.fail || 0;
