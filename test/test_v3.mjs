@@ -403,7 +403,7 @@ eq("都没有返回空串", W.primaryId({}), "");
         done = p;
       },
     };
-    const envCron = { STATS: { get: async () => null, put: async () => {} } };
+    const envCron = { STATS: { get: async () => null, put: async () => {} }, pxSchedH: "0" };
     await W.runCron(envCron, ctx1);
     await done; // 等 waitUntil 的任务真正跑完，闸门必须回到 false
     eq("runCron 结束后闸门释放", W.S.cronBusy, false);
@@ -494,6 +494,36 @@ eq("都没有返回空串", W.primaryId({}), "");
   ok("老条目补 hits", c.hits === 1, String(c.hits));
   ok("老条目 rtt 不变 NaN", Number.isFinite(c.rtt) && c.rtt > 0, String(c.rtt));
   W.S.rtt.clear();
+}
+
+/* ---------- UDP/53 分帧：Trojan 带地址前缀，VLESS 带 ver 头 ---------- */
+{
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(new Uint8Array([1, 2, 3, 4]));
+  const sent = [];
+  const ws = {
+    readyState: 1,
+    send: (d) => sent.push([...d]),
+    close() {},
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  try {
+    // Trojan: [ATYP=1][8.8.8.8][port=53][len=4][4 字节 DNS]
+    const stT = { down: 0, header: null };
+    const dns12 = [9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9];
+    await W.handleDns(ws, new Uint8Array([1, 8, 8, 8, 8, 0, 53, 0, 12, ...dns12]), stT, true);
+    eq("Trojan UDP 响应保留地址前缀", sent[0], [1, 8, 8, 8, 8, 0, 53, 0, 4, 1, 2, 3, 4]);
+    eq("Trojan UDP 下行计数", stT.down, 4);
+
+    // VLESS: [len=4][4 字节 DNS]，响应前要带一次 [ver,0]
+    const stV = { down: 0, header: new Uint8Array([0, 0]) };
+    await W.handleDns(ws, new Uint8Array([0, 12, ...dns12]), stV, false);
+    eq("VLESS UDP 响应带 ver 头", sent[1], [0, 0, 0, 4, 1, 2, 3, 4]);
+    eq("VLESS 头只发一次", stV.header, null);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
 /* ---------- 随机密码：长度 / 字符集 / 默认值 ---------- */
