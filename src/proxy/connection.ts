@@ -4,10 +4,9 @@ import { errMsg } from "../core/util";
 import { pipeBack } from "./tunnel";
 
 import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
-import { cnt } from "../px/pool";
+import { cnt } from "../core/counter";
 import { availOf, nsFail, nsOk, nsSpeed, nsStall } from "../nodes/score";
 import { markSeedDirty } from "../px/seed";
-import { SEL } from "../nodes/selector";
 import { S } from "../core/state";
 import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";
 import { WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS, closeQuietly, releaseAll } from "../core/util";

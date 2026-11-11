@@ -1,8 +1,16 @@
-import type { Connection } from "../proxy/connection";
+interface PickState {
+  host?: string;
+  node?: string;
+  hostTrial?: boolean;
+  trial?: boolean;
+  retried?: boolean;
+}
+
 import { SC } from "../core/const";
-import { hostKey, hostRank, hostUntried, logErr } from "./metrics";
-import { MODES, aliveList, cnt, keyOf, pxGet } from "../px/pool";
-import { pxPolicy } from "../px/probe";
+import { hostKey, hostRank, hostUntried, logErr } from "../nodes/metrics";
+import { MODES, aliveList, keyOf, pxGet } from "./pool";
+import { cnt } from "../core/counter";
+import { pxPolicy } from "./probe";
 import {
   bestFor,
   candsFor,
@@ -14,7 +22,7 @@ import {
   nsGet,
   ZERO_STAT,
   nsSiteFail,
-} from "./score";
+} from "../nodes/score";
 import { S } from "../core/state";
 
 /* 节点选择：挑谁 / 何时换 / 失败怎么办 */
@@ -38,7 +46,7 @@ export class Selector {
    *   ② 冷启动（这个站试过的节点 <3）：一半概率去试一个没试过的
    *   ③ 都没有 → 回到全局游标 + 影子流量
    */
-  pick(env: Env, mode: Mode, st: Connection | null) {
+  pick(env: Env, mode: Mode, st: PickState | null) {
     const m = mode === "lat" ? "lat" : "tput";
     const now = Date.now();
     let cur = S.curs[m];
@@ -294,7 +302,7 @@ export class Selector {
   }
 
   /** 当前节点（"auto" 模式才用池子；手动配置直接返回） */
-  async current(env: Env, mode: Mode, st: Connection | null) {
+  async current(env: Env, mode: Mode, st: PickState | null) {
     const raw = String(env.proxyip || "").trim();
     if (!raw) return "";
     const m = mode === "lat" ? "lat" : "tput";

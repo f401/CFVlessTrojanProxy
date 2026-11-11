@@ -6,7 +6,8 @@ import { fmtBytes } from "../views/html";
 import { effectiveQuota, subHeaders } from "../core/quota";
 import { renderClash, renderSingbox, renderLinks, trojanPasswordOf } from "../views/sub";
 import { readStatsCached, nodeSnapGet } from "../store/index";
-import { aliveList, cntView, nsOf, pxGet } from "../px/pool";
+import { aliveList, nsOf, pxGet } from "../px/pool";
+import { cntView } from "../core/counter";
 import { html, json, text } from "../edge/respond";
 import type { UserCtx } from "../edge/types";
 

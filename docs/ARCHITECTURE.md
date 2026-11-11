@@ -1,19 +1,19 @@
-# proxyx 架构（v6）
+# proxyx 架构（v7）
 
 > 一句话：**core ← 各业务域 ← routes ← 组装根**，单向依赖；每个域一个目录；热路径不许跨层回调。
 
 ## 1 分层
 
 ```
-core/     util const state          无业务依赖
+core/     const util net state quota 无业务依赖：常量 / 工具 / 目标校验 /
+          counter hist node-snapshot 日计数 / 直方图分位 / 节点快照
 store/    index kv crypto         适配器：KV / 加密 / 快照 / 计量 / Meter DO
           snapshot metering meter
-nodes/    score selector metrics    节点域：评分、选择、画像
-px/       pool probe seed           中转域：候选池、探活、信誉表
+nodes/    score metrics            节点域：纯评分、画像（不依赖中转域）
+px/       pool probe seed selector 中转域：候选池、探活、信誉表、选择器
 proxy/    protocol dial session     数据面：协议、拨号、会话
           fallback tunnel connection
 views/    sub panel html auth       纯渲染：(data) => string（auth 是面板会话）
-core/     quota                     配额与订阅头（纯计算）
 edge/     respond types             响应与安全头、请求上下文
 routes/   health subscription admin tools logs cron
 index.ts                            组装根：分发 + ws 升级 + cron
@@ -21,7 +21,7 @@ index.ts                            组装根：分发 + ws 升级 + cron
 
 依赖门禁（`npm run arch`）会拦住：反向依赖、目录级循环依赖、顶层 `let`、单文件 > 560 行、以及**任何 `any`**（边界用 `unknown` + 收窄）。
 
-唯一的跨层"接缝"在 `npm run arch` 的 `ALLOW` 表里显式列出（数据面回写指标、选择器读中转出口等）；循环检查只针对未登记的边。
+依赖图当前是**严格单向**的：`core → store → nodes → px → proxy → views → edge → routes`。`ALLOW` 表为空；`npm run arch` 会对全部层做循环检查，任何反向边都会失败。
 
 ## 2 一次请求怎么走
 
@@ -137,3 +137,14 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 - 修改后跑 `npm run format`，再跑 `npm run arch && npm test`。
 - 类型边界用 `unknown` + 收窄，仍然禁止 `any`（`npm run arch` 会拦）。
 - 目录依赖方向不变：`core ← 业务域 ← routes ← index`；跨层接缝必须登记在 `check-arch.js` 的 `ALLOW` 表。
+
+## 8 设计取舍：有状态服务用类，纯计算用函数
+
+- **有状态边界用类**：`AppState`（isolate 状态）、`SeedStore`（信誉表）、
+  `Selector`（选路策略）、`Meter`（DO 账本）、`Connection`（单连接生命周期）。
+- **纯计算保持函数**：`score/hist/net/quota` 与 `views` 渲染。它们无副作用，便于单测，
+  也不会在热路径上引入 `this` 和对象分配。
+- **不把每个函数都塞进 class**：Workers 每个请求都可能是新 isolate，状态属于
+  `AppState`/DO，而不是模块实例；纯函数直接调用比服务定位器更轻。
+- **选择器放 `px/`**：它需要“当前中转出口/存活池”，放在中转域后 `nodes` 不再反向依赖 `px`，
+  这是 v7 拆环的关键一步。

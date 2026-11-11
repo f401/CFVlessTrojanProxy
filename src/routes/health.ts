@@ -1,6 +1,6 @@
 import { P_T, VERSION } from "../core/util";
 import { S } from "../core/state";
-import { cntView } from "../px/pool";
+import { cntView } from "../core/counter";
 import { json, forbidden } from "../edge/respond";
 import type { RouteCtx } from "../edge/types";
 

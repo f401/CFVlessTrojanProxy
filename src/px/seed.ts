@@ -1,8 +1,10 @@
 import { errMsg } from "../core/util";
 
 import { SC, SEED_WRITE_GAP } from "../core/const";
-import { PX_TTL, SEED_KEY, SEED_MAX, SEED_TTL, SEED_VER, cnt, cntDelta, cntUnsend } from "./pool";
-import { costOf, nsGet, p90Local, ZERO_STAT } from "../nodes/score";
+import { PX_TTL, SEED_KEY, SEED_MAX, SEED_TTL, SEED_VER } from "./pool";
+import { cnt, cntDelta, cntUnsend } from "../core/counter";
+import { p90Local } from "../core/hist";
+import { costOf, nsGet, ZERO_STAT } from "../nodes/score";
 import { S } from "../core/state";
 import { kvGet, kvSet } from "../store/index";
 

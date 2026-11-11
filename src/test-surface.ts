@@ -32,7 +32,7 @@ import {
   pcts,
 } from "./nodes/score";
 import { SEEDS } from "./px/seed";
-import { SEL } from "./nodes/selector";
+import { SEL } from "./px/selector";
 import { S } from "./core/state";
 import {
   COLO_CITY,
@@ -65,7 +65,7 @@ export {
 export { loadRtt, rttLearn, rttMark } from "./nodes/metrics";
 export { subHeaders, effectiveQuota } from "./core/quota";
 export { S } from "./core/state";
-export { SEL } from "./nodes/selector";
+export { SEL } from "./px/selector";
 export { SEEDS } from "./px/seed";
 export { Connection } from "./proxy/connection";
 export {
@@ -91,7 +91,9 @@ export {
   freezeNode,
   isFrozen,
 } from "./nodes/score";
-export { nsOf, pxGet, spdSnapshot, cntDelta, cntUnsend } from "./px/pool";
+export { nsOf, pxGet } from "./px/pool";
+export { spdSnapshot } from "./core/node-snapshot";
+export { cntDelta, cntUnsend, cntView } from "./core/counter";
 export {
   logErr,
   hostNodeMark,

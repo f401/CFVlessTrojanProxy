@@ -1,5 +1,6 @@
 import { S } from "../core/state";
-import { cntDelta, cntUnsend, spdSnapshot } from "../px/pool";
+import { cntDelta, cntUnsend } from "../core/counter";
+import { spdSnapshot } from "../core/node-snapshot";
 import { Meter } from "./meter";
 import { flushSnap, getSnap, usageSnapGet } from "./snapshot";
 
@@ -65,6 +66,13 @@ export function scheduleFlush(env: Env, delay?: number) {
     S.tflush = null;
     pendFlush(env, true).catch(() => {});
   }, d);
+}
+
+/** 只有计数、没有字节时 PEND 是空的：塞一个空批次把计数顶出去 */
+export function kickFlush(env: Env, id: string | null) {
+  if (!env || !id || !env.METER) return;
+  if (!S.pend.has(id)) S.pend.set(id, { up: 0, down: 0, conns: 0 });
+  scheduleFlush(env, 0);
 }
 
 export async function pendFlush(env: Env, force?: boolean): Promise<void> {

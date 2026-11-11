@@ -19,7 +19,7 @@ import {
   pcts,
 } from "../nodes/score";
 import { BUCKET_DEF, SEEDS } from "./seed";
-import { SEL } from "../nodes/selector";
+import { SEL } from "./selector";
 import { S } from "../core/state";
 import { kvGet, kvSet, scheduleFlush } from "../store/index";
 
@@ -53,102 +53,6 @@ export const BOOT = [
   "193.181.211.185:443",
   "89.22.227.132:443",
 ];
-
-/* 日计数器：用来回答"一天多少连接、多少走节点、切换几次"这些以前只能估的量 */
-
-/** 跨天重置日计数：任何出口（cntView/cntDelta）都要先过这一层 */
-function rollCntDay() {
-  const d = new Date().toISOString().slice(0, 10);
-  if (S.cntDay === d) return;
-  S.cntDay = d;
-  for (const key of S.cntKeys) {
-    S.cnt[key] = 0;
-    S.cntSent[key] = 0;
-  }
-}
-
-/**
- * 计数（跨天自动清零）
- * @param {string} k 计数名
- * @param {number} [n] 增量
- * @returns {void}
- */
-export function cnt(k: string, n: number = 1) {
-  if (!S.cntKeys.includes(k)) {
-    try {
-      console.error("[cnt] unknown key", k);
-    } catch (e) {}
-    return;
-  }
-  rollCntDay();
-  S.cnt[k] = (S.cnt[k] || 0) + (n === undefined ? 1 : n);
-}
-
-/**
- * 每个节点的紧凑快照（用于跨 isolate 展示：本 isolate 看不到别人测的吞吐）
- * @returns {object} { "h:p": {med,p90,cap,n,ts,tf,at} }
- */
-export function spdSnapshot() {
-  const out: Record<string, NodeSnap> = {};
-  // 按累计下行挑前 16 个：以前取 Map 的前 16 个（首次触碰顺序），
-  // 真正在跑的大流量节点经常排在后面，面板就一直看不到它的 KB/s。
-  const rows = [...S.nstat.entries()]
-    .filter(([k, s]) => S.alive.has(k) && ((s.tS || 0) + (s.tF || 0) > 0 || (s.bytesDown || 0) > 0))
-    .sort((a, b) => (b[1].bytesDown || 0) - (a[1].bytesDown || 0))
-    .slice(0, 16);
-  for (const [k, s] of rows) {
-    const n = (s.tS || 0) + (s.tF || 0);
-    const q = pcts(s);
-    out[k] = {
-      med: Math.round(q.p50 || 0),
-      p90: Math.round(q.p90 || 0),
-      cap: Math.round(q.cap || 0),
-      n: Math.round(n),
-      ts: Math.round(s.tS || 0),
-      tf: Math.round(s.tF || 0),
-      at: s.at || 0,
-    };
-  }
-  return out;
-}
-
-/**
- * 只有计数、没有字节时，PEND 是空的 → 没人会去跟 DO 说话，计数就丢了。
- * 塞一个空批次把它顶出去。
- * @param {object} env Worker 环境
- * @param {string} id 用户 UUID
- * @returns {void}
- */
-export function kickFlush(env: Env, id: string | null) {
-  if (!env || !id || !env.METER) return;
-  if (!S.pend.has(id)) S.pend.set(id, { up: 0, down: 0, conns: 0 });
-  scheduleFlush(env, 0);
-}
-
-/** 取出"上次落盘之后"的增量，并把基线推到当前值 */
-export function cntView() {
-  rollCntDay();
-  return { ...S.cnt, d: S.cntDay || new Date().toISOString().slice(0, 10) };
-}
-
-export function cntDelta() {
-  rollCntDay();
-  const out: Record<string, number> = {};
-  for (const k of S.cntKeys) {
-    const v = (S.cnt[k] || 0) - (S.cntSent[k] || 0);
-    if (v) out[k] = v;
-  }
-  for (const k of S.cntKeys) S.cntSent[k] = S.cnt[k] || 0;
-  return out;
-}
-
-/** 批次失败时把日计数基线退回去，下一轮重新发送（否则这批连接数就永久丢了） */
-export function cntUnsend(delta: Record<string, number>) {
-  for (const [k, v] of Object.entries(delta)) {
-    if (S.cntSent[k] === undefined) continue;
-    S.cntSent[k] = Math.max(0, (S.cntSent[k] || 0) - v);
-  }
-}
 
 export const keyOf = (x: NodeEntry) => x.h + ":" + x.p;
 

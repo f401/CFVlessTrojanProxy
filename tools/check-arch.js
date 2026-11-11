@@ -6,22 +6,8 @@ const SRC = path.join(ROOT, "src");
 
 const LAYERS = ["core", "store", "nodes", "px", "proxy", "views", "edge", "routes"];
 const RANK = Object.fromEntries(LAYERS.map((l, i) => [l, i]));
-// 允许的反向边（数据面要回写指标，视图要读节点），其它一律禁止
-const ALLOW = new Set([
-  // 数据面回写指标 / 计量
-  "proxy->px", "proxy->nodes", "proxy->store",
-  // 中转池要落盘、读节点评分；目标校验已抽到 core/net，px 不再依赖 proxy
-  "px->store",
-  // 快照要枚举用户、要读计数器
-  "store->proxy", "store->px",
-  // 选择器要知道"当前中转出口"，这是唯一的 nodes → px 依赖
-  "nodes->px",
-  // 视图只读节点画像 / 计量
-  "views->nodes", "views->px", "views->store",
-  // 路由向下调用
-  "routes->views", "routes->proxy", "routes->px", "routes->nodes", "routes->store",
-  "edge->core",
-]);
+// 当前没有允许的反向依赖；新增必须是显式的架构决策
+const ALLOW = new Set();
 
 function walk(d, out = []) {
   for (const e of fs.readdirSync(d, { withFileTypes: true })) {

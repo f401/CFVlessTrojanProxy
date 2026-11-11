@@ -1,4 +1,4 @@
-import { cnt } from "../px/pool";
+import { cnt } from "../core/counter";
 import { seal, unseal } from "./index";
 
 /* do */

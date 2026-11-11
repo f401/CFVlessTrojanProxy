@@ -2,7 +2,7 @@ import type { Socket } from "cloudflare:sockets";
 import { WS_OPEN, closeQuietly, errMsg, safeSend, toU8 } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
 import { nsDecay, nsGet, nsSiteFail } from "../nodes/score";
-import { cnt } from "../px/pool";
+import { cnt } from "../core/counter";
 import { S } from "../core/state";
 import type { Connection } from "./connection";
 
