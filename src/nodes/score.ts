@@ -167,7 +167,7 @@ export function nsFail(k: string) {
   s.failW += 1; s.fail += 1; s.tF = (s.tF || 0) + 1;
   s.streak = (s.streak || 0) + 1;
   const ladder = [60000, 300000, 900000, 3600000];
-  s.blackUntil = now + ladder[Math.min(s.streak, 4) - 1];
+  s.blackUntil = Math.max(s.blackUntil || 0, now + ladder[Math.min(s.streak, 4) - 1]);
   if (s.streak >= 4) s.streak = 0;     // 给第五次机会
   // 抖动：10 分钟内成败参半（≥4 次）→ 冷却 5 分钟，而不是等"连续"失败
   const wn = s.winOk + s.winFail;
@@ -477,7 +477,7 @@ export function isFrozen(k: string) {
 export function freezeNode(k: string) {
   if (!k) return;
   const s = nsGet(k);
-  s.freeUntil = Date.now() + SC.ROLL_FREEZE;
+  s.freeUntil = Math.max(s.freeUntil || 0, Date.now() + SC.ROLL_FREEZE);
   S.hostRankCache.clear();     // 站点排行里不能再推荐它
   S.rankCache.t = 0;
 }

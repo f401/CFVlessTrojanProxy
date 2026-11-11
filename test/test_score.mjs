@@ -367,6 +367,16 @@ eq("DO 累计", [j1.up, j1.down, j1.conns], [15, 27, 2]);
 eq("DO 当前只占一个键（行写入 ÷4）", [...do1.store.keys()], ["a"]);
 eq("DO 当日字节", [j1.dU, j1.dD], [15, 27]);
 
+// 旧 isolate 带着昨天的日计数晚到：不能把全局 g 回滚到昨天
+{
+  const doG = mkDO();
+  await doG.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 1, down: 1, conns: 1, c: { d: "2099-01-01", conn: 2 } }) }));
+  await doG.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 1, down: 1, conns: 1, c: { d: "2000-01-01", conn: 9 } }) }));
+  const jg = await (await doG.m.fetch(new Request("https://m/cnt"))).json();
+  eq("全局日计数不被旧批次回滚", jg.g.d, "2099-01-01");
+  eq("旧批次计数被丢弃", jg.g.conn, 2);
+}
+
 // 节点快照不能随池子换代无限增长
 {
   const do2 = mkDO();
@@ -794,5 +804,17 @@ eq("影子失败冻结节点", W.isFrozen("tr:443"), true);
   eq("大下行快照不溢出", doc.users[envU.uuid].down, 5000000000);
 }
 
+// 新失败不能把已有的长冷却缩短
+reset();
+{
+  const s = W.nsGet("cd:443");
+  const until = Date.now() + 10 * 60000;
+  s.blackUntil = until;
+  W.nsFail("cd:443");
+  ok("失败不缩短已有冷却", s.blackUntil >= until, String(s.blackUntil - Date.now()));
+  s.freeUntil = Date.now() + 60 * 60000;
+  W.freezeNode("cd:443");
+  ok("冻结不缩短已有冻结", s.freeUntil >= Date.now() + 59 * 60000, String(s.freeUntil - Date.now()));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
