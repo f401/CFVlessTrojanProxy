@@ -298,6 +298,13 @@ export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
     s = { n: 0, ok: 0, bad: 0, bytes: 0, ttfb: 0, at: 0 };
     m.set(node, s);
   }
+  // 站点封禁是"临时事实"而不是判决书：6 小时没再更新过的坏样本减半。
+  // 以前 bad 只增不减，一个站偶尔封过一次，这条 (站,节点) 记录就被永久钉在下面，
+  // 而节点全局分早就恢复了 —— 站点排行却再也不会给它机会。
+  if (s.bad > 0 && s.at && Date.now() - s.at > 6 * 3600e3) {
+    s.bad *= 0.5;
+    s.n = Math.max(s.ok, s.ok + s.bad);
+  }
   // 只带 bps 的调用是"中途采样"，0 字节 0 失败的收尾也不是有效站点样本
   const isConn = o.ok !== undefined || o.bad !== undefined;
   if (isConn && (o.ok || o.bad)) {

@@ -22,6 +22,9 @@ import {
   isFrozen,
   nsFail,
   nsGet,
+  scoreParts,
+  suspectOf,
+  usable,
   ZERO_STAT,
   nsSiteFail,
 } from "../nodes/score";
@@ -46,13 +49,29 @@ export class Selector {
     const want = String(cc || "").toUpperCase();
     if (!want) return null;
     const list = await aliveList(env);
-    const hit = list.filter(
-      (x) =>
-        String(x.cc || "").toUpperCase() === want && keyOf(x) !== avoid && !isBlack(keyOf(x)) && !isFrozen(keyOf(x)),
-    );
-    if (!hit.length) return null;
-    hit.sort((a, b) => costOf(keyOf(a), mode) - costOf(keyOf(b), mode));
-    return hit[0];
+    // 冷却/冻结是硬排除：全国都不可用就返回 null，交给上层 1011
+    const live = list.filter((x) => {
+      const k = keyOf(x);
+      return String(x.cc || "").toUpperCase() === want && k !== avoid && !isBlack(k) && !isFrozen(k);
+    });
+    if (!live.length) return null;
+    // 低可用/空关闭可疑是软排除：全国只剩它们时仍然要选一个（地区是硬要求）
+    const ok = live.filter((x) => usable(keyOf(x)));
+    const pool = ok.length ? ok : live;
+    // 一次算分，别在 sort 比较器里反复调 costOf（30 个节点会算 150 次）
+    const scored = pool.map((x) => ({ x, v: costOf(keyOf(x), mode) })).sort((a, b) => a.v - b.v);
+    // 负载感知：最优代价 1.5 倍内挑在途最少的，避免全国连接全压在第一名
+    const band = scored.filter((r) => r.v <= scored[0].v * 1.5 + 50).slice(0, 8);
+    let pick = band[0];
+    let load = S.inflight.get(keyOf(pick.x)) || 0;
+    for (const r of band) {
+      const l = S.inflight.get(keyOf(r.x)) || 0;
+      if (l < load) {
+        pick = r;
+        load = l;
+      }
+    }
+    return pick.x;
   }
 
   /**
@@ -180,6 +199,7 @@ export class Selector {
       const a = (S.alive.get(k) || {}) as NodeEntry;
       if (!a.ms || a.ms > 250) continue; // 只试"探活不慢"的节点，慢的试了只会更慢
       const s = S.nstat.get(k) || ZERO_STAT;
+      if (suspectOf(s)) continue; // 连得上却传不出数据的节点，不值得占一次试探预算
       const n = (s.okW || 0) + (s.failW || 0);
       // 样本够了就不再试探：按有效吞吐窗口数判断，而不是累计字节
       if (this.nEffOf(k) >= SC.N_EFF_MIN && n >= SC.TRIAL_N) continue;
@@ -212,8 +232,12 @@ export class Selector {
       return true;
     }
     if (best.k === cur) return false;
-    const cv = costOf(cur, m);
-    const h = m === "tput" ? Math.max(1, cv * SC.H_TPUT) : Math.max(SC.H_LAT, cv * 0.15);
+    // 滞回必须按"主项"算：总分里含 8000×pFail 的风险项，拿总分乘比例会让
+    // 风险项把延迟差异整个吃掉（250ms 的老节点门槛高达 210ms，60ms 的新节点永远换不上）。
+    const cp = scoreParts(cur, m);
+    const cv = cp.score;
+    const h =
+      m === "tput" ? Math.max(1, cp.e10Ms * SC.H_TPUT) : Math.max(SC.H_LAT, cp.latencyMs * SC.H_LAT_REL);
     if (cv - best.v <= h) return false;
     const dwell = dwellOf(env, m);
     if (now - (S.lastSwitch[m] || 0) < dwell) return false;

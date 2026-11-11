@@ -1277,5 +1277,66 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
   W.S.nstat.delete("probe-only:443");
 }
 
+/* ---------- 14. 评分 v2.1：滞回主项 / 地区排除 / 快失败窗口 / 站点衰减 ---------- */
+// 滞回按"主项"算：250ms → 60ms 必须切得动（旧实现门槛 0.15×总分=210ms，永远切不动）
+reset();
+node("hz1:443", { tcp: 250, tls: 60, okW: 20, failW: 2 });
+node("hz2:443", { tcp: 60, tls: 60, okW: 20, failW: 2 });
+S.curs.lat = "hz1:443";
+eq("lat 滞回按延迟分量：250ms → 60ms 会切", W.SEL.maybeSwitch({ pxDwellMin: 0 }, "lat"), true);
+// 5ms 的差异仍然不切：改的是门槛基准，不是把门槛拿掉
+reset();
+node("hz3:443", { tcp: 100, tls: 60, okW: 20, failW: 2 });
+node("hz4:443", { tcp: 105, tls: 60, okW: 20, failW: 2 });
+S.curs.lat = "hz3:443";
+eq("lat 滞回仍挡住 5ms 抖动", W.SEL.maybeSwitch({ pxDwellMin: 0 }, "lat"), false);
+
+// 地区选路必须和全局候选表共用排除规则
+reset();
+W.S.inflight.clear();
+node("rde1:443", { tcp: 60, tls: 10, okW: 5, failW: 0, tS: 5, eCloseP: 6 });
+node("rde2:443", { tcp: 180, tls: 20, okW: 20, failW: 1, tS: 20, eCloseP: 0 });
+S.alive.get("rde1:443").cc = "DE";
+S.alive.get("rde2:443").cc = "DE";
+eq("可疑节点进不了全局候选", W.candsFor("lat").some((x) => x.k === "rde1:443"), false);
+const rOk = await W.SEL.region({}, "DE", "lat");
+eq("地区选路跳过可疑节点", rOk && rOk.h + ":" + rOk.p, "rde2:443");
+W.nsFail("rde2:443"); // 冷却 → 硬排除
+const rLast = await W.SEL.region({}, "DE", "lat");
+eq("地区只剩可疑节点时仍返回（硬要求，不返回 null）", rLast && rLast.h + ":" + rLast.p, "rde1:443");
+
+// 地区选路的负载感知：全国流量不能全压在第一名
+reset();
+W.S.inflight.clear();
+node("rjp1:443", { tcp: 60, tls: 10, okW: 20, failW: 1, tS: 20 });
+node("rjp2:443", { tcp: 70, tls: 10, okW: 20, failW: 1, tS: 20 });
+S.alive.get("rjp1:443").cc = "JP";
+S.alive.get("rjp2:443").cc = "JP";
+W.S.inflight.set("rjp1:443", 4);
+const rLb = await W.SEL.region({}, "JP", "lat");
+eq("地区选路避开在途堆积", rLb && rLb.h + ":" + rLb.p, "rjp2:443");
+W.S.inflight.clear();
+
+// 快失败窗口：9 分钟前的 4 次成功不能把刚刚的 3 次失败稀释成"健康"
+reset();
+const ffx = W.nsGet("ffx:443");
+for (let i = 0; i < 4; i++) W.nsOk("ffx:443", 50, 10);
+ffx.winAt -= 9 * 60000;
+ffx.at -= 9 * 60000;
+for (let i = 0; i < 3; i++) W.nsFail("ffx:443");
+ok("旧成功不按次数稀释新失败", W.pFailFast(ffx) > 0.27, String(W.pFailFast(ffx)));
+ok("旧成功同时被时间权重压掉", ffx.winOk < 1, String(ffx.winOk));
+
+// 站点画像：一次封禁不是判决书
+reset();
+W.hostNodeMark("decay.test", "n1:443", { ok: false, bad: true, ttfb: 0 });
+W.hostNodeMark("decay.test", "n1:443", { ok: false, bad: true, ttfb: 0 });
+const dRec = S.hostNode.get("decay.test").get("n1:443");
+const dBefore = W.hostScore(dRec, "lat", Date.now());
+dRec.at -= 7 * 3600e3;
+W.hostNodeMark("decay.test", "n1:443", { ok: true, bad: false, ttfb: 100 });
+eq("站点坏样本空闲 7 小时后减半", dRec.bad, 1);
+ok("站点分随之回升", W.hostScore(dRec, "lat", Date.now()) < dBefore, `${Math.round(dBefore)}ms`);
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

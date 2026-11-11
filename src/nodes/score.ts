@@ -93,17 +93,26 @@ export function nsEmptyClose(k: string, viaP: boolean) {
   s.at = now;
 }
 
+// 快速失败窗口用指数衰减，而不是"10 分钟内计数、到点清零"：
+// 旧写法里 9 分钟前的 4 次成功会把刚刚的 4 次失败稀释成 50%，
+// 而第 10 分钟一到，同一批失败又整段消失，风险曲线是断崖。
 function bumpWin(s: NodeStats, now: number, ok: boolean) {
-  if (!s.winAt || now - s.winAt > SC.WIN_MS) { s.winAt = now; s.winOk = 0; s.winFail = 0; }
-  if (ok) s.winOk += 1; else s.winFail += 1;
+  const k = s.winAt ? Math.pow(0.5, Math.max(0, now - s.winAt) / SC.WIN_HL) : 0;
+  s.winOk *= k;
+  s.winFail *= k;
+  s.winAt = now;
+  if (ok) s.winOk += 1;
+  else s.winFail += 1;
 }
 
-/** 近期（10 分钟）失败率；样本不足返回 0（= 不参与） */
+/** 近期失败率（3 分钟半衰期的指数窗口）；样本淡到不足一次就交给慢通道 */
 export function pFailFast(s: NodeStats, now = Date.now()): number {
-  if (!s || !s.winAt || now - s.winAt > SC.WIN_MS) return 0;
-  const n = s.winOk + s.winFail;
-  if (n < 2) return 0;
-  return (s.winFail + 1) / (n + 10);
+  if (!s || !s.winAt) return 0;
+  const k = Math.pow(0.5, Math.max(0, now - s.winAt) / SC.WIN_HL);
+  const bad = (s.winFail || 0) * k;
+  const n = bad + (s.winOk || 0) * k;
+  if (n < 0.75) return 0;
+  return (bad + 1) / (n + 10);
 }
 
 /** 记一次成功（同时更新握手耗时 EWMA）。 */
@@ -422,15 +431,37 @@ export function freezeNode(k: string) {
 /**
  * 中转后仍然大量空关闭 → 这个节点基本是坏的。
  * 只看"走了中转"的口径，直连空关闭是目标站的问题，不能算到节点头上。
- * @param {string} k "host:port"
+ * @param {object} s 统计对象
  * @returns {boolean} 是否可疑
  */
-export function emptyCloseSuspect(k: string) {
-  const s = S.nstat.get(k);
+export function suspectOf(s: NodeStats | undefined): boolean {
   if (!s) return false;
   const viaP = s.eCloseP || 0;
   const attempts = (s.tS || 0) + viaP;
   return attempts >= 5 && viaP / attempts > 0.5;
+}
+
+/** 可疑节点的 key 版本（面板/规则共用一份判定） */
+export function emptyCloseSuspect(k: string) {
+  return suspectOf(S.nstat.get(k));
+}
+
+/**
+ * 候选资格：活着、不在冷却/冻结、可用性够、不是空关闭可疑节点。
+ * 全局选路与地区选路必须共用这一份判定 —— 否则 rg=xx 会绕过排除规则，
+ * 把全国流量压到一个"连得上但永远传不出数据"的节点上。
+ * @param {string} k "host:port"
+ * @param {number} now 当前时间
+ * @returns {boolean} 是否可用
+ */
+export function usable(k: string, now = Date.now()): boolean {
+  if (!S.alive.has(k) || isBlack(k) || isFrozen(k)) return false;
+  const s = S.nstat.get(k);
+  if (!s) return true;
+  const e = effView(s, now);
+  const n = e.okW + e.failW;
+  if (n >= 8 && availOf(s, now, e) < 0.4) return false;
+  return !suspectOf(s);
 }
 
 /** 候选列表（已过滤黑名单/冻结，按代价升序） */
@@ -449,13 +480,7 @@ export function candsFor(mode: Mode) {
   }
   const out: { k: string; v: number }[] = [];
   for (const k of S.alive.keys()) {
-    if (isBlack(k) || isFrozen(k)) continue;
-    const s = (S.nstat.get(k) || ZERO_STAT);
-    const e = effView(s);
-    const n = e.okW + e.failW;
-    // 小样本只做软惩罚（pFailRisk），别让一两次失败直接失去候选资格
-    if (n >= 8 && availOf(s) < 0.4) continue;
-    if (emptyCloseSuspect(k)) continue;               // 中转后仍大量空关闭
+    if (!usable(k)) continue;           // 冷却/冻结/低可用/空关闭可疑：统一在这里挡掉
     out.push({ k, v: costOf(k, m) });
   }
   out.sort((a, b) => a.v - b.v);

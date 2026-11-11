@@ -14,6 +14,7 @@ export const SC = {
   MIN_BYTES: 1048576, // 吞吐样本准入门槛
   PRIOR_BPS: 200 * 1024,
   H_LAT: 20,
+  H_LAT_REL: 0.25, // 延迟模式的滞回比例（按延迟分量算，不按含风险的总分算）
   H_TPUT: 0.25,
   DWELL_TPUT: 20 * 60000,
   DWELL: 10 * 60000,
@@ -32,7 +33,7 @@ export const SC = {
   SEED_CONF: 0.25, // seed 先验最大置信度
   SEED_TTL: 24 * 3600e3, // seed 先验保质期
   EXPLORE_MAX: 0.1, // 样本不足时的探索上限（样本够了回落到 pxShadow）
-  WIN_MS: 10 * 60000, // 快速失败窗口：10 分钟
+  WIN_HL: 3 * 60000, // 快速失败窗口半衰期：3 分钟（指数窗口，不按 10 分钟一刀切）
 };
 export const HIST_BASE = 16 * 1024; // 直方图起点 16 KB/s
 export const HIST_N = 12; // 16K ~ 32M
