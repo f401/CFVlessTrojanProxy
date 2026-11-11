@@ -1338,5 +1338,17 @@ W.hostNodeMark("decay.test", "n1:443", { ok: true, bad: false, ttfb: 100 });
 eq("站点坏样本空闲 7 小时后减半", dRec.bad, 1);
 ok("站点分随之回升", W.hostScore(dRec, "lat", Date.now()) < dBefore, `${Math.round(dBefore)}ms`);
 
+// 冷启动不做 6h 轮换：否则第一条 cron 就把第 1 名换成第 2 名
+reset();
+node("sc1:443", { tcp: 60, okW: 20 });
+node("sc2:443", { tcp: 70, okW: 20 });
+S.curs.lat = "sc1:443";
+S.lastSwitch = { lat: 0, tput: 0 };
+W.SEL.sched({ pxSchedH: 6 });
+eq("冷启动不轮换", S.curs.lat, "sc1:443");
+S.lastSwitch = { lat: Date.now() - 7 * 3600e3, tput: 0 };
+W.SEL.sched({ pxSchedH: 6 });
+eq("6 小时没切换才轮换", S.curs.lat, "sc2:443");
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

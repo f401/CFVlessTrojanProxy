@@ -105,14 +105,20 @@ function bumpWin(s: NodeStats, now: number, ok: boolean) {
   else s.winFail += 1;
 }
 
-/** 近期失败率（3 分钟半衰期的指数窗口）；样本淡到不足一次就交给慢通道 */
+/**
+ * 近期失败率（3 分钟半衰期的指数窗口）。
+ * 权重淡到不足 3 次就返回 0（交给慢通道），**不要用 +1/+10 平滑**：
+ * 平滑常数在 n→0 时会把"很久没有流量"算成 9% 失败率，
+ * 而空闲节点恰恰是每一个非游标节点 —— 等于给所有候选固定加 750ms，
+ * 游标一旦坐稳就再也换不下来（仿真里 20 个节点全被这条压住）。
+ */
 export function pFailFast(s: NodeStats, now = Date.now()): number {
   if (!s || !s.winAt) return 0;
   const k = Math.pow(0.5, Math.max(0, now - s.winAt) / SC.WIN_HL);
   const bad = (s.winFail || 0) * k;
   const n = bad + (s.winOk || 0) * k;
-  if (n < 0.75) return 0;
-  return (bad + 1) / (n + 10);
+  if (n < 3) return 0;
+  return Math.min(0.9, bad / n);
 }
 
 /** 记一次成功（同时更新握手耗时 EWMA）。 */

@@ -368,6 +368,9 @@ export class Selector {
     if (!(h > 0)) return;
     const seedBucket = (S.seed.byColo || {})[S.colo || "*"] || {};
     const last = Math.max(S.lastSwitch.lat || 0, S.lastSwitch.tput || 0, seedBucket.lastSwitch || 0);
+    // 冷启动（还没有任何切换记录）不要轮换：否则第一条 cron 会把刚选出的第 1 名
+    // 换成第 2 名，第 2 名因此拿到最初 10 分钟的全部样本，反过来把第 1 名永久压住。
+    if (!last) return;
     if (Date.now() - last < h * 3600000) return;
     for (const m of MODES) {
       const cands = candsFor(m);
