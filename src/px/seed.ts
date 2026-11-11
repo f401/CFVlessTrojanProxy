@@ -255,7 +255,7 @@ export class SeedStore {
     const gc: CounterDoc = S.seed.cnt && S.seed.cnt.d === d0 ? ({ ...S.seed.cnt } as CounterDoc) : { d: d0 };
     const dlt = cntDelta();
     sentDelta = dlt;
-    for (const [k, n] of Object.entries(dlt)) gc[k] = (gc[k] || 0) + n;
+    for (const [k, n] of Object.entries(dlt)) gc[k] = (Number(gc[k]) || 0) + n;
 
     const byColo = { ...(S.seed.byColo || {}) };
     // 站点偏好：只写"样本够"（族内 ≥3 次）的，按样本数取前 40 —— 约 2KB，

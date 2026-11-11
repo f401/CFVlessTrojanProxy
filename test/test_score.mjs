@@ -694,8 +694,8 @@ eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1
     "u",
     { up: 0, down: 0, todayUp: 0, todayDown: 0 },
     {},
-    [{ h: "a", p: 443, ms: 10, cc: "US" }],
-    { "a:443": { bps: 2048 * 1024, n: 7 } },
+    W.statsNodeRows([{ h: "a", p: 443, ms: 10, cc: "US" }], { "a:443": { bps: 2048 * 1024, n: 7 } }),
+    [],
   );
   ok("面板显示 KB/s 与样本数", html1.includes("2048 KB/s (n=7)"), html1.match(/\d+ KB\/s[^<]*/)?.[0]);
   const html2 = W.renderStatsHtml(
@@ -703,8 +703,8 @@ eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1
     "u",
     { up: 0, down: 0, todayUp: 0, todayDown: 0 },
     {},
-    [{ h: "b", p: 443, ms: 10, cc: "US" }],
-    {},
+    W.statsNodeRows([{ h: "b", p: 443, ms: 10, cc: "US" }], {}),
+    [],
   );
   ok("没有吞吐样本显示未用", html2.includes("未用"));
   const html3 = W.renderStatsHtml(
@@ -713,7 +713,7 @@ eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1
     { up: 0, down: 0, todayUp: 0, todayDown: 0 },
     { "<img src=x onerror=alert(1)>": { rtt: 10, colo: "HKG", hits: 1, ok: 1, fail: 0, ts: 1 } },
     [],
-    {},
+    [],
   );
   ok("入口标签做了 HTML 转义", !html3.includes("<img src=x"), html3.slice(0, 80));
 }

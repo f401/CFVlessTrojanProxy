@@ -137,7 +137,7 @@ export class Meter {
           for (const [k, v] of Object.entries(d.c)) {
             if (k === "d" || k === "__proto__" || k === "constructor" || k === "prototype") continue;
             if (!(Number(v) > 0)) continue;
-            this.g[k] = (this.g[k] || 0) + v;
+            this.g[k] = (Number(this.g[k]) || 0) + Number(v);
           }
         }
       }

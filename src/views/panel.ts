@@ -242,6 +242,5 @@ export function renderAdminHint() {
 <p style="color:#666">建议：<code>openssl rand -hex 16</code> 生成。</p></body>`;
 }
 
-
 export { renderAdmin } from "./panel-admin";
 export { renderStatsHtml } from "./panel-stats";

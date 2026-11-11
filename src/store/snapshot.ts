@@ -2,7 +2,7 @@ import { S } from "../core/state";
 import { RTT_MAX } from "../core/const";
 import { eachLimit } from "../core/util";
 import { kvGet, kvGetStrict, kvSet } from "./kv";
-import { meterGet } from "./metering";
+import { meterGet } from "./meter-client";
 
 /* 快照：用量灾备（KV）+ 合成快照 */
 

@@ -114,6 +114,7 @@ export { regionListAsync } from "./px/probe";
 export { nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats } from "./store/index";
 export { runCron } from "./routes/cron";
 export { renderStatsHtml } from "./views/panel";
+export { statsNodeRows } from "./nodes/stats-rows";
 export { randomPwd } from "./edge/auth";
 
 export { renderAdmin } from "./views/panel";

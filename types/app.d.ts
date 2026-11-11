@@ -1,65 +1,77 @@
 /**
- * 业务类型：Env 绑定 / 节点统计 / 信誉表
- * 目前是"渐进式"的：先给出形状，允许 optional，便于逐步替换 any
+ * 业务类型：节点统计 / 信誉表 / 计量 / 订阅渲染
+ * 全局 ambient 声明；Env / 运行时类型已拆到 env.d.ts / runtime.d.ts
  */
 
-interface Env {
-  // —— 身份 ——
-  uuid: string;
-  uuids?: string;
-  pwd?: string;            // Trojan 密码（裸密码或 uuid:密码）
-  adminKey?: string;
-  pageKey?: string;
-  expireAt?: string;
-  quotaBytes?: string;
-
-  // —— 入口与订阅 ——
-  nodes?: string;
-  regions?: string;
-
-  // —— 中转池 ——
-  proxyip?: string;
-  pxDwellMin?: string;
-  pxFailMax?: string;
-  pxForceAt?: string;
-  pxSchedH?: string;
-  pxShadow?: string;
-  defaultMode?: string;
-  cfIpv6?: string;
-
-  // —— 存储 ——
-  STATS: KVNamespace;
-  METER: DurableObjectNamespace;
-  kek?: string;
-
-  [k: string]: any;
+/** ip-api 批量查询返回的一行 */
+interface IpApiRow {
+  status?: string;
+  countryCode?: string;
 }
 
-/** ip-api 批量查询返回的一行 */
-interface IpApiRow { status?: string; countryCode?: string }
-
 /** 站点诊断的一行（真实样本或主动探测） */
-interface DiagRow { node: string; n: number; ok: number; bad: number; cc?: string; bytes?: number; ttfb?: number }
+interface DiagRow {
+  node: string;
+  n: number;
+  ok: number;
+  bad: number;
+  cc?: string;
+  bytes?: number;
+  ttfb?: number;
+}
 
 /** 控制页模板的数据 */
 interface PanelInfo {
-  regions: string[]; curPx: string; curLat: string; curTput: string; colo: string;
+  regions: string[];
+  curPx: string;
+  curLat: string;
+  curTput: string;
+  colo: string;
   cnt: Record<string, unknown>;
-  funnel: string; aliveCount: number;
-  used: string; today: string; quota: string; expire: string; policy: string;
+  funnel: string;
+  aliveCount: number;
+  used: string;
+  today: string;
+  quota: string;
+  expire: string;
+  policy: string;
   [k: string]: unknown;
 }
 
 /** SNI 探测结果 */
-interface SniProbe { err: string; hs?: number; head?: string }
+interface SniProbe {
+  err: string;
+  hs?: number;
+  head?: string;
+}
 
 /** DNS-over-HTTPS 的 Answer 元素 */
-interface DohAnswer { type: number; data: string }
+interface DohAnswer {
+  type: number;
+  data: string;
+}
 
 /** 订阅里的入口节点 */
-interface SubNode { host: string; port: number; tls: boolean; name: string; cc?: string }
-interface RegionEntry { name: string; proto: string; server: string; port: number; path: string; cc?: string }
-interface RankedNode extends SubNode { _i?: number; _rtt?: number | null; _colo?: string }
+interface SubNode {
+  host: string;
+  port: number;
+  tls: boolean;
+  name: string;
+  cc?: string;
+}
+interface RegionEntry {
+  name: string;
+  proto: string;
+  server: string;
+  port: number;
+  path: string;
+  cc?: string;
+}
+interface RankedNode extends SubNode {
+  _i?: number;
+  _rtt?: number | null;
+  _colo?: string;
+}
 
 /** 选路模式 */
 type Mode = "lat" | "tput";
@@ -116,7 +128,7 @@ interface NodeStats {
 
   /** 其它 */
   counted: number;
-  [k: string]: any;
+  [k: string]: unknown;
 }
 
 /** 存活节点（ALIVE 的值） */
@@ -126,7 +138,7 @@ interface NodeEntry {
   cc?: string;
   ms?: number;
   src?: string;
-  [k: string]: any;
+  [k: string]: unknown;
 }
 
 /** 信誉表里的一条（落盘用） */
@@ -179,32 +191,52 @@ interface Seed {
   poolN: number;
   builtAt: number;
   byColo: Record<string, SeedBucket>;
-  cnt?: Record<string, any> | null;
+  cnt?: CounterDoc | null;
   lastColo?: string;
 }
 
-
 /** 本 isolate 的本地计数 */
-interface StatsLocal { up: number; down: number; conns: number; first: number; last: number }
+interface StatsLocal {
+  up: number;
+  down: number;
+  conns: number;
+  first: number;
+  last: number;
+}
 
 /** 对外展示的用量视图（DO / KV / 本地合并后） */
 interface StatsView {
-  up: number; down: number; conns: number;
-  todayUp: number; todayDown: number;
-  firstSeen: number | null; lastSeen: number | null;
+  up: number;
+  down: number;
+  conns: number;
+  todayUp: number;
+  todayDown: number;
+  firstSeen: number | null;
+  lastSeen: number | null;
   isolateLocal?: { up: number; down: number; conns: number };
-  backend?: string; persisted?: boolean;
+  backend?: string;
+  persisted?: boolean;
   [k: string]: unknown;
 }
 
 /** 待推送的计量增量 */
-interface PendEntry { up: number; down: number; conns: number }
+interface PendEntry {
+  up: number;
+  down: number;
+  conns: number;
+}
 
 /** 节点排行一行 */
-interface RankRow { k: string; v: number }
+interface RankRow {
+  k: string;
+  v: number;
+}
 
 /** 面板块速率限制 */
-interface RlBucket { n: number; t: number }
+interface RlBucket {
+  n: number;
+  t: number;
+}
 
 /** 首包解析：成功 */
 interface ParseOk {
@@ -252,16 +284,6 @@ interface PoolEntry {
 }
 
 /** RTT 学习表里的一条（按入口标签聚合） */
-/** request.cf 里我们用到的字段 */
-interface CfMeta {
-  colo?: string;
-  clientTcpRtt?: number;
-  asn?: number;
-  city?: string;
-  edgeL4?: { deliveryRate?: number };
-  [k: string]: unknown;
-}
-
 interface RttEntry {
   rtt: number;
   colo?: string;
@@ -293,23 +315,65 @@ interface SnapDoc {
 }
 
 /** Meter DO 里存的用量累计 */
-interface UsageMeter { up: number; down: number; conns: number; first: number; ts: number; d?: string; dU?: number; dD?: number }
+interface UsageMeter {
+  up: number;
+  down: number;
+  conns: number;
+  first: number;
+  ts: number;
+  d?: string;
+  dU?: number;
+  dD?: number;
+}
+
+/** 看板的节点行（views 只负责渲染，数据由 nodes/stats-rows 组装） */
+interface StatsNodeRow {
+  k: string;
+  cc: string;
+  ms: number;
+  score: number;
+  kbps: string;
+  rate: string;
+  tip: string;
+}
 
 /** 某个节点在某个站点上的画像（诊断用：谁对这个站不行） */
 interface HNStat {
-  n: number; ok: number; bad: number; bytes: number; ttfb: number; at: number;
+  n: number;
+  ok: number;
+  bad: number;
+  bytes: number;
+  ttfb: number;
+  at: number;
   /** 站点级吞吐样本（EWMA）与样本数、采集时刻 */
-  bps?: number; bpsN?: number; bpsAt?: number;
+  bps?: number;
+  bpsN?: number;
+  bpsAt?: number;
 }
 
 /** 直连对照：这个站直连到底通不通 */
-interface HDirect { ok: number; bad: number; at: number }
+interface HDirect {
+  ok: number;
+  bad: number;
+  at: number;
+}
 
 /** Meter DO 里存的节点快照（跨 isolate 展示用） */
-interface NodeSnap { med: number; p90: number; cap: number; n: number; ts?: number; tf?: number; at: number }
+interface NodeSnap {
+  med: number;
+  p90: number;
+  cap: number;
+  n: number;
+  ts?: number;
+  tf?: number;
+  at: number;
+}
 
 /** 日计数（d + 若干计数字段） */
-interface CounterDoc { d: string; [k: string]: any }
+interface CounterDoc {
+  d: string;
+  [k: string]: number | string | undefined;
+}
 
 /** /add 的请求体（用量 + 计数 + 节点快照 + 错误） */
 interface MeterBody {
@@ -330,21 +394,21 @@ interface MeterBody {
 }
 
 /** 一条错误日志 */
-interface ErrItem { t: number; m: string; tag?: string }
-
-/** Worker 侧的 WebSocket（客户端连接与服务端连接共用） */
-interface WebSocketLike {
-  accept(): void;
-  send(data: any): void;
-  close(code?: number, reason?: string): void;
-  readyState: number;
-  bufferedAmount: number;
-  binaryType?: string;
-  addEventListener(t: string, f: (...a: any[]) => void): void;
-  removeEventListener(t: string, f: (...a: any[]) => void): void;
+interface ErrItem {
+  t: number;
+  m: string;
+  tag?: string;
 }
 
 /** 地址解析：成功 */
-interface AddrOk { host: string; next: number; err?: undefined }
+interface AddrOk {
+  host: string;
+  next: number;
+  err?: undefined;
+}
 /** 地址解析：失败 */
-interface AddrErr { err: string; host?: undefined; next?: undefined }
+interface AddrErr {
+  err: string;
+  host?: undefined;
+  next?: undefined;
+}

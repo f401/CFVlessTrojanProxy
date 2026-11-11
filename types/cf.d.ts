@@ -26,8 +26,12 @@ interface DurableObjectState {
   storage: DurableObjectStorage;
   blockConcurrencyWhile(fn: () => Promise<void>): void;
 }
-interface DurableObjectId { toString(): string }
-interface DurableObjectStub { fetch(input: string | Request, init?: RequestInit): Promise<Response> }
+interface DurableObjectId {
+  toString(): string;
+}
+interface DurableObjectStub {
+  fetch(input: string | Request, init?: RequestInit): Promise<Response>;
+}
 interface DurableObjectNamespace {
   idFromName(name: string): DurableObjectId;
   get(id: DurableObjectId): DurableObjectStub;
@@ -39,9 +43,23 @@ interface KVNamespace {
   list(opts?: unknown): Promise<{ keys: Array<{ name: string }> }>;
 }
 
-// 运行时由入口的 import 提供；这里只是让其它"脚本文件"能通过类型检查
-declare const connect: (o: { hostname: string; port: number }) => any;
-declare const WebSocketPair: any;
-
 // Workers 会在 Request 上挂 cf 字段（机房、ASN、clientTcpRtt 等）
-interface Request { cf?: any }
+interface Request {
+  cf?: CfMeta;
+}
+
+interface SocketLike {
+  readable: ReadableStream<Uint8Array>;
+  writable: WritableStream<Uint8Array>;
+  close(): void;
+  closed?: Promise<void>;
+}
+interface ResponseInitLike {
+  status?: number;
+  webSocket?: WebSocketLike;
+  headers?: Record<string, string>;
+}
+
+// 运行时由入口 import { connect } from "cloudflare:sockets" 提供；类型指向模块导出
+declare const connect: (o: { hostname: string; port: number }) => import("cloudflare:sockets").Socket;
+declare const WebSocketPair: { new (): { 0: WebSocketLike; 1: WebSocketLike } };

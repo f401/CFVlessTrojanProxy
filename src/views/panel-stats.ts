@@ -1,7 +1,5 @@
 import { escapeHtml, fmtBytes } from "./html";
 import { effectiveQuota } from "../core/quota";
-import { costOf, p90Of, ZERO_STAT } from "../nodes/score";
-import { S } from "../core/state";
 import { COLO_CITY } from "./sub-common";
 
 /**
@@ -17,8 +15,8 @@ export function renderStatsHtml(
   id: string,
   s: StatsView,
   learned: Record<string, RttEntry>,
-  alive: NodeEntry[],
-  nsMap: Record<string, Record<string, number | string>>,
+  nodeRows: StatsNodeRow[],
+  errs: ErrItem[],
 ) {
   const usedBytes = (s.up || 0) + (s.down || 0);
   const total = effectiveQuota(env, usedBytes);
@@ -38,46 +36,14 @@ export function renderStatsHtml(
     })
     .join("");
 
-  const nodeRows = (alive || [])
-    .map((x: NodeEntry) => {
-      const k = x.h + ":" + x.p;
-      const a1 = S.nstat.get(k) || ZERO_STAT;
-      const b1 = (nsMap && nsMap[k]) || {};
-      const st = {
-        ok: Math.max(a1.ok || 0, Number(b1.ok) || 0),
-        fail: Math.max(a1.fail || 0, Number(b1.fail) || 0),
-        bps: Number(b1.bps) || p90Of(a1) || 0,
-        samples: Number(b1.n) || 0,
-      };
-      const ok = st.ok || 0;
-      const bad = st.fail || 0;
-      const rate = ok + bad > 0 ? Math.round((ok / (ok + bad)) * 100) + "% (" + ok + "/" + (ok + bad) + ")" : "-";
-      // bps 来自"真实下载窗口"的 p90：本实例没有样本时，面板会去读 Meter DO 里的跨实例快照
-      const nSamp = Number(b1.nEff) || st.samples || 0;
-      const kbps = st.bps
-        ? Math.round(st.bps / 1024) + " KB/s" + (nSamp ? ` (n=${Math.round(nSamp)})` : "")
-        : "未用（本实例无下载样本）";
-      const p = (nsMap && nsMap[k]) || {};
-      // nsOf 已经算过 tput 分；没有就走本地评分，别拿延迟分冒充总评分
-      const score = Number(p.tput) || costOf(k, "tput");
-      const tip =
-        `lat ${Math.round(Number(p.lat) || 0)}ms · tput ${Math.round(Number(p.tput) || 0)}ms` +
-        ` · E10 ${Math.round(Number(p.e10) || 0)}ms · pFail ${Number(p.pFail) || 0}` +
-        ` · pStall ${Number(p.pStall) || 0} · confB ${Number(p.confB) || 0}` +
-        ` · nEff ${Number(p.nEff) || 0} · latN ${Number(p.latN) || 0} · ${p.gate || "ok"}`;
-      return { x, k, score, kbps, rate, ok, bad, cc: x.cc || "", tip };
-    })
-    .sort((a, b) => a.score - b.score)
-    .slice(0, 10)
+  const nodeRowsHtml = (nodeRows || [])
     .map(
       (n) =>
-        `<tr title="${escapeHtml(n.tip)}"><td class="u">${escapeHtml(n.k)}</td><td>${escapeHtml(n.cc || "-")}</td><td>${n.x.ms} ms</td><td>${n.kbps}</td><td>${n.rate}</td><td><b>${Math.round(n.score)}</b></td></tr>`,
+        `<tr title="${escapeHtml(n.tip)}"><td class="u">${escapeHtml(n.k)}</td><td>${escapeHtml(n.cc || "-")}</td><td>${n.ms} ms</td><td>${n.kbps}</td><td>${n.rate}</td><td><b>${Math.round(n.score)}</b></td></tr>`,
     )
     .join("");
 
-  const errRows = S.errs
-    .slice(-20)
-    .reverse()
+  const errRows = (errs || [])
     .map(
       (e) =>
         `<tr><td>${new Date(e.t).toISOString().replace("T", " ").slice(0, 19)}</td><td class="u">${escapeHtml(e.m)}</td></tr>`,
@@ -109,9 +75,8 @@ ${total ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
 <h2>实测 RTT（按入口）</h2>
 <table><tr><th>入口标签</th><th>机房</th><th>RTT</th><th>样本</th><th>成功率</th></tr>${rttRows || "<tr><td colspan=4>暂无数据</td></tr>"}</table>
 <h2>节点评分（延迟 + 失败率 + 实测吞吐）</h2>
-<table><tr><th>节点</th><th>地区</th><th>探测延迟</th><th>实测吞吐</th><th>成功率</th><th>评分</th></tr>${nodeRows || "<tr><td colspan=6>暂无数据</td></tr>"}</table>
+<table><tr><th>节点</th><th>地区</th><th>探测延迟</th><th>实测吞吐</th><th>成功率</th><th>评分</th></tr>${nodeRowsHtml || "<tr><td colspan=6>暂无数据</td></tr>"}</table>
 <h2>最近错误</h2>
 <table><tr><th>时间</th><th>内容</th></tr>${errRows || "<tr><td colspan=2>无</td></tr>"}</table>
 </body>`;
 }
-

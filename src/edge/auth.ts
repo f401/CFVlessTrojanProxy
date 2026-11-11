@@ -1,4 +1,5 @@
 import { enc, toHex } from "../core/util";
+import type { RouteCtx } from "./types";
 
 /* 面板鉴权：cookie / 挑战-应答会话 / 登录限流 */
 
@@ -74,4 +75,13 @@ export function randomPwd(n: number) {
     }
   }
   return s;
+}
+
+/** 会改全局状态 / 花 KV 额度的调试动作：要求管理员会话或 &k=adminKey */
+export async function adminOnly(c: RouteCtx): Promise<Response | null> {
+  if (await adminAuthed(c.request, c.url, c.env)) return null;
+  return new Response(JSON.stringify({ ok: false, error: "需要管理员登录 /admin，或加 &k=<adminKey>" }), {
+    status: 403,
+    headers: { "content-type": "application/json;charset=utf-8" },
+  });
 }

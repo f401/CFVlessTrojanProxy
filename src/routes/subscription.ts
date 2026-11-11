@@ -7,6 +7,7 @@ import { fmtBytes } from "../views/html";
 import { effectiveQuota, subHeaders } from "../core/quota";
 import { renderClash, renderSingbox, renderLinks, trojanPasswordOf } from "../views/sub";
 import { readStatsCached, nodeSnapGet } from "../store/index";
+import { statsNodeRows } from "../nodes/stats-rows";
 import { aliveList, nsOf, pxGet } from "../px/pool";
 import { cntView } from "../core/counter";
 import { CSP_STATIC, html, json, text } from "../edge/respond";
@@ -91,7 +92,9 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
             n: Math.max(Number(cur.n) || 0, v.n || 0),
           };
         }
-        return html(renderStatsHtml(env, id, s, learned, alive, nsMap));
+        const nodeRows = statsNodeRows(alive, nsMap);
+        const errs = S.errs.slice(-20).reverse();
+        return html(renderStatsHtml(env, id, s, learned, nodeRows, errs));
       }
       return json(s);
     }
