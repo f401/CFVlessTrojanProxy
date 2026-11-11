@@ -396,10 +396,19 @@ export async function cronScan(env: Env) {
   // ③ 只裁「重罚」节点：连续失败 4 次会冷却 1 小时，这种才移出 alive；
   //    以前只要 isBlack 就删，一次 1 分钟的小冷却也会把好节点踢出池子，
   //    要等下一轮扫描（最长 8 小时）才回来。
+  let pruned = false;
   for (const k of [...S.alive.keys()]) {
     const s = S.nstat.get(k);
     const ban = s ? (s.blackUntil || 0) - Date.now() : 0;
-    if (ban > 30 * 60000 && k !== S.curs.tput && k !== S.curs.lat) S.alive.delete(k);
+    if (ban > 30 * 60000 && k !== S.curs.tput && k !== S.curs.lat) {
+      S.alive.delete(k);
+      pruned = true;
+    }
+  }
+  if (pruned) {
+    // 站点排行里可能还留着刚被删的节点
+    S.hostRankCache.clear();
+    S.rankCache.t = 0;
   }
 
   // ③b alive 长期只增不减：池子换代后旧节点会一直留着，最终拖慢每次评分。
@@ -411,8 +420,8 @@ export async function cronScan(env: Env) {
     rows.sort((a, b) => {
       const ap = inPool.has(a[0]) ? 0 : 1;
       const bp = inPool.has(b[0]) ? 0 : 1;
-      if (ap !== bp) return ap - bp;
-      return (a[1].ms || 9999) - (b[1].ms || 9999);
+      if (ap !== bp) return bp - ap;              // 先删不在当前池里的
+      return (b[1].ms || 9999) - (a[1].ms || 9999); // 同一档先删最慢的
     });
     for (const [k] of rows) {
       if (S.alive.size <= ALIVE_MAX) break;
