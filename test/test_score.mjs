@@ -355,8 +355,19 @@ await do1.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stri
 await do1.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 5, down: 7, conns: 1 }) }));
 const j1 = await (await do1.m.fetch(new Request("https://m/get"))).json();
 eq("DO 累计", [j1.up, j1.down, j1.conns], [15, 27, 2]);
-eq("DO 只占一个键（行写入 ÷4）", [...do1.store.keys()], ["a"]);
+eq("DO 当前只占一个键（行写入 ÷4）", [...do1.store.keys()], ["a"]);
 eq("DO 当日字节", [j1.dU, j1.dD], [15, 27]);
+
+// 节点快照不能随池子换代无限增长
+{
+  const do2 = mkDO();
+  const spd = {};
+  for (let i = 0; i < 80; i++) spd[`n${i}:443`] = { med: 1, p90: 1, cap: 1, n: 1, at: i + 1 };
+  await do2.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 0, down: 0, conns: 0, spd }) }));
+  const j2 = await (await do2.m.fetch(new Request("https://m/cnt"))).json();
+  eq("节点快照最多 64 个", Object.keys(j2.s).length, 64);
+  ok("保留最新节点", !!j2.s["n79:443"] && !j2.s["n0:443"]);
+}
 
 // 老结构（c/e/s/g 四个键）要能读出来并迁移
 const legacy = mkDO([

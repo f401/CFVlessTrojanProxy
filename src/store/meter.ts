@@ -117,6 +117,12 @@ export class Meter {
           const old = this.s[k];
           if (!old || (v.at || 0) >= (old.at || 0)) this.s[k] = v;   // 新的覆盖旧的
         }
+        // 池子每天换代，旧节点快照会无限累积；只留最近活跃的 64 个
+        const sk = Object.keys(this.s);
+        if (sk.length > 64) {
+          sk.sort((a, b) => (this.s[a].at || 0) - (this.s[b].at || 0));
+          for (let i = 0; i < sk.length - 64; i++) delete this.s[sk[i]];
+        }
       }
       c.up += Number(d.up) || 0;
       c.down += Number(d.down) || 0;

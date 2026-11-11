@@ -90,6 +90,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
   try {
     const q = new URL(request.url).searchParams;
     ipTag = q.get("ip");
+    if (ipTag) ipTag = ipTag.slice(0, 48);   // 标签只用于统计，别让超长 ?ip= 把快照撑大
     ipRegion = (q.get("rg") || "").toUpperCase() || null;
     const qm = q.get("mode");
     if (qm === "lat" || qm === "tput") mode = qm;
