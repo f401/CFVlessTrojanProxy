@@ -402,6 +402,8 @@ export function renderSingbox(
   const G_LAT = "\u26a1 \u901f\u7387\u4f18\u5148";
   const G_TPUT = "\ud83d\ude80 \u541e\u5410\u4f18\u5148";
   const G_MAN = "\ud83c\udfaf \u624b\u52a8";
+  const G_REG = "\ud83c\udf0d \u5730\u533a";
+  const regNames: string[] = [];
 
   for (const mode of ["tput", "lat"]) {
     const suffix = mode === "lat" ? "L" : "T";
@@ -428,6 +430,7 @@ export function renderSingbox(
 
   for (const e of regionEntries(regions, host, pass, protos)) {
     tags.push(e.name);
+    regNames.push(e.name);
     const o: Record<string, unknown> = {
       type: e.proto,
       tag: e.name,
@@ -451,6 +454,15 @@ export function renderSingbox(
       interval: "5m",
       tolerance: 30,
     },
+    ...(regNames.length
+      ? [
+          {
+            type: "selector",
+            tag: G_REG,
+            outbounds: regNames,
+          },
+        ]
+      : []),
     {
       type: "urltest",
       tag: G_LAT,
@@ -459,7 +471,11 @@ export function renderSingbox(
       interval: "5m",
       tolerance: 30,
     },
-    { type: "selector", tag: G_MAN, outbounds: [G_TPUT, G_LAT, ...tags, "direct"] },
+    {
+      type: "selector",
+      tag: G_MAN,
+      outbounds: [G_TPUT, G_LAT, ...(regNames.length ? [G_REG] : []), ...tags, "direct"],
+    },
   ];
 
   return JSON.stringify(

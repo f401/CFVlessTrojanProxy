@@ -385,7 +385,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
  * @param {object} st 连接状态
  * @returns {Promise<void>}
  */
-export async function handleDns(ws: WebSocketLike, firstBody: Uint8Array, st: ConnState): Promise<void> {
+export async function handleDns(ws: WebSocketLike, firstBody: Uint8Array, st: Connection): Promise<void> {
   const send = async (dnsMsg: Uint8Array) => {
     const resp = await fetch("https://1.1.1.1/dns-query", {
       method: "POST",
@@ -412,12 +412,22 @@ export async function handleDns(ws: WebSocketLike, firstBody: Uint8Array, st: Co
     st.header = null;
   };
 
-  // 把连续的 [len][msg] 帧拆出来逐个查询
+  // 把连续的 [len][msg] 帧拆出来逐个查询。
+  // 恶意/异常客户端可以发"声明 64KB 但只来一半"的帧，让缓冲无限堆积；
+  // 超过 4KB 的 DNS 报文本身就是非法的（UDP 上限），直接断开。
   let buf = firstBody;
-  while (buf.length >= 2) {
+  let queries = 0;
+  while (buf.length >= 2 && queries < 32) {
     const n = (buf[0] << 8) | buf[1];
+    if (n < 12 || n > 4096) {
+      try {
+        ws.close(1003, "bad dns frame");
+      } catch (e) {}
+      return;
+    }
     if (buf.length < 2 + n) break;
     await send(buf.slice(2, 2 + n)).catch(() => {});
+    queries++;
     buf = buf.slice(2 + n);
   }
 }

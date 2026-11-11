@@ -1,5 +1,5 @@
 {
-  "version": "6.1",
+  "version": "6.7",
   "items": [
     {
       "name": "clash",
@@ -8,8 +8,8 @@
     },
     {
       "name": "singbox",
-      "bytes": 12876,
-      "sha": "2d7ba7d190f4222c8d900dfd93e44cce"
+      "bytes": 13214,
+      "sha": "b372c71eb139ae3dacfbaf966e6877ae"
     },
     {
       "name": "links",

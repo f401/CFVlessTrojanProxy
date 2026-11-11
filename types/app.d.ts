@@ -206,51 +206,6 @@ interface RankRow { k: string; v: number }
 /** 面板块速率限制 */
 interface RlBucket { n: number; t: number }
 
-/** 采样窗口 */
-interface ConnWin {
-  t0: number;
-  bytes: number;
-  drained: number;
-  last?: number;
-}
-
-/** 一条 WS 连接的状态（数据面里传得最广的对象） */
-interface ConnState {
-  ipTag?: string;
-  node?: string;          // 实际使用的中转节点 "h:p"，为空表示直连
-  mode?: string;          // lat | tput
-  trial?: boolean;        // 是否影子连接
-  via?: string;           // direct | node | v6
-
-  win?: ConnWin;
-  lastEmit?: number;
-
-  markedOk?: boolean;
-  markedFail?: boolean;
-
-  sock?: any;
-  writer?: any;
-  header?: any;
-  headerSent?: boolean;
-
-  up: number;
-  down: number;
-  reportedUp?: number;
-  reportedDown?: number;
-  t0?: number;
-  id?: string | null;
-
-  env?: any;
-  ctx?: any;
-
-  retried?: boolean;
-  pxTries?: number;
-  triedV6?: boolean;
-  stallMs?: number;
-  sockDown?: number;
-  counted?: number;
-}
-
 /** 首包解析：成功 */
 interface ParseOk {
   ok: true;
