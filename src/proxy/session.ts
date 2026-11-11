@@ -126,6 +126,11 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
           }
 
           const u8 = toU8(chunk);
+          // 同一个 UDP 连接里的后续 DNS 报文：首包已经解析过，不能再当协议头
+          if (st.udp) {
+            await handleDns(serverWS, u8, st);
+            return;
+          }
           const proto = detectProtocol(u8);
           const r = proto === "trojan" ? parseTrojan(u8, auth) : parseVLESS(u8, auth);
 
@@ -162,6 +167,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
               throw new Error("unsupported udp");
             }
             await handleDns(serverWS, u8.subarray(r.offset), st);
+            st.udp = true;
             return;
           }
 

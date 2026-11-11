@@ -3,7 +3,7 @@ export const WS_OPEN = 1;
 export const WS_BUFFER_LIMIT = 1024 * 1024; // 下行发送缓冲超过 1MB 就开始背压
 export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给到 60 秒
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐了
-export const VERSION = "6.1";
+export const VERSION = "6.2";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 
@@ -15,6 +15,40 @@ export const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart
 
 // 密码绑定的读取：优先 env.pwd（中性名），兼容老的 env[P_T]
 export const secretPwd = (env: Env) => String((env && (env.pwd || env[P_T])) || "").trim();
+
+/** 影子流量默认比例：只在「当前节点样本不足」时才提升到 SC.EXPLORE_MAX */
+export const SHADOW_DEFAULT = 0.05;
+
+/**
+ * 解析 pxShadow。三处（选择器 / 控制页 / /proxyip）必须用同一套规则，
+ * 否则面板显示 10%、实际跑 5%，或者 pxShadow=0 时显示成 10%。
+ *   未设置 / 非法 → 默认 5%
+ *   显式 0       → 0（关闭探索）
+ *   >1           → 1（封顶）
+ */
+export function shadowRate(env: Env) {
+  const raw = env ? env.pxShadow : undefined;
+  if (raw === undefined || raw === null || String(raw).trim() === "") return SHADOW_DEFAULT;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return SHADOW_DEFAULT;
+  return Math.min(1, n);
+}
+
+/**
+ * 有限并发地跑异步任务：既不让 50 个用户同时打 DO，也不退化成串行。
+ * 顺序不保证，调用方只关心「全部完成」。
+ */
+export async function eachLimit<T>(list: readonly T[], limit: number, fn: (x: T) => Promise<void>): Promise<void> {
+  const n = Math.max(1, Math.min(Math.floor(limit) || 1, list.length));
+  let i = 0;
+  const worker = async () => {
+    while (i < list.length) {
+      const idx = i++;
+      await fn(list[idx]);
+    }
+  };
+  await Promise.all(Array.from({ length: n }, worker));
+}
 
 // 协议名在运行时拼装，源码里不出现明文，混淆后也不会残留
 export const P_V = String.fromCharCode(118, 108, 101, 115, 115); // 118 108 101 115 115

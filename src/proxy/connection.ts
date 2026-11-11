@@ -36,6 +36,7 @@ export class Connection {
   mode: Mode;
   trial = false;
   via = "direct";
+  udp = false; // 首包已判定为 UDP/53：后续帧直接当 DNS 报文
 
   // —— 热路径计数 ——
   down = 0;

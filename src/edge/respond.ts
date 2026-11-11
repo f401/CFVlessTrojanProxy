@@ -1,5 +1,8 @@
 /** 统一响应构造：所有 content-type / 安全头只在这里出现一次 */
 
+/** 控制页/统计页没有脚本：比管理面板再收紧一档（不给 script-src） */
+export const CSP_STATIC = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'";
+
 export const SEC_HEADERS: Record<string, string> = {
   "content-security-policy":
     "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
@@ -17,7 +20,9 @@ export function json(obj: unknown, extra?: Record<string, string>): Response {
 
 /** 纯文本响应（订阅 / 错误） */
 export function text(s: string, extra?: Record<string, string>): Response {
-  return new Response(s, { headers: { "content-type": "text/plain;charset=utf-8", ...(extra || {}) } });
+  return new Response(s, {
+    headers: { "content-type": "text/plain;charset=utf-8", "cache-control": "no-store", ...(extra || {}) },
+  });
 }
 
 /** HTML 响应（面板类页面一律带安全头 + no-store） */

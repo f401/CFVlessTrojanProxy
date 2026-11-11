@@ -7,6 +7,7 @@ interface PickState {
 }
 
 import { SC } from "../core/const";
+import { shadowRate } from "../core/util";
 import { hostKey, hostRank, hostUntried, logErr } from "../nodes/metrics";
 import { MODES, aliveList, keyOf, pxGet } from "./pool";
 import { cnt } from "../core/counter";
@@ -96,8 +97,7 @@ export class Selector {
     // ③ 全局：粘滞游标 + 自适应探索
     //   样本不足（nEff<3）→ 最多 10%，样本够了 → 回落到 pxShadow（默认 5%）
     //   站点冷启动和全局影子共用这一次掷骰，避免两层探索叠加
-    let base = Number(env && env.pxShadow);
-    if (!Number.isFinite(base) || base < 0) base = 0.1;
+    const base = shadowRate(env);
     const needRate = cur ? this.nEffOf(cur) < SC.N_EFF_MIN : true;
     // pxShadow=0 视为"关闭探索"；否则样本不足时最高放到 EXPLORE_MAX
     const exploreP = base <= 0 ? 0 : Math.min(1, needRate ? Math.max(base, SC.EXPLORE_MAX) : base);
@@ -213,7 +213,6 @@ export class Selector {
     S.prev[m] = cur;
     S.curs[m] = best.k;
     S.lastSwitch[m] = now;
-    S.lastUp = now;
     cnt("sw");
     logErr(`switch(${m}) ${cur} -> ${best.k}`, "v=" + Math.round(cv) + ">" + Math.round(best.v));
     return true;

@@ -2,6 +2,7 @@ import { renderAdmin, renderAdminHint, renderLogin } from "../views/panel";
 import { adminAuthed, newNonce, randomPwd, rlReset, rlTake, sessionToken, sha256Hex } from "../views/auth";
 import { loadUsers, saveUsers, invalidateUsers } from "../proxy/protocol";
 import { readStats } from "../store/index";
+import { html } from "../edge/respond";
 import type { RouteCtx } from "../edge/types";
 
 /** /admin：登录（挑战-应答）+ 用户增删改。未设 adminKey 时整个面板关闭 */
@@ -10,19 +11,7 @@ export async function admin(c: RouteCtx): Promise<Response> {
   /* ---------- 管理面板（会话登录） ---------- */
   if (first === "admin") {
     const adminKey = String(env.adminKey || "");
-    const safeHtml = (body: string, status = 200) =>
-      new Response(body, {
-        status: status || 200,
-        headers: {
-          "content-type": "text/html;charset=utf-8",
-          "cache-control": "no-store",
-          "content-security-policy":
-            "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-          "x-frame-options": "DENY",
-          "x-content-type-options": "nosniff",
-          "referrer-policy": "no-referrer",
-        },
-      });
+    const safeHtml = (body: string, status = 200) => html(body, status);
 
     if (!adminKey) return safeHtml(renderAdminHint(), 503);
     if (adminKey.length < 12) {

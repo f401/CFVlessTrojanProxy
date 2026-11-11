@@ -8,7 +8,7 @@ export const USERS_TTL = 300000; // 面板改动最多 5 分钟生效（把 KV �
 export const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
- * 加载用户表：把 env 里的 uuid/trojan（secret）与 KV 托管用户合并，结果缓存 30 秒。
+ * 加载用户表：把 env 里的 uuid/trojan（secret）与 KV 托管用户合并，结果缓存 5 分钟。
  * @param {object} env Worker 环境（读 uuid / uuids / trojan / STATS）
  * @returns {Promise<{list: Array, uuids: Set<string>, trojan: Map<string,string>}>} 用户表与两套鉴权索引
  */

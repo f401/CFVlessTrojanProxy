@@ -1,4 +1,4 @@
-import { errMsg } from "../core/util";
+import { eachLimit, errMsg } from "../core/util";
 
 import { logErr } from "../nodes/metrics";
 import { S } from "../core/state";
@@ -27,10 +27,11 @@ export async function runCron(env: Env, ctx: ExecutionContext): Promise<void> {
         if (S.seedDirty) await flushPx(env);
       } catch (e) {}
       try {
-        // 先把快照续回 DO（重建脚本后不会从 0 开始），再写新快照
+        // 先把快照续回 DO（重建脚本后不会从 0 开始），再写新快照。
+        // 用户一多时 50 个 /set 同时飞出去会把 cron 的 CPU 拉满，限 8 并发。
         const snap = await usageSnapGet(env);
         if (snap && snap.users) {
-          await Promise.all(Object.keys(snap.users).map((id) => restoreUsage(env, id, snap)));
+          await eachLimit(Object.keys(snap.users), 8, (id) => restoreUsage(env, id, snap).then(() => undefined));
         }
         const users = await loadUsers(env);
         await usageSnapWrite(env, users.list);

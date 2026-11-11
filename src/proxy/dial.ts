@@ -85,12 +85,17 @@ export async function resolveV4(domain: string) {
  * @returns {string} 形如 [2001:67c:2960:6464::xxxx:xxxx] 的地址
  */
 export function nat64FromV4(ip: string) {
-  const p = ip.split(".").map((x) => Number(x).toString(16).padStart(2, "0"));
-  if (p.length !== 4) throw new Error("IPv4 非法");
+  const seg = String(ip).split(".").map(Number);
+  if (seg.length !== 4 || seg.some((x) => !Number.isInteger(x) || x < 0 || x > 255)) {
+    throw new Error("IPv4 非法");
+  }
+  const p = seg.map((x) => x.toString(16).padStart(2, "0"));
   return `[2001:67c:2960:6464::${p[0]}${p[1]}:${p[2]}${p[3]}]`;
 }
 
-export const isV4Literal = (h: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(h);
+// 四段 0–255：以前允许 999，会生成 "…::3e7:…" 这种畸形 NAT64 地址
+export const isV4Literal = (h: string) =>
+  /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(h);
 
 /**
  * 解析 proxyip 配置字符串。

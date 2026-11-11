@@ -1,4 +1,4 @@
-import { errMsg } from "../core/util";
+import { errMsg, shadowRate } from "../core/util";
 
 import { SC } from "../core/const";
 import { S } from "../core/state";
@@ -65,7 +65,6 @@ export async function proxyip(c: UserCtx): Promise<Response> {
     S.prev = { lat: "", tput: "" };
     S.lastSwitch = { lat: 0, tput: 0 };
     S.switchHits = { lat: [], tput: [] };
-    S.lastUp = 0;
     S.lastManual = 0;
     S.funnel = { direct: 0, node: 0, v6: 0 };
     // 站点画像/排行缓存也必须一起清：否则 reset 后 pick 还会推荐已经不存在的节点
@@ -149,7 +148,7 @@ export async function proxyip(c: UserCtx): Promise<Response> {
     rotatePolicy: {
       minDwellSec: Math.round(SC.DWELL / 1000),
       budgetPerHour: SC.BUDGET,
-      shadow: Number(env.pxShadow) || 0.1,
+      shadow: shadowRate(env),
     },
     alive: rows,
     regions: await regionListAsync(env),

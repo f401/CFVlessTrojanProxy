@@ -1,4 +1,4 @@
-import { P_T } from "../core/util";
+import { P_T, shadowRate } from "../core/util";
 import { S } from "../core/state";
 import { SC } from "../core/const";
 import { renderStatsHtml, renderHtml } from "../views/panel";
@@ -8,7 +8,7 @@ import { renderClash, renderSingbox, renderLinks, trojanPasswordOf } from "../vi
 import { readStatsCached, nodeSnapGet } from "../store/index";
 import { aliveList, nsOf, pxGet } from "../px/pool";
 import { cntView } from "../core/counter";
-import { html, json, text } from "../edge/respond";
+import { CSP_STATIC, html, json, text } from "../edge/respond";
 import type { UserCtx } from "../edge/types";
 
 /**
@@ -44,19 +44,9 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
         quota: fmtBytes(effectiveQuota(env, (st.up || 0) + (st.down || 0))) + "（到顶自动翻倍）",
         expire: env.expireAt ? String(env.expireAt).slice(0, 10) : "长期",
         [P_T + "Pwd"]: trojanPasswordOf(env, id, c.auth),
-        policy: `滞回 15% · 驻留 ${Math.round(SC.DWELL / 60000)} 分钟 · 每小时最多 ${SC.BUDGET} 次切换 · 影子 ${Math.round((Number(env.pxShadow) || 0.1) * 100)}%`,
+        policy: `滞回 15% · 驻留 ${Math.round(SC.DWELL / 60000)} 分钟 · 每小时最多 ${SC.BUDGET} 次切换 · 影子 ${Math.round(shadowRate(env) * 100)}%`,
       };
-      return new Response(renderHtml(env, url, id, host, pageKey, info), {
-        headers: {
-          "content-type": "text/html;charset=utf-8",
-          "cache-control": "no-store",
-          "content-security-policy":
-            "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
-          "x-frame-options": "DENY",
-          "x-content-type-options": "nosniff",
-          "referrer-policy": "no-referrer",
-        },
-      });
+      return html(renderHtml(env, url, id, host, pageKey, info), 200, { "content-security-policy": CSP_STATIC });
     }
 
     case "cl":

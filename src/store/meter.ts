@@ -233,6 +233,10 @@ export class Meter {
           conns: Number(d.conns) || this.c.conns || 0,
           first: Number(d.first) || this.c.first || Date.now(),
           ts: Date.now(),
+          // 恢复历史累计不能把"今日"一起抹掉：d/dU/dD 是面板今日用量的来源
+          d: this.c.d || "",
+          dU: this.c.dU || 0,
+          dD: this.c.dD || 0,
         };
         try {
           await this.save();

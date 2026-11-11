@@ -48,13 +48,14 @@ export default {
         return admin({ request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf });
       }
 
-      if (auth.uuids.size === 0) {
-        return new Response("未配置 uuid（请设置环境变量 uuid 或 uuids）", { status: 500 });
-      }
-
       /* ---------- 健康检查 ---------- */
+      // 放在 uuid 检查之前：全新部署还没配 uuid 时也要能自检（否则只会看到 500）
       if (first === "health") {
         return health({ request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf });
+      }
+
+      if (auth.uuids.size === 0) {
+        return new Response("未配置 uuid（请设置环境变量 uuid 或 uuids）", { status: 500 });
       }
 
       /* ---------- 需要合法 UUID 的路由 ---------- */

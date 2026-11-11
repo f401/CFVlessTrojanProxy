@@ -860,5 +860,69 @@ reset();
   eq("并发 /add 串行累加", jq.up, 3);
 }
 
+/* ---------- 9. 影子概率：选择器 / 控制页 / /proxyip 同源 ---------- */
+eq("pxShadow 未设置 → 5%", W.shadowRate({}), 0.05);
+eq("pxShadow=\"0\" → 关闭探索", W.shadowRate({ pxShadow: "0" }), 0);
+eq("pxShadow=0.2 原样", W.shadowRate({ pxShadow: "0.2" }), 0.2);
+eq("pxShadow 非法 → 回落 5%", W.shadowRate({ pxShadow: "abc" }), 0.05);
+eq("pxShadow 负数 → 回落 5%", W.shadowRate({ pxShadow: "-1" }), 0.05);
+eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
+
+/* ---------- 10. 今日用量按 DO 的日期判断 ---------- */
+{
+  const day = new Date().toISOString().slice(0, 10);
+  const fakeEnv = (c) => ({
+    METER: { idFromName: (x) => x, get: () => ({ fetch: async () => Response.json(c) }) },
+  });
+  S.meterCache.clear();
+  S.pend.clear();
+  const old = await W.readStats(
+    fakeEnv({ up: 100, down: 200, conns: 1, first: 1, ts: 2, d: "2000-01-01", dU: 50, dD: 60 }),
+    "u-yesterday",
+  );
+  eq("昨天的不算今日（上行）", old.todayUp, 0);
+  eq("昨天的不算今日（下行）", old.todayDown, 0);
+  eq("累计仍然保留", [old.up, old.down], [100, 200]);
+
+  S.meterCache.clear();
+  const cur = await W.readStats(
+    fakeEnv({ up: 100, down: 200, conns: 1, first: 1, ts: 2, d: day, dU: 50, dD: 60 }),
+    "u-today",
+  );
+  eq("今天照常显示当日量", [cur.todayUp, cur.todayDown], [50, 60]);
+}
+
+/* ---------- 11. /set 恢复累计不能抹掉今日 ---------- */
+{
+  const doS = mkDO();
+  await doS.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
+  await doS.m.fetch(
+    new Request("https://m/set", {
+      method: "POST",
+      body: JSON.stringify({ up: 1000, down: 2000, conns: 9, first: 1 }),
+    }),
+  );
+  const js = await (await doS.m.fetch(new Request("https://m/get"))).json();
+  eq("恢复历史后累计生效", [js.up, js.down], [1000, 2000]);
+  eq("恢复历史不抹今日", [js.dU, js.dD], [10, 20]);
+  ok("恢复历史保留日期", !!js.d);
+}
+
+/* ---------- 12. 并发闸：不漏任务、不超上限 ---------- */
+{
+  const seen = [];
+  let live = 0,
+    peak = 0;
+  await W.eachLimit([1, 2, 3, 4, 5, 6, 7], 3, async (x) => {
+    live++;
+    peak = Math.max(peak, live);
+    await new Promise((r) => setTimeout(r, 1));
+    seen.push(x);
+    live--;
+  });
+  eq("eachLimit 覆盖全部任务", seen.sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7]);
+  ok("eachLimit 并发不超过 3", peak <= 3, String(peak));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

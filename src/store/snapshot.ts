@@ -1,5 +1,6 @@
 import { S } from "../core/state";
 import { RTT_MAX } from "../core/const";
+import { eachLimit } from "../core/util";
 import { kvGet, kvSet } from "./kv";
 import { meterGet } from "./metering";
 
@@ -32,21 +33,19 @@ export async function usageSnapWrite(env: Env, users?: UserRec[]) {
     const n = Number(x);
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
   };
-  await Promise.all(
-    list.map(async (u) => {
-      const v = await meterGet(env, u.id);
-      const old = (prev.users || {})[u.id];
-      // 只增不减：DO 被重置（重建脚本）时不能把历史快照写回 0。
-      // 这里绝不能用 `|0`：用量经常超过 2^31，位运算会溢出成负数，
-      // 灾备快照会被写成 0（重建 DO 后历史用量就是这么丢的）。
-      const up = Math.max(num(v && v.up), num(old && old.up));
-      const down = Math.max(num(v && v.down), num(old && old.down));
-      const conns = Math.max(num(v && v.conns), num(old && old.conns));
-      if (up || down || conns) {
-        out.users[u.id] = { up, down, conns, first: (v && v.first) || (old && old.first) || 0 };
-      }
-    }),
-  );
+  await eachLimit(list, 8, async (u) => {
+    const v = await meterGet(env, u.id);
+    const old = (prev.users || {})[u.id];
+    // 只增不减：DO 被重置（重建脚本）时不能把历史快照写回 0。
+    // 这里绝不能用 `|0`：用量经常超过 2^31，位运算会溢出成负数，
+    // 灾备快照会被写成 0（重建 DO 后历史用量就是这么丢的）。
+    const up = Math.max(num(v && v.up), num(old && old.up));
+    const down = Math.max(num(v && v.down), num(old && old.down));
+    const conns = Math.max(num(v && v.conns), num(old && old.conns));
+    if (up || down || conns) {
+      out.users[u.id] = { up, down, conns, first: (v && v.first) || (old && old.first) || 0 };
+    }
+  });
   if (!Object.keys(out.users).length) return;
   try {
     await kvSet(env, USAGE_SNAP_KEY, out, { expirationTtl: 86400 * 90 });

@@ -14,7 +14,6 @@ export class AppState {
   prev: Record<string, string> = { lat: "", tput: "" };
   lastSwitch: Record<string, number> = { lat: 0, tput: 0 };
   switchHits: Record<string, number[]> = { lat: [], tput: [] };
-  lastUp = 0;
   lastManual = 0;
   pxFailMem = 0;
   pxFailSeen = 0;

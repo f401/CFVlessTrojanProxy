@@ -1,5 +1,6 @@
 import { S } from "../core/state";
 import { cntDelta, cntUnsend } from "../core/counter";
+import { eachLimit } from "../core/util";
 import { spdSnapshot } from "../core/node-snapshot";
 import { Meter } from "./meter";
 import { flushSnap, getSnap, usageSnapGet } from "./snapshot";
@@ -92,34 +93,32 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
   const cd = hasPrimary ? cntDelta() : {};
   const today = new Date().toISOString().slice(0, 10);
   let attached = false;
-  await Promise.all(
-    batch.map(async ([id, d]) => {
-      const mine = !primary || String(id).toLowerCase() === primary;
-      try {
-        const stub = env.METER.get(env.METER.idFromName(id));
-        const body: Record<string, unknown> = { ...d };
-        if (!attached && mine) {
-          attached = true;
-          body.c = { ...cd, d: today }; // 只挂一次，避免重复计
-          body.spd = spdSnapshot(); // 节点快照：跨 isolate 可见
-          body.e = S.errs.slice(-8); // 错误也带上去：/logs 才能跨 isolate
-        }
-        const r = await stub.fetch("https://meter/add", {
-          method: "POST",
-          body: JSON.stringify(body),
-        });
-        if (!r.ok) throw new Error("do " + r.status);
-        S.doCalls += 1;
-        S.meterCache.delete(id); // 刚推过增量，缓存立即失效，避免读数倒退
-      } catch (e) {
-        bad += 1;
-        const cur = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
-        S.pend.set(id, { up: cur.up + d.up, down: cur.down + d.down, conns: cur.conns + d.conns });
-        S.pendBytes += (d.up || 0) + (d.down || 0); // 回滚失败批次：健康页与立即刷新的判断要准
-        if (mine) cntUnsend(cd); // 日计数搭车主批次失败 → 基线退回，下轮重发
+  await eachLimit(batch, 8, async ([id, d]) => {
+    const mine = !primary || String(id).toLowerCase() === primary;
+    try {
+      const stub = env.METER.get(env.METER.idFromName(id));
+      const body: Record<string, unknown> = { ...d };
+      if (!attached && mine) {
+        attached = true;
+        body.c = { ...cd, d: today }; // 只挂一次，避免重复计
+        body.spd = spdSnapshot(); // 节点快照：跨 isolate 可见
+        body.e = S.errs.slice(-8); // 错误也带上去：/logs 才能跨 isolate
       }
-    }),
-  );
+      const r = await stub.fetch("https://meter/add", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error("do " + r.status);
+      S.doCalls += 1;
+      S.meterCache.delete(id); // 刚推过增量，缓存立即失效，避免读数倒退
+    } catch (e) {
+      bad += 1;
+      const cur = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
+      S.pend.set(id, { up: cur.up + d.up, down: cur.down + d.down, conns: cur.conns + d.conns });
+      S.pendBytes += (d.up || 0) + (d.down || 0); // 回滚失败批次：健康页与立即刷新的判断要准
+      if (mine) cntUnsend(cd); // 日计数搭车主批次失败 → 基线退回，下轮重发
+    }
+  });
   // 自适应退避：失败了就把间隔翻倍（最多 60s），成功了慢慢降回 30s
   if (bad) S.pendMs = Math.min(S.pendMs * 2, 60000);
   else S.pendMs = Math.max(30000, Math.round(S.pendMs / 2));
@@ -199,14 +198,18 @@ export async function readStats(env: Env, id: string) {
   }
 
   if (doTotal) {
+    // "今日"必须真的按今天算：当天没有任何流量时，DO 里的 d 还停在昨天，
+    // dU/dD 也是昨天的数；直接展示会让面板把昨天当今天。
+    const day = new Date().toISOString().slice(0, 10);
+    const sameDay = !doTotal.d || doTotal.d === day; // 老数据没有 d 字段，按当天处理
     return {
       id,
       up: (doTotal.up || 0) + p.up,
       down: (doTotal.down || 0) + p.down,
       conns: (doTotal.conns || 0) + p.conns,
       // 当日量 = DO 里的当日累计 + 还没推上去的增量
-      todayUp: (doTotal.dU || 0) + p.up,
-      todayDown: (doTotal.dD || 0) + p.down,
+      todayUp: (sameDay ? doTotal.dU || 0 : 0) + p.up,
+      todayDown: (sameDay ? doTotal.dD || 0 : 0) + p.down,
       firstSeen: doTotal.first || local.first || null,
       lastSeen: Math.max(doTotal.ts || 0, local.last) || null,
       isolateLocal: { up: local.up, down: local.down, conns: local.conns },

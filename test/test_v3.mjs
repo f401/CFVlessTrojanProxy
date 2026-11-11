@@ -289,5 +289,55 @@ eq("都没有返回空串", W.primaryId({}), "");
   eq("另一个用户仍在 uuids", aOff.uuids.has(UUID), true);
 }
 
+/* ---------- 随机密码：长度 / 字符集 / 默认值 ---------- */
+{
+  const A = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const p = W.randomPwd(64);
+  eq("randomPwd 长度", p.length, 64);
+  ok(
+    "randomPwd 只用无歧义字符",
+    [...p].every((c) => A.includes(c)),
+    p,
+  );
+  eq("randomPwd 默认 16 位", W.randomPwd(0).length, 16);
+  eq("randomPwd 负数回落到 16 位", W.randomPwd(-5).length, 16);
+  const many = W.randomPwd(2000);
+  ok("randomPwd 覆盖大小写与数字", /[a-z]/.test(many) && /[A-Z]/.test(many) && /[2-9]/.test(many));
+}
+
+/* ---------- IPv4 / NAT64 边界 ---------- */
+eq("IPv4 字面量识别", W.isV4Literal("1.2.3.4"), true);
+eq("IPv4 拒绝越界段", W.isV4Literal("1.2.3.999"), false);
+eq("IPv4 拒绝前导零", W.isV4Literal("01.2.3.4"), false);
+eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
+{
+  let threw = false;
+  try {
+    W.nat64FromV4("1.2.3.999");
+  } catch (e) {
+    threw = true;
+  }
+  eq("NAT64 拒绝越界 IPv4", threw, true);
+}
+
+/* ---------- 统一 HTML 响应头 ---------- */
+{
+  const r = W.html("<b>x</b>", 200, { "content-security-policy": W.CSP_STATIC });
+  eq("html content-type", r.headers.get("content-type"), "text/html;charset=utf-8");
+  eq("html no-store", r.headers.get("cache-control"), "no-store");
+  eq("html frame-options", r.headers.get("x-frame-options"), "DENY");
+  eq("静态页 CSP 不含 script-src", r.headers.get("content-security-policy"), W.CSP_STATIC);
+  ok("静态页 CSP 不给脚本", !String(W.CSP_STATIC).includes("script-src"));
+}
+
+/* ---------- Clash YAML 转义：密码里的引号/反斜杠不能拆坏配置 ---------- */
+{
+  const envY = { ...env, pwd: 'a"b\\c', nodes: 'bad"host:443:tls#x' };
+  const y = W.renderClash(envY, new URL("https://x/" + UUID), UUID, "a.example.com", {}, []);
+  ok("Clash 密码转义引号", y.includes('password: "a\\"b\\\\c"'), y.split("\n").find((l) => l.includes("password")));
+  ok("Clash 主机名按需加引号", y.includes('server: "bad\\"host"'), y.split("\n").find((l) => l.includes("server")));
+  ok("Clash 名字仍然带引号", y.includes('name: "vless-bad-host-443-T"'));
+}
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

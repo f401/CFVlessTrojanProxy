@@ -62,8 +62,16 @@ export function newNonce() {
 
 export function randomPwd(n: number) {
   const A = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const b = crypto.getRandomValues(new Uint8Array(n || 16));
+  const len = Math.floor(Number(n)) > 0 ? Math.floor(Number(n)) : 16;
   let s = "";
-  for (let i = 0; i < b.length; i++) s += A[b[i] % A.length];
+  // 256 % 56 = 32：直接取模会让前 32 个字符出现概率高 1/4，
+  // 用拒绝采样把这 224..255 丢掉，字符分布才是均匀的。
+  const max = 256 - (256 % A.length);
+  while (s.length < len) {
+    const b = crypto.getRandomValues(new Uint8Array(len - s.length + 8));
+    for (let i = 0; i < b.length && s.length < len; i++) {
+      if (b[i] < max) s += A[b[i] % A.length];
+    }
+  }
   return s;
 }

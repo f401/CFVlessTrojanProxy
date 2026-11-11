@@ -88,9 +88,11 @@ eq("pageKey 缺失 403", r2.status, 403);
 const r3 = await mod.fetch(mk(`/${UUID}?k=s3cret`), env2, ctx);
 eq("pageKey 正确 200", r3.status, 200);
 
-/* 无 uuid 配置 */
-const r4 = await mod.fetch(mk("/health"), { }, ctx);
-eq("未配置 uuid 时 500", r4.status, 500);
+/* 无 uuid 配置：/health 仍然可用（便于全新部署自检），业务路径才 500 */
+const r4 = await mod.fetch(mk("/health"), {}, ctx);
+eq("无 uuid 时 /health 仍可用", r4.status, 200);
+const r4b = await mod.fetch(mk("/"), {}, ctx);
+eq("无 uuid 时业务路径 500", r4b.status, 500);
 
 /* 未知路径不返回 request.cf（旧版是 200 + 2.3KB JSON） */
 r = await run("/");
