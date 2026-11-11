@@ -1,4 +1,3 @@
-
 /* HTML 小工具：转义与字节格式化 */
 
 export function fmtBytes(n: number) {

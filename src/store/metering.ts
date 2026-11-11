@@ -5,13 +5,16 @@ import { flushSnap, getSnap, usageSnapGet } from "./snapshot";
 
 /* 计量：PEND 缓冲 + Meter DO 读写 + 用量视图 */
 
-export const PEND_FLUSH_BYTES = 16 * 1024 * 1024;  // 大文件传输时别频繁打 DO：DO 调用会吃这条连接的 CPU
+export const PEND_FLUSH_BYTES = 16 * 1024 * 1024; // 大文件传输时别频繁打 DO：DO 调用会吃这条连接的 CPU
 
 export const METER_TTL = 15000;
 
 /** 主 UUID：计数器/节点快照只挂在这个 DO 上（uuid 可能是逗号列表，取第一个） */
 export function primaryId(env: Env): string {
-  return String((env && (env.uuid || env.uuids)) || "").split(",")[0].trim().toLowerCase();
+  return String((env && (env.uuid || env.uuids)) || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
 }
 
 /**
@@ -89,9 +92,9 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
         const body: Record<string, unknown> = { ...d };
         if (!attached && mine) {
           attached = true;
-          body.c = { ...cd, d: today };        // 只挂一次，避免重复计
-          body.spd = spdSnapshot();            // 节点快照：跨 isolate 可见
-          body.e = S.errs.slice(-8);             // 错误也带上去：/logs 才能跨 isolate
+          body.c = { ...cd, d: today }; // 只挂一次，避免重复计
+          body.spd = spdSnapshot(); // 节点快照：跨 isolate 可见
+          body.e = S.errs.slice(-8); // 错误也带上去：/logs 才能跨 isolate
         }
         const r = await stub.fetch("https://meter/add", {
           method: "POST",
@@ -99,15 +102,15 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
         });
         if (!r.ok) throw new Error("do " + r.status);
         S.doCalls += 1;
-        S.meterCache.delete(id);      // 刚推过增量，缓存立即失效，避免读数倒退
+        S.meterCache.delete(id); // 刚推过增量，缓存立即失效，避免读数倒退
       } catch (e) {
         bad += 1;
         const cur = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
         S.pend.set(id, { up: cur.up + d.up, down: cur.down + d.down, conns: cur.conns + d.conns });
-        S.pendBytes += (d.up || 0) + (d.down || 0);   // 回滚失败批次：健康页与立即刷新的判断要准
-        if (mine) cntUnsend(cd);                       // 日计数搭车主批次失败 → 基线退回，下轮重发
+        S.pendBytes += (d.up || 0) + (d.down || 0); // 回滚失败批次：健康页与立即刷新的判断要准
+        if (mine) cntUnsend(cd); // 日计数搭车主批次失败 → 基线退回，下轮重发
       }
-    })
+    }),
   );
   // 自适应退避：失败了就把间隔翻倍（最多 60s），成功了慢慢降回 30s
   if (bad) S.pendMs = Math.min(S.pendMs * 2, 60000);
@@ -142,7 +145,7 @@ export async function meterGet(env: Env, id: string) {
 
 export function statBump(id: string, up: number, down: number, isNewConn?: boolean) {
   if (!id) return;
-  pendAdd(id, up, down, isNewConn);   // 全局帐本（DO）
+  pendAdd(id, up, down, isNewConn); // 全局帐本（DO）
   let s = S.stats.get(id);
   if (!s) {
     s = { up: 0, down: 0, conns: 0, first: Date.now(), last: Date.now() };

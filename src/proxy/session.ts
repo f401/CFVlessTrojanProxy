@@ -34,11 +34,15 @@ export function wsToStream(ws: WebSocketLike, earlyData: string): ReadableStream
       ws.addEventListener("message", (ev) => push(ev.data));
       ws.addEventListener("close", () => {
         live = false;
-        try { controller.close(); } catch (e) {}
+        try {
+          controller.close();
+        } catch (e) {}
       });
       ws.addEventListener("error", (e) => {
         live = false;
-        try { controller.error(e); } catch (err) {}
+        try {
+          controller.error(e);
+        } catch (err) {}
       });
       if (earlyData) {
         try {
@@ -66,7 +70,6 @@ export function wsToStream(ws: WebSocketLike, earlyData: string): ReadableStream
  * @returns {Promise<Socket|null>} 新连接，没有可换或连不上返回 null
  */
 
-
 /**
  * WebSocket 数据面主流程：鉴权 → 解析目标 → 直连/降级 proxyip → 双向转发。
  * @param {Request} request 升级请求
@@ -80,7 +83,9 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
   serverWS.accept();
   // 新版兼容日期下 message 事件默认给 Blob，不是 ArrayBuffer —— 不设这一行，
   // 二进制帧会被 toU8() 当成空数组丢掉，VLESS 头解析失败后回 400，客户端看到的就是 SSLError。
-  try { serverWS.binaryType = "arraybuffer"; } catch (e) {}
+  try {
+    serverWS.binaryType = "arraybuffer";
+  } catch (e) {}
 
   const auth = await loadUsers(env);
   const cf = request.cf || {};
@@ -90,7 +95,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
   try {
     const q = new URL(request.url).searchParams;
     ipTag = q.get("ip");
-    if (ipTag) ipTag = ipTag.slice(0, 48);   // 标签只用于统计，别让超长 ?ip= 把快照撑大
+    if (ipTag) ipTag = ipTag.slice(0, 48); // 标签只用于统计，别让超长 ?ip= 把快照撑大
     ipRegion = (q.get("rg") || "").toUpperCase() || null;
     const qm = q.get("mode");
     if (qm === "lat" || qm === "tput") mode = qm;
@@ -126,7 +131,9 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
           if (r.ok === false) {
             safeSend(serverWS, enc.encode(`HTTP/1.1 400 Bad Request\r\n\r\n`));
             cnt("noAuth");
-            try { serverWS.close(1008, r.err); } catch (e) {}
+            try {
+              serverWS.close(1008, r.err);
+            } catch (e) {}
             throw new Error(r.err);
           }
 
@@ -137,7 +144,9 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
 
           const bad = checkTarget(r.host, r.port);
           if (bad) {
-            try { serverWS.close(1011, bad); } catch (e) {}
+            try {
+              serverWS.close(1011, bad);
+            } catch (e) {}
             throw new Error(bad);
           }
 
@@ -146,7 +155,9 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
 
           if (r.udp) {
             if (r.port !== 53) {
-              try { serverWS.close(1011, "UDP 仅支持 DNS(53)"); } catch (e) {}
+              try {
+                serverWS.close(1011, "UDP 仅支持 DNS(53)");
+              } catch (e) {}
               throw new Error("unsupported udp");
             }
             await handleDns(serverWS, u8.subarray(r.offset), st);
@@ -184,9 +195,12 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
           } catch (e) {
             const px0 = parseProxyIp(await SEL.current(env, mode, st));
             if (!px0) {
-              cnt("dead"); kickFlush(env, st.id);                       // 直连失败且没有可用中转 → 目标不可达
+              cnt("dead");
+              kickFlush(env, st.id); // 直连失败且没有可用中转 → 目标不可达
               logErr(`dead target ${r.host}: ${errMsg(e)}`);
-              try { serverWS.close(1011, "连接目标失败"); } catch (err) {}
+              try {
+                serverWS.close(1011, "连接目标失败");
+              } catch (err) {}
               throw e;
             }
             st.retried = true;
@@ -217,28 +231,33 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
             st.sock = s2;
             st.writer = s2.writable.getWriter();
             st.headerSent = false;
-            st.tAttach = Date.now();          // 首字节耗时从这里起算
+            st.tAttach = Date.now(); // 首字节耗时从这里起算
             st.ttfb = 0;
             if (payload.length) await st.writer!.write(payload).catch(() => {});
 
             pipeBack(s2, serverWS, st, async (gotData) => {
               // 客户端已经走了（取消下载 / 切网 / 切节点）：别再替它开新中转，
               // 否则每次取消都会白烧一次拨号 + 一次探测不到的失败记录。
-              if (serverWS.readyState !== WS_OPEN) { closeQuietly(st.sock); return; }
-              if (gotData) SEL.resetFail(env, st.node);   // 能通就说明链路健康，别乱切
+              if (serverWS.readyState !== WS_OPEN) {
+                closeQuietly(st.sock);
+                return;
+              }
+              if (gotData) SEL.resetFail(env, st.node); // 能通就说明链路健康，别乱切
               if (!gotData && !st.markedFail) {
                 st.markedFail = true;
                 rttMark(st.id, st.ipTag, false);
               }
 
               if (gotData) {
-                try { serverWS.close(1000, "done"); } catch (e) {}
+                try {
+                  serverWS.close(1000, "done");
+                } catch (e) {}
                 return;
               }
 
               // 已经走 proxyip 了还是 0 字节关闭 → 这次中转失败，必须计数
               if (st.retried) {
-                cnt("eCloseP");                       // 中转后仍空关闭：才算节点的问题
+                cnt("eCloseP"); // 中转后仍空关闭：才算节点的问题
                 nsEmptyClose(st.node, true);
                 // 这个中转不通，换一个再试一次；直接放弃就是用户看到的"下载失败"
                 if ((st.pxTries || 1) < 2) {
@@ -248,13 +267,16 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
                     return;
                   }
                 }
-                cnt("dead"); kickFlush(env, st.id);                       // 换节点也不通 → 这个目标走不了中转
+                cnt("dead");
+                kickFlush(env, st.id); // 换节点也不通 → 这个目标走不了中转
                 // 站点侧失败：连上了中转，但目标 0 字节关闭 —— 不当作节点故障
                 st.failed = true;
                 st.siteFail = true;
                 if (st.hostTrial) await SEL.softFail(st.node);
                 else await SEL.bumpFail(env, st.mode, st.node, st.trial, "site");
-                try { serverWS.close(1000, "done"); } catch (e) {}
+                try {
+                  serverWS.close(1000, "done");
+                } catch (e) {}
                 return;
               }
 
@@ -283,10 +305,13 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
               // ② 再试 proxyip（第三方中转，最后兜底）
               const px = parseProxyIp(await SEL.current(env, mode, st));
               if (!px || st.retried) {
-                cnt("dead"); kickFlush(env, st.id);
-                cnt("eCloseD");                       // 直连空关闭：目标站的问题，不算节点
+                cnt("dead");
+                kickFlush(env, st.id);
+                cnt("eCloseD"); // 直连空关闭：目标站的问题，不算节点
                 nsEmptyClose(st.node, false);
-                try { serverWS.close(1000, "done"); } catch (e) {}
+                try {
+                  serverWS.close(1000, "done");
+                } catch (e) {}
                 return;
               }
               st.retried = true;
@@ -303,7 +328,9 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
               S.needPx.set(r.host, Date.now() + 6 * 3600e3);
               logErr(`empty close -> proxyip ${px.host}`, r.host);
               if (checkTarget(px.host, px.port)) {
-                try { serverWS.close(1011, "proxyip blocked"); } catch (e) {}
+                try {
+                  serverWS.close(1011, "proxyip blocked");
+                } catch (e) {}
                 return;
               }
               try {
@@ -312,7 +339,9 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
                 st.via = "node";
                 await attach(s3);
               } catch (e) {
-                try { serverWS.close(1011, "proxyip failed"); } catch (err) {}
+                try {
+                  serverWS.close(1011, "proxyip failed");
+                } catch (err) {}
               }
             });
           };
@@ -325,17 +354,19 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
         abort() {
           st.release();
         },
-      })
+      }),
     )
     .catch((err) => {
       cnt("wsFail");
       logErr(`ws: ${errMsg(err)}`, ipTag || "");
       closeQuietly(st.sock);
-      try { serverWS.close(1011, "internal error"); } catch (e) {}
+      try {
+        serverWS.close(1011, "internal error");
+      } catch (e) {}
     })
     .finally(async () => {
       st.release();
-      if (!st.id) cnt("noPayload");     // 握手期就结束的连接（占大多数），以前完全不可见
+      if (!st.id) cnt("noPayload"); // 握手期就结束的连接（占大多数），以前完全不可见
       st.flush(true);
       if (ctx && ctx.waitUntil) {
         ctx.waitUntil(pendFlush(env));
@@ -354,8 +385,6 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
  * @param {(gotData: boolean) => void} [onClose] 上游关闭时的回调（gotData 表示是否收到过数据）
  * @returns {void}
  */
-
-
 
 /**
  * 处理 UDP/53 的 DNS 查询：转发到 DoH 再把响应回写给客户端。
@@ -378,7 +407,12 @@ export async function handleDns(ws: WebSocketLike, firstBody: Uint8Array, st: Co
     out.set(len, 0);
     out.set(u8, 2);
     const merged = st.header
-      ? (() => { const m = new Uint8Array(st.header.length + out.length); m.set(st.header, 0); m.set(out, st.header.length); return m; })()
+      ? (() => {
+          const m = new Uint8Array(st.header.length + out.length);
+          m.set(st.header, 0);
+          m.set(out, st.header.length);
+          return m;
+        })()
       : out;
     safeSend(ws, merged);
     st.header = null;
@@ -397,4 +431,3 @@ export async function handleDns(ws: WebSocketLike, firstBody: Uint8Array, st: Co
 /* ==================================================================
  * §8  配置下发
  * ================================================================== */
-

@@ -29,7 +29,7 @@ export function rttMark(id: string | null, tag: string | null, ok: boolean) {
   if (!id || !tag) return;
   let bucket = S.rtt.get(id);
   if (!bucket) {
-    bucket = Object.create(null) as Record<string, RttEntry>;   // 防 ?ip=__proto__ 污染原型
+    bucket = Object.create(null) as Record<string, RttEntry>; // 防 ?ip=__proto__ 污染原型
     S.rtt.set(id, bucket);
   }
   const e = bucket[tag] || { rtt: 0, colo: "", bw: 0, hits: 0, ok: 0, fail: 0, ts: Date.now() };
@@ -109,7 +109,6 @@ export async function loadRtt(env: Env, id: string) {
   }
 }
 
-
 /**
  * 域名 → 站点族。
  * 目的：x.com / api.x.com / pbs.twimg.com 共享一份样本，否则每个域名
@@ -118,9 +117,11 @@ export async function loadRtt(env: Env, id: string) {
  * @returns {string} 族名
  */
 export function hostKey(host: string): string {
-  const h = String(host || "").toLowerCase().replace(/\.$/, "");
+  const h = String(host || "")
+    .toLowerCase()
+    .replace(/\.$/, "");
   if (!h) return "";
-  if (/^[\d.]+$/.test(h) || h.includes(":")) return h;   // IP 字面量原样
+  if (/^[\d.]+$/.test(h) || h.includes(":")) return h; // IP 字面量原样
 
   // 手工归并（同一套基础设施，物理路径通常一致）
   if (/(^|\.)(x|twitter)\.com$|(^|\.)twimg\.com$/.test(h)) return "x.com";
@@ -152,8 +153,8 @@ export function hostKey(host: string): string {
  *   tput → 站点级 10MB 估算 + 0.5×首字节 + 失败风险（没有吞吐样本就不要拿 TTFB 冒充）
  */
 export function hostScore(s: HNStat, mode: Mode, now: number): number {
-  const fail = (s.bad + 1) / (s.n + 6);            // 小样本往坏里估
-  const stale = now - (s.at || 0) > 6 * 3600e3 ? 300 : 0;   // 6 小时没更新就降权
+  const fail = (s.bad + 1) / (s.n + 6); // 小样本往坏里估
+  const stale = now - (s.at || 0) > 6 * 3600e3 ? 300 : 0; // 6 小时没更新就降权
   const ttfb = s.ttfb > 0 ? s.ttfb : 800;
   if (mode === "tput") {
     const bpsAge = now - (s.bpsAt || 0);
@@ -247,8 +248,8 @@ export function logErr(msg: unknown, tag?: string | null) {
  * 按站点的节点画像（诊断：某个站到底该用哪个节点 / 为什么被拦）
  * ================================================================== */
 
-export const HN_MAX_HOSTS = 120;   // 最多记 120 个域名
-export const HN_MAX_NODES = 12;    // 每个域名最多记 12 个节点
+export const HN_MAX_HOSTS = 120; // 最多记 120 个域名
+export const HN_MAX_NODES = 12; // 每个域名最多记 12 个节点
 
 /**
  * 记一次 (站点, 节点) 的连接结果。
@@ -265,11 +266,15 @@ export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
   if (!m) {
     if (S.hostNode.size >= HN_MAX_HOSTS) {
       // 淘汰最久没更新过的域名（120 条，线性扫可接受）
-      let oldK = "", oldT = Infinity;
+      let oldK = "",
+        oldT = Infinity;
       for (const [k, v] of S.hostNode) {
         let t = 0;
         for (const s of v.values()) if (s.at > t) t = s.at;
-        if (t < oldT) { oldT = t; oldK = k; }
+        if (t < oldT) {
+          oldT = t;
+          oldK = k;
+        }
       }
       if (oldK) S.hostNode.delete(oldK);
     }
@@ -279,8 +284,13 @@ export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
   let s = m.get(node);
   if (!s) {
     if (m.size >= HN_MAX_NODES) {
-      let oldN = "", oldT = Infinity;
-      for (const [k, v] of m) if (v.at < oldT) { oldT = v.at; oldN = k; }
+      let oldN = "",
+        oldT = Infinity;
+      for (const [k, v] of m)
+        if (v.at < oldT) {
+          oldT = v.at;
+          oldN = k;
+        }
       if (oldN) m.delete(oldN);
     }
     s = { n: 0, ok: 0, bad: 0, bytes: 0, ttfb: 0, at: 0 };
@@ -318,12 +328,18 @@ export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
 export function hostDirectMark(host: string, ok: boolean) {
   if (!host) return;
   if (S.hostDirect.size >= HN_MAX_HOSTS) {
-    let oldK = "", oldT = Infinity;
-    for (const [k, v] of S.hostDirect) if (v.at < oldT) { oldT = v.at; oldK = k; }
+    let oldK = "",
+      oldT = Infinity;
+    for (const [k, v] of S.hostDirect)
+      if (v.at < oldT) {
+        oldT = v.at;
+        oldK = k;
+      }
     if (oldK) S.hostDirect.delete(oldK);
   }
   const e = S.hostDirect.get(host) || { ok: 0, bad: 0, at: 0 };
-  if (ok) e.ok += 1; else e.bad += 1;
+  if (ok) e.ok += 1;
+  else e.bad += 1;
   e.at = Date.now();
   S.hostDirect.set(host, e);
 }
@@ -334,7 +350,10 @@ export function hostDirectMark(host: string, ok: boolean) {
  * @param {{ok:number,bad:number}} direct 直连对照
  * @returns {{kind:string, verdict:string, suspect:string[]}}
  */
-export function diagVerdict(rows: Array<{ node: string; n: number; ok: number; bad: number; cc?: string }> | null, direct: HDirect | null) {
+export function diagVerdict(
+  rows: Array<{ node: string; n: number; ok: number; bad: number; cc?: string }> | null,
+  direct: HDirect | null,
+) {
   const tested = (rows || []).filter((r) => r.n > 0);
   const suspect = tested.filter((r) => r.bad >= 1 && r.bad * 2 >= r.n);
   const d = direct || { ok: 0, bad: 0 };

@@ -1,7 +1,7 @@
 /* 通用工具：编码/哈希/字节处理/WS 发送 */
 export const WS_OPEN = 1;
-export const WS_BUFFER_LIMIT = 1024 * 1024;   // 下行发送缓冲超过 1MB 就开始背压
-export const WS_STALL_MS = 60000;              // 客户端一时收不动很常见，给到 60 秒
+export const WS_BUFFER_LIMIT = 1024 * 1024; // 下行发送缓冲超过 1MB 就开始背压
+export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给到 60 秒
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐了
 export const VERSION = "6.1";
 export const enc = new TextEncoder();
@@ -17,8 +17,8 @@ export const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart
 export const secretPwd = (env: Env) => String((env && (env.pwd || env[P_T])) || "").trim();
 
 // 协议名在运行时拼装，源码里不出现明文，混淆后也不会残留
-export const P_V = String.fromCharCode(118, 108, 101, 115, 115);          // 118 108 101 115 115
-export const P_T = String.fromCharCode(116, 114, 111, 106, 97, 110);      // 116 114 111 106 97 110
+export const P_V = String.fromCharCode(118, 108, 101, 115, 115); // 118 108 101 115 115
+export const P_T = String.fromCharCode(116, 114, 111, 106, 97, 110); // 116 114 111 106 97 110
 
 /**
  * 字节数组 → 小写十六进制字符串。
@@ -44,8 +44,7 @@ export function toU8(d: unknown) {
   return new Uint8Array(0);
 }
 
-export const isUUID = (s: string) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+export const isUUID = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 /**
  * 16 字节 → 标准 UUID 字符串（8-4-4-4-12）。
@@ -63,7 +62,7 @@ export function uuidFromBytes(b: Uint8Array) {
  * @param {Uint8Array|ArrayBuffer} data 待发送数据
  * @returns {void}
  */
-export const WS_MSG_MAX = 256 * 1024;   // 单帧上限：CF 对超大 WS 消息会直接断链
+export const WS_MSG_MAX = 256 * 1024; // 单帧上限：CF 对超大 WS 消息会直接断链
 
 export function safeSend(ws: WebSocketLike, data: Uint8Array) {
   try {
@@ -117,14 +116,14 @@ export function closeQuietly(sock: { close(): void } | null | undefined) {
  * ================================================================== */
 
 export const SHA_K = new Uint32Array([
-  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98,
+  0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+  0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8,
+  0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+  0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819,
+  0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+  0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+  0xc67178f2,
 ]);
 export const SHA_H224 = new Uint32Array([
   0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939, 0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4,
@@ -156,14 +155,21 @@ export function sha224Bytes(data: Uint8Array | ArrayBuffer) {
   for (let off = 0; off < total; off += 64) {
     for (let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4);
     for (let i = 16; i < 64; i++) {
-      const a15 = w[i - 15], a2 = w[i - 2];
+      const a15 = w[i - 15],
+        a2 = w[i - 2];
       const s0 = (rotr(a15, 7) ^ rotr(a15, 18) ^ (a15 >>> 3)) >>> 0;
       const s1 = (rotr(a2, 17) ^ rotr(a2, 19) ^ (a2 >>> 10)) >>> 0;
       w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
     }
 
-    let a = H[0], b = H[1], c = H[2], d = H[3];
-    let e = H[4], f = H[5], g = H[6], h = H[7];
+    let a = H[0],
+      b = H[1],
+      c = H[2],
+      d = H[3];
+    let e = H[4],
+      f = H[5],
+      g = H[6],
+      h = H[7];
 
     for (let i = 0; i < 64; i++) {
       const S1 = (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) >>> 0;
@@ -172,16 +178,24 @@ export function sha224Bytes(data: Uint8Array | ArrayBuffer) {
       const S0 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) >>> 0;
       const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
       const t2 = (S0 + maj) >>> 0;
-      h = g; g = f; f = e;
+      h = g;
+      g = f;
+      f = e;
       e = (d + t1) >>> 0;
-      d = c; c = b; b = a;
+      d = c;
+      c = b;
+      b = a;
       a = (t1 + t2) >>> 0;
     }
 
-    H[0] = (H[0] + a) >>> 0; H[1] = (H[1] + b) >>> 0;
-    H[2] = (H[2] + c) >>> 0; H[3] = (H[3] + d) >>> 0;
-    H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0;
-    H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0;
+    H[0] = (H[0] + a) >>> 0;
+    H[1] = (H[1] + b) >>> 0;
+    H[2] = (H[2] + c) >>> 0;
+    H[3] = (H[3] + d) >>> 0;
+    H[4] = (H[4] + e) >>> 0;
+    H[5] = (H[5] + f) >>> 0;
+    H[6] = (H[6] + g) >>> 0;
+    H[7] = (H[7] + h) >>> 0;
   }
 
   const out = new Uint8Array(28);
@@ -197,7 +211,6 @@ export function sha224Bytes(data: Uint8Array | ArrayBuffer) {
  *            密码在 isolate 首次使用时算成 sha224 哈希，映射回 uuid
  * ================================================================== */
 
-
 /**
  * 把 catch 到的任意值转成一句可读的错误文本。
  * 统一入口，避免每个 catch 里写 `errMsg(e)`。
@@ -207,7 +220,11 @@ export function errMsg(e: unknown, max = 200): string {
   if (e instanceof Error) out = e.message;
   else if (typeof e === "string") out = e;
   else {
-    try { out = String(e); } catch { out = "unknown"; }
+    try {
+      out = String(e);
+    } catch {
+      out = "unknown";
+    }
   }
   return out.slice(0, max);
 }

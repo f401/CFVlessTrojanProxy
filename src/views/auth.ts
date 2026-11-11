@@ -2,7 +2,7 @@ import { enc, toHex } from "../core/util";
 
 /* 面板鉴权：cookie / 挑战-应答会话 / 登录限流 */
 
-export const RL_MEM = new Map();   // ip -> { n, t }
+export const RL_MEM = new Map(); // ip -> { n, t }
 
 export function getCookie(req: Request, name: string) {
   const raw = req.headers.get("cookie") || "";
@@ -21,7 +21,7 @@ export async function sha256Hex(str: string) {
 
 /** 会话令牌：exp 参与签名，过期即失效（以前是永久不变的静态值）。 */
 export async function sessionToken(env: Env, exp?: number) {
-  const e = Math.floor(exp || (Date.now() + 12 * 3600e3));
+  const e = Math.floor(exp || Date.now() + 12 * 3600e3);
   const sig = await sha256Hex(`adm|${e}|${env.adminKey || ""}|${env.adminHash || ""}`);
   return `${e.toString(36)}.${sig.slice(0, 40)}`;
 }

@@ -11,26 +11,87 @@ export const DEFAULT_PORTS: Array<[number, boolean]> = [
 
 /** Cloudflare colo 代码 → 城市中文名（常用部分） */
 export const COLO_CITY = {
-  HKG: "香港", NRT: "东京", KIX: "大阪", ICN: "首尔", TPE: "台北", KHH: "高雄",
-  SIN: "新加坡", BKK: "曼谷", KUL: "吉隆坡", CGK: "雅加达", MNL: "马尼拉",
-  SGN: "胡志明", HAN: "河内", DEL: "德里", BOM: "孟买", CCU: "加尔各答",
-  SYD: "悉尼", MEL: "墨尔本", AKL: "奥克兰", PER: "珀斯",
-  LAX: "洛杉矶", SJC: "圣何塞", SFO: "旧金山", SEA: "西雅图", DFW: "达拉斯",
-  ORD: "芝加哥", IAD: "华盛顿", EWR: "纽瓦克", ATL: "亚特兰大", MIA: "迈阿密",
-  DEN: "丹佛", PHX: "凤凰城", YYZ: "多伦多", YVR: "温哥华", GRU: "圣保罗",
-  EZE: "布宜诺斯艾利斯", SCL: "圣地亚哥", BOG: "波哥大",
-  LHR: "伦敦", MAN: "曼彻斯特", AMS: "阿姆斯特丹", FRA: "法兰克福",
-  CDG: "巴黎", MAD: "马德里", BCN: "巴塞罗那", MXP: "米兰", FCO: "罗马",
-  ZRH: "苏黎世", VIE: "维也纳", ARN: "斯德哥尔摩", CPH: "哥本哈根",
-  OSL: "奥斯陆", HEL: "赫尔辛基", WAW: "华沙", PRG: "布拉格", BUD: "布达佩斯",
-  BRU: "布鲁塞尔", DUB: "都柏林", LIS: "里斯本", SOF: "索非亚", KBP: "基辅",
-  IST: "伊斯坦布尔", DME: "莫斯科", LED: "圣彼得堡", TLV: "特拉维夫",
-  DXB: "迪拜", DOH: "多哈", RUH: "利雅得", JNB: "约翰内斯堡", LOS: "拉各斯",
-  CAI: "开罗", NBO: "内罗毕", CPT: "开普敦",
+  HKG: "香港",
+  NRT: "东京",
+  KIX: "大阪",
+  ICN: "首尔",
+  TPE: "台北",
+  KHH: "高雄",
+  SIN: "新加坡",
+  BKK: "曼谷",
+  KUL: "吉隆坡",
+  CGK: "雅加达",
+  MNL: "马尼拉",
+  SGN: "胡志明",
+  HAN: "河内",
+  DEL: "德里",
+  BOM: "孟买",
+  CCU: "加尔各答",
+  SYD: "悉尼",
+  MEL: "墨尔本",
+  AKL: "奥克兰",
+  PER: "珀斯",
+  LAX: "洛杉矶",
+  SJC: "圣何塞",
+  SFO: "旧金山",
+  SEA: "西雅图",
+  DFW: "达拉斯",
+  ORD: "芝加哥",
+  IAD: "华盛顿",
+  EWR: "纽瓦克",
+  ATL: "亚特兰大",
+  MIA: "迈阿密",
+  DEN: "丹佛",
+  PHX: "凤凰城",
+  YYZ: "多伦多",
+  YVR: "温哥华",
+  GRU: "圣保罗",
+  EZE: "布宜诺斯艾利斯",
+  SCL: "圣地亚哥",
+  BOG: "波哥大",
+  LHR: "伦敦",
+  MAN: "曼彻斯特",
+  AMS: "阿姆斯特丹",
+  FRA: "法兰克福",
+  CDG: "巴黎",
+  MAD: "马德里",
+  BCN: "巴塞罗那",
+  MXP: "米兰",
+  FCO: "罗马",
+  ZRH: "苏黎世",
+  VIE: "维也纳",
+  ARN: "斯德哥尔摩",
+  CPH: "哥本哈根",
+  OSL: "奥斯陆",
+  HEL: "赫尔辛基",
+  WAW: "华沙",
+  PRG: "布拉格",
+  BUD: "布达佩斯",
+  BRU: "布鲁塞尔",
+  DUB: "都柏林",
+  LIS: "里斯本",
+  SOF: "索非亚",
+  KBP: "基辅",
+  IST: "伊斯坦布尔",
+  DME: "莫斯科",
+  LED: "圣彼得堡",
+  TLV: "特拉维夫",
+  DXB: "迪拜",
+  DOH: "多哈",
+  RUH: "利雅得",
+  JNB: "约翰内斯堡",
+  LOS: "拉各斯",
+  CAI: "开罗",
+  NBO: "内罗毕",
+  CPT: "开普敦",
 };
 
 /** 把入口地址压成可放进 URL 的标签：104.16.0.1 → 104-16-0-1 */
-export const tagOf = (h: string) => String(h).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+export const tagOf = (h: string) =>
+  String(h)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 
 /** 节点唯一标签 = 入口 + 端口（同一域名的 443/8443 是两个节点） */
 export const nodeTag = (n: SubNode) => `${tagOf(n.host)}-${n.port}`;
@@ -67,9 +128,7 @@ export function loadNodes(env: Env, host: string): SubNode[] {
  * @returns {string[]} 协议名数组
  */
 export function pickProtos(env: Env, url: URL, hasTrojanOverride?: boolean): string[] {
-  const hasTrojan = hasTrojanOverride === undefined
-    ? Boolean(secretPwd(env))
-    : !!hasTrojanOverride;
+  const hasTrojan = hasTrojanOverride === undefined ? Boolean(secretPwd(env)) : !!hasTrojanOverride;
   const q = url.searchParams.get("proto");
   if (q === "vless") return ["vless"];
   if (q === "trojan") return hasTrojan ? ["trojan"] : ["vless"];
@@ -87,7 +146,7 @@ export function trojanPasswordOf(env: Env, id: string, auth?: Auth) {
   if (auth && auth.list) {
     const u = auth.list.find((x) => x.id === id);
     if (u && u.pwd) return u.pwd;
-    if (u && u.managed) return "";      // 托管用户没密码 → 这个订阅不出 Trojan
+    if (u && u.managed) return ""; // 托管用户没密码 → 这个订阅不出 Trojan
   }
   const raw = secretPwd(env);
   if (!raw) return "";
@@ -111,7 +170,12 @@ export function orderNodes(nodes: SubNode[], learned: Record<string, RttEntry>):
   return nodes
     .map((n: SubNode, i: number) => {
       const info = learned[nodeTag(n)];
-      return { ...n, _i: i, _rtt: info && typeof info.rtt === "number" ? info.rtt : null, _colo: (info && info.colo) || "" };
+      return {
+        ...n,
+        _i: i,
+        _rtt: info && typeof info.rtt === "number" ? info.rtt : null,
+        _colo: (info && info.colo) || "",
+      };
     })
     .sort((a: RankedNode, b: RankedNode) => {
       // 未测过的按"中性值"处理：快的一定在前，慢的排后，未测的居中
@@ -181,7 +245,15 @@ export function regionEntries(regions: string[], host: string, pass: string, pro
  * @param {string[]} [regions] 地区列表
  * @returns {string} YAML 文本
  */
-export function renderClash(env: Env, url: URL, id: string, host: string, learned: Record<string, RttEntry> = {}, regions: string[] = [], auth?: Auth) {
+export function renderClash(
+  env: Env,
+  url: URL,
+  id: string,
+  host: string,
+  learned: Record<string, RttEntry> = {},
+  regions: string[] = [],
+  auth?: Auth,
+) {
   const nodes = orderNodes(loadNodes(env, host), learned);
   const pass = trojanPasswordOf(env, id, auth);
   const protos = pickProtos(env, url, Boolean(pass));
@@ -193,7 +265,15 @@ export function renderClash(env: Env, url: URL, id: string, host: string, learne
   const G_REG = "\ud83c\udf0d \u5730\u533a";
   const G_MAN = "\ud83c\udfaf \u624b\u52a8";
 
-  const emit = (name: string, proto: string, server: string, port: number, path: string, tls: boolean, extra: string) => {
+  const emit = (
+    name: string,
+    proto: string,
+    server: string,
+    port: number,
+    path: string,
+    tls: boolean,
+    extra: string,
+  ) => {
     out.push(`  - name: "${name}"`);
     out.push(`    type: ${proto}`);
     out.push(`    server: ${server}`);
@@ -217,7 +297,15 @@ export function renderClash(env: Env, url: URL, id: string, host: string, learne
       for (const n of nodes) {
         if (proto === "trojan" && !pass) continue;
         const name = `${proto}-${nodeLabel(n)}-${suffix}`;
-        emit(name, proto, n.host, n.port, `${nodePath(n)}&mode=${mode}`, n.tls, n._rtt != null ? `rtt ~${n._rtt}ms` : "");
+        emit(
+          name,
+          proto,
+          n.host,
+          n.port,
+          `${nodePath(n)}&mode=${mode}`,
+          n.tls,
+          n._rtt != null ? `rtt ~${n._rtt}ms` : "",
+        );
         byMode[mode].push(name);
         all.push(name);
       }
@@ -260,7 +348,9 @@ export function renderClash(env: Env, url: URL, id: string, host: string, learne
 
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
-  groups.push(`    proxies: ["${G_TPUT}", "${G_LAT}"${regNames.length ? `, "${G_REG}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`);
+  groups.push(
+    `    proxies: ["${G_TPUT}", "${G_LAT}"${regNames.length ? `, "${G_REG}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
+  );
 
   return [
     "port: 7890",
@@ -287,7 +377,15 @@ export function renderClash(env: Env, url: URL, id: string, host: string, learne
   ].join("\n");
 }
 
-export function renderSingbox(env: Env, url: URL, id: string, host: string, learned: Record<string, RttEntry> = {}, regions: string[] = [], auth?: Auth) {
+export function renderSingbox(
+  env: Env,
+  url: URL,
+  id: string,
+  host: string,
+  learned: Record<string, RttEntry> = {},
+  regions: string[] = [],
+  auth?: Auth,
+) {
   const nodes = orderNodes(loadNodes(env, host), learned);
   const pass = trojanPasswordOf(env, id, auth);
   const protos = pickProtos(env, url, Boolean(pass));
@@ -367,18 +465,24 @@ export function renderSingbox(env: Env, url: URL, id: string, host: string, lear
         ],
         final: "dns_remote",
       },
-      inbounds: [
-        { type: "tun", tag: "tun-in", address: ["172.19.0.1/30"], auto_route: true, strict_route: true },
-      ],
+      inbounds: [{ type: "tun", tag: "tun-in", address: ["172.19.0.1/30"], auto_route: true, strict_route: true }],
       outbounds: [...groups, ...outs, { type: "direct", tag: "direct" }],
       route: { final: G_MAN, auto_detect_interface: true },
     },
     null,
-    2
+    2,
   );
 }
 
-export function renderLinks(env: Env, url: URL, id: string, host: string, learned: Record<string, RttEntry> = {}, regions: string[] = [], auth?: Auth) {
+export function renderLinks(
+  env: Env,
+  url: URL,
+  id: string,
+  host: string,
+  learned: Record<string, RttEntry> = {},
+  regions: string[] = [],
+  auth?: Auth,
+) {
   const nodes = orderNodes(loadNodes(env, host), learned);
   const pass = trojanPasswordOf(env, id, auth);
   const protos = pickProtos(env, url, Boolean(pass));

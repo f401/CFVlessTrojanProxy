@@ -35,16 +35,18 @@ export function pipeBack(sock: Socket, ws: WebSocketLike, st: Connection, onClos
         close() {
           if (onClose) onClose(st.down > 0);
           else {
-            try { ws.close(1000, "done"); } catch (e) {}
+            try {
+              ws.close(1000, "done");
+            } catch (e) {}
           }
         },
         abort() {
           closeQuietly(sock);
         },
-      })
+      }),
     )
     .catch((err) => {
-      logErr("pipe: " + (errMsg(err)), st && st.node ? st.node : "");
+      logErr("pipe: " + errMsg(err), st && st.node ? st.node : "");
       closeQuietly(sock);
       const clientGone = !ws || ws.readyState !== WS_OPEN;
       if (st && st.down > 0) {
@@ -56,11 +58,12 @@ export function pipeBack(sock: Socket, ws: WebSocketLike, st: Connection, onClos
           cnt("cut");
           if (st.node) {
             if (st.siteFail) {
-              nsSiteFail(st.node);            // 站点侧：只轻记
+              nsSiteFail(st.node); // 站点侧：只轻记
             } else {
               // 中途断流是节点问题：只记 tF 的话 pFail/可用性完全看不到，
               // 节点过了 60 秒冻结又原样回到候选表。加 0.5 次失败权重（不走阶梯）。
-              const sn = nsGet(st.node), now = Date.now();
+              const sn = nsGet(st.node),
+                now = Date.now();
               nsDecay(sn, now);
               sn.failW = (sn.failW || 0) + 0.5;
               sn.fail = (sn.fail || 0) + 0.5;
@@ -68,7 +71,7 @@ export function pipeBack(sock: Socket, ws: WebSocketLike, st: Connection, onClos
               // 中途断流的节点先凉 60 秒；站点级试探不冻结（可能只是对这个站不行）
               if (!st.hostTrial) {
                 sn.freeUntil = Math.max(sn.freeUntil || 0, now + 60000);
-                S.hostRankCache.clear();   // 站点排行不能继续推荐刚断流的节点
+                S.hostRankCache.clear(); // 站点排行不能继续推荐刚断流的节点
                 S.rankCache.t = 0;
               }
               sn.at = now;
@@ -76,6 +79,10 @@ export function pipeBack(sock: Socket, ws: WebSocketLike, st: Connection, onClos
           }
         }
       }
-      if (!clientGone) { try { ws.close(1011, "pipe error"); } catch (e) {} }
+      if (!clientGone) {
+        try {
+          ws.close(1011, "pipe error");
+        } catch (e) {}
+      }
     });
 }

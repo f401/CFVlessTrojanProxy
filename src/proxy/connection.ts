@@ -32,7 +32,7 @@ export class Connection {
   // —— 归属 ——
   ipTag: string;
   node = "";
-  host = "";              // 目标域名（按站点的节点画像用）
+  host = ""; // 目标域名（按站点的节点画像用）
   mode: Mode;
   trial = false;
   via = "direct";
@@ -40,25 +40,25 @@ export class Connection {
   // —— 热路径计数 ——
   down = 0;
   up = 0;
-  mark = TICK_BYTES;      // 下一个 tick 的字节水位
+  mark = TICK_BYTES; // 下一个 tick 的字节水位
 
   // —— 采样窗口 ——
   sampleAt = 0;
   sampleDown = 0;
   lastEmit = 0;
-  sampleW = 0;            // 本连接已贡献给直方图的权重（上限 SC.CONN_W_CAP）
-  inflightKey = "";       // 已经计入在途的节点（变更时迁移）
-  stallMark = 0;          // 上次采样时的累计背压毫秒（算窗口 stall 占比）
-  siteAt = 0;             // 站点吞吐：上一次采样时刻
-  siteDown = 0;           // 站点吞吐：上一次采样时的下行字节
-  siteEmitted = 0;        // 已写过几次站点级 bps（写过就别再用"一生平均"覆盖）
+  sampleW = 0; // 本连接已贡献给直方图的权重（上限 SC.CONN_W_CAP）
+  inflightKey = ""; // 已经计入在途的节点（变更时迁移）
+  stallMark = 0; // 上次采样时的累计背压毫秒（算窗口 stall 占比）
+  siteAt = 0; // 站点吞吐：上一次采样时刻
+  siteDown = 0; // 站点吞吐：上一次采样时的下行字节
+  siteEmitted = 0; // 已写过几次站点级 bps（写过就别再用"一生平均"覆盖）
 
   // —— 生命周期 ——
   markedOk = false;
   markedFail = false;
-  failed = false;         // 中途断流/异常（由 pipeBack 的 catch 置位），不算成功
-  siteFail = false;       // 失败归因：连上了节点但目标侧拒绝（只轻记全局）
-  hostTrial = false;      // 站点级试探：失败只记账，不动全局游标/不冻结
+  failed = false; // 中途断流/异常（由 pipeBack 的 catch 置位），不算成功
+  siteFail = false; // 失败归因：连上了节点但目标侧拒绝（只轻记全局）
+  hostTrial = false; // 站点级试探：失败只记账，不动全局游标/不冻结
   retried = false;
   pxTries = 0;
   triedV6 = false;
@@ -76,9 +76,9 @@ export class Connection {
   stallMs = 0;
 
   // —— 观测 ——
-  tAttach = 0;            // 连上上游的时刻
-  ttfb = 0;               // 首字节耗时（ms），按站点的画像就靠它
-  directFail = false;     // 直连阶段 0 字节关闭过（用于"直连对照"）
+  tAttach = 0; // 连上上游的时刻
+  ttfb = 0; // 首字节耗时（ms），按站点的画像就靠它
+  directFail = false; // 直连阶段 0 字节关闭过（用于"直连对照"）
 
   // —— 身份与上下文 ——
   t0 = Date.now();
@@ -128,8 +128,10 @@ export class Connection {
       }
       // 站点级吞吐：长连接（看视频）每 60 秒补一个窗口，别等连接结束
       if (this.node && this.host) {
-        if (!this.siteAt) { this.siteAt = now; this.siteDown = this.down; }
-        else if (now - this.siteAt >= 60000) {
+        if (!this.siteAt) {
+          this.siteAt = now;
+          this.siteDown = this.down;
+        } else if (now - this.siteAt >= 60000) {
           const sb = this.down - this.siteDown;
           const sdt = now - this.siteAt;
           if (sb >= 262144) {
@@ -149,8 +151,8 @@ export class Connection {
       this.flush(false);
       return await this.backpressure(ws);
     } catch (e) {
-      logErr("tick: " + (errMsg(e)), this.node || "");
-      return true;   // 统计出错绝不影响数据面
+      logErr("tick: " + errMsg(e), this.node || "");
+      return true; // 统计出错绝不影响数据面
     }
   }
 
@@ -170,7 +172,9 @@ export class Connection {
       if ((ws.bufferedAmount || 0) > WS_MAX_BUFFER || Date.now() > deadline) {
         cnt("stall");
         this.stallMs += Date.now() - t0;
-        try { ws.close(1011, "stall"); } catch (e) {}
+        try {
+          ws.close(1011, "stall");
+        } catch (e) {}
         closeQuietly(this.sock);
         return false;
       }
@@ -186,7 +190,8 @@ export class Connection {
     if (k === this.inflightKey) return;
     if (this.inflightKey) {
       const n = (S.inflight.get(this.inflightKey) || 1) - 1;
-      if (n > 0) S.inflight.set(this.inflightKey, n); else S.inflight.delete(this.inflightKey);
+      if (n > 0) S.inflight.set(this.inflightKey, n);
+      else S.inflight.delete(this.inflightKey);
     }
     this.inflightKey = k || "";
     if (k) S.inflight.set(k, (S.inflight.get(k) || 0) + 1);
@@ -195,7 +200,8 @@ export class Connection {
   clearInflight(): void {
     if (!this.inflightKey) return;
     const n = (S.inflight.get(this.inflightKey) || 1) - 1;
-    if (n > 0) S.inflight.set(this.inflightKey, n); else S.inflight.delete(this.inflightKey);
+    if (n > 0) S.inflight.set(this.inflightKey, n);
+    else S.inflight.delete(this.inflightKey);
     this.inflightKey = "";
   }
 
@@ -248,7 +254,8 @@ export class Connection {
         if (this.host) {
           if (this.node) {
             const life = this.tAttach ? Math.max(1, Date.now() - this.tAttach) : 0;
-            const siteBps = !this.siteEmitted && life > 500 && this.down >= 512 * 1024 ? Math.round((this.down * 1000) / life) : 0;
+            const siteBps =
+              !this.siteEmitted && life > 500 && this.down >= 512 * 1024 ? Math.round((this.down * 1000) / life) : 0;
             hostNodeMark(this.host, this.node, {
               ok: !this.failed && this.down > 0 ? 1 : 0,
               bad: this.failed ? 1 : 0,

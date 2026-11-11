@@ -1,12 +1,11 @@
-
 /* 配额与订阅头：纯计算，不碰 IO */
 
 export function effectiveQuota(env: Env, used: number) {
-  const base = Number(env.quotaBytes) > 0 ? Number(env.quotaBytes) : 1024 ** 4;  // 默认 1 TB
+  const base = Number(env.quotaBytes) > 0 ? Number(env.quotaBytes) : 1024 ** 4; // 默认 1 TB
   const u = Number(used);
   if (!Number.isFinite(u) || u <= 0) return base;
   let total = base;
-  while (u >= total) total *= 2;     // 不设上限，直到覆盖实际用量
+  while (u >= total) total *= 2; // 不设上限，直到覆盖实际用量
   return total;
 }
 

@@ -3,8 +3,7 @@ import { connect } from "cloudflare:sockets";
 
 /* 出站网络：DNS / 三级拨号 / 目标校验 */
 export const DENY_PORTS = new Set([
-  23, 25, 135, 137, 138, 139, 445, 465, 587, 1433, 1521, 2049, 3306, 3389, 5432, 5900, 6379,
-  9200, 11211, 27017,
+  23, 25, 135, 137, 138, 139, 445, 465, 587, 1433, 1521, 2049, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017,
 ]);
 
 /**
@@ -27,9 +26,9 @@ export function isPrivateHost(h: string) {
     if (host === "::1" || host === "::") return true;
     if (/^f[cd][0-9a-f]{2}:/.test(host)) return true; // fc00::/7
     if (/^fe[89ab][0-9a-f]:/.test(host)) return true; // fe80::/10
-    if (/^ff[0-9a-f]{2}:/.test(host)) return true;    // 组播
-    if (/^2001:db8:/.test(host)) return true;         // 文档保留
-    if (/^2002:/.test(host)) return true;             // 6to4，可编码内网 v4
+    if (/^ff[0-9a-f]{2}:/.test(host)) return true; // 组播
+    if (/^2001:db8:/.test(host)) return true; // 文档保留
+    if (/^2002:/.test(host)) return true; // 6to4，可编码内网 v4
     // NAT64（含本服务自己用的前缀）：可把 127.0.0.1 编成公网 IPv6
     if (/^64:ff9b::/.test(host) || /^2001:67c:2960:6464:/.test(host)) return true;
     if (host.startsWith("::ffff:")) {
@@ -38,7 +37,8 @@ export function isPrivateHost(h: string) {
       // ::ffff:7f00:1 这种十六进制写法等价于 127.0.0.1
       const hx = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(rest);
       if (hx) {
-        const hi = parseInt(hx[1], 16), lo = parseInt(hx[2], 16);
+        const hi = parseInt(hx[1], 16),
+          lo = parseInt(hx[2], 16);
         return isPrivateHost(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
       }
       return true;
@@ -64,11 +64,11 @@ export function isPrivateHost(h: string) {
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
   if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-  if (a === 192 && b === 0 && (c === 0 || c === 2)) return true;  // 192.0.0/24 / TEST-NET-1
-  if (a === 198 && (b === 18 || b === 19)) return true;           // 基准测试
-  if (a === 198 && b === 51 && c === 100) return true;            // TEST-NET-2
-  if (a === 203 && b === 0 && c === 113) return true;             // TEST-NET-3
-  if (a === 192 && b === 88 && c === 99) return true;             // 6to4 中继
+  if (a === 192 && b === 0 && (c === 0 || c === 2)) return true; // 192.0.0/24 / TEST-NET-1
+  if (a === 198 && (b === 18 || b === 19)) return true; // 基准测试
+  if (a === 198 && b === 51 && c === 100) return true; // TEST-NET-2
+  if (a === 203 && b === 0 && c === 113) return true; // TEST-NET-3
+  if (a === 192 && b === 88 && c === 99) return true; // 6to4 中继
   if (a >= 224) return true; // 组播/保留
   return false;
 }
@@ -87,12 +87,11 @@ export function checkTarget(host: string, port: number) {
   return null;
 }
 
-
 /** 查 AAAA 记录（用于绕过 CF 对 IPv4 的内部隔离） */
 export const DOH_ENDPOINTS = [
-  "https://dns.google/resolve",                 // 非 CF，优先
-  "https://1.1.1.1/dns-query",                  // CF
-  "https://doh.pub/dns-query",                  // 腾讯
+  "https://dns.google/resolve", // 非 CF，优先
+  "https://1.1.1.1/dns-query", // CF
+  "https://doh.pub/dns-query", // 腾讯
 ];
 
 /**
@@ -233,4 +232,3 @@ export async function dial(host: string, port: number) {
 /* ==================================================================
  * §6.1  流量统计
  * ================================================================== */
-

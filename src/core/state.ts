@@ -25,14 +25,29 @@ export class AppState {
   needPx: Map<string, number> = new Map();
   colo = "";
   funnel: Record<string, number> = { direct: 0, node: 0, v6: 0 };
-  candN = 0;               // 最近一次 candsFor 的候选数（观测用）
-  inflight: Map<string, number> = new Map();   // 节点在途连接数（负载均衡用）
+  candN = 0; // 最近一次 candsFor 的候选数（观测用）
+  inflight: Map<string, number> = new Map(); // 节点在途连接数（负载均衡用）
   // 候选排行缓存：只在大规模（alive≥24）时启用，20 秒一轮
   rankCache: { t: number; v: Record<string, RankRow[]> } = { t: 0, v: {} };
 
   // —— 日计数 ——
-  cntKeys = ["conn", "direct", "node", "eCloseD", "eCloseP", "sw", "noCand",
-    "tput", "stall", "cut", "ccut", "dead", "noPayload", "noAuth", "wsFail"];
+  cntKeys = [
+    "conn",
+    "direct",
+    "node",
+    "eCloseD",
+    "eCloseP",
+    "sw",
+    "noCand",
+    "tput",
+    "stall",
+    "cut",
+    "ccut",
+    "dead",
+    "noPayload",
+    "noAuth",
+    "wsFail",
+  ];
   cnt: Record<string, number> = {};
   cntDay = "";
   cntSent: Record<string, number> = {};
@@ -52,7 +67,7 @@ export class AppState {
   stats: Map<string, StatsLocal> = new Map();
   pend: Map<string, PendEntry> = new Map();
   pendAt = 0;
-  pendMs = 30000;          // 推送间隔地板：30 秒（原来 10 秒，DO 请求量 ×3）
+  pendMs = 30000; // 推送间隔地板：30 秒（原来 10 秒，DO 请求量 ×3）
   tflush: ReturnType<typeof setTimeout> | null = null;
   pendBytes = 0;
   doCalls = 0;
@@ -62,11 +77,15 @@ export class AppState {
   /** 跨 isolate 的节点快照（Meter DO 里的 s），面板用；60 秒缓存 */
   nodeSnapCache: { t: number; v: Record<string, NodeSnap> } = { t: 0, v: {} };
   snapWritten = 0;
-  snapBusy = false;        // flushSnap 在飞：并发收尾只允许一个写
-  snapChecked = 0;         // 上次检查全局闸门的时间（避免每条连接都读一次 KV）
+  snapBusy = false; // flushSnap 在飞：并发收尾只允许一个写
+  snapChecked = 0; // 上次检查全局闸门的时间（避免每条连接都读一次 KV）
   snapBytes = 0;
   kvw = 0;
-  kvStat: { ok: boolean | null; key: string; at: number; err?: string; quota?: boolean; quotaAt?: number } = { ok: null, key: "", at: 0 };
+  kvStat: { ok: boolean | null; key: string; at: number; err?: string; quota?: boolean; quotaAt?: number } = {
+    ok: null,
+    key: "",
+    at: 0,
+  };
 
   // —— 按站点的节点画像（诊断 / 站点级偏好用）——
   //   hostNode[host][node] = {n, ok, bad, bytes, ttfb, at}
@@ -81,7 +100,7 @@ export class AppState {
   usersCache: { v: Auth | null; t: number } = { v: null, t: 0 };
   usersSig = "";
   rtt: Map<string, Record<string, RttEntry>> = new Map();
-  rttMiss: Map<string, number> = new Map();   // rtt:<id> 不存在时的负缓存（省 KV 读）
+  rttMiss: Map<string, number> = new Map(); // rtt:<id> 不存在时的负缓存（省 KV 读）
   errs: ErrItem[] = [];
 
   // —— DNS 缓存 ——

@@ -9,7 +9,11 @@ import { flushSnap } from "./snapshot";
 export async function kvGet<T = unknown>(env: Env, key: string): Promise<T | null> {
   if (!env || !env.STATS) return null;
   let raw = null;
-  try { raw = await env.STATS.get(key); } catch (e) { return null; }
+  try {
+    raw = await env.STATS.get(key);
+  } catch (e) {
+    return null;
+  }
   return (await unseal(env, raw)) as T | null;
 }
 
@@ -36,7 +40,10 @@ export async function kvPut(kv: KVNamespace, key: string, val: string, opts?: { 
     // 10048 = 当日写入额度耗尽；此时所有改动只在内存里生效，必须让调用方知道
     const emsg = String(errMsg(e));
     S.kvStat = {
-      ok: false, key, at: Date.now(), err: emsg.slice(0, 100),
+      ok: false,
+      key,
+      at: Date.now(),
+      err: emsg.slice(0, 100),
       quota: /10048|quota|limit/i.test(emsg),
       quotaAt: Date.now(),
     };

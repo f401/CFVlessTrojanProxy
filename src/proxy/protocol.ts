@@ -3,7 +3,7 @@ import { kvGet, kvSet } from "../store/index";
 import { dec, enc, secretPwd, sha224Bytes, toHex, uuidFromBytes } from "../core/util";
 
 /* 协议解析：VLESS / Trojan 首包 */
-export const USERS_TTL = 300000;  // 面板改动最多 5 分钟生效（把 KV 读从 1.4 万/天压到 1.4 千）
+export const USERS_TTL = 300000; // 面板改动最多 5 分钟生效（把 KV 读从 1.4 万/天压到 1.4 千）
 
 export const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -33,7 +33,10 @@ export async function loadUsers(env: Env): Promise<Auth> {
   const setTrojan = (id: string, pwd: string) => {
     const h = hashOf(pwd);
     const cur = trojan.get(h);
-    if (!cur || cur === id) { trojan.set(h, id); return; }
+    if (!cur || cur === id) {
+      trojan.set(h, id);
+      return;
+    }
     const owner = list.find((x) => x.id === cur);
     if (!owner || !owner.enabled) trojan.set(h, id);
   };
@@ -57,7 +60,7 @@ export async function loadUsers(env: Env): Promise<Auth> {
     } else {
       if (note && !rec.note) rec.note = note;
       if (managedFlag) rec.managed = true;
-      rec.enabled = enabled !== false;   // 托管记录最后写，必须能覆盖 env 的启用状态
+      rec.enabled = enabled !== false; // 托管记录最后写，必须能覆盖 env 的启用状态
     }
     if (pwd) {
       if (rec.pwd && rec.pwd !== pwd) delTrojanFor(id);
@@ -118,13 +121,15 @@ export function invalidateUsers() {
  * @returns {Promise<void>}
  */
 export async function saveUsers(env: Env, list: UserRec[]) {
-  const clean = list.filter((x) => x.managed).map((x) => ({
-    id: x.id,
-    pwd: x.pwd || "",
-    note: x.note || "",
-    enabled: x.enabled !== false,
-    ts: x.ts || 0,
-  }));
+  const clean = list
+    .filter((x) => x.managed)
+    .map((x) => ({
+      id: x.id,
+      pwd: x.pwd || "",
+      note: x.note || "",
+      enabled: x.enabled !== false,
+      ts: x.ts || 0,
+    }));
   await kvSet(env, "users", clean);
   invalidateUsers();
 }

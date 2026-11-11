@@ -1,0 +1,5 @@
+dist
+obf
+node_modules
+test/_bundle.mjs
+test/golden.json

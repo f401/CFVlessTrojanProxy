@@ -7,10 +7,10 @@ import { meterGet } from "./metering";
 /* 快照：用量灾备（KV）+ 合成快照 */
 
 export const USAGE_SNAP_KEY = "usage:snap";
-export const FLUSH_MIN_MS = 3600000;    // 1 小时（且累计 ≥2MB 才写）
-export const FLUSH_DIRTY = 2 * 1024 * 1024;   // 脏字节门槛
-export const FLUSH_MAX_MS = 7200000;    // 最迟 2 小时必落一次
-export const FLUSH_GAP = 2700000;       // 全局闸门：45 分钟内已有别的 isolate 写过就不再写
+export const FLUSH_MIN_MS = 3600000; // 1 小时（且累计 ≥2MB 才写）
+export const FLUSH_DIRTY = 2 * 1024 * 1024; // 脏字节门槛
+export const FLUSH_MAX_MS = 7200000; // 最迟 2 小时必落一次
+export const FLUSH_GAP = 2700000; // 全局闸门：45 分钟内已有别的 isolate 写过就不再写
 export const SNAP_TTL = 300000;
 
 export async function usageSnapGet(env: Env) {
@@ -116,7 +116,7 @@ async function writeSnap(env: Env, now: number): Promise<void> {
     v: 1,
     ts: now,
     date: day,
-    stats: prev.date === day ? { ...(prev.stats || {}) } : {},   // 跨天重置
+    stats: prev.date === day ? { ...(prev.stats || {}) } : {}, // 跨天重置
     rtt: { ...(prev.rtt || {}) },
     errs: (prev.errs || []).slice(-50),
   };

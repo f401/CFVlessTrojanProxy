@@ -8,7 +8,6 @@ import { P_T, VERSION, enc, toHex } from "../core/util";
 
 /* panel */
 
-
 /**
  * 生成用户首页（用量、当前节点、订阅入口与参数说明）。
  * @param {object} env Worker 环境
@@ -135,8 +134,6 @@ ${row("?k=", "页面口令（配置了 pageKey 才生效）", false)}
 </body></html>`;
 }
 
-
-
 /* ---------- 会话与登录（挑战-应答，密码不出现在任何请求里） ---------- */
 
 /**
@@ -146,20 +143,17 @@ ${row("?k=", "页面口令（配置了 pageKey 才生效）", false)}
  * @returns {string} 值，没有则空串
  */
 
-
 /**
  * 计算字符串的 SHA-256，输出十六进制。
  * @param {string} str 原文
  * @returns {Promise<string>} 64 位十六进制
  */
 
-
 /**
  * 用 adminKey 派生会话 token（不存任何明文）。
  * @param {object} env Worker 环境
  * @returns {Promise<string>} token
  */
-
 
 /**
  * 校验管理端请求是否已登录（cookie 或 URL 上的 key）。
@@ -169,8 +163,6 @@ ${row("?k=", "页面口令（配置了 pageKey 才生效）", false)}
  * @returns {Promise<boolean>} 是否通过
  */
 
-
-
 /**
  * 登录限流：命中则返回 false。
  * @param {string} ip 客户端 IP
@@ -178,19 +170,16 @@ ${row("?k=", "页面口令（配置了 pageKey 才生效）", false)}
  * @returns {boolean} 是否允许本次请求
  */
 
-
 /**
  * 清空某个 IP 的失败计数（登录成功后调用）。
  * @param {string} ip 客户端 IP
  * @returns {void}
  */
 
-
 /**
  * 生成一次性随机串（用于登录表单防重放）。
  * @returns {string} 32 位十六进制
  */
-
 
 /**
  * 渲染登录页。
@@ -250,7 +239,6 @@ f.addEventListener('submit',async e=>{
  * @returns {string} 密码
  */
 
-
 /**
  * 渲染“未配置 adminKey”的提示页。
  * @returns {string} HTML
@@ -271,7 +259,12 @@ export function renderAdminHint() {
  * @param {Map<string,object>} statsMap 用量表
  * @returns {string} HTML
  */
-export function renderAdmin(url: URL, users: { list: UserRec[] }, statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }>, pageKey = "") {
+export function renderAdmin(
+  url: URL,
+  users: { list: UserRec[] },
+  statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }>,
+  pageKey = "",
+) {
   // 用 ?k=adminKey 直接打开面板时，表单 POST 也必须带同一个 k
   const ak = url.searchParams.get("k") || "";
   const opAction = "/admin/op" + (ak ? "?k=" + encodeURIComponent(ak) : "");
@@ -396,14 +389,12 @@ ${rows || '<tr><td colspan="8" class="mu">还没有用户</td></tr>'}
  * @returns {number} 展示用总量
  */
 
-
 /**
  * 生成订阅响应头（subscription-userinfo / 到期 / 标题）。
  * @param {object} env Worker 环境
  * @param {object} stats 用量对象
  * @returns {Record<string,string>} 响应头
  */
-
 
 /**
  * 渲染用量看板（进度条 + 各入口 RTT + 最近错误）。
@@ -413,7 +404,14 @@ ${rows || '<tr><td colspan="8" class="mu">还没有用户</td></tr>'}
  * @param {object} learned RTT 学习结果
  * @returns {string} HTML
  */
-export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Record<string, RttEntry>, alive: NodeEntry[], nsMap: Record<string, Record<string, number | string>>) {
+export function renderStatsHtml(
+  env: Env,
+  id: string,
+  s: StatsView,
+  learned: Record<string, RttEntry>,
+  alive: NodeEntry[],
+  nsMap: Record<string, Record<string, number | string>>,
+) {
   const usedBytes = (s.up || 0) + (s.down || 0);
   const total = effectiveQuota(env, usedBytes);
   const pct = total > 0 ? Math.min(100, Math.round((usedBytes / total) * 100)) : 0;
@@ -421,8 +419,11 @@ export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Rec
   const rttRows = (Object.entries(learned || {}) as [string, RttEntry][])
     .sort((a, b) => a[1].rtt - b[1].rtt)
     .map(([tag, v]) => {
-      const city = v.colo ? `${v.colo}${(COLO_CITY as Record<string, string>)[v.colo] ? "-" + (COLO_CITY as Record<string, string>)[v.colo] : ""}` : "-";
-      const ok = v.ok || 0, bad = v.fail || 0;
+      const city = v.colo
+        ? `${v.colo}${(COLO_CITY as Record<string, string>)[v.colo] ? "-" + (COLO_CITY as Record<string, string>)[v.colo] : ""}`
+        : "-";
+      const ok = v.ok || 0,
+        bad = v.fail || 0;
       const rate = ok + bad > 0 ? Math.round((ok / (ok + bad)) * 100) + "% (" + ok + "/" + (ok + bad) + ")" : "-";
       const cls = ok + bad >= 5 && ok / (ok + bad) < 0.8 ? ' style="color:#dc2626"' : "";
       return `<tr><td class="u">${escapeHtml(tag)}</td><td>${escapeHtml(city)}</td><td>${v.rtt} ms</td><td>${v.hits}</td><td${cls}>${rate}</td></tr>`;
@@ -432,7 +433,7 @@ export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Rec
   const nodeRows = (alive || [])
     .map((x: NodeEntry) => {
       const k = x.h + ":" + x.p;
-      const a1 = (S.nstat.get(k) || ZERO_STAT);
+      const a1 = S.nstat.get(k) || ZERO_STAT;
       const b1 = (nsMap && nsMap[k]) || {};
       const st = {
         ok: Math.max(a1.ok || 0, Number(b1.ok) || 0),
@@ -462,13 +463,17 @@ export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Rec
     .slice(0, 10)
     .map(
       (n) =>
-        `<tr title="${escapeHtml(n.tip)}"><td class="u">${escapeHtml(n.k)}</td><td>${escapeHtml(n.cc || "-")}</td><td>${n.x.ms} ms</td><td>${n.kbps}</td><td>${n.rate}</td><td><b>${Math.round(n.score)}</b></td></tr>`
+        `<tr title="${escapeHtml(n.tip)}"><td class="u">${escapeHtml(n.k)}</td><td>${escapeHtml(n.cc || "-")}</td><td>${n.x.ms} ms</td><td>${n.kbps}</td><td>${n.rate}</td><td><b>${Math.round(n.score)}</b></td></tr>`,
     )
     .join("");
 
-  const errRows = S.errs.slice(-20)
+  const errRows = S.errs
+    .slice(-20)
     .reverse()
-    .map((e) => `<tr><td>${new Date(e.t).toISOString().replace("T", " ").slice(0, 19)}</td><td class="u">${escapeHtml(e.m)}</td></tr>`)
+    .map(
+      (e) =>
+        `<tr><td>${new Date(e.t).toISOString().replace("T", " ").slice(0, 19)}</td><td class="u">${escapeHtml(e.m)}</td></tr>`,
+    )
     .join("");
 
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -507,7 +512,6 @@ ${total ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
  * @param {string} s 原文
  * @returns {string} 转义后的文本
  */
-
 
 /* ==================================================================
  * Meter：每个用户一个 Durable Object —— 全局唯一的流量帐本

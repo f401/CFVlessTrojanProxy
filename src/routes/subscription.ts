@@ -25,11 +25,7 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
       // 注意：不要写成 (await pxGet(env)).cur —— 那会在数组字面量里
       // 先串行 await 一次，Promise.all 就只剩两个成员了。
       const px0 = pxGet(env).then((x) => x.cur);
-      const [st, curPx, alive] = await Promise.all([
-        readStatsCached(env, id),
-        px0,
-        aliveList(env),
-      ]);
+      const [st, curPx, alive] = await Promise.all([readStatsCached(env, id), px0, aliveList(env)]);
       const f: Record<string, number> = S.funnel || {};
       const ftot = (f.direct || 0) + (f.node || 0) + (f.v6 || 0);
       const pctOf = (x: number) => (ftot > 0 ? Math.round((x / ftot) * 1000) / 10 + "%" : "-");
@@ -53,7 +49,8 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
         headers: {
           "content-type": "text/html;charset=utf-8",
           "cache-control": "no-store",
-          "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
+          "content-security-policy":
+            "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
           "x-frame-options": "DENY",
           "x-content-type-options": "nosniff",
           "referrer-policy": "no-referrer",
@@ -103,7 +100,6 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
       }
       return json(s);
     }
-
   }
   return new Response("Not Found", { status: 404 });
 }

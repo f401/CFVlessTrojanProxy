@@ -1,6 +1,5 @@
 import { errMsg } from "./core/util";
 
-
 import { handleUpgrade } from "./proxy/session";
 import { Meter } from "./store/meter";
 import { health } from "./routes/health";
@@ -31,7 +30,7 @@ export default {
       // "edge.example.com:443:443" 这种坏地址；hostname 已经去掉端口
       const host = url.hostname || request.headers.get("Host") || "";
       const cf = request.cf || {};
-      S.colo = (cf && cf.colo) || S.colo || "??";   // 本 isolate 的机房：所有统计按它分桶
+      S.colo = (cf && cf.colo) || S.colo || "??"; // 本 isolate 的机房：所有统计按它分桶
 
       if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
         return await handleUpgrade(request, env, ctx);

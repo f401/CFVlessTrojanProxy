@@ -4,7 +4,20 @@ import { SEED_WRITE_GAP } from "../core/const";
 import { HIST_BASE, HIST_N, SC } from "../core/const";
 import { logErr } from "../nodes/metrics";
 import { POOL_MAX, POOL_TTL_MS, geoLabel, probeProxy, refillPool } from "./probe";
-import { candsFor, capOf, costOf, scoreParts, nsLatency, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, pcts } from "../nodes/score";
+import {
+  candsFor,
+  capOf,
+  costOf,
+  scoreParts,
+  nsLatency,
+  nsProbe,
+  nsProbeFail,
+  p90Of,
+  pFailOf,
+  pStallOf,
+  pctOf,
+  pcts,
+} from "../nodes/score";
 import { BUCKET_DEF, SEEDS } from "./seed";
 import { SEL } from "../nodes/selector";
 import { S } from "../core/state";
@@ -14,9 +27,9 @@ import { kvGet, kvSet, scheduleFlush } from "../store/index";
 /* ---- 轮换模块：内存为权威，KV 只存「候选池 + 分机房节点信誉」 ---- */
 
 export const SEED_KEY = "px:seed";
-export const SEED_TTL = 30 * 60000;      // 信誉表回读周期
-export const SEED_MAX = 40;              // 每个机房最多记 40 个节点
-export const SEED_COLD_N = 8;            // 冷启动灌进 alive 的节点数
+export const SEED_TTL = 30 * 60000; // 信誉表回读周期
+export const SEED_MAX = 40; // 每个机房最多记 40 个节点
+export const SEED_COLD_N = 8; // 冷启动灌进 alive 的节点数
 export const PX_TTL = 86400 * 30;
 export const SEED_VER = 6;
 // 信誉表落盘的最小间隔：每个 isolate 各写各的会让写次数随实例数线性增长
@@ -26,18 +39,20 @@ export const SEED_VER = 6;
 export { SC, HIST_BASE, HIST_N } from "../core/const";
 
 export const MODES: Mode[] = ["lat", "tput"];
-const ALIVE_MAX = 400;                  // 长期运行 alive 上限：池子换代不会永久累积
-
-
-
+const ALIVE_MAX = 400; // 长期运行 alive 上限：池子换代不会永久累积
 
 // 灾备种子：seed 被清空时用它兜底，避免"池子有 2000 条但一个能用的都没有"。
 // 这些是历史上实测可用的中转，会被正常探活/熔断覆盖，不是永久白名单。
 export const BOOT = [
-  "45.147.250.39:443", "45.136.117.194:443", "185.253.117.147:443", "91.215.154.80:443",
-  "91.215.153.143:443", "45.151.183.22:443", "193.181.211.185:443", "89.22.227.132:443",
+  "45.147.250.39:443",
+  "45.136.117.194:443",
+  "185.253.117.147:443",
+  "91.215.154.80:443",
+  "91.215.153.143:443",
+  "45.151.183.22:443",
+  "193.181.211.185:443",
+  "89.22.227.132:443",
 ];
-
 
 /* 日计数器：用来回答"一天多少连接、多少走节点、切换几次"这些以前只能估的量 */
 
@@ -46,7 +61,10 @@ function rollCntDay() {
   const d = new Date().toISOString().slice(0, 10);
   if (S.cntDay === d) return;
   S.cntDay = d;
-  for (const key of S.cntKeys) { S.cnt[key] = 0; S.cntSent[key] = 0; }
+  for (const key of S.cntKeys) {
+    S.cnt[key] = 0;
+    S.cntSent[key] = 0;
+  }
 }
 
 /**
@@ -57,7 +75,9 @@ function rollCntDay() {
  */
 export function cnt(k: string, n: number = 1) {
   if (!S.cntKeys.includes(k)) {
-    try { console.error("[cnt] unknown key", k); } catch (e) {}
+    try {
+      console.error("[cnt] unknown key", k);
+    } catch (e) {}
     return;
   }
   rollCntDay();
@@ -196,7 +216,10 @@ export async function pxGet(env: Env) {
     if (!src.length) {
       // 连名单桶都没有：借用任意一个有数据的机房，只取名字，不取延迟（避免跨机房污染）
       const hit = (Object.values(S.seed.byColo || {}) as SeedBucket[]).find((b) => (b.nodes || []).length);
-      if (hit) { src = hit.nodes || []; foreign = true; }
+      if (hit) {
+        src = hit.nodes || [];
+        foreign = true;
+      }
     }
     if (!src.length) {
       for (const kk of BOOT) {
@@ -208,9 +231,7 @@ export async function pxGet(env: Env) {
       if (!n || !n.k) continue;
       const i = n.k.lastIndexOf(":");
       // 跨机房桶只借名字：n.ms 是别的机房的延迟，直接用会污染本地评分
-      const ms = foreign
-        ? (refMs[n.k] || SC.P_TCP)
-        : ((n.ms && n.ms !== SC.P_TCP) ? n.ms : (refMs[n.k] || n.ms || SC.P_TCP));
+      const ms = foreign ? refMs[n.k] || SC.P_TCP : n.ms && n.ms !== SC.P_TCP ? n.ms : refMs[n.k] || n.ms || SC.P_TCP;
       S.alive.set(n.k, {
         h: n.h || n.k.slice(0, i),
         p: n.p || Number(n.k.slice(i + 1)) || 443,
@@ -232,7 +253,7 @@ export async function pxGet(env: Env) {
     alive: [...S.alive.values()],
     state: {
       gen: S.poolGen || S.seed.poolGen || 0,
-      poolKey: (S.poolGen || S.seed.poolGen) ? "px:pool:" + (S.poolGen || S.seed.poolGen) : "",
+      poolKey: S.poolGen || S.seed.poolGen ? "px:pool:" + (S.poolGen || S.seed.poolGen) : "",
       poolN: S.pool.length || S.seed.poolN || 0,
       builtAt: S.poolBuilt,
       idx: S.poolIdx,
@@ -258,13 +279,16 @@ export function nsOf(keys: string[]) {
   const m: Record<string, Record<string, number | string>> = {};
   let i = 0;
   for (const k of keys) {
-    if (++i > 64) break;                       // 面板最多展示几十行，别被异常输入拖死
+    if (++i > 64) break; // 面板最多展示几十行，别被异常输入拖死
     const s = S.nstat.get(k);
     if (!s) continue;
     const n = (s.okW || 0) + (s.failW || 0);
-    const lat = scoreParts(k, "lat"), tp = scoreParts(k, "tput");
+    const lat = scoreParts(k, "lat"),
+      tp = scoreParts(k, "tput");
     m[k] = {
-      ok: s.ok || 0, fail: s.fail || 0, at: s.at || 0,
+      ok: s.ok || 0,
+      fail: s.fail || 0,
+      at: s.at || 0,
       bps: Math.round(p90Of(s) || s.seedBps || 0),
       bpsMed: Math.round(pctOf(s, 0.5) || 0),
       bpsCap: Math.round(capOf(s) || 0),
@@ -287,7 +311,10 @@ export function nsOf(keys: string[]) {
 /** 兼容旧调用：只改内存，不落盘 */
 export async function pxSet(env: Env, patch: { cur?: string | null; alive?: NodeEntry[] }) {
   if (!patch) return pxGet(env);
-  if (typeof patch.cur === "string") { S.curs.tput = patch.cur; S.curs.lat = patch.cur; }
+  if (typeof patch.cur === "string") {
+    S.curs.tput = patch.cur;
+    S.curs.lat = patch.cur;
+  }
   if (Array.isArray(patch.alive)) {
     S.alive = new Map(patch.alive.map((x) => [keyOf(x), x]));
   }
@@ -341,7 +368,13 @@ export async function cronScan(env: Env) {
   for (const x of hits) {
     if (!x) continue;
     const k = keyOf(x);
-    S.alive.set(k, { h: x.h, p: x.p, cc: (x as { cc?: string }).cc || ((S.alive.get(k) || {}) as NodeEntry).cc || "", ms: x.ms, src: "probe" });
+    S.alive.set(k, {
+      h: x.h,
+      p: x.p,
+      cc: (x as { cc?: string }).cc || ((S.alive.get(k) || {}) as NodeEntry).cc || "",
+      ms: x.ms,
+      src: "probe",
+    });
     nsLatency(k, x.ms);
     nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
   }
@@ -350,13 +383,16 @@ export async function cronScan(env: Env) {
   //    以前这里取的是 alive 的前三个 key（插入顺序），跟"前 3 名"没关系，
   //    真正该复测的头部节点反而一直轮不到。
   const cur = S.curs.tput || S.curs.lat || "";
-  const top3 = candsFor("tput").map((x) => x.k).filter((k) => k !== cur).slice(0, 3);
+  const top3 = candsFor("tput")
+    .map((x) => x.k)
+    .filter((k) => k !== cur)
+    .slice(0, 3);
   const recheck = [cur, ...top3].filter(Boolean).slice(0, 4);
   const rres = await Promise.all(
     recheck.map(async (k) => {
       const i = k.lastIndexOf(":");
       return { k, r: await probeProxy(k.slice(0, i), Number(k.slice(i + 1)) || 443) };
-    })
+    }),
   );
   for (const { k, r } of rres) {
     if (r && !r.bad) {
@@ -372,14 +408,14 @@ export async function cronScan(env: Env) {
   // ②b 其余 alive：只刷新延迟，不参与拉黑（抖动不该把 alive 打死）
   //    从 poolIdx 开始轮转，别每次都测同样 12 个（插入顺序靠前的会一直被溺爱）
   const allRest = [...S.alive.keys()].filter((k) => !recheck.includes(k));
-  const start = allRest.length ? (S.poolIdx % allRest.length) : 0;
+  const start = allRest.length ? S.poolIdx % allRest.length : 0;
   const rest = [...allRest.slice(start), ...allRest.slice(0, start)].slice(0, 12);
   if (rest.length) {
     const rres2 = await Promise.all(
       rest.map(async (k) => {
         const i = k.lastIndexOf(":");
         return { k, r: await probeProxy(k.slice(0, i), Number(k.slice(i + 1)) || 443) };
-      })
+      }),
     );
     for (const { k, r } of rres2) {
       if (r && !r.bad) {
@@ -420,7 +456,7 @@ export async function cronScan(env: Env) {
     rows.sort((a, b) => {
       const ap = inPool.has(a[0]) ? 0 : 1;
       const bp = inPool.has(b[0]) ? 0 : 1;
-      if (ap !== bp) return bp - ap;              // 先删不在当前池里的
+      if (ap !== bp) return bp - ap; // 先删不在当前池里的
       return (b[1].ms || 9999) - (a[1].ms || 9999); // 同一档先删最慢的
     });
     for (const [k] of rows) {
@@ -450,9 +486,7 @@ export async function cronScan(env: Env) {
       S.nstat.delete(k);
     }
     if (S.nstat.size > 400) {
-      const old = [...S.nstat.entries()]
-        .filter(([k]) => !live.has(k))
-        .sort((a, b) => (a[1].at || 0) - (b[1].at || 0));
+      const old = [...S.nstat.entries()].filter(([k]) => !live.has(k)).sort((a, b) => (a[1].at || 0) - (b[1].at || 0));
       for (const [k] of old) {
         if (S.nstat.size <= 300) break;
         S.nstat.delete(k);
@@ -470,6 +504,3 @@ export async function cronScan(env: Env) {
     await SEEDS.write(env, S.colo ? undefined : true, true);
   }
 }
-
-
-

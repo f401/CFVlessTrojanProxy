@@ -130,3 +130,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 
 `/<uuid>/debug?diag=<host>` 与 `/proxyip?why=1` 输出的是同一份分项：
 `latencyMs / e10Ms / pFailRisk / pStall / capBps / confB / nEff / sampleAgeMs / priorSource / gate`。
+
+## 7 代码风格
+
+- 统一由 Prettier 格式化：`printWidth=120`、2 空格、双引号、分号；配置在 `.prettierrc.json`。
+- 修改后跑 `npm run format`，再跑 `npm run arch && npm test`。
+- 类型边界用 `unknown` + 收窄，仍然禁止 `any`（`npm run arch` 会拦）。
+- 目录依赖方向不变：`core ← 业务域 ← routes ← index`；跨层接缝必须登记在 `check-arch.js` 的 `ALLOW` 表。

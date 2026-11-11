@@ -7,7 +7,8 @@ const KEY_BOX: { aek: CryptoKey | null } = { aek: null };
 export function b64e(u8: Uint8Array) {
   let s = "";
   const CH = 0x8000;
-  for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH) as unknown as number[]);
+  for (let i = 0; i < u8.length; i += CH)
+    s += String.fromCharCode.apply(null, u8.subarray(i, i + CH) as unknown as number[]);
   return btoa(s);
 }
 
@@ -40,17 +41,17 @@ export async function unseal<T = unknown>(env: Env, raw: unknown): Promise<T | n
   if (raw == null) return null;
   if (typeof raw !== "string") return raw as T;
   if (!raw.startsWith("ENC1:")) {
-    try { return JSON.parse(raw); } catch (e) { return null; }
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
   }
   const k = await aesKey(env);
   if (!k) return null;
   const parts = raw.split(":");
   try {
-    const pt = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: b64d(parts[1]) },
-      k,
-      b64d(parts[2])
-    );
+    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64d(parts[1]) }, k, b64d(parts[2]));
     return JSON.parse(new TextDecoder().decode(pt));
   } catch (e) {
     return null;
