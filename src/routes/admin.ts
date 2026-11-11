@@ -106,7 +106,10 @@ export async function admin(c: RouteCtx): Promise<Response> {
           }
 
           await saveUsers(env, list);
-          return new Response(null, { status: 303, headers: { location: "/admin" } });
+          // 用 ?k= 打开面板时，操作后的 303 也要带上 k，否则下一跳掉回登录页
+          const k = url.searchParams.get("k") || "";
+          const back = "/admin" + (k ? "?k=" + encodeURIComponent(k) : "");
+          return new Response(null, { status: 303, headers: { location: back } });
         }
 
         // 面板
