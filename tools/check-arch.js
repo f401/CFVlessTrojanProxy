@@ -10,8 +10,8 @@ const RANK = Object.fromEntries(LAYERS.map((l, i) => [l, i]));
 const ALLOW = new Set([
   // 数据面回写指标 / 计量
   "proxy->px", "proxy->nodes", "proxy->store",
-  // 中转池要拨号、要落盘
-  "px->store", "px->proxy",
+  // 中转池要落盘、读节点评分；目标校验已抽到 core/net，px 不再依赖 proxy
+  "px->store",
   // 快照要枚举用户、要读计数器
   "store->proxy", "store->px",
   // 选择器要知道"当前中转出口"，这是唯一的 nodes → px 依赖

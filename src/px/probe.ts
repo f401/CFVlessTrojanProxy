@@ -1,6 +1,6 @@
 import type { Socket } from "cloudflare:sockets";
 import { logErr } from "../nodes/metrics";
-import { checkTarget } from "../proxy/dial";
+import { checkTarget } from "../core/net";
 import { aliveList } from "./pool";
 import { S } from "../core/state";
 import { dec, enc, toHex } from "../core/util";
