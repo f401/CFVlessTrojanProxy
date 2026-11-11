@@ -133,7 +133,10 @@ async function writeSnap(env: Env, now: number): Promise<void> {
   }
 
   for (const [id, bucket] of S.rtt) {
-    const tgt = next.rtt[id] || {};
+    // 不能直接复用 prev 里的普通对象：tag="__proto__" 时赋值会改原型而不是写键
+    const tgt = Object.create(null) as Record<string, RttEntry>;
+    const oldTgt = next.rtt[id];
+    if (oldTgt) for (const [k, v] of Object.entries(oldTgt)) tgt[k] = v;
     for (const [tag, v] of Object.entries(bucket) as [string, RttEntry][]) {
       const p = tgt[tag];
       tgt[tag] = p
