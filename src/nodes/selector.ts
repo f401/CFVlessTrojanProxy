@@ -223,11 +223,11 @@ async bumpFail(env: Env, mode: Mode, k: string, trial: boolean, kind: "node" | "
     if (k) nsSiteFail(k);
     return;
   }
-  S.pxFailSeen = 1;
-  S.pxFailMem += 1;
   const node = k || S.curs[mode === "lat" ? "lat" : "tput"] || S.curs.tput || S.curs.lat || "";
   this.onFail(env, mode, node, !!trial);
-  if (trial) return;                       // 影子连接失败不惩罚主游标
+  if (trial) return;                       // 影子/站点试探失败不惩罚主游标，也不进全局失败记忆
+  S.pxFailSeen = 1;
+  S.pxFailMem += 1;
   const { fail, force } = pxPolicy(env);
   if (S.pxFailMem < fail) return;
   const n = S.pxFailMem;

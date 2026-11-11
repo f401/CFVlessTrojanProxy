@@ -731,5 +731,25 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
   W.S.cnt.conn = 0; W.S.cntSent.conn = 0;
 }
 
+// 真实成功要解除冻结，否则一个 30 分钟冻结只有等它自己过期
+{
+  reset();
+  node("fr:443", {});
+  W.freezeNode("fr:443");
+  eq("冻结生效", W.isFrozen("fr:443"), true);
+  W.nsOk("fr:443", 0, 0);
+  eq("成功连接解除冻结", W.isFrozen("fr:443"), false);
+}
+
+// 影子/站点试探失败只罚节点，不推进全局失败记忆
+reset();
+node("tr:443", { tcp: 50 });
+S.pxFailMem = 0; S.pxFailSeen = 0;
+await W.SEL.bumpFail({}, "tput", "tr:443", true);
+eq("影子失败不进全局失败记忆", S.pxFailMem, 0);
+eq("影子失败不置失败标志", S.pxFailSeen, 0);
+eq("影子失败仍记节点失败", W.nsGet("tr:443").failW >= 1, true);
+eq("影子失败冻结节点", W.isFrozen("tr:443"), true);
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
