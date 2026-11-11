@@ -762,5 +762,23 @@ eq("影子失败不置失败标志", S.pxFailSeen, 0);
 eq("影子失败仍记节点失败", W.nsGet("tr:443").failW >= 1, true);
 eq("影子失败冻结节点", W.isFrozen("tr:443"), true);
 
+// 灾备快照不能用 |0：>2^31 的用量会溢出成负数/0
+{
+  const box = new Map();
+  const envU = {
+    uuid: "7c53c12a-88b1-4fda-b6e7-4da62e47a4e1",
+    STATS: { get: async (k) => box.get(k) || null, put: async (k, v) => { box.set(k, v); } },
+    METER: {
+      idFromName: (id) => id,
+      get: () => ({ fetch: async () => ({ ok: true, json: async () => ({ up: 3000000000, down: 5000000000, conns: 10, first: 1 }) }) }),
+    },
+  };
+  W.S.usersCache = { v: null, t: 0 }; W.S.usersSig = ""; W.S.meterCache.clear();
+  await W.usageSnapWrite(envU);
+  const doc = JSON.parse(box.get("usage:snap"));
+  eq("大用量快照不溢出", doc.users[envU.uuid].up, 3000000000);
+  eq("大下行快照不溢出", doc.users[envU.uuid].down, 5000000000);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

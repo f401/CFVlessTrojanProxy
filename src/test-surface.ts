@@ -27,7 +27,7 @@ export { nsGet, nsSpeed, nsOk, nsFail, nsSiteFail, nsEmptyClose, pFailFast, pcts
 export { nsOf, pxGet, spdSnapshot, cntDelta, cntUnsend } from "./px/pool";
 export { logErr, hostNodeMark, hostDirectMark, diagVerdict, hostRank, hostScore, hostKey, hostUntried } from "./nodes/metrics";
 export { tlsHello } from "./px/probe";
-export { nodeSnapGet, primaryId, flushSnap } from "./store/index";
+export { nodeSnapGet, primaryId, flushSnap, usageSnapWrite } from "./store/index";
 export { renderStatsHtml } from "./views/panel";
 
 export { renderAdmin } from "./views/panel";
