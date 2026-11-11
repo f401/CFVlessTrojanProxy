@@ -127,7 +127,8 @@ export class Selector {
       const cv = costOf(cur, m);
       let alt = "",
         bv = Infinity;
-      for (const x of candsFor(m).slice(0, 3)) {
+      // 看前 8 个而不是前 3 个：前 3 可能全忙，后面仍有同分数的空闲节点
+      for (const x of candsFor(m).slice(0, 8)) {
         if (x.k === cur) continue;
         if (x.v > cv * 1.5) continue;
         if ((S.inflight.get(x.k) || 0) >= (S.inflight.get(cur) || 0)) continue;

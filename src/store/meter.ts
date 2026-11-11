@@ -9,6 +9,8 @@ export class Meter {
   g: CounterDoc;
   s: Record<string, NodeSnap>;
   e: ErrItem[];
+  /** 请求串行队列：/add 与 /set 交错会让内存和 storage 的顺序不一致 */
+  q: Promise<unknown> = Promise.resolve();
   /**
    * 构造：从 storage 恢复累计值；blockConcurrencyWhile 保证恢复完成前不处理请求。
    * @param {DurableObjectState} state DO 状态对象（storage / alarm / blockConcurrencyWhile）
@@ -101,6 +103,16 @@ export class Meter {
    * @returns {Promise<Response>} 处理后的累计值
    */
   async fetch(req: Request): Promise<Response> {
+    // DO 的异步存储操作会让多个请求在 await 处交错；这里按到达顺序串行化
+    const run = this.q.then(() => this.handle(req));
+    this.q = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async handle(req: Request): Promise<Response> {
     const p = new URL(req.url).pathname;
 
     if (p.endsWith("/add")) {

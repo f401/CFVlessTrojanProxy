@@ -847,5 +847,16 @@ reset();
   eq("恢复后只记一次", m.c.up, 10);
 }
 
+// DO 请求串行化：并发 /add 不能交错写坏内存/storage
+{
+  const doQ = mkDO();
+  await Promise.all([
+    doQ.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 1, down: 0, conns: 0 }) })),
+    doQ.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 2, down: 0, conns: 0 }) })),
+  ]);
+  const jq = await (await doQ.m.fetch(new Request("https://m/get"))).json();
+  eq("并发 /add 串行累加", jq.up, 3);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
