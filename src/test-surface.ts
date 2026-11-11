@@ -48,7 +48,7 @@ import {
 import { VERSION, sha224Bytes, toHex } from "./core/util";
 
 // 测试专用出口：只在 dist/_test.js 里存在，生产包不含此文件
-export { sha224Bytes, toHex, VERSION, shadowRate, eachLimit } from "./core/util";
+export { sha224Bytes, toHex, VERSION, shadowRate, eachLimit, withTimeout } from "./core/util";
 export { detectProtocol, parseVLESS, parseTrojan, loadUsers } from "./proxy/protocol";
 export { checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
 export {
@@ -104,7 +104,7 @@ export {
   hostKey,
   hostUntried,
 } from "./nodes/metrics";
-export { tlsHello } from "./px/probe";
+export { tlsHello, refillPool } from "./px/probe";
 export { nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats } from "./store/index";
 export { renderStatsHtml } from "./views/panel";
 export { randomPwd } from "./views/auth";

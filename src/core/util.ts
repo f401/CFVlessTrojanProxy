@@ -3,7 +3,7 @@ export const WS_OPEN = 1;
 export const WS_BUFFER_LIMIT = 1024 * 1024; // 下行发送缓冲超过 1MB 就开始背压
 export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给到 60 秒
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐了
-export const VERSION = "6.2";
+export const VERSION = "6.3";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 
@@ -32,6 +32,25 @@ export function shadowRate(env: Env) {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return SHADOW_DEFAULT;
   return Math.min(1, n);
+}
+
+/**
+ * 给 Promise 加超时，并在结束时清掉定时器。
+ * 直接用 Promise.race 会把 setTimeout 留在那里：一轮 cron 探 60 个节点，
+ * 就是 60 个多余的 4 秒定时器，既占 CPU 又拖长请求生命周期。
+ */
+export async function withTimeout<T>(p: Promise<T>, ms: number, msg = "timeout"): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(msg)), Math.max(1, ms));
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 /**

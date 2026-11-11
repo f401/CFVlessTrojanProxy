@@ -382,5 +382,94 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   eq("溢出后流失效", rejected, true);
 }
 
+/* ---------- 直连统计按站点族合并 ---------- */
+{
+  W.S.hostDirect.clear();
+  W.hostDirectMark("api.x.com", true);
+  W.hostDirectMark("x.com", false);
+  const d = W.S.hostDirect.get("x.com");
+  eq("直连统计按站点族合并", [d.ok, d.bad], [1, 1]);
+  W.S.hostDirect.clear();
+}
+
+/* ---------- 节点明细上限：默认 64，可按需放开 ---------- */
+{
+  const keys = [];
+  for (let i = 0; i < 70; i++) keys.push(`n${i}:443`);
+  for (const k of keys) W.nsGet(k);
+  eq("nsOf 默认最多 64 条", Object.keys(W.nsOf(keys)).length, 64);
+  eq("nsOf 可放开到全部", Object.keys(W.nsOf(keys, 70)).length, 70);
+  for (const k of keys) W.S.nstat.delete(k);
+}
+
+/* ---------- nsOk 必须推进 at（否则衰减基准永远停在旧时刻） ---------- */
+{
+  const s = W.nsGet("at-check:443");
+  s.at = Date.now() - 1000;
+  W.nsOk("at-check:443", 50, 20);
+  ok("nsOk 更新 at", Date.now() - s.at < 500, String(Date.now() - s.at));
+  W.S.nstat.delete("at-check:443");
+}
+
+/* ---------- withTimeout：正常值 / 超时 ---------- */
+{
+  eq("withTimeout 正常返回", await W.withTimeout(Promise.resolve(7), 100), 7);
+  let to = false;
+  try {
+    await W.withTimeout(new Promise(() => {}), 20);
+  } catch (e) {
+    to = true;
+  }
+  eq("withTimeout 超时", to, true);
+}
+
+/* ---------- refillPool：去重 + 各源统计 ---------- */
+{
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("1.1.1.1:443#US\n2.2.2.2:8443\n1.1.1.1:443\n", { status: 200 });
+  try {
+    const rr = await W.refillPool({});
+    eq("refillPool 去重后 2 条 + 内置 1 条", rr.pool.length, 3);
+    eq("refillPool 记录全部来源", Object.keys(rr.sources).length, 6);
+    eq("refillPool 首个来源新增 2 条", rr.sources[Object.keys(rr.sources)[0]].ok, 2);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+/* ---------- 内网/保留地址：IPv6 必须按数值判断 ---------- */
+{
+  const priv = [
+    "127.0.0.1",
+    "10.1.2.3",
+    "172.16.0.1",
+    "192.168.1.1",
+    "169.254.169.254",
+    "100.64.0.1",
+    "0:0:0:0:0:0:0:1",
+    "::1",
+    "::",
+    "::7f00:1",
+    "0:0:0:0:0:ffff:7f00:1",
+    "::ffff:127.0.0.1",
+    "fd12:3456::1",
+    "fe80::1",
+    "ff02::1",
+    "2001:db8::1",
+    "2002:7f00:1::",
+    "64:ff9b::7f00:1",
+    "2001:67c:2960:6464::0102:0304",
+    "localhost.",
+    "foo.local",
+    "0177.0.0.1",
+    "0x7f000001",
+    "2130706433",
+    "1.2.3.999",
+  ];
+  for (const h of priv) ok(`私网拦截 ${h}`, W.isPrivateHost(h), h);
+  const pub = ["1.1.1.1", "8.8.8.8", "2606:4700:4700::1111", "2001:4860:4860::8888", "example.com", "::ffff:8.8.8.8"];
+  for (const h of pub) ok(`公网放行 ${h}`, !W.isPrivateHost(h), h);
+}
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

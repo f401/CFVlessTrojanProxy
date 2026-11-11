@@ -327,6 +327,9 @@ export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
  */
 export function hostDirectMark(host: string, ok: boolean) {
   if (!host) return;
+  // 和 hostNodeMark 用同一个族键：写 www.x.com、读 x.com 时不能对不上
+  const fam = hostKey(host);
+  if (!fam) return;
   if (S.hostDirect.size >= HN_MAX_HOSTS) {
     let oldK = "",
       oldT = Infinity;
@@ -337,11 +340,11 @@ export function hostDirectMark(host: string, ok: boolean) {
       }
     if (oldK) S.hostDirect.delete(oldK);
   }
-  const e = S.hostDirect.get(host) || { ok: 0, bad: 0, at: 0 };
+  const e = S.hostDirect.get(fam) || { ok: 0, bad: 0, at: 0 };
   if (ok) e.ok += 1;
   else e.bad += 1;
   e.at = Date.now();
-  S.hostDirect.set(host, e);
+  S.hostDirect.set(fam, e);
 }
 
 /**

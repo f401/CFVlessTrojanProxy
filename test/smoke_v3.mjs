@@ -94,6 +94,10 @@ eq("无 uuid 时 /health 仍可用", r4.status, 200);
 const r4b = await mod.fetch(mk("/"), {}, ctx);
 eq("无 uuid 时业务路径 500", r4b.status, 500);
 
+/* 写操作必须管理员：restore 会往 DO 写数据 */
+r = await run(`/${UUID}/debug?restore=1`);
+eq("debug restore 需要管理员", r.status, 403);
+
 /* 未知路径不返回 request.cf（旧版是 200 + 2.3KB JSON） */
 r = await run("/");
 eq("根路径 404", r.status, 404);

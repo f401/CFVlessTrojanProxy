@@ -113,7 +113,8 @@ export function nsOk(k: string, tcp: number, tls: number) {
   nsDecay(s, now);
   bumpWin(s, now, true);
   s.okW += 1; s.ok += 1; s.tS = (s.tS || 0) + 1;
-  s.streak = 0; s.blackUntil = 0; s.freeUntil = 0;   // 真流量成功：黑名单和冻结都解除 s.at = now;
+  s.streak = 0; s.blackUntil = 0; s.freeUntil = 0;   // 真流量成功：黑名单和冻结都解除
+  s.at = now;
   if (tcp > 0) s.tcp = s.tcp ? s.tcp * (1 - SC.A) + tcp * SC.A : tcp;
   if (tls > 0) s.tls = s.tls ? s.tls * (1 - SC.A) + tls * SC.A : tls;
 }

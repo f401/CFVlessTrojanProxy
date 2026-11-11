@@ -62,7 +62,7 @@ fetch(request)
 tools/tsc.js      tsc（strict:true，0 error 才继续）
 tools/bundle.js   esbuild → dist/_worker.js（生产）/ dist/_test.js（测试出口）
 tools/check-arch.js 分层 / 循环 / 顶层 let / 体积
-test/*.mjs        324 断言 + 8 项逐字节 golden
+test/*.mjs        365 断言 + 8 项逐字节 golden
 obf/*.js          预处理 + 混淆（Meter 类名保留）
 scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → obf → PUT
 ```
@@ -142,6 +142,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
   `SEC_HEADERS`；不要再在路由里手写 `content-type` / CSP。
 - 运行参数只有 `core/util.shadowRate` 一个来源：选择器、控制页、`/proxyip` 必须同值，
   未设置时默认 5%，显式 `0` 表示关闭探索。
+- 出站目标只走 `checkTarget`：IPv6 必须拆成 8 个 16 位分组后按数值判断，
+  不能靠字符串前缀（`0:0:0:0:0:0:0:1`、`::7f00:1` 这类写法能绕过前缀匹配）。
 
 ## 8 设计取舍：有状态服务用类，纯计算用函数
 

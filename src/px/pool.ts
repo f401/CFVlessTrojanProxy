@@ -177,13 +177,14 @@ export async function pxGet(env: Env) {
 /**
  * 按需生成节点面板明细（只算传入的节点，避免为整张 nstat 白算分）。
  * @param {Iterable<string>} keys "host:port" 列表
+ * @param {number} [limit] 最多算多少条（默认 64；整页节点列表要传实际条数）
  * @returns {object} "host:port" → 统计明细
  */
-export function nsOf(keys: string[]) {
+export function nsOf(keys: string[], limit = 64) {
   const m: Record<string, Record<string, number | string>> = {};
   let i = 0;
   for (const k of keys) {
-    if (++i > 64) break; // 面板最多展示几十行，别被异常输入拖死
+    if (++i > limit) break;
     const s = S.nstat.get(k);
     if (!s) continue;
     const n = (s.okW || 0) + (s.failW || 0);
@@ -247,7 +248,7 @@ export async function cronScan(env: Env) {
   await pxGet(env);
   let pool = await ensurePool(env);
   if (!pool.length || Date.now() - S.poolBuilt > POOL_TTL_MS) {
-    const fresh = await refillPool(env);
+    const { pool: fresh } = await refillPool(env);
     if (fresh.length) {
       const c = await commitPool(env, fresh);
       if (c.ok) pool = fresh;

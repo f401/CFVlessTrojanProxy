@@ -72,7 +72,10 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
       if (url.searchParams.get("format") === "html") {
         const alive = await aliveList(env);
         // 明细只算要展示的节点（以前是为整张 nstat 生成，能到几千条）
-        const nsMap = nsOf(alive.map((x) => x.h + ":" + x.p));
+        const nsMap = nsOf(
+          alive.map((x) => x.h + ":" + x.p),
+          alive.length,
+        );
         // 吞吐是 isolate 本地样本：再并上 Meter DO 里的跨 isolate 快照，
         // 否则换一个 isolate 打开面板就全是"未用"
         const snap = await nodeSnapGet(env, id);

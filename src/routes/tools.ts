@@ -12,7 +12,7 @@ import { checkTarget, dohQuery, expandV6, resolveAAAA } from "../proxy/dial";
 import { aliveList, commitPool, cronScan, flushPx, nsOf, pxGet, pxSet } from "../px/pool";
 import { cnt, cntView } from "../core/counter";
 import { spdSnapshot } from "../core/node-snapshot";
-import { EXTRA_HOSTS, POOL_SOURCES, PX_LINE, probeProxy, probeSni, regionListAsync, takePoolLine } from "../px/probe";
+import { EXTRA_HOSTS, probeProxy, probeSni, refillPool, regionListAsync } from "../px/probe";
 import { restoreUsage, primaryId } from "../store/index";
 import { adminAuthed } from "../views/auth";
 
@@ -90,7 +90,7 @@ export async function proxyip(c: UserCtx): Promise<Response> {
   const alive = px.alive || [];
   const stat: Record<string, unknown> = px.state || {};
   const aliveKeys = (alive || []).map((x) => x.h + ":" + x.p);
-  const nsMap = nsOf(aliveKeys);
+  const nsMap = nsOf(aliveKeys, aliveKeys.length);
   // 并上 DO 里的跨 isolate 快照：否则换 isolate 看就是一片 kbps=0
   const snapS = await nodeSnapGet(env, id);
   for (const [k, v] of Object.entries(snapS)) {
@@ -248,7 +248,7 @@ export async function debug(c: UserCtx): Promise<Response> {
     }
     rows.sort((a, b) => b.n - a.n);
 
-    const direct = S.hostDirect.get(diagHost) || { ok: 0, bad: 0, at: 0 };
+    const direct = S.hostDirect.get(fam) || { ok: 0, bad: 0, at: 0 };
 
     // 主动探测：不信历史样本时，直接拿每个节点试一次
     // （只验"能不能把这个 SNI 转出去"，看不到 HTTP 状态）
@@ -310,42 +310,18 @@ export async function debug(c: UserCtx): Promise<Response> {
   if (url.searchParams.get("refill") === "1") {
     const deny = await adminOnly(c);
     if (deny) return deny;
-    const counts: Record<string, { lines: number; ok: number }> = {};
-    const merged = new Map();
-    let total = 0;
-    for (const src of POOL_SOURCES) {
-      const one = new Map();
-      let lines = 0;
-      try {
-        const r = await fetch(src, { headers: { "user-agent": "curl/8" } });
-        if (r.ok) {
-          const txt = await r.text();
-          for (const l of txt.split("\n")) {
-            if (PX_LINE.test(l.trim())) lines++;
-            takePoolLine(l, src, one);
-          }
-        } else {
-          lines = -r.status;
-        }
-      } catch (e) {
-        lines = -1;
-      }
-      counts[src] = { lines, ok: one.size };
-      total += one.size;
-      for (const [k, v] of one) if (!merged.has(k)) merged.set(k, v);
-    }
-    for (const h of EXTRA_HOSTS) {
-      if (!merged.has(h + ":443")) merged.set(h + ":443", { h, p: 443, src: "builtin" });
-    }
+    // 和 cron 共用同一套抓取/去重/2MB 截断，别再维护第二份
+    const refill = await refillPool(env);
+    const merged = refill.pool;
     // 默认提交（debug 端点已有 UUID 鉴权）；&dry=1 只看不写，&force=1 无视线池 60% 守卫
     let commit: Record<string, unknown> = { ok: true, skipped: true };
-    if (merged.size && url.searchParams.get("dry") !== "1") {
-      commit = await commitPool(env, [...merged.values()], url.searchParams.get("force") === "1");
+    if (merged.length && url.searchParams.get("dry") !== "1") {
+      commit = await commitPool(env, merged, url.searchParams.get("force") === "1");
     }
     return json({
-      sources: counts,
-      merged: total,
-      pool: merged.size,
+      sources: refill.sources,
+      merged: merged.length,
+      pool: merged.length,
       committed: !!commit.ok && !commit.skipped,
       gen: commit.gen || 0,
       reason: commit.reason || "",
@@ -370,8 +346,10 @@ export async function debug(c: UserCtx): Promise<Response> {
     return json({ ok: true, cur: want, curs: S.curs });
   }
 
-  // 手动把 KV 快照续回 DO
+  // 手动把 KV 快照续回 DO（写操作，必须管理员）
   if (url.searchParams.get("restore") === "1") {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
     const v = await restoreUsage(env, id);
     return json({ ok: !!v, restored: v || null });
   }

@@ -3,7 +3,7 @@ import { logErr } from "../nodes/metrics";
 import { checkTarget } from "../core/net";
 import { aliveList } from "./pool";
 import { S } from "../core/state";
-import { dec, enc, toHex } from "../core/util";
+import { dec, enc, toHex, withTimeout } from "../core/util";
 import { connect } from "cloudflare:sockets";
 
 /* 代理节点：探活与池子抓取 */
@@ -112,10 +112,7 @@ export async function probeProxy(h: string, p: number) {
       const wait = Math.max(200, deadline - Date.now());
       let got = null;
       try {
-        got = (await Promise.race([
-          r.read(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), wait)),
-        ])) as { value?: Uint8Array };
+        got = (await withTimeout(r.read(), wait, "timeout")) as { value?: Uint8Array };
       } catch (e) {
         break; // 超时/断开：跳出，走下面的诊断返回
       }
@@ -162,14 +159,23 @@ export async function probeProxy(h: string, p: number) {
   }
 }
 
+/** 一次抓取的结果：池子 + 每个源的行数/新增数（/proxyip?refill=1 直接展示） */
+export interface PoolRefill {
+  pool: PoolEntry[];
+  sources: Record<string, { lines: number; ok: number }>;
+}
+
 /**
  * 从所有上游源抓取候选池并按 ip:port 去重（单源失败不影响其他源）。
  * @param {object} env Worker 环境
- * @returns {Promise<Array<{h:string,p:number,src:string}>>} 合并后的候选池
+ * @returns {Promise<PoolRefill>} 合并后的候选池与各源统计
  */
-export async function refillPool(env: Env) {
-  const seen = new Map();
+export async function refillPool(env: Env): Promise<PoolRefill> {
+  const seen = new Map<string, PoolEntry>();
+  const sources: Record<string, { lines: number; ok: number }> = Object.create(null);
   for (const src of POOL_SOURCES) {
+    let lines = 0;
+    const before = seen.size;
     try {
       const r = await fetch(src, {
         headers: {
@@ -180,12 +186,19 @@ export async function refillPool(env: Env) {
           referer: "https://www.google.com/",
         },
       });
-      if (!r.ok) continue;
-      const txt = (await r.text()).slice(0, 2 * 1024 * 1024); // 防异常大响应把 CPU/内存打满
-      for (const line of txt.split("\n")) takePoolLine(line, src, seen);
+      if (!r.ok) {
+        lines = -r.status;
+      } else {
+        const txt = (await r.text()).slice(0, 2 * 1024 * 1024); // 防异常大响应把 CPU/内存打满
+        for (const line of txt.split("\n")) {
+          if (PX_LINE.test(line.trim())) lines++;
+          takePoolLine(line, src, seen);
+        }
+      }
     } catch (e) {
-      /* 换下一个源 */
+      lines = -1;
     }
+    sources[src] = { lines, ok: seen.size - before };
   }
   for (const h of EXTRA_HOSTS) {
     // seen 的键是 "ip:port"：以前用不带端口的 h 去重，永远判不存在，
@@ -196,7 +209,7 @@ export async function refillPool(env: Env) {
 
   const pool = [...seen.values()];
   if (pool.length) logErr("pool refilled: " + pool.length, "");
-  return pool;
+  return { pool, sources };
 }
 
 /**
@@ -331,10 +344,7 @@ export async function probeSni(nodeHost: string, nodePort: number, sni: string, 
       const wait = Math.max(150, deadline - Date.now());
       let got: { value?: Uint8Array } | null = null;
       try {
-        got = (await Promise.race([
-          r.read(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), wait)),
-        ])) as { value?: Uint8Array };
+        got = (await withTimeout(r.read(), wait, "timeout")) as { value?: Uint8Array };
       } catch (e) {
         break;
       }
