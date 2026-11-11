@@ -13,6 +13,7 @@ nodes/    score metrics            节点域：纯评分、画像（不依赖中
 px/       pool probe seed selector 中转域：候选池、探活、信誉表、选择器
 proxy/    protocol dial session     数据面：协议、拨号、会话
           fallback tunnel connection
+          ws-in                      客户端→上游字节流（8MB 上行队列上限）
 views/    sub panel html auth       纯渲染：(data) => string（auth 是面板会话）
 edge/     respond types             响应与安全头、请求上下文
 routes/   health subscription admin tools logs cron
@@ -61,7 +62,7 @@ fetch(request)
 tools/tsc.js      tsc（strict:true，0 error 才继续）
 tools/bundle.js   esbuild → dist/_worker.js（生产）/ dist/_test.js（测试出口）
 tools/check-arch.js 分层 / 循环 / 顶层 let / 体积
-test/*.mjs        321 断言 + 8 项逐字节 golden
+test/*.mjs        324 断言 + 8 项逐字节 golden
 obf/*.js          预处理 + 混淆（Meter 类名保留）
 scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → obf → PUT
 ```

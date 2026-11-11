@@ -2,6 +2,7 @@ import { errMsg } from "../core/util";
 import type { Socket } from "cloudflare:sockets";
 
 import { Connection } from "./connection";
+import { wsToStream } from "./ws-in";
 import { dialAnother } from "./fallback";
 import { pipeBack } from "./tunnel";
 import { logErr, rttLearn, rttMark } from "../nodes/metrics";
@@ -15,53 +16,6 @@ import { S } from "../core/state";
 import { flushSnap, pendFlush, statBump } from "../store/index";
 import { WS_OPEN, closeQuietly, enc, safeSend, toU8 } from "../core/util";
 import { connect } from "cloudflare:sockets";
-
-/* data */
-export function wsToStream(ws: WebSocketLike, earlyData: string): ReadableStream<Uint8Array> {
-  // 流被取消（pipeTo 提前结束）后 WS 仍可能在推消息：
-  // 继续 enqueue 会抛 "The stream is not in a state that permits enqueue"，
-  // 而这个异常发生在事件回调里，没人接得住 —— 用一个闩把后续消息直接丢掉。
-  let live = true;
-  return new ReadableStream({
-    start(controller: ReadableStreamDefaultController<Uint8Array>) {
-      const push = (d: unknown) => {
-        if (!live) return;
-        try {
-          controller.enqueue(toU8(d));
-        } catch (e) {
-          live = false;
-        }
-      };
-      ws.addEventListener("message", (ev) => push(ev.data));
-      ws.addEventListener("close", () => {
-        live = false;
-        try {
-          controller.close();
-        } catch (e) {}
-      });
-      ws.addEventListener("error", (e) => {
-        live = false;
-        try {
-          controller.error(e);
-        } catch (err) {}
-      });
-      if (earlyData) {
-        try {
-          const b64 = earlyData.replace(/-/g, "+").replace(/_/g, "/");
-          const raw = atob(b64);
-          const buf = new Uint8Array(raw.length);
-          for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
-          push(buf);
-        } catch (e) {
-          /* 早期数据非法，忽略 */
-        }
-      }
-    },
-    cancel() {
-      live = false;
-    },
-  });
-}
 
 /**
  * 换一个中转节点重连（"这个节点不通就换下一个"）。

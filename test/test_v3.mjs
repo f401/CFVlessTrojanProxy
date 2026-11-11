@@ -339,5 +339,48 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   ok("Clash 名字仍然带引号", y.includes('name: "vless-bad-host-443-T"'));
 }
 
+/* ---------- 上行队列：8MB 上限，读走才释放额度 ---------- */
+{
+  const handlers = {};
+  let closed = null;
+  const ws = {
+    readyState: 1,
+    bufferedAmount: 0,
+    send() {},
+    close(code, reason) {
+      closed = [code, reason];
+    },
+    addEventListener(t, f) {
+      (handlers[t] = handlers[t] || []).push(f);
+    },
+    removeEventListener() {},
+  };
+  const emit = (t, data) => {
+    for (const f of handlers[t] || []) f({ data });
+  };
+  const reader = W.wsToStream(ws, "").getReader();
+  const MB = 1024 * 1024;
+
+  // 正常读：3MB 进、3MB 出，额度应释放
+  for (let i = 0; i < 3; i++) emit("message", new Uint8Array(MB));
+  let got = 0;
+  for (let i = 0; i < 3; i++) {
+    const r = await reader.read();
+    got += r.value.length;
+  }
+  eq("上行流正常读出 3MB", got, 3 * MB);
+
+  // 不读，继续灌 12MB：超过 8MB 上限必须断开
+  for (let i = 0; i < 12; i++) emit("message", new Uint8Array(MB));
+  eq("上行队列溢出关闭 1013", closed && closed[0], 1013);
+  let rejected = false;
+  try {
+    await reader.read();
+  } catch (e) {
+    rejected = true;
+  }
+  eq("溢出后流失效", rejected, true);
+}
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

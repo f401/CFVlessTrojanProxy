@@ -112,3 +112,4 @@ export { randomPwd } from "./views/auth";
 export { renderAdmin } from "./views/panel";
 export { adminAuthed, sessionToken } from "./views/auth";
 export { html, CSP_STATIC } from "./edge/respond";
+export { wsToStream } from "./proxy/ws-in";
