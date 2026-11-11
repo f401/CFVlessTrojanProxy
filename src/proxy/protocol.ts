@@ -27,6 +27,7 @@ export async function loadUsers(env: Env): Promise<Auth> {
   const uuids = new Set<string>();
   const trojan = new Map<string, string>();
   const list: UserRec[] = [];
+  const byId = new Map<string, UserRec>();
   const hashOf = (pwd: string) => toHex(sha224Bytes(enc.encode(pwd)));
 
   /** 共享密码只保留一个稳定 owner；不要让后加载的用户把前面的顶掉 */
@@ -37,7 +38,7 @@ export async function loadUsers(env: Env): Promise<Auth> {
       trojan.set(h, id);
       return;
     }
-    const owner = list.find((x) => x.id === cur);
+    const owner = byId.get(cur);
     if (!owner || !owner.enabled) trojan.set(h, id);
   };
 
@@ -53,10 +54,11 @@ export async function loadUsers(env: Env): Promise<Auth> {
 
   const add = (id: string, pwd?: string, note?: string, enabled?: boolean, managedFlag?: boolean) => {
     if (!RE_UUID.test(id)) return;
-    let rec = list.find((x) => x.id === id);
+    let rec = byId.get(id);
     if (!rec) {
       rec = { id, pwd: "", note: note || "", enabled: enabled !== false, managed: !!managedFlag };
       list.push(rec);
+      byId.set(id, rec);
     } else {
       if (note && !rec.note) rec.note = note;
       if (managedFlag) rec.managed = true;
