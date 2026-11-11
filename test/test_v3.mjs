@@ -390,6 +390,42 @@ eq("都没有返回空串", W.primaryId({}), "");
   W.S.usersSig = "";
 }
 
+/* ---------- cron 并发闸：重投递 / 手动 refresh 撞车不双跑 ---------- */
+{
+  // cronScan 会去抓上游候选池：stub 掉 fetch，返回空文本让它提前退出
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("", { status: 200 });
+  try {
+    W.S.cronBusy = false;
+    let done = null;
+    const ctx1 = {
+      waitUntil: (p) => {
+        done = p;
+      },
+    };
+    await W.runCron({}, ctx1);
+    await done; // 等 waitUntil 的任务真正跑完，闸门必须回到 false
+    eq("runCron 结束后闸门释放", W.S.cronBusy, false);
+
+    W.S.cronBusy = true;
+    let skipped = null;
+    await W.runCron(
+      {},
+      {
+        waitUntil: (p) => {
+          skipped = p;
+        },
+      },
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    eq("cron 忙时不重复跑（闸门保持）", W.S.cronBusy, true);
+    eq("cron 忙时不排新任务", skipped, null);
+  } finally {
+    globalThis.fetch = realFetch;
+    W.S.cronBusy = false;
+  }
+}
+
 /* ---------- 随机密码：长度 / 字符集 / 默认值 ---------- */
 {
   const A = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";

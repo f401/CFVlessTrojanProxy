@@ -81,9 +81,16 @@ export async function proxyip(c: UserCtx): Promise<Response> {
     if (deny) return deny;
     const sn = Number(url.searchParams.get("scan"));
     S.scanN = Number.isFinite(sn) && sn > 12 ? sn : 12;
+    // 与 cron 互斥：两轮 cronScan 并发会双跑探活、双写 seed、poolIdx 相互覆盖
+    if (S.cronBusy) return json({ ok: false, error: "cron in progress" });
     if (Date.now() - S.lastManual > 5000) {
       S.lastManual = Date.now();
-      await cronScan(env).catch((e) => logErr("cron: " + errMsg(e)));
+      S.cronBusy = true;
+      try {
+        await cronScan(env).catch((e) => logErr("cron: " + errMsg(e)));
+      } finally {
+        S.cronBusy = false;
+      }
     }
   }
   const px = await pxGet(env);

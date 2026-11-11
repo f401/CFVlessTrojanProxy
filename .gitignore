@@ -15,6 +15,7 @@ node_modules
 # 含密钥，绝不入库
 config/config.env
 config/metadata.json
+config/metadata.migrate.json
 meta_clean.json
 meta_deploy.json
 

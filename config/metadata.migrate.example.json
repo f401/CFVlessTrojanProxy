@@ -73,12 +73,12 @@
     {
       "type": "secret_text",
       "name": "pwd",
-      "text": "TjRYUOTxz1eBDxS2"
+      "text": "CHANGE_ME"
     },
     {
       "name": "uuid",
       "type": "secret_text",
-      "text": "7c53c12a-88b1-4fda-b6e7-4da62e47a4e1"
+      "text": "CHANGE_ME"
     },
     {
       "type": "durable_object_namespace",
@@ -88,7 +88,7 @@
     {
       "type": "secret_text",
       "name": "kek",
-      "text": "ab6fa6c256e0361a7cf56c062ffa885746a2a1ebcf3e7c4bb432bdb465cebd6e"
+      "text": "CHANGE_ME"
     }
   ],
   "migrations": {
