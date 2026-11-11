@@ -115,6 +115,14 @@ export function cntDelta() {
   return out;
 }
 
+/** 批次失败时把日计数基线退回去，下一轮重新发送（否则这批连接数就永久丢了） */
+export function cntUnsend(delta: Record<string, number>) {
+  for (const [k, v] of Object.entries(delta)) {
+    if (S.cntSent[k] === undefined) continue;
+    S.cntSent[k] = Math.max(0, (S.cntSent[k] || 0) - v);
+  }
+}
+
 export const keyOf = (x: NodeEntry) => x.h + ":" + x.p;
 
 /** 候选项池：内存 → KV(poolGen) → 空；空时由 cronScan 触发重建 */

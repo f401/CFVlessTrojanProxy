@@ -702,5 +702,34 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
   ok("保留的是最新的标签", !!capB.t39 && !capB.t0);
 }
 
+// 全局闸门命中时不能每条连接都读一次 KV：一次检查后本地基线要推进
+{
+  let gets = 0, puts = 0;
+  const envS = { STATS: {
+    get: async () => { gets += 1; return JSON.stringify({ v: 1, ts: Date.now(), date: "", stats: {}, rtt: {}, errs: [] }); },
+    put: async () => { puts += 1; },
+  } };
+  W.S.stats.set("snap-u", { up: 1, down: 2, conns: 1, first: Date.now(), last: Date.now() });
+  W.S.snapBytes = 3 * 1048576;
+  W.S.snapWritten = Date.now() - 3 * 3600e3;
+  W.S.snapChecked = 0; W.S.snapBusy = false;
+  await W.flushSnap(envS);
+  await W.flushSnap(envS);
+  eq("快照全局闸门只读一次 KV", gets, 1);
+  eq("闸门命中不写 KV", puts, 0);
+  W.S.stats.clear(); W.S.snapBytes = 0; W.S.snapWritten = 0; W.S.snapChecked = 0;
+}
+
+// 日计数批次失败要能退回基线，否则这批连接数永久丢
+{
+  W.S.cnt.conn = 7; W.S.cntSent.conn = 0;
+  const dl = W.cntDelta();
+  eq("cntDelta 取出增量", dl.conn, 7);
+  eq("cntDelta 推进基线", W.S.cntSent.conn, 7);
+  W.cntUnsend(dl);
+  eq("cntUnsend 退回基线", W.S.cntSent.conn, 0);
+  W.S.cnt.conn = 0; W.S.cntSent.conn = 0;
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

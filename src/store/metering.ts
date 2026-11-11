@@ -1,5 +1,5 @@
 import { S } from "../core/state";
-import { cntDelta, spdSnapshot } from "../px/pool";
+import { cntDelta, cntUnsend, spdSnapshot } from "../px/pool";
 import { Meter } from "./meter";
 import { flushSnap, getSnap, usageSnapGet } from "./snapshot";
 
@@ -66,18 +66,21 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
   S.pend.clear();
   S.pendBytes = 0;
   let bad = 0;
-  const cd = cntDelta();
-  const today = new Date().toISOString().slice(0, 10);
-  let attached = false;
   // 快照固定挂在主 uuid 的对象上：挂到"批次第一个"会挂到另一个用户，
   // 结果面板（读主 uuid）永远看不到更新。
   const primary = primaryId(env);
+  // 日计数只搭主 uuid 的车：主 uuid 这批没有流量时不要先 cntDelta（会推进基线），
+  // 否则计数会永久丢；等主 uuid 下次有批次再一起发。
+  const hasPrimary = !primary || batch.some(([bid]) => String(bid).toLowerCase() === primary);
+  const cd = hasPrimary ? cntDelta() : {};
+  const today = new Date().toISOString().slice(0, 10);
+  let attached = false;
   await Promise.all(
     batch.map(async ([id, d]) => {
+      const mine = !primary || String(id).toLowerCase() === primary;
       try {
         const stub = env.METER.get(env.METER.idFromName(id));
         const body: Record<string, unknown> = { ...d };
-        const mine = !primary || String(id).toLowerCase() === primary;
         if (!attached && mine) {
           attached = true;
           body.c = { ...cd, d: today };        // 只挂一次，避免重复计
@@ -96,6 +99,7 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
         const cur = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
         S.pend.set(id, { up: cur.up + d.up, down: cur.down + d.down, conns: cur.conns + d.conns });
         S.pendBytes += (d.up || 0) + (d.down || 0);   // 回滚失败批次：健康页与立即刷新的判断要准
+        if (mine) cntUnsend(cd);                       // 日计数搭车主批次失败 → 基线退回，下轮重发
       }
     })
   );

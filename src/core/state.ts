@@ -63,6 +63,7 @@ export class AppState {
   nodeSnapCache: { t: number; v: Record<string, NodeSnap> } = { t: 0, v: {} };
   snapWritten = 0;
   snapBusy = false;        // flushSnap 在飞：并发收尾只允许一个写
+  snapChecked = 0;         // 上次检查全局闸门的时间（避免每条连接都读一次 KV）
   snapBytes = 0;
   kvw = 0;
   kvStat: { ok: boolean | null; key: string; at: number; err?: string; quota?: boolean; quotaAt?: number } = { ok: null, key: "", at: 0 };

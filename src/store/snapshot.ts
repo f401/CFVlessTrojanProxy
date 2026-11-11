@@ -77,6 +77,9 @@ export async function flushSnap(env: Env, force?: boolean): Promise<void> {
   // 免费额度（1000/天）打爆。
   const due = !!force || (S.snapBytes >= FLUSH_DIRTY && since >= FLUSH_MIN_MS) || since >= FLUSH_MAX_MS;
   if (!due) return;
+  // 全局闸门失败/跳过时不能每条连接都再去读一次 KV：5 分钟内只检查一次
+  if (now - S.snapChecked < 5 * 60000) return;
+  S.snapChecked = now;
   // 同一 isolate 只允许一个落盘在飞：连接收尾会并发调 flushSnap，
   // 没有这个闩时 50 条连接同时关闭就可能各写一次 KV（写额度 1000/天）。
   if (S.snapBusy) return;
@@ -94,7 +97,13 @@ async function writeSnap(env: Env, now: number): Promise<void> {
   // 45 分钟内别人写过就跳过，自己的增量留在内存里下一轮合并，一条不丢。
   // 这里必须 fresh：缓存里的 ts 可能已经过时 5 分钟，会误判"该写了"。
   const prev = await getSnap(env, true);
-  if (now - (prev.ts || 0) < FLUSH_GAP) return;
+  if (now - (prev.ts || 0) < FLUSH_GAP) {
+    // 别人刚写过：把本地基线推进到那一次，并把下一次检查推到闸门结束，
+    // 避免下一批连接反复走 getSnap 再跳过。
+    S.snapWritten = Math.max(S.snapWritten || 0, prev.ts || 0);
+    S.snapChecked = Math.max(S.snapChecked || 0, (prev.ts || 0) + FLUSH_GAP);
+    return;
+  }
 
   const day = new Date().toISOString().slice(0, 10);
   const next: SnapDoc = {

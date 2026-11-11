@@ -96,7 +96,7 @@ ${row("当前节点 · 速率优先", escapeHtml(i.curLat || "（未定）"), tr
 ${row("备用节点", (i.aliveCount || 0) + " 个", false)}
 ${row("用量", (i.used || "0 B") + " / " + (i.quota || "不限"), false)}
 ${row("今日", i.today || "0 B", false)}
-${row("到期", i.expire || "长期", false)}
+${row("到期", escapeHtml(i.expire || "长期"), false)}
 </table>
 
 <h2>监控与调试</h2>

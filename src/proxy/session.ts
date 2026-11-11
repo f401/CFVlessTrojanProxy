@@ -201,8 +201,9 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
               const alt = await dialAnother(env, st, mode, r.host);
               if (alt) sock = alt;
               else {
-                if (st.hostTrial) await SEL.softFail(st.node);
-                else await SEL.bumpFail(env, st.mode, st.node, st.trial);
+                // 连不上中转是节点问题，不是目标站问题：站点级试探也要把节点冻掉，
+                // 否则这条探索路径每次都白撞同一个坏节点（softFail 只记 0.2 站责）。
+                await SEL.bumpFail(env, st.mode, st.node, st.hostTrial || st.trial);
                 throw e2;
               }
             }
