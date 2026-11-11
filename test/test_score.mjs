@@ -447,6 +447,12 @@ S.curs.lat = "gone:443";
 eq("游标失效 → 选当前最优", W.SEL.pick({ pxShadow: 0 }, "lat", null), "v1:443");
 eq("游标自愈写回", S.curs.lat, "v1:443");
 
+// 一个候选都没有：返回空，并把游标清掉（不能一直显示已经不存在的节点）
+reset();
+S.curs.lat = "gone:443";
+eq("无候选时返回空", W.SEL.pick({ pxShadow: 0 }, "lat", null), "");
+eq("无候选时清空游标", S.curs.lat, "");
+
 // 两个节点各 1 次样本：有对比就该按站点选，不用等 n>=2
 reset();
 node("p:443", { tcp: 60 });
@@ -908,6 +914,56 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
   ok("恢复历史保留日期", !!js.d);
 }
 
+/* ---------- 恢复历史：同日 dU/dD 取较大值，旧日快照不覆盖今天 ---------- */
+{
+  const today = new Date().toISOString().slice(0, 10);
+  const doT = mkDO();
+  await doT.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
+  await doT.m.fetch(
+    new Request("https://m/set", {
+      method: "POST",
+      body: JSON.stringify({ up: 1000, down: 2000, conns: 9, first: 1, d: today, dU: 33, dD: 44 }),
+    }),
+  );
+  const jt = await (await doT.m.fetch(new Request("https://m/get"))).json();
+  eq("同日快照 dU/dD 取较大值", [jt.dU, jt.dD], [33, 44]);
+
+  const doY = mkDO();
+  await doY.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
+  await doY.m.fetch(
+    new Request("https://m/set", {
+      method: "POST",
+      body: JSON.stringify({ up: 1000, down: 2000, d: "2000-01-01", dU: 999, dD: 999 }),
+    }),
+  );
+  const jy = await (await doY.m.fetch(new Request("https://m/get"))).json();
+  eq("旧日快照不覆盖今日", [jy.dU, jy.dD], [10, 20]);
+}
+
+/* ---------- 灾备快照带当日字段，且只合并同一天 ---------- */
+{
+  const today = new Date().toISOString().slice(0, 10);
+  const store = new Map();
+  const envS = {
+    STATS: {
+      get: async (k) => store.get(k) ?? null,
+      put: async (k, v) => store.set(k, v),
+    },
+    METER: {
+      idFromName: (x) => x,
+      get: () => ({
+        fetch: async () => Response.json({ up: 100, down: 200, conns: 1, first: 1, d: today, dU: 77, dD: 88 }),
+      }),
+    },
+  };
+  store.set("usage:snap", JSON.stringify({ ts: 0, users: { "snap-u1": { up: 1, down: 1, conns: 1, d: "2000-01-01", dU: 999, dD: 999 } } }));
+  W.S.meterCache.clear();
+  await W.usageSnapWrite(envS, [{ id: "snap-u1" }]);
+  const snap = JSON.parse(store.get("usage:snap"));
+  eq("快照写入今日 dU/dD", [snap.users["snap-u1"].dU, snap.users["snap-u1"].dD], [77, 88]);
+  eq("快照日期是今天", snap.users["snap-u1"].d, today);
+}
+
 /* ---------- 12. 并发闸：不漏任务、不超上限 ---------- */
 {
   const seen = [];
@@ -922,6 +978,20 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
   });
   eq("eachLimit 覆盖全部任务", seen.sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7]);
   ok("eachLimit 并发不超过 3", peak <= 3, String(peak));
+}
+
+/* ---------- 节点快照的 key 不能污染原型 ---------- */
+{
+  const doP = mkDO();
+  await doP.m.fetch(
+    new Request("https://m/add", {
+      method: "POST",
+      body: '{"up":0,"down":0,"conns":0,"spd":{"__proto__":{"med":1},"ok:443":{"med":2,"at":1}}}',
+    }),
+  );
+  eq("spd 容器是 null 原型", Object.getPrototypeOf(doP.m.s), null);
+  eq("__proto__ 不作为自有键写入", Object.prototype.hasOwnProperty.call(doP.m.s, "__proto__"), false);
+  ok("正常节点仍保留", !!doP.m.s["ok:443"]);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

@@ -315,10 +315,13 @@ interface RttEntry {
   ts: number;
 }
 
-/** usage:snap —— 各用户的用量水位（只增不减） */
+/** usage:snap —— 各用户的用量水位（只增不减；d/dU/dD 用于同日灾备） */
 interface UsageSnap {
   ts: number;
-  users: Record<string, { up: number; down: number; conns: number; first?: number }>;
+  users: Record<
+    string,
+    { up: number; down: number; conns: number; first?: number; d?: string; dU?: number; dD?: number }
+  >;
 }
 
 /** snap —— 当日统计快照 */
@@ -357,6 +360,10 @@ interface MeterBody {
   down?: number;
   conns?: number;
   first?: number;
+  /** 恢复历史累计时一并带回的当日字段（d 必须是今天才采纳） */
+  d?: string;
+  dU?: number;
+  dD?: number;
   c?: Record<string, number | string>;
   spd?: Record<string, NodeSnap>;
   e?: ErrItem[];

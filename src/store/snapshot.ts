@@ -33,6 +33,7 @@ export async function usageSnapWrite(env: Env, users?: UserRec[]) {
     const n = Number(x);
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
   };
+  const today = new Date().toISOString().slice(0, 10);
   await eachLimit(list, 8, async (u) => {
     const v = await meterGet(env, u.id);
     const old = (prev.users || {})[u.id];
@@ -42,8 +43,21 @@ export async function usageSnapWrite(env: Env, users?: UserRec[]) {
     const up = Math.max(num(v && v.up), num(old && old.up));
     const down = Math.max(num(v && v.down), num(old && old.down));
     const conns = Math.max(num(v && v.conns), num(old && old.conns));
+    // 当日字段只合并"同一天"的：昨天 23:59 的 dU 不能算进今天
+    const vDay = v && v.d === today ? v : null;
+    const oldDay = old && old.d === today ? old : null;
+    const dU = Math.max(num(vDay && vDay.dU), num(oldDay && oldDay.dU));
+    const dD = Math.max(num(vDay && vDay.dD), num(oldDay && oldDay.dD));
     if (up || down || conns) {
-      out.users[u.id] = { up, down, conns, first: (v && v.first) || (old && old.first) || 0 };
+      out.users[u.id] = {
+        up,
+        down,
+        conns,
+        first: (v && v.first) || (old && old.first) || 0,
+        d: today,
+        dU,
+        dD,
+      };
     }
   });
   if (!Object.keys(out.users).length) return;

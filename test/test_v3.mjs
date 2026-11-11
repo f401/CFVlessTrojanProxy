@@ -337,6 +337,10 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   ok("Clash 密码转义引号", y.includes('password: "a\\"b\\\\c"'), y.split("\n").find((l) => l.includes("password")));
   ok("Clash 主机名按需加引号", y.includes('server: "bad\\"host"'), y.split("\n").find((l) => l.includes("server")));
   ok("Clash 名字仍然带引号", y.includes('name: "vless-bad-host-443-T"'));
+
+  const envN = { ...env, pwd: 'a"b\nc', nodes: "n.example.com:443:tls" };
+  const yn = W.renderClash(envN, new URL("https://x/" + UUID), UUID, "a.example.com", {}, []);
+  ok("Clash 密码里的换行被转义", yn.includes('password: "a\\"b\\nc"'), yn.split("\n").find((l) => l.includes("password")));
 }
 
 /* ---------- 上行队列：8MB 上限，读走才释放额度 ---------- */

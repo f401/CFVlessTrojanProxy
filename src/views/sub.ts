@@ -246,7 +246,8 @@ export function regionEntries(regions: string[], host: string, pass: string, pro
  * @returns {string} YAML 文本
  */
 /** YAML 双引号字符串：密码来自 env / 面板，可能带引号或反斜杠，不转义会把整份配置拆坏 */
-const yamlStr = (s: string) => `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+const yamlStr = (s: string) =>
+  `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "\\r").replace(/\n/g, "\\n")}"`;
 
 /** 普通主机名/端口保持裸写；只有含特殊字符时才加引号（不改变现有订阅的字节） */
 const yamlScalar = (s: string) => (/^[A-Za-z0-9._:-]+$/.test(String(s)) ? String(s) : yamlStr(String(s)));

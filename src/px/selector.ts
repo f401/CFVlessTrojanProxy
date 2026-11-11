@@ -55,7 +55,7 @@ export class Selector {
     // 以前会一直把连接拨到这个死地址，直到 cron 的 maybeSwitch 才发现。
     if (!cur || !S.alive.has(cur) || isBlack(cur) || isFrozen(cur)) {
       cur = bestFor(m);
-      if (cur) S.curs[m] = cur;
+      S.curs[m] = cur; // 没有候选就清空：别让面板/health 一直显示一个已经不存在的节点
     }
     if (!cur) cnt("noCand");
     const host = st && st.host ? String(st.host) : "";
@@ -191,7 +191,7 @@ export class Selector {
       S.lastSwitch[m] = now;
       return true;
     }
-    if (isBlack(cur) || isFrozen(cur)) {
+    if (!S.alive.has(cur) || isBlack(cur) || isFrozen(cur)) {
       S.prev[m] = cur;
       S.curs[m] = best.k;
       S.lastSwitch[m] = now;

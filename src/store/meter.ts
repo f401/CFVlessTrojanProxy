@@ -20,7 +20,8 @@ export class Meter {
     this.env = env;
     this.c = { up: 0, down: 0, conns: 0, first: 0, ts: 0, d: "", dU: 0, dD: 0 };
     this.g = { d: "" }; // 全局日计数（连接/走节点/断流…）
-    this.s = {}; // 节点快照 "h:p" -> {med,p90,cap,n,...}
+    // 节点 key 来自 ?spd 的外部快照：用 null 原型，`__proto__` 当键也不能改原型
+    this.s = Object.create(null) as Record<string, NodeSnap>;
     this.e = []; // 跨 isolate 的错误环形（最多 50 条）
     this.st.blockConcurrencyWhile(async () => {
       // 单键存储：每次 /add 只写 1 行。
@@ -32,7 +33,7 @@ export class Meter {
         if (o && typeof o === "object") {
           if (o.c && typeof o.c === "object") this.c = { ...this.c, ...o.c };
           if (o.g && typeof o.g === "object") this.g = o.g as CounterDoc;
-          if (o.s && typeof o.s === "object") this.s = o.s;
+          if (o.s && typeof o.s === "object") this.s = Object.assign(Object.create(null), o.s);
           if (Array.isArray(o.e)) this.e = o.e;
         }
         return;
@@ -59,7 +60,7 @@ export class Meter {
       if (sv) {
         const o3 = await unseal<Record<string, NodeSnap>>(env, sv);
         if (o3 && typeof o3 === "object") {
-          this.s = o3;
+          this.s = Object.assign(Object.create(null), o3);
           migrated = true;
         }
       }
@@ -151,6 +152,7 @@ export class Meter {
       if (d.spd && typeof d.spd === "object") {
         for (const [k, v] of Object.entries(d.spd)) {
           if (!v || typeof v !== "object") continue;
+          if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
           const old = this.s[k];
           if (!old || (v.at || 0) >= (old.at || 0)) this.s[k] = v; // 新的覆盖旧的
         }
@@ -227,16 +229,29 @@ export class Meter {
       const want = (Number(d.up) || 0) + (Number(d.down) || 0);
       if (want > cur) {
         const oldC = { ...this.c };
+        // 恢复历史累计不能把"今日"一起抹掉；只有快照的 d 是今天才采纳 dU/dD
+        const today = new Date().toISOString().slice(0, 10);
+        const restoreDay = String(d.d || "") === today;
+        const sameDay = this.c.d === today;
+        const dU = restoreDay
+          ? Math.max(Number(d.dU) || 0, sameDay ? this.c.dU || 0 : 0)
+          : sameDay
+            ? this.c.dU || 0
+            : 0;
+        const dD = restoreDay
+          ? Math.max(Number(d.dD) || 0, sameDay ? this.c.dD || 0 : 0)
+          : sameDay
+            ? this.c.dD || 0
+            : 0;
         this.c = {
           up: Number(d.up) || 0,
           down: Number(d.down) || 0,
           conns: Number(d.conns) || this.c.conns || 0,
           first: Number(d.first) || this.c.first || Date.now(),
           ts: Date.now(),
-          // 恢复历史累计不能把"今日"一起抹掉：d/dU/dD 是面板今日用量的来源
-          d: this.c.d || "",
-          dU: this.c.dU || 0,
-          dD: this.c.dD || 0,
+          d: restoreDay || sameDay ? today : this.c.d || "",
+          dU,
+          dD,
         };
         try {
           await this.save();
