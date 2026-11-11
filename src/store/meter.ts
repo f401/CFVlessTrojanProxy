@@ -119,7 +119,8 @@ export class Meter {
     if (p.endsWith("/add")) {
       let d: MeterBody = {};
       try {
-        d = await req.json();
+        const j = await req.json();
+        if (j && typeof j === "object" && !Array.isArray(j)) d = j as MeterBody;
       } catch (e) {}
       const c = this.c;
       const oldC = { ...this.c },
@@ -200,7 +201,8 @@ export class Meter {
     if (p.endsWith("/seed")) {
       let d: MeterBody = {};
       try {
-        d = await req.json();
+        const j = await req.json();
+        if (j && typeof j === "object" && !Array.isArray(j)) d = j as MeterBody;
       } catch (e) {}
       if ((this.c.up || 0) + (this.c.down || 0) + (this.c.conns || 0) === 0) {
         const oldC = { ...this.c };
@@ -223,7 +225,8 @@ export class Meter {
     if (p.endsWith("/set")) {
       let d: MeterBody = {};
       try {
-        d = await req.json();
+        const j = await req.json();
+        if (j && typeof j === "object" && !Array.isArray(j)) d = j as MeterBody;
       } catch (e) {}
       const cur = (this.c.up || 0) + (this.c.down || 0);
       const want = (Number(d.up) || 0) + (Number(d.down) || 0);

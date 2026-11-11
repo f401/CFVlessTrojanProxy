@@ -564,6 +564,19 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   for (const h of pub) ok(`公网放行 ${h}`, !W.isPrivateHost(h), h);
 }
 
+/* ---------- 地区列表：去重后再截断 ---------- */
+{
+  eq("regions 去重且最多 6 个", await W.regionListAsync({ regions: "HK,HK,JP,US,SG,DE,NL" }), [
+    "HK",
+    "JP",
+    "US",
+    "SG",
+    "DE",
+    "NL",
+  ]);
+  eq("regions 忽略非法值", await W.regionListAsync({ regions: "hk, jp ,X,US" }), ["HK", "JP", "US"]);
+}
+
 /* ---------- 全局候选名单：新探到的节点不能永远排在第 41 位 ---------- */
 {
   W.S.alive.clear();
@@ -621,6 +634,15 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   const rw = await W.SEEDS.write(envDown, true, true);
   eq("seed 读失败时拒绝落盘", rw.ok, false);
   eq("seed 读失败时一次都没写", puts, 0);
+
+  // 有原始值但解不出来（损坏 / KEK 变了）也必须按读失败处理
+  W.S.seedAt = 0;
+  W.S.seedReadFail = false;
+  puts = 0;
+  const envBad = { STATS: { get: async () => "not-json", put: async () => puts++ } };
+  const rb = await W.SEEDS.write(envBad, true, true);
+  eq("seed 值损坏时拒绝落盘", rb.ok, false);
+  eq("seed 值损坏时一次都没写", puts, 0);
 
   W.S.snapChecked = 0;
   W.S.snapBusy = false;

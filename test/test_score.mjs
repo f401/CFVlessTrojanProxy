@@ -1081,6 +1081,15 @@ reset();
   eq("并发 /add 串行累加", jq.up, 3);
 }
 
+/* ---------- 8d. /add 收到 null / 数组 body 不能把 DO 打 500 ---------- */
+{
+  const doN = mkDO();
+  const rn = await doN.m.fetch(new Request("https://m/add", { method: "POST", body: "null" }));
+  eq("DO /add null body 不抛", rn.status, 200);
+  const jn = await rn.json();
+  eq("DO /add null body 累计仍为 0", [jn.up, jn.down, jn.conns], [0, 0, 0]);
+}
+
 /* ---------- 9. 影子概率：选择器 / 控制页 / /proxyip 同源 ---------- */
 eq("pxShadow 未设置 → 5%", W.shadowRate({}), 0.05);
 eq('pxShadow="0" → 关闭探索', W.shadowRate({ pxShadow: "0" }), 0);

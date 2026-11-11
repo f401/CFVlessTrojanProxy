@@ -20,8 +20,10 @@ import { P_T, VERSION, enc, toHex } from "../core/util";
  */
 export function renderHtml(env: Env, url: URL, id: string, host: string, key: string, info: PanelInfo) {
   const base = `${url.origin}/${id}`;
-  const kq = key ? `?k=${encodeURIComponent(key)}` : "";
-  const kk = key ? "&k=" + encodeURIComponent(key) : "";
+  // 路径里已经有 ? 时必须用 &，否则 /stats?format=html?k=xxx 会把 format 的值
+  // 变成 "html?k=xxx"，页面退化成 JSON，k 也不会被解析。
+  const withKey = (path: string) =>
+    key ? path + (path.includes("?") ? "&k=" : "?k=") + encodeURIComponent(key) : path;
   const i = info || {};
 
   const protos = pickProtos(env, url, Boolean(i[P_T + "Pwd"]));
@@ -31,11 +33,15 @@ export function renderHtml(env: Env, url: URL, id: string, host: string, key: st
   const row = (k: string, v: string, mono = false) =>
     `<tr><td class="k">${k}</td><td class="${mono ? "u" : ""}">${v}</td></tr>`;
 
-  const link = (path: string, desc: string, tag: string) =>
-    `<tr><td class="t">${tag || "GET"}</td><td class="u"><a href="${base}${path}${kq}" target="_blank">${base}${path}${kq}</a></td><td class="d">${desc}</td></tr>`;
+  const link = (path: string, desc: string, tag: string) => {
+    const p = withKey(path);
+    return `<tr><td class="t">${tag || "GET"}</td><td class="u"><a href="${base}${p}" target="_blank">${base}${p}</a></td><td class="d">${desc}</td></tr>`;
+  };
 
-  const topLink = (path: string, desc: string, tag: string) =>
-    `<tr><td class="t">${tag || "GET"}</td><td class="u"><a href="${url.origin}${path}${kq}" target="_blank">${url.origin}${path}${kq}</a></td><td class="d">${desc}</td></tr>`;
+  const topLink = (path: string, desc: string, tag: string) => {
+    const p = withKey(path);
+    return `<tr><td class="t">${tag || "GET"}</td><td class="u"><a href="${url.origin}${p}" target="_blank">${url.origin}${p}</a></td><td class="d">${desc}</td></tr>`;
+  };
 
   return `<!doctype html><html lang="zh"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">

@@ -361,8 +361,6 @@ export async function debug(c: UserCtx): Promise<Response> {
     const [u0, d0, c0] = String(url.searchParams.get("seed"))
       .split(",")
       .map((x) => Number(x) || 0);
-    const px0 = await pxGet(env);
-    void px0;
     let seeded = null;
     try {
       const stub = env.METER.get(env.METER.idFromName(id));

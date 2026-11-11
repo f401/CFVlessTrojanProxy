@@ -372,11 +372,13 @@ export async function probeSni(nodeHost: string, nodePort: number, sni: string, 
 export async function regionListAsync(env: Env) {
   const raw = String(env.regions || "").trim();
   if (raw && raw.toLowerCase() !== "auto") {
-    return raw
-      .split(",")
-      .map((x) => x.trim().toUpperCase())
-      .filter((x) => /^[A-Z]{2}$/.test(x))
-      .slice(0, 6);
+    const out: string[] = [];
+    for (const x of raw.split(",")) {
+      const cc = x.trim().toUpperCase();
+      if (/^[A-Z]{2}$/.test(cc) && !out.includes(cc)) out.push(cc);
+      if (out.length >= 6) break;
+    }
+    return out;
   }
   const list = await aliveList(env);
   const set: string[] = [];

@@ -25,7 +25,11 @@ export async function kvGet<T = unknown>(env: Env, key: string): Promise<T | nul
 export async function kvGetStrict<T = unknown>(env: Env, key: string): Promise<T | null> {
   if (!env || !env.STATS) return null;
   const raw = await env.STATS.get(key);
-  return (await unseal(env, raw)) as T | null;
+  if (raw == null) return null;
+  const val = (await unseal(env, raw)) as T | null;
+  // 有原始值却解不出来（损坏 / KEK 变了）：当成读失败，别让调用方拿空表覆盖
+  if (val == null) throw new Error("kv unseal failed: " + key);
+  return val;
 }
 
 export async function kvSet(env: Env, key: string, obj: unknown, opts?: { expirationTtl?: number }): Promise<void> {

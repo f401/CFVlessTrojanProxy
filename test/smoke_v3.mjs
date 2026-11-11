@@ -1,8 +1,15 @@
 import mod from "./_bundle.mjs";
 import * as W from "./_bundle.mjs";
 
-let pass = 0, fail = 0;
-const eq = (n, a, b) => { if (JSON.stringify(a) === JSON.stringify(b)) pass++; else { fail++; console.log(`FAIL ${n}: got ${JSON.stringify(a)} want ${JSON.stringify(b)}`); } };
+let pass = 0,
+  fail = 0;
+const eq = (n, a, b) => {
+  if (JSON.stringify(a) === JSON.stringify(b)) pass++;
+  else {
+    fail++;
+    console.log(`FAIL ${n}: got ${JSON.stringify(a)} want ${JSON.stringify(b)}`);
+  }
+};
 const ok = (n, c) => eq(n, !!c, true);
 
 const UUID = "7c53c12a-88b1-4fda-b6e7-4da62e47a4e1";
@@ -52,9 +59,11 @@ ok("clash 含 ip 标签", r.body.includes("&ip=104-16-0-1-443"));
 r = await run(`/${UUID}/sb`);
 eq("singbox 200", r.status, 200);
 let sb = null;
-try { sb = JSON.parse(r.body); } catch (e) {}
+try {
+  sb = JSON.parse(r.body);
+} catch (e) {}
 ok("singbox 是合法 JSON", sb && Array.isArray(sb.outbounds));
-ok("singbox outbound 数", sb.outbounds.length === 2 * 2 * 2 + 4);  // 2 节点 x 2 协议 x 2 模式 + 2 urltest + selector
+ok("singbox outbound 数", sb.outbounds.length === 2 * 2 * 2 + 4); // 2 节点 x 2 协议 x 2 模式 + 2 urltest + selector
 
 /* base64 */
 r = await run(`/${UUID}/ty`);
@@ -87,6 +96,11 @@ const r2 = await mod.fetch(mk(`/${UUID}`), env2, ctx);
 eq("pageKey 缺失 403", r2.status, 403);
 const r3 = await mod.fetch(mk(`/${UUID}?k=s3cret`), env2, ctx);
 eq("pageKey 正确 200", r3.status, 200);
+{
+  const body = await r3.text();
+  ok("控制页 stats 链接保留 format 参数", body.includes("/stats?format=html&k=s3cret"));
+  ok("控制页 refresh 链接保留 refresh 参数", body.includes("/proxyip?refresh=1&k=s3cret"));
+}
 
 /* 无 uuid 配置：/health 仍然可用（便于全新部署自检），业务路径才 500 */
 const r4 = await mod.fetch(mk("/health"), {}, ctx);

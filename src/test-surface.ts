@@ -108,6 +108,7 @@ export {
   hostUntried,
 } from "./nodes/metrics";
 export { tlsHello, refillPool } from "./px/probe";
+export { regionListAsync } from "./px/probe";
 export { nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats } from "./store/index";
 export { renderStatsHtml } from "./views/panel";
 export { randomPwd } from "./views/auth";
