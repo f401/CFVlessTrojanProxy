@@ -60,5 +60,6 @@ interface ResponseInitLike {
   headers?: Record<string, string>;
 }
 
-// 运行时由入口 import { connect } from "cloudflare:sockets" 提供；类型指向模块导出
+// WebSocketPair 是 Workers 的运行时全局；connect 必须从 "cloudflare:sockets" import，
+// 不要在这里 declare —— 否则漏 import 会被 tsc 放过，线上才炸。
 declare const WebSocketPair: { new (): { 0: WebSocketLike; 1: WebSocketLike } };

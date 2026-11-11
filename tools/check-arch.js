@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const ROOT = path.resolve(__dirname, "..");
 const SRC = path.join(ROOT, "src");
+const TYPES = path.join(ROOT, "types");
 
 const LAYERS = ["core", "store", "nodes", "px", "proxy", "views", "edge", "routes"];
 const RANK = Object.fromEntries(LAYERS.map((l, i) => [l, i]));
@@ -77,6 +78,17 @@ function dfs(layer, pathArr) {
   seen.add(layer);
 }
 for (const layer of LAYERS) dfs(layer, []);
+
+// types/*.d.ts 里的全局 declare 会掩盖漏 import（connect 就这么躲过一次 tsc）。
+// 只允许 Workers 真正的运行时全局；其余必须 import。
+for (const f of walk(TYPES)) {
+  const src = fs.readFileSync(f, "utf8");
+  for (const m of src.matchAll(/^\s*declare\s+(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/gm)) {
+    if (m[1] !== "WebSocketPair") {
+      problems.push(`${path.relative(ROOT, f)}: 全局声明 ${m[1]} 会掩盖漏 import（只允许 WebSocketPair）`);
+    }
+  }
+}
 
 const uniq = [...new Set(problems)];
 if (uniq.length) {
