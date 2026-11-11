@@ -46,7 +46,7 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
         today: fmtBytes((st.todayUp || 0) + (st.todayDown || 0)),
         quota: fmtBytes(effectiveQuota(env, (st.up || 0) + (st.down || 0))) + "（到顶自动翻倍）",
         expire: env.expireAt ? String(env.expireAt).slice(0, 10) : "长期",
-        [P_T + "Pwd"]: trojanPasswordOf(env, id),
+        [P_T + "Pwd"]: trojanPasswordOf(env, id, c.auth),
         policy: `滞回 15% · 驻留 ${Math.round(SC.DWELL / 60000)} 分钟 · 每小时最多 ${SC.BUDGET} 次切换 · 影子 ${Math.round((Number(env.pxShadow) || 0.1) * 100)}%`,
       };
       return new Response(renderHtml(env, url, id, host, pageKey, info), {
@@ -64,19 +64,19 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
     case "cl":
     case "pcl": {
       const s = await readStatsCached(env, id);
-      return text(renderClash(env, url, id, host, learned, regions), subHeaders(env, s));
+      return text(renderClash(env, url, id, host, learned, regions, c.auth), subHeaders(env, s));
     }
 
     case "sb":
     case "psb": {
       const s = await readStatsCached(env, id);
-      return json(renderSingbox(env, url, id, host, learned, regions), subHeaders(env, s));
+      return json(renderSingbox(env, url, id, host, learned, regions, c.auth), subHeaders(env, s));
     }
 
     case "ty":
     case "pty": {
       const s = await readStatsCached(env, id);
-      return text(renderLinks(env, url, id, host, learned, regions), subHeaders(env, s));
+      return text(renderLinks(env, url, id, host, learned, regions, c.auth), subHeaders(env, s));
     }
 
     case "stats": {

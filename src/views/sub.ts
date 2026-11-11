@@ -82,7 +82,13 @@ export function pickProtos(env: Env, url: URL, hasTrojanOverride?: boolean): str
  * @param {string} id 用户 UUID
  * @returns {string} 密码，没有则空串
  */
-export function trojanPasswordOf(env: Env, id: string) {
+export function trojanPasswordOf(env: Env, id: string, auth?: Auth) {
+  // 面板创建的用户有自己的密码：优先用用户表，别拿 env 的公共密码去顶
+  if (auth && auth.list) {
+    const u = auth.list.find((x) => x.id === id);
+    if (u && u.pwd) return u.pwd;
+    if (u && u.managed) return "";      // 托管用户没密码 → 这个订阅不出 Trojan
+  }
   const raw = secretPwd(env);
   if (!raw) return "";
   // 单密码模式：一个公共密码，所有用户共用
@@ -175,10 +181,10 @@ export function regionEntries(regions: string[], host: string, pass: string, pro
  * @param {string[]} [regions] 地区列表
  * @returns {string} YAML 文本
  */
-export function renderClash(env: Env, url: URL, id: string, host: string, learned: Record<string, RttEntry> = {}, regions: string[] = []) {
+export function renderClash(env: Env, url: URL, id: string, host: string, learned: Record<string, RttEntry> = {}, regions: string[] = [], auth?: Auth) {
   const nodes = orderNodes(loadNodes(env, host), learned);
-  const protos = pickProtos(env, url);
-  const pass = trojanPasswordOf(env, id);
+  const pass = trojanPasswordOf(env, id, auth);
+  const protos = pickProtos(env, url, Boolean(pass));
   const out: string[] = [];
   const byMode: Record<string, string[]> = { lat: [], tput: [] };
   const all = [];
@@ -281,10 +287,10 @@ export function renderClash(env: Env, url: URL, id: string, host: string, learne
   ].join("\n");
 }
 
-export function renderSingbox(env: Env, url: URL, id: string, host: string, learned: Record<string, RttEntry> = {}, regions: string[] = []) {
+export function renderSingbox(env: Env, url: URL, id: string, host: string, learned: Record<string, RttEntry> = {}, regions: string[] = [], auth?: Auth) {
   const nodes = orderNodes(loadNodes(env, host), learned);
-  const protos = pickProtos(env, url);
-  const pass = trojanPasswordOf(env, id);
+  const pass = trojanPasswordOf(env, id, auth);
+  const protos = pickProtos(env, url, Boolean(pass));
   const outs = [];
   const byMode: Record<string, string[]> = { lat: [], tput: [] };
   const tags = [];
@@ -372,10 +378,10 @@ export function renderSingbox(env: Env, url: URL, id: string, host: string, lear
   );
 }
 
-export function renderLinks(env: Env, url: URL, id: string, host: string, learned: Record<string, RttEntry> = {}, regions: string[] = []) {
+export function renderLinks(env: Env, url: URL, id: string, host: string, learned: Record<string, RttEntry> = {}, regions: string[] = [], auth?: Auth) {
   const nodes = orderNodes(loadNodes(env, host), learned);
-  const protos = pickProtos(env, url);
-  const pass = trojanPasswordOf(env, id);
+  const pass = trojanPasswordOf(env, id, auth);
+  const protos = pickProtos(env, url, Boolean(pass));
   const lines = [];
 
   // 和 Clash / sing-box 对齐：每个入口出两套（吞吐优先 T / 速率优先 L），

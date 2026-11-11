@@ -240,5 +240,20 @@ eq("主 UUID 取列表第一个（小写）", W.primaryId({ uuid: "AAA-BBB,CCC-D
 eq("没有 uuid 时回落 uuids", W.primaryId({ uuids: "EEE-FFF" }), "eee-fff");
 eq("都没有返回空串", W.primaryId({}), "");
 
+/* ---------- 面板托管用户的 Trojan 密码 ---------- */
+{
+  const authM = {
+    uuids: new Set([UUID]), trojan: new Map(),
+    list: [{ id: UUID, pwd: "ManagedPwd123", enabled: true, managed: true, note: "" }],
+  };
+  const envM = { nodes: "a.example.com:443:tls" };
+  eq("托管用户密码优先于 env 公共密码", W.trojanPasswordOf(envM, UUID, authM), "ManagedPwd123");
+  const clM = W.renderClash(envM, new URL("https://x/" + UUID), UUID, "a.example.com", {}, [], authM);
+  ok("托管用户订阅会出 Trojan", clM.includes("type: trojan"));
+  ok("托管用户订阅用生成的密码", clM.includes('password: "ManagedPwd123"'));
+  const authEmpty = { uuids: new Set([UUID]), trojan: new Map(), list: [{ id: UUID, pwd: "", enabled: true, managed: true, note: "" }] };
+  eq("托管用户没密码时不出 Trojan", W.trojanPasswordOf(envM, UUID, authEmpty), "");
+}
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

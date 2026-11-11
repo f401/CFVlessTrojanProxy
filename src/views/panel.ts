@@ -25,7 +25,7 @@ export function renderHtml(env: Env, url: URL, id: string, host: string, key: st
   const kk = key ? "&k=" + encodeURIComponent(key) : "";
   const i = info || {};
 
-  const protos = pickProtos(env, url);
+  const protos = pickProtos(env, url, Boolean(i[P_T + "Pwd"]));
   const regions = i.regions || [];
   const nodeCount = loadNodes(env, host).length * protos.length + regions.length * protos.length;
 
