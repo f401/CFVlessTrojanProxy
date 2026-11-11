@@ -5,6 +5,10 @@ import { meterGet } from "./meter-client";
 
 /* 用量视图：Meter DO 读取 / 本地缓存 / 面板口径 */
 
+/**
+ * 取 Meter DO 里的节点快照（跨 isolate）。
+ * 面板跑在哪个 isolate 全看运气，只看本地 nstat 会永远显示"未用"。
+ */
 export async function nodeSnapGet(env: Env, id: string): Promise<Record<string, NodeSnap>> {
   if (!env || !env.METER || !id) return {};
   const hit = S.nodeSnapCache;

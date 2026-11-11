@@ -1,7 +1,6 @@
 import type { Socket } from "cloudflare:sockets";
 import { logErr } from "../nodes/metrics";
 import { checkTarget } from "../core/net";
-import { aliveList } from "./pool";
 import { S } from "../core/state";
 import { dec, enc, timeoutSignal, toHex, withTimeout } from "../core/util";
 import { connect } from "cloudflare:sockets";
@@ -364,29 +363,4 @@ export async function probeSni(nodeHost: string, nodePort: number, sni: string, 
       if (sock) sock.close();
     } catch (e) {}
   }
-}
-
-/**
- * 得出订阅里要输出的地区列表（配置固定值或按 alive 自动推断）。
- * @param {object} env Worker 环境
- * @returns {Promise<string[]>} 最多 6 个两位国家码
- */
-export async function regionListAsync(env: Env) {
-  const raw = String(env.regions || "").trim();
-  if (raw && raw.toLowerCase() !== "auto") {
-    const out: string[] = [];
-    for (const x of raw.split(",")) {
-      const cc = x.trim().toUpperCase();
-      if (/^[A-Z]{2}$/.test(cc) && !out.includes(cc)) out.push(cc);
-      if (out.length >= 6) break;
-    }
-    return out;
-  }
-  const list = await aliveList(env);
-  const set: string[] = [];
-  for (const x of list) {
-    const cc = (x.cc || "").toUpperCase();
-    if (cc && !set.includes(cc)) set.push(cc);
-  }
-  return set.slice(0, 6);
 }

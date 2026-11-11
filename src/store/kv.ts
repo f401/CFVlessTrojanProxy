@@ -2,7 +2,6 @@ import { errMsg } from "../core/util";
 
 import { S } from "../core/state";
 import { seal, unseal } from "./crypto";
-import { flushSnap } from "./snapshot";
 
 /* KV 读写：所有 KV 访问的唯一入口 */
 

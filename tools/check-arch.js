@@ -79,6 +79,33 @@ function dfs(layer, pathArr) {
 }
 for (const layer of LAYERS) dfs(layer, []);
 
+// 文件级循环：目录级 DFS 看不到同层互引，拆文件后很容易踩到（store/views 都拆过）
+const fileGraph = new Map();
+for (const f of files) {
+  const src = fs.readFileSync(f, "utf8").split("\n").map((l) => (l.startsWith("import type") ? "" : l)).join("\n");
+  const deps = [];
+  for (const m of src.matchAll(/from\s+"(\.[^"]+)"/g)) {
+    const base = path.resolve(path.dirname(f), m[1]);
+    const cand = [base, base + ".ts", path.join(base, "index.ts")].find((x) => fs.existsSync(x) && x.endsWith(".ts"));
+    if (cand) deps.push(cand);
+  }
+  fileGraph.set(f, deps);
+}
+const fSeen = new Set(), fStack = new Set();
+function dfsFile(n, pathArr) {
+  if (fStack.has(n)) {
+    const i = pathArr.indexOf(n);
+    problems.push(`文件级循环：${pathArr.slice(i).concat(n).map((x) => path.relative(ROOT, x)).join(" → ")}`);
+    return;
+  }
+  if (fSeen.has(n)) return;
+  fStack.add(n);
+  for (const d of fileGraph.get(n) || []) dfsFile(d, pathArr.concat(n));
+  fStack.delete(n);
+  fSeen.add(n);
+}
+for (const f of files) dfsFile(f, []);
+
 // types/*.d.ts 里的全局 declare 会掩盖漏 import（connect 就这么躲过一次 tsc）。
 // 只允许 Workers 真正的运行时全局；其余必须 import。
 for (const f of walk(TYPES)) {
@@ -96,4 +123,4 @@ if (uniq.length) {
   for (const p of uniq) console.log("  ✗", p);
   process.exit(1);
 }
-console.log(`架构门禁通过：${files.length} 个文件，分层方向 / 循环依赖 / 顶层状态 / 体积 全部 OK`);
+console.log(`架构门禁通过：${files.length} 个文件，分层方向 / 目录与文件级循环 / 顶层状态 / 体积 全部 OK`);

@@ -13,7 +13,7 @@ import { checkTarget, dohQuery, expandV6, resolveAAAA } from "../proxy/dial";
 import { aliveList, commitPool, cronScan, flushPx, nsOf, pxGet, pxSet } from "../px/pool";
 import { cnt, cntView } from "../core/counter";
 import { spdSnapshot } from "../core/node-snapshot";
-import { EXTRA_HOSTS, probeProxy, probeSni, refillPool, regionListAsync } from "../px/probe";
+import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
 import { restoreUsage, primaryId } from "../store/index";
 import { adminOnly } from "../edge/auth";
 

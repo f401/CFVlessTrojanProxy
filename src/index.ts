@@ -13,7 +13,7 @@ import { loadRtt, logErr } from "./nodes/metrics";
 
 import { loadUsers } from "./proxy/protocol";
 
-import { regionListAsync } from "./px/probe";
+import { regionListAsync } from "./px/regions";
 
 import { S } from "./core/state";
 import { pendFlush } from "./store/index";

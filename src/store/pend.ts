@@ -14,11 +14,6 @@ export function primaryId(env: Env): string {
     .toLowerCase();
 }
 
-/**
- * 取 Meter DO 里的节点快照（跨 isolate）。
- * 面板跑在哪个 isolate 全看运气，只看本地 nstat 会永远显示"未用"。
- */
-
 export function pendAdd(id: string, up: number, down: number, isNew?: boolean) {
   if (!id) return;
   const p = S.pend.get(id) || { up: 0, down: 0, conns: 0 };

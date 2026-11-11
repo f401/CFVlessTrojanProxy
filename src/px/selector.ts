@@ -9,7 +9,8 @@ interface PickState {
 import { SC } from "../core/const";
 import { shadowRate } from "../core/util";
 import { hostKey, hostRank, hostUntried, logErr } from "../nodes/metrics";
-import { MODES, aliveList, keyOf, pxGet } from "./pool";
+import { MODES, keyOf } from "./const";
+import { aliveList, pxGet } from "./pool";
 import { cnt } from "../core/counter";
 import { pxPolicy } from "./probe";
 import {
@@ -325,6 +326,12 @@ export class Selector {
     await pxGet(env);
     const k = this.pick(env, m, st);
     return k || "";
+  }
+
+  /** cron 扫描收尾：重算两个模式的游标，再做定时轮换 */
+  afterScan(env: Env) {
+    for (const m of MODES) this.maybeSwitch(env, m);
+    this.sched(env);
   }
 
   /**

@@ -12,6 +12,7 @@ store/    index kv crypto         适配器：KV / 加密 / 快照 / 计量 / Me
           meter-client meter
 nodes/    score metrics            节点域：纯评分、画像、看板行组装
 px/       pool probe seed selector 中转域：候选池、探活、信誉表、选择器
+          const regions              共享常量 / 地区列表（打破 pool 互引）
 proxy/    protocol dial session     数据面：协议、拨号、会话
           fallback tunnel connection
           ws-in                      客户端→上游字节流（8MB 上行队列上限）
@@ -22,7 +23,7 @@ routes/   health subscription admin   proxyip debug tools(barrel)
 index.ts                            组装根：分发 + ws 升级 + cron
 ```
 
-依赖门禁（`npm run arch`）会拦住：反向依赖、目录级循环依赖、顶层 `let`、单文件 > 560 行、以及**任何 `any`**（`src/` 与 `types/` 一并检查；边界用 `unknown` + 收窄）。
+依赖门禁（`npm run arch`）会拦住：反向依赖、目录级与**文件级**循环依赖、顶层 `let`、单文件 > 560 行、以及**任何 `any`**（`src/` 与 `types/` 一并检查；边界用 `unknown` + 收窄）。
 `types/*.d.ts` 里的全局 `declare` 只允许 `WebSocketPair`（Workers 真全局）；其余全局声明会掩盖漏 import，必须用显式 `import`。
 
 依赖图当前是**严格单向**的：`core → store → nodes → px → proxy → views → edge → routes`。`ALLOW` 表为空；`npm run arch` 会对全部层做循环检查，任何反向边都会失败。

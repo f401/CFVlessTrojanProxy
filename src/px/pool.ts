@@ -19,26 +19,16 @@ import {
   pcts,
 } from "../nodes/score";
 import { BUCKET_DEF, SEEDS } from "./seed";
-import { SEL } from "./selector";
+import { SEED_KEY, SEED_TTL, SEED_MAX, PX_TTL, SEED_VER, MODES, keyOf } from "./const";
 import { S } from "../core/state";
 import { kvGet, kvSet, scheduleFlush } from "../store/index";
 
 /* 代理节点：状态 / 信誉分桶 / 选择 / cron */
 /* ---- 轮换模块：内存为权威，KV 只存「候选池 + 分机房节点信誉」 ---- */
 
-export const SEED_KEY = "px:seed";
-export const SEED_TTL = 30 * 60000; // 信誉表回读周期
-export const SEED_MAX = 40; // 每个机房最多记 40 个节点
 export const SEED_COLD_N = 8; // 冷启动灌进 alive 的节点数
-export const PX_TTL = 86400 * 30;
-export const SEED_VER = 6;
-// 信誉表落盘的最小间隔：每个 isolate 各写各的会让写次数随实例数线性增长
-// （8 个 isolate × 48 次/天 = 384）。S.seed.ts 是从 KV 读回来的全局时间戳，
-// 用它当闸门能把全局写频压到 ~30 次/天。
-
 export { SC, HIST_BASE, HIST_N } from "../core/const";
 
-export const MODES: Mode[] = ["lat", "tput"];
 const ALIVE_MAX = 400; // 长期运行 alive 上限：池子换代不会永久累积
 
 // 灾备种子：seed 被清空时用它兜底，避免"池子有 2000 条但一个能用的都没有"。
@@ -54,7 +44,6 @@ export const BOOT = [
   "89.22.227.132:443",
 ];
 
-export const keyOf = (x: NodeEntry) => x.h + ":" + x.p;
 
 /** 候选项池：内存 → KV(poolGen) → 空；空时由 cronScan 触发重建 */
 export async function ensurePool(env: Env) {
@@ -399,9 +388,7 @@ export async function cronScan(env: Env) {
     }
   }
 
-  // ⑤ 重算两个游标
-  for (const m of MODES) SEL.maybeSwitch(env, m);
-  SEL.sched(env);
+  // ⑤ 游标重算已移到 Selector.afterScan：pool 不再反向 import selector
 
   // ⑥ 每轮最多写一次 KV，且两次落盘间隔 ≥55 分钟（S.seed.ts 来自 KV，跨 isolate 有效）。
   //    cron 是 30 分钟一轮，早先每轮都强制写 = 48 次/天，光这一项就吃掉 5% 的日额度。

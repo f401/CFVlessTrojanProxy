@@ -3,6 +3,7 @@ import { eachLimit, errMsg } from "../core/util";
 import { logErr } from "../nodes/metrics";
 import { S } from "../core/state";
 import { cronScan, flushPx } from "../px/pool";
+import { SEL } from "../px/selector";
 import { flushSnap, pendFlush, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
 import { loadUsers } from "../proxy/protocol";
 
@@ -31,6 +32,7 @@ export async function runCron(env: Env, ctx: ExecutionContext): Promise<void> {
 async function cronOnce(env: Env): Promise<void> {
   try {
     await cronScan(env);
+    SEL.afterScan(env);
   } catch (e) {
     logErr(`cron: ${errMsg(e)}`);
   }

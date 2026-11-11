@@ -10,9 +10,11 @@ import { ZERO_STAT, capOf, costOf, scoreParts, nsGet, p90Of, pFailOf, pStallOf, 
 import { nodeSnapGet } from "../store/index";
 import { checkTarget, dohQuery, expandV6, resolveAAAA } from "../proxy/dial";
 import { aliveList, commitPool, cronScan, flushPx, nsOf, pxGet, pxSet } from "../px/pool";
+import { SEL } from "../px/selector";
 import { cnt, cntView } from "../core/counter";
 import { spdSnapshot } from "../core/node-snapshot";
-import { EXTRA_HOSTS, probeProxy, probeSni, refillPool, regionListAsync } from "../px/probe";
+import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
+import { regionListAsync } from "../px/regions";
 import { restoreUsage, primaryId } from "../store/index";
 import { adminOnly } from "../edge/auth";
 
@@ -79,6 +81,7 @@ export async function proxyip(c: UserCtx): Promise<Response> {
       S.cronBusy = true;
       try {
         await cronScan(env).catch((e) => logErr("cron: " + errMsg(e)));
+        SEL.afterScan(env);
       } finally {
         S.cronBusy = false;
       }
