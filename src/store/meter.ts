@@ -135,7 +135,8 @@ export class Meter {
         if (!this.g || !this.g.d || d0 > this.g.d) this.g = { d: d0 };
         if (this.g.d === d0) {
           for (const [k, v] of Object.entries(d.c)) {
-            if (k === "d" || !(Number(v) > 0)) continue;
+            if (k === "d" || k === "__proto__" || k === "constructor" || k === "prototype") continue;
+            if (!(Number(v) > 0)) continue;
             this.g[k] = (this.g[k] || 0) + v;
           }
         }
@@ -206,11 +207,17 @@ export class Meter {
       } catch (e) {}
       if ((this.c.up || 0) + (this.c.down || 0) + (this.c.conns || 0) === 0) {
         const oldC = { ...this.c };
+        const today = new Date().toISOString().slice(0, 10);
+        const restoreDay = String(d.d || "") === today;
         this.c.up = Number(d.up) || 0;
         this.c.down = Number(d.down) || 0;
         this.c.conns = Number(d.conns) || 0;
         this.c.first = Number(d.first) || Date.now();
         this.c.ts = Date.now();
+        // 灾备快照里的当日字段：DO 被重建后"今日"不该从 0 开始
+        this.c.d = restoreDay ? today : this.c.d || "";
+        this.c.dU = restoreDay ? Number(d.dU) || 0 : this.c.dU || 0;
+        this.c.dD = restoreDay ? Number(d.dD) || 0 : this.c.dD || 0;
         try {
           await this.save();
         } catch (e) {

@@ -1,5 +1,5 @@
 import { S } from "../core/state";
-import { kvGet, kvSet } from "../store/index";
+import { kvGetStrict, kvSet } from "../store/index";
 import { dec, enc, secretPwd, sha224Bytes, toHex, uuidFromBytes } from "../core/util";
 
 /* 协议解析：VLESS / Trojan 首包 */
@@ -18,10 +18,16 @@ export async function loadUsers(env: Env): Promise<Auth> {
   S.usersSig = sig;
 
   let managed: Partial<UserRec>[] = [];
+  let readOk = true;
   try {
-    managed = (await kvGet<UserRec[]>(env, "users")) || [];
+    managed = (await kvGetStrict<UserRec[]>(env, "users")) || [];
   } catch (e) {
-    managed = [];
+    // KV 抖动不等于"没有用户"：有旧缓存就继续用，别让所有托管用户被踢下线
+    readOk = false;
+  }
+  if (!readOk && S.usersCache.v) {
+    S.usersCache.t = Date.now() - USERS_TTL + 60000; // 1 分钟后再试，别每个请求都打 KV
+    return S.usersCache.v;
   }
 
   const uuids = new Set<string>();
@@ -104,7 +110,7 @@ export async function loadUsers(env: Env): Promise<Auth> {
   }
 
   const out = { uuids, trojan, list };
-  S.usersCache = { v: out, t: Date.now() };
+  S.usersCache = { v: out, t: readOk ? Date.now() : Date.now() - USERS_TTL + 60000 };
   return out;
 }
 

@@ -62,7 +62,7 @@ fetch(request)
 tools/tsc.js      tsc（strict:true，0 error 才继续）
 tools/bundle.js   esbuild → dist/_worker.js（生产）/ dist/_test.js（测试出口）
 tools/check-arch.js 分层 / 循环 / 顶层 let / 体积
-test/*.mjs        397 断言 + 8 项逐字节 golden
+test/*.mjs        406 断言 + 8 项逐字节 golden
 obf/*.js          预处理 + 混淆（Meter 类名保留）
 scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → obf → PUT
 ```
@@ -77,6 +77,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 4. 热路径只做"加字节 + 比阈值 + 发送"，其余搬到 tick。
 5. 账务只在连接收尾结算一次；`nsOk` 必须由成功连接调用（历史上漏掉过，导致节点表永远 n=0）。
 6. DO 存储键 `"a"` 是单键格式，老键 `c/e/s/g` 只读兼容，不要回写。
+7. `rg=xx` 是**硬要求**：只在该国节点里选，找不到/连不上就断开，禁止回落到直连或全球节点。
+8. 落盘前读旧值（seed / snap / usage）必须用 `kvGetStrict`；读失败要跳过写，不能当空表覆盖。
 
 ## 6 目录之外的约定
 

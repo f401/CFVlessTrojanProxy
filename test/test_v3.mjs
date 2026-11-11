@@ -366,6 +366,30 @@ eq("都没有返回空串", W.primaryId({}), "");
   eq("另一个用户仍在 uuids", aOff.uuids.has(UUID), true);
 }
 
+/* ---------- KV 读失败时沿用旧用户表，不能把托管用户全踢下线 ---------- */
+{
+  const fake = {
+    uuids: new Set([UUID]),
+    trojan: new Map(),
+    list: [{ id: UUID, pwd: "pw", enabled: true, managed: true, note: "" }],
+  };
+  W.S.usersCache = { v: fake, t: Date.now() - 400000 };
+  W.S.usersSig = "";
+  const envFailUsers = {
+    uuid: UUID,
+    pwd: "pw",
+    STATS: {
+      get: async () => {
+        throw new Error("kv down");
+      },
+    },
+  };
+  const a = await W.loadUsers(envFailUsers);
+  ok("KV 读失败沿用旧用户表", a.uuids.has(UUID));
+  W.S.usersCache = { v: null, t: 0 };
+  W.S.usersSig = "";
+}
+
 /* ---------- 随机密码：长度 / 字符集 / 默认值 ---------- */
 {
   const A = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";

@@ -5,8 +5,14 @@ import { checkTarget } from "./dial";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 
-export async function dialAnother(env: Env, st: Connection, mode: Mode, tag?: string | null): Promise<Socket | null> {
-  const alt = nextNode(mode, st.node);
+export async function dialAnother(
+  env: Env,
+  st: Connection,
+  mode: Mode,
+  tag?: string | null,
+  cc?: string | null,
+): Promise<Socket | null> {
+  const alt = nextNode(mode, st.node, cc);
   if (!alt) return null;
   const i = alt.lastIndexOf(":");
   const host = alt.slice(0, i);

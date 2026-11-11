@@ -231,7 +231,25 @@ eq(
   eq("衰减后不再可疑", W.emptyCloseSuspect("e:443"), false);
 }
 
-/* ---------- 4. Selector ---------- */
+/* ---------- 4. Selector（地区硬要求） ---------- */
+{
+  reset();
+  node("de1:443", { tcp: 50 });
+  node("de2:443", { tcp: 90 });
+  node("us1:443", { tcp: 40 });
+  S.alive.get("de1:443").cc = "DE";
+  S.alive.get("de2:443").cc = "DE";
+  S.alive.get("us1:443").cc = "US";
+  const de = await W.SEL.region({}, "DE", "lat");
+  eq("地区只选 DE 节点", de && de.h + ":" + de.p, "de1:443");
+  const deAlt = await W.SEL.region({}, "DE", "lat", "de1:443");
+  eq("地区避开指定节点", deAlt && deAlt.h + ":" + deAlt.p, "de2:443");
+  eq("地区无节点返回 null", await W.SEL.region({}, "JP", "lat"), null);
+  eq("nextNode 按国家过滤", W.nextNode("lat", "", "US"), "us1:443");
+  eq("nextNode 避开后无同国节点", W.nextNode("lat", "us1:443", "US"), "");
+}
+
+/* ---------- 4b. Selector ---------- */
 reset();
 S.lastSwitch = { lat: 0, tput: 0 };
 node("cur:443", { tcp: 400, tls: 60, okW: 20 });
@@ -1088,6 +1106,22 @@ reset();
   eq("DO /add null body 不抛", rn.status, 200);
   const jn = await rn.json();
   eq("DO /add null body 累计仍为 0", [jn.up, jn.down, jn.conns], [0, 0, 0]);
+}
+
+/* ---------- 8e. /seed 回填历史时也要带回当日字段 ---------- */
+{
+  const today = new Date().toISOString().slice(0, 10);
+  const doSeed = mkDO();
+  await doSeed.m.fetch(
+    new Request("https://m/seed", {
+      method: "POST",
+      body: JSON.stringify({ up: 1000, down: 2000, conns: 5, first: 1, d: today, dU: 77, dD: 88 }),
+    }),
+  );
+  const js = await (await doSeed.m.fetch(new Request("https://m/get"))).json();
+  eq("seed 回填累计", [js.up, js.down], [1000, 2000]);
+  eq("seed 回填当日量", [js.dU, js.dD], [77, 88]);
+  eq("seed 回填日期", js.d, today);
 }
 
 /* ---------- 9. 影子概率：选择器 / 控制页 / /proxyip 同源 ---------- */

@@ -40,16 +40,17 @@ export function dwellOf(env: Env, mode: Mode) {
 
 /* 节点选择：挑谁 / 何时换 / 失败怎么办 */
 export class Selector {
-  /** 按国家挑一个节点（地区出口） */
-  async region(env: Env, cc: string | null) {
+  /** 按国家挑一个节点（地区硬要求：调用方不得回落到直连/全球） */
+  async region(env: Env, cc: string | null, mode: Mode = "tput", avoid = "") {
     const want = String(cc || "").toUpperCase();
     if (!want) return null;
     const list = await aliveList(env);
     const hit = list.filter(
-      (x) => String(x.cc || "").toUpperCase() === want && !isBlack(keyOf(x)) && !isFrozen(keyOf(x)),
+      (x) =>
+        String(x.cc || "").toUpperCase() === want && keyOf(x) !== avoid && !isBlack(keyOf(x)) && !isFrozen(keyOf(x)),
     );
     if (!hit.length) return null;
-    hit.sort((a, b) => costOf(keyOf(a), "tput") - costOf(keyOf(b), "tput"));
+    hit.sort((a, b) => costOf(keyOf(a), mode) - costOf(keyOf(b), mode));
     return hit[0];
   }
 

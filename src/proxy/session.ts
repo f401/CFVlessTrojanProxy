@@ -51,7 +51,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
     const q = new URL(request.url).searchParams;
     ipTag = q.get("ip");
     if (ipTag) ipTag = ipTag.slice(0, 48); // 标签只用于统计，别让超长 ?ip= 把快照撑大
-    ipRegion = (q.get("rg") || "").toUpperCase() || null;
+    ipRegion = (q.get("rg") || "").trim().toUpperCase() || null;
     const qm = q.get("mode");
     if (qm === "lat" || qm === "tput") mode = qm;
     else mode = String(env.defaultMode || "").toLowerCase() === "lat" ? "lat" : "tput";
@@ -69,6 +69,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
     .pipeTo(
       new WritableStream({
         async write(chunk) {
+          if (st.dead) return;
           st.onUp(chunk.length);
           if (st.up + st.down - (st.reportedUp || 0) - (st.reportedDown || 0) >= 1048576) {
             st.flush();
@@ -130,57 +131,87 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
 
           let sock: Socket | null = null;
 
-          // 指定地区：直接走该国家的 proxyip（跳过直连，因为直连出口是 CF 自己的 IP）
           if (ipRegion) {
-            try {
-              const p = await SEL.region(env, ipRegion);
-              if (p && !checkTarget(p.h, p.p)) {
-                sock = await connect({ hostname: p.h, port: p.p });
-                st.node = p.h + ":" + p.p;
-                st.via = "node";
-                st.retried = true;
-              }
-            } catch (e) {
-              /* 该地区暂时没有可用节点 → 走默认逻辑 */
-            }
-          }
-
-          try {
-            // 已知直连必挂的目标（CF 托管站点）直接跳过直连：
-            // 每次先等一次 0 字节关闭，短请求很容易被客户端判超时。
-            // 只靠失败学习（S.needPx），不在直连前做 DNS 预判：
-            // 那会让每个新域名首连多等 50–150 ms，换来的只是一次注定失败的直连。
-            const needPx = (S.needPx.get(r.host) || 0) > Date.now();
-            if (!sock && !needPx) sock = await dial(r.host, r.port);
-            if (!sock) throw new Error("skip-direct");
-          } catch (e) {
-            const px0 = parseProxyIp(await SEL.current(env, mode, st));
-            if (!px0) {
+            // 地区是硬要求：只允许该国家的节点。找不到 / 连不上就明确失败，
+            // 绝不回落到直连（CF 出口）或全球节点，否则用户拿到的不是该国 IP。
+            const failRegion = (msg: string) => {
+              st.dead = true;
+              st.failed = true;
               cnt("dead");
-              kickFlush(env, st.id); // 直连失败且没有可用中转 → 目标不可达
-              logErr(`dead target ${r.host}: ${errMsg(e)}`);
+              kickFlush(env, st.id);
+              logErr(`region ${ipRegion}: ${msg}`, r.host);
               try {
-                serverWS.close(1011, "连接目标失败");
-              } catch (err) {}
-              throw e;
+                serverWS.close(1011, msg);
+              } catch (e) {}
+            };
+            const p = await SEL.region(env, ipRegion, mode);
+            if (!p) {
+              failRegion(`地区 ${ipRegion} 暂无可用节点`);
+              return;
             }
-            st.retried = true;
-            st.pxTries = 1;
+            st.node = p.h + ":" + p.p;
+            if (checkTarget(p.h, p.p)) {
+              failRegion(`地区 ${ipRegion} 节点地址被策略禁止`);
+              return;
+            }
             try {
-              // 纵深防御：种子池来自外部名单，进 connect 之前再验一次地址
-              st.node = px0.host + ":" + px0.port;
-              if (checkTarget(px0.host, px0.port)) throw new Error("proxyip 被策略禁止");
-              sock = await connect({ hostname: px0.host, port: px0.port });
+              sock = await connect({ hostname: p.h, port: p.p });
               st.via = "node";
-            } catch (e2) {
-              // 这个中转连不上，换一个再试一次
-              const alt = await dialAnother(env, st, mode, r.host);
-              if (alt) sock = alt;
-              else {
-                // 连不上中转是节点问题，不是目标站问题：站点级试探也要把节点冻掉，
-                // 否则这条探索路径每次都白撞同一个坏节点（softFail 只记 0.2 站责）。
-                await SEL.bumpFail(env, st.mode, st.node, st.hostTrial || st.trial);
-                throw e2;
+              st.retried = true;
+            } catch (e) {
+              // 同国家再试一个，仍然失败就结束（不跨地区）
+              const alt = await SEL.region(env, ipRegion, mode, st.node);
+              if (alt && !checkTarget(alt.h, alt.p)) {
+                st.node = alt.h + ":" + alt.p;
+                try {
+                  sock = await connect({ hostname: alt.h, port: alt.p });
+                  st.via = "node";
+                  st.retried = true;
+                } catch (e2) {}
+              }
+              if (!sock) {
+                failRegion(`地区 ${ipRegion} 节点连接失败`);
+                return;
+              }
+            }
+          } else {
+            try {
+              // 已知直连必挂的目标（CF 托管站点）直接跳过直连：
+              // 每次先等一次 0 字节关闭，短请求很容易被客户端判超时。
+              // 只靠失败学习（S.needPx），不在直连前做 DNS 预判：
+              // 那会让每个新域名首连多等 50–150 ms，换来的只是一次注定失败的直连。
+              const needPx = (S.needPx.get(r.host) || 0) > Date.now();
+              if (!needPx) sock = await dial(r.host, r.port);
+              if (!sock) throw new Error("skip-direct");
+            } catch (e) {
+              const px0 = parseProxyIp(await SEL.current(env, mode, st));
+              if (!px0) {
+                cnt("dead");
+                kickFlush(env, st.id); // 直连失败且没有可用中转 → 目标不可达
+                logErr(`dead target ${r.host}: ${errMsg(e)}`);
+                try {
+                  serverWS.close(1011, "连接目标失败");
+                } catch (err) {}
+                throw e;
+              }
+              st.retried = true;
+              st.pxTries = 1;
+              try {
+                // 纵深防御：种子池来自外部名单，进 connect 之前再验一次地址
+                st.node = px0.host + ":" + px0.port;
+                if (checkTarget(px0.host, px0.port)) throw new Error("proxyip 被策略禁止");
+                sock = await connect({ hostname: px0.host, port: px0.port });
+                st.via = "node";
+              } catch (e2) {
+                // 这个中转连不上，换一个再试一次
+                const alt = await dialAnother(env, st, mode, r.host);
+                if (alt) sock = alt;
+                else {
+                  // 连不上中转是节点问题，不是目标站问题：站点级试探也要把节点冻掉，
+                  // 否则这条探索路径每次都白撞同一个坏节点（softFail 只记 0.2 站责）。
+                  await SEL.bumpFail(env, st.mode, st.node, st.hostTrial || st.trial);
+                  throw e2;
+                }
               }
             }
           }
@@ -222,7 +253,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
                 nsEmptyClose(st.node, true);
                 // 这个中转不通，换一个再试一次；直接放弃就是用户看到的"下载失败"
                 if ((st.pxTries || 1) < 2) {
-                  const s2 = await dialAnother(env, st, st.mode, r.host);
+                  const s2 = await dialAnother(env, st, st.mode, r.host, ipRegion || undefined);
                   if (s2) {
                     await attach(s2);
                     return;
@@ -246,7 +277,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
 
               // ① 先试 IPv6：CF 只隔离 IPv4 到自家网段，走 IPv6 能通
               // 可选：IPv6 兜底（实测对 CF 托管站点无效，默认关闭，配了 env.cfIpv6 才启用）
-              if (!st.triedV6 && env.cfIpv6 && !isV6Literal(r.host)) {
+              if (!ipRegion && !st.triedV6 && env.cfIpv6 && !isV6Literal(r.host)) {
                 st.triedV6 = true;
                 for (const raw of String(env.cfIpv6).split(",")) {
                   const v6 = raw.trim();

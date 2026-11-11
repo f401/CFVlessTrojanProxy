@@ -468,11 +468,19 @@ export function candsFor(mode: Mode) {
  * 换一个节点（排除指定的那个），用于"这个节点断了再试下一个"
  * @param {string} mode "lat" | "tput"
  * @param {string} avoid 要避开的节点
+ * @param {string} [cc] 只在这个国家里选（地区硬要求）
  * @returns {string} 节点 key，没有可换的返回 ""
  */
-export function nextNode(mode: Mode, avoid: string) {
-  const c = candsFor(mode);
-  for (const x of c) if (x.k !== avoid) return x.k;
+export function nextNode(mode: Mode, avoid: string, cc?: string | null) {
+  const want = String(cc || "").toUpperCase();
+  for (const x of candsFor(mode)) {
+    if (x.k === avoid) continue;
+    if (want) {
+      const a = S.alive.get(x.k);
+      if (!a || String(a.cc || "").toUpperCase() !== want) continue;
+    }
+    return x.k;
+  }
   return "";
 }
 

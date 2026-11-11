@@ -250,7 +250,7 @@ const yamlStr = (s: string) =>
   `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "\\r").replace(/\n/g, "\\n")}"`;
 
 /** 普通主机名/端口保持裸写；只有含特殊字符时才加引号（不改变现有订阅的字节） */
-const yamlScalar = (s: string) => (/^[A-Za-z0-9._:-]+$/.test(String(s)) ? String(s) : yamlStr(String(s)));
+const yamlScalar = (s: string) => (/^[A-Za-z0-9._-]+$/.test(String(s)) ? String(s) : yamlStr(String(s)));
 
 export function renderClash(
   env: Env,
