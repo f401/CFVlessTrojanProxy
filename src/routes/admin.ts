@@ -1,5 +1,5 @@
 import { renderAdmin, renderAdminHint, renderLogin } from "../views/panel";
-import { adminAuthed, newNonce, randomPwd, rlReset, rlTake, sessionToken, sha256Hex } from "../views/auth";
+import { adminAuthed, newNonce, randomPwd, rlReset, rlTake, sessionToken, sha256Hex } from "../edge/auth";
 import { loadUsers, saveUsers } from "../proxy/protocol";
 import { eachLimit } from "../core/util";
 import { readStats } from "../store/index";

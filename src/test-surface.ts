@@ -114,10 +114,10 @@ export { regionListAsync } from "./px/probe";
 export { nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats } from "./store/index";
 export { runCron } from "./routes/cron";
 export { renderStatsHtml } from "./views/panel";
-export { randomPwd } from "./views/auth";
+export { randomPwd } from "./edge/auth";
 
 export { renderAdmin } from "./views/panel";
-export { adminAuthed, sessionToken } from "./views/auth";
+export { adminAuthed, sessionToken } from "./edge/auth";
 export { html, CSP_STATIC } from "./edge/respond";
 export { wsToStream } from "./proxy/ws-in";
 export { handleDns } from "./proxy/session";

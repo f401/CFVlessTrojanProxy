@@ -14,7 +14,7 @@ import { cnt, cntView } from "../core/counter";
 import { spdSnapshot } from "../core/node-snapshot";
 import { EXTRA_HOSTS, probeProxy, probeSni, refillPool, regionListAsync } from "../px/probe";
 import { restoreUsage, primaryId } from "../store/index";
-import { adminAuthed } from "../views/auth";
+import { adminAuthed } from "../edge/auth";
 
 import type { RouteCtx } from "../edge/types";
 

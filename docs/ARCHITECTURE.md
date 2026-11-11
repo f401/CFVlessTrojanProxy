@@ -14,8 +14,8 @@ px/       pool probe seed selector 中转域：候选池、探活、信誉表、
 proxy/    protocol dial session     数据面：协议、拨号、会话
           fallback tunnel connection
           ws-in                      客户端→上游字节流（8MB 上行队列上限）
-views/    sub* panel html auth      纯渲染：sub-common / sub-singbox / sub-links + sub 入口
-edge/     respond types             响应与安全头、请求上下文
+views/    sub* panel* html          纯渲染：sub-common/singbox/links + panel-home/admin/stats
+edge/     respond types auth        响应与安全头、请求上下文、管理会话
 routes/   health subscription admin tools logs cron
 index.ts                            组装根：分发 + ws 升级 + cron
 ```
