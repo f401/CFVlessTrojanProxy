@@ -1,6 +1,6 @@
 import { errMsg } from "../core/util";
 
-import { SC } from "../core/const";
+import { SC, SEED_WRITE_GAP } from "../core/const";
 import { PX_TTL, SEED_KEY, SEED_MAX, SEED_TTL, SEED_VER, cnt, cntDelta, cntUnsend } from "./pool";
 import { costOf, nsGet, p90Local, ZERO_STAT } from "../nodes/score";
 import { S } from "../core/state";
@@ -351,3 +351,12 @@ export class SeedStore {
 }
 
 export const SEEDS = new SeedStore();
+
+/** 变化驱动的落盘节流：90 分钟地板，避免每条连接都打 KV */
+export function markSeedDirty(env: Env) {
+  if (!env || !env.STATS) return;
+  const last = Math.max(S.nsWriteAt, S.seed.ts || 0);
+  if (Date.now() - last < SEED_WRITE_GAP) return;
+  S.nsWriteAt = Date.now();
+  SEEDS.write(env).catch(() => {});
+}

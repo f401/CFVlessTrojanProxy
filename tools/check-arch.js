@@ -39,7 +39,7 @@ const layerOf = (f) => {
 };
 
 const problems = [];
-const graph = new Map();
+const layerGraph = new Map();
 
 for (const f of files) {
   // 类型导入在编译后消失，不算分层依赖
@@ -68,32 +68,29 @@ for (const f of files) {
     if (RANK[to] > RANK[from] && !ALLOW.has(`${from}->${to}`)) {
       problems.push(`${rel}: 反向依赖 ${from} -> ${to}`);
     }
+    // 循环检查只看未登记的反向边；ALLOW 里的接缝是显式允许的
+    if (!ALLOW.has(`${from}->${to}`)) {
+      if (!layerGraph.has(from)) layerGraph.set(from, new Set());
+      layerGraph.get(from).add(to);
+    }
   }
-  graph.set(f, [...deps].filter((t) => t !== from));
 }
 
-// 循环依赖（按目录粒度）
+// 循环依赖（按目录粒度）：对全部层跑 DFS，而不是只从第一个文件跑一次
 const seen = new Set(), stack = new Set();
-function dfs(n, pathArr) {
-  if (stack.has(n)) {
-    const cyc = pathArr.slice(pathArr.indexOf(n)).concat(n).join(" → ");
+function dfs(layer, pathArr) {
+  if (stack.has(layer)) {
+    const cyc = pathArr.slice(pathArr.indexOf(layer)).concat(layer).join(" → ");
     problems.push(`循环依赖：${cyc}`);
     return;
   }
-  if (seen.has(n)) return;
-  stack.add(n);
-  for (const d of graph.get(n) || []) {
-    const target = files.find((f) => layerOf(f) === d);
-    if (target) dfs(target, pathArr.concat(n));
-  }
-  stack.delete(n);
-  seen.add(n);
+  if (seen.has(layer)) return;
+  stack.add(layer);
+  for (const d of layerGraph.get(layer) || []) dfs(d, pathArr.concat(layer));
+  stack.delete(layer);
+  seen.add(layer);
 }
-for (const f of files) {
-  const l = layerOf(f);
-  if (RANK[l]) dfs(f, []);
-  break;
-}
+for (const layer of LAYERS) dfs(layer, []);
 
 const uniq = [...new Set(problems)];
 if (uniq.length) {

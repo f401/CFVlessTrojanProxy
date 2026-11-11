@@ -15,7 +15,6 @@ import {
   ZERO_STAT,
   nsSiteFail,
 } from "./score";
-import { SEEDS } from "../px/seed";
 import { S } from "../core/state";
 
 /* 节点选择：挑谁 / 何时换 / 失败怎么办 */
@@ -316,7 +315,8 @@ export class Selector {
   sched(env: Env) {
     const h = env.pxSchedH === undefined ? 6 : Number(env.pxSchedH) || 0;
     if (!(h > 0)) return;
-    const last = Math.max(S.lastSwitch.lat || 0, S.lastSwitch.tput || 0, SEEDS.bucket().lastSwitch || 0);
+    const seedBucket = (S.seed.byColo || {})[S.colo || "*"] || {};
+    const last = Math.max(S.lastSwitch.lat || 0, S.lastSwitch.tput || 0, seedBucket.lastSwitch || 0);
     if (Date.now() - last < h * 3600000) return;
     for (const m of MODES) {
       const cands = candsFor(m);

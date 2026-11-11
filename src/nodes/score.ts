@@ -1,6 +1,4 @@
 import { HIST_BASE, HIST_N, SC } from "../core/const";
-import { SEED_WRITE_GAP } from "../core/const";
-import { SEEDS } from "../px/seed";
 import { S } from "../core/state";
 
 /* 代理节点：统计与评分（纯计算） */
@@ -546,13 +544,5 @@ export function bestFor(mode: Mode) {
   return c.length ? c[0].k : "";
 }
 
-/* ---- 落盘节流：变化驱动 + 90 分钟地板（SEED_WRITE_GAP 定义在 px.ts） ---- */
-
-export function markSeedDirty(env: Env) {
-  if (!env || !env.STATS) return;
-  const last = Math.max(S.nsWriteAt, S.seed.ts || 0);
-  if (Date.now() - last < SEED_WRITE_GAP) return;
-  S.nsWriteAt = Date.now();
-  SEEDS.write(env).catch(() => {});
-}
+/* ---- 落盘节流已移到 px/seed.ts，nodes 不再反向依赖 px ---- */
 

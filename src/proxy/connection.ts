@@ -5,7 +5,8 @@ import { pipeBack } from "./tunnel";
 
 import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../px/pool";
-import { availOf, markSeedDirty, nsFail, nsOk, nsSpeed, nsStall } from "../nodes/score";
+import { availOf, nsFail, nsOk, nsSpeed, nsStall } from "../nodes/score";
+import { markSeedDirty } from "../px/seed";
 import { SEL } from "../nodes/selector";
 import { S } from "../core/state";
 import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";

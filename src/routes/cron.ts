@@ -4,6 +4,7 @@ import { logErr } from "../nodes/metrics";
 import { S } from "../core/state";
 import { cronScan, flushPx } from "../px/pool";
 import { flushSnap, pendFlush, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
+import { loadUsers } from "../proxy/protocol";
 
 /**
  * 定时任务（每 30 分钟）：探活候选池 → 推计量 → 落 seed → 续回并写用量快照。
@@ -31,7 +32,8 @@ export async function runCron(env: Env, ctx: ExecutionContext): Promise<void> {
         if (snap && snap.users) {
           for (const id of Object.keys(snap.users)) await restoreUsage(env, id, snap);
         }
-        await usageSnapWrite(env);
+        const users = await loadUsers(env);
+        await usageSnapWrite(env, users.list);
       } catch (e) {}
       // 不传 force：让 flushSnap 走「1h/2h + 全局 45 分钟闸门」的节奏
       try {

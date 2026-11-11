@@ -804,7 +804,9 @@ eq("影子失败冻结节点", W.isFrozen("tr:443"), true);
     },
   };
   W.S.usersCache = { v: null, t: 0 }; W.S.usersSig = ""; W.S.meterCache.clear();
-  await W.usageSnapWrite(envU);
+  await W.usageSnapWrite(envU, [
+    { id: envU.uuid, pwd: "", note: "", enabled: true, managed: false },
+  ]);
   const doc = JSON.parse(box.get("usage:snap"));
   eq("大用量快照不溢出", doc.users[envU.uuid].up, 3000000000);
   eq("大下行快照不溢出", doc.users[envU.uuid].down, 5000000000);

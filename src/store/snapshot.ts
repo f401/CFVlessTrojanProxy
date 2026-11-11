@@ -1,6 +1,5 @@
 import { S } from "../core/state";
 import { RTT_MAX } from "../core/const";
-import { loadUsers } from "../proxy/protocol";
 import { kvGet, kvSet } from "./kv";
 import { meterGet } from "./metering";
 
@@ -21,12 +20,12 @@ export async function usageSnapGet(env: Env) {
   }
 }
 
-export async function usageSnapWrite(env: Env) {
+export async function usageSnapWrite(env: Env, users?: UserRec[]) {
   if (!env.STATS || !env.METER) return;
   const prev = (await usageSnapGet(env)) || ({ users: {}, ts: 0 } as UsageSnap);
   // 灾备快照，2 小时一次足够（cron 是 30 分钟一轮，别每轮都写一遍）
   if (Date.now() - (prev.ts || 0) < 2 * 3600e3) return;
-  const { list } = await loadUsers(env);
+  const list = users || [];
   const out: UsageSnap = { ts: Date.now(), users: {} };
   for (const u of list) {
     const v = await meterGet(env, u.id);
