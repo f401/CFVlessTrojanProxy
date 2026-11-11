@@ -62,7 +62,7 @@ fetch(request)
 tools/tsc.js      tsc（strict:true，0 error 才继续）
 tools/bundle.js   esbuild → dist/_worker.js（生产）/ dist/_test.js（测试出口）
 tools/check-arch.js 分层 / 循环 / 顶层 let / 体积
-test/*.mjs        375 断言 + 8 项逐字节 golden
+test/*.mjs        389 断言 + 8 项逐字节 golden
 obf/*.js          预处理 + 混淆（Meter 类名保留）
 scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → obf → PUT
 ```
@@ -144,6 +144,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
   未设置时默认 5%，显式 `0` 表示关闭探索。
 - 出站目标只走 `checkTarget`：IPv6 必须拆成 8 个 16 位分组后按数值判断，
   不能靠字符串前缀（`0:0:0:0:0:0:0:1`、`::7f00:1` 这类写法能绕过前缀匹配）。
+- 落盘前读旧值必须用 `kvGetStrict`：读失败要跳过写，不能把"读不到"当"空表"，
+  否则 seed / snap / usage 快照会用空对象覆盖别的 isolate 的数据。
 
 ## 8 设计取舍：有状态服务用类，纯计算用函数
 

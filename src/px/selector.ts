@@ -26,6 +26,18 @@ import {
 } from "../nodes/score";
 import { S } from "../core/state";
 
+/**
+ * 切换后的最短驻留时间。pxDwellMin 只接受正数覆盖；未设置 / 0 / 非法时
+ * 回落到模式默认值（lat 10 分钟、tput 20 分钟），避免"配了 0 却以为关掉了"。
+ */
+export function dwellOf(env: Env, mode: Mode) {
+  const def = mode === "tput" ? SC.DWELL_TPUT : SC.DWELL;
+  const raw = env && env.pxDwellMin;
+  if (raw === undefined || raw === null || String(raw).trim() === "") return def;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n * 60000 : def;
+}
+
 /* 节点选择：挑谁 / 何时换 / 失败怎么办 */
 export class Selector {
   /** 按国家挑一个节点（地区出口） */
@@ -201,7 +213,7 @@ export class Selector {
     const cv = costOf(cur, m);
     const h = m === "tput" ? Math.max(1, cv * SC.H_TPUT) : Math.max(SC.H_LAT, cv * 0.15);
     if (cv - best.v <= h) return false;
-    const dwell = m === "tput" ? SC.DWELL_TPUT : SC.DWELL;
+    const dwell = dwellOf(env, m);
     if (now - (S.lastSwitch[m] || 0) < dwell) return false;
     const hits = (S.switchHits[m] || []).filter((t) => now - t < 3600000);
     if (hits.length >= SC.BUDGET) {

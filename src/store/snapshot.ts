@@ -1,7 +1,7 @@
 import { S } from "../core/state";
 import { RTT_MAX } from "../core/const";
 import { eachLimit } from "../core/util";
-import { kvGet, kvSet } from "./kv";
+import { kvGet, kvGetStrict, kvSet } from "./kv";
 import { meterGet } from "./metering";
 
 /* 快照：用量灾备（KV）+ 合成快照 */
@@ -23,7 +23,13 @@ export async function usageSnapGet(env: Env) {
 
 export async function usageSnapWrite(env: Env, users?: UserRec[]) {
   if (!env.STATS || !env.METER) return;
-  const prev = (await usageSnapGet(env)) || ({ users: {}, ts: 0 } as UsageSnap);
+  // 读失败就跳过：拿空表继续写会把别的用户的历史用量覆盖掉
+  let prev: UsageSnap;
+  try {
+    prev = (await kvGetStrict<UsageSnap>(env, USAGE_SNAP_KEY)) || ({ users: {}, ts: 0 } as UsageSnap);
+  } catch (e) {
+    return;
+  }
   // 灾备快照，2 小时一次足够（cron 是 30 分钟一轮，别每轮都写一遍）
   if (Date.now() - (prev.ts || 0) < 2 * 3600e3) return;
   const list = users || [];
@@ -117,7 +123,14 @@ async function writeSnap(env: Env, now: number): Promise<void> {
   // （实测 8 个 isolate × 24 次/天 = 192 次）。快照本身就是合并写入，
   // 45 分钟内别人写过就跳过，自己的增量留在内存里下一轮合并，一条不丢。
   // 这里必须 fresh：缓存里的 ts 可能已经过时 5 分钟，会误判"该写了"。
-  const prev = await getSnap(env, true);
+  // 这里必须 fresh + 严格：读失败时不能当空快照继续写，否则会把别的
+  // isolate 的当日统计/错误整份覆盖掉。
+  let prev: SnapDoc;
+  try {
+    prev = (await kvGetStrict<SnapDoc>(env, "snap")) || { v: 1, ts: 0, date: "", stats: {}, rtt: {}, errs: [] };
+  } catch (e) {
+    return;
+  }
   if (now - (prev.ts || 0) < FLUSH_GAP) {
     // 别人刚写过：把本地基线推进到那一次，并把下一次检查推到闸门结束，
     // 避免下一批连接反复走 getSnap 再跳过。

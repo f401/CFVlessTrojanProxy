@@ -506,8 +506,8 @@ export function renderLinks(
           "encryption=none",
           `security=${n.tls ? "tls" : "none"}`,
           "type=ws",
-          `host=${host}`,
-          n.tls ? `sni=${host}` : "",
+          `host=${encodeURIComponent(host)}`,
+          n.tls ? `sni=${encodeURIComponent(host)}` : "",
           `path=${encodeURIComponent(`${nodePath(n)}&mode=${mode}`)}`,
           `#${encodeURIComponent(`${proto}-${nodeLabel(n)}-${suffix}`)}`,
         ]
@@ -523,8 +523,8 @@ export function renderLinks(
       "encryption=none",
       "security=tls",
       "type=ws",
-      `host=${host}`,
-      `sni=${host}`,
+      `host=${encodeURIComponent(host)}`,
+      `sni=${encodeURIComponent(host)}`,
       `path=${encodeURIComponent(e.path)}`,
       `#${encodeURIComponent(e.name)}`,
     ].join("&");

@@ -2,23 +2,41 @@ import * as W from "./_bundle.mjs";
 import { webcrypto } from "node:crypto";
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
-let pass = 0, fail = 0;
+let pass = 0,
+  fail = 0;
 const eq = (name, got, want) => {
-  const a = JSON.stringify(got), b = JSON.stringify(want);
-  if (a === b) { pass++; }
-  else { fail++; console.log(`FAIL ${name}\n  got : ${a}\n  want: ${b}`); }
+  const a = JSON.stringify(got),
+    b = JSON.stringify(want);
+  if (a === b) {
+    pass++;
+  } else {
+    fail++;
+    console.log(`FAIL ${name}\n  got : ${a}\n  want: ${b}`);
+  }
 };
 const ok = (name, cond, info = "") => eq(name, !!cond, true) || (!cond && console.log("  info:", info));
 
 /* ---------- 1. SHA-224 官方向量 ---------- */
-eq("sha224('')", W.toHex(W.sha224Bytes(new TextEncoder().encode(""))),
-   "d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f");
-eq("sha224('abc')", W.toHex(W.sha224Bytes(new TextEncoder().encode("abc"))),
-   "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7");
-eq("sha224('test123')", W.toHex(W.sha224Bytes(new TextEncoder().encode("test123"))),
-   "4f555b1bb8bc729a665b8892df73119e2ef2eb50dffaf0d5c546cf23");
-eq("sha224('Passw0rd!')", W.toHex(W.sha224Bytes(new TextEncoder().encode("Passw0rd!"))),
-   "72f6c09f12fe97e7ab06d44fa4abc999904811729a7af49f040ee454");
+eq(
+  "sha224('')",
+  W.toHex(W.sha224Bytes(new TextEncoder().encode(""))),
+  "d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f",
+);
+eq(
+  "sha224('abc')",
+  W.toHex(W.sha224Bytes(new TextEncoder().encode("abc"))),
+  "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7",
+);
+eq(
+  "sha224('test123')",
+  W.toHex(W.sha224Bytes(new TextEncoder().encode("test123"))),
+  "4f555b1bb8bc729a665b8892df73119e2ef2eb50dffaf0d5c546cf23",
+);
+eq(
+  "sha224('Passw0rd!')",
+  W.toHex(W.sha224Bytes(new TextEncoder().encode("Passw0rd!"))),
+  "72f6c09f12fe97e7ab06d44fa4abc999904811729a7af49f040ee454",
+);
 
 /* ---------- 测试数据构造 ---------- */
 const UUID = "7c53c12a-88b1-4fda-b6e7-4da62e47a4e1";
@@ -37,14 +55,19 @@ function vlessBuf(uuid, host = "example.com", port = 80, cmd = 1, atyp = 2) {
   const d = enc.encode(host);
   const b = new Uint8Array(1 + 16 + 1 + 1 + 2 + 1 + 1 + d.length + 8);
   let o = 0;
-  b[o++] = 0;                       // ver
-  b.set(uuidToBytes(uuid), o); o += 16;
-  b[o++] = 0;                       // optLen
+  b[o++] = 0; // ver
+  b.set(uuidToBytes(uuid), o);
+  o += 16;
+  b[o++] = 0; // optLen
   b[o++] = cmd;
-  b[o++] = (port >> 8) & 0xff; b[o++] = port & 0xff;
+  b[o++] = (port >> 8) & 0xff;
+  b[o++] = port & 0xff;
   b[o++] = atyp;
-  b[o++] = d.length; b.set(d, o); o += d.length;
-  b[o++] = 0x41; b[o++] = 0x42;     // payload
+  b[o++] = d.length;
+  b.set(d, o);
+  o += d.length;
+  b[o++] = 0x41;
+  b[o++] = 0x42; // payload
   return b.slice(0, o);
 }
 
@@ -53,14 +76,21 @@ function trojanBuf(pwd, host = "example.com", port = 80, cmd = 1, atyp = 3) {
   const d = enc.encode(host);
   const b = new Uint8Array(56 + 2 + 1 + 1 + 1 + d.length + 2 + 2 + 4);
   let o = 0;
-  b.set(hash, o); o += 56;
-  b[o++] = 0x0d; b[o++] = 0x0a;
+  b.set(hash, o);
+  o += 56;
+  b[o++] = 0x0d;
+  b[o++] = 0x0a;
   b[o++] = cmd;
   b[o++] = atyp;
-  b[o++] = d.length; b.set(d, o); o += d.length;
-  b[o++] = (port >> 8) & 0xff; b[o++] = port & 0xff;
-  b[o++] = 0x0d; b[o++] = 0x0a;
-  b[o++] = 0x41; b[o++] = 0x42;
+  b[o++] = d.length;
+  b.set(d, o);
+  o += d.length;
+  b[o++] = (port >> 8) & 0xff;
+  b[o++] = port & 0xff;
+  b[o++] = 0x0d;
+  b[o++] = 0x0a;
+  b[o++] = 0x41;
+  b[o++] = 0x42;
   return b.slice(0, o);
 }
 
@@ -99,10 +129,16 @@ const V6 = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
 function vlessBufV6(uuid) {
   const b = new Uint8Array(1 + 16 + 1 + 1 + 2 + 1 + 16 + 4);
   let o = 0;
-  b[o++] = 0; b.set(uuidToBytes(uuid), o); o += 16;
-  b[o++] = 0; b[o++] = 1;
-  b[o++] = 0x01; b[o++] = 0xbb; b[o++] = 3;
-  b.set(V6, o); o += 16;
+  b[o++] = 0;
+  b.set(uuidToBytes(uuid), o);
+  o += 16;
+  b[o++] = 0;
+  b[o++] = 1;
+  b[o++] = 0x01;
+  b[o++] = 0xbb;
+  b[o++] = 3;
+  b.set(V6, o);
+  o += 16;
   b[o++] = 0x41;
   return b.slice(0, o);
 }
@@ -110,11 +146,19 @@ function trojanBufV6(pwd) {
   const hash = enc.encode(W.toHex(W.sha224Bytes(enc.encode(pwd))));
   const b = new Uint8Array(56 + 2 + 1 + 1 + 16 + 2 + 2 + 4);
   let o = 0;
-  b.set(hash, o); o += 56;
-  b[o++] = 0x0d; b[o++] = 0x0a; b[o++] = 1; b[o++] = 4;
-  b.set(V6, o); o += 16;
-  b[o++] = 0x01; b[o++] = 0xbb;
-  b[o++] = 0x0d; b[o++] = 0x0a; b[o++] = 0x41;
+  b.set(hash, o);
+  o += 56;
+  b[o++] = 0x0d;
+  b[o++] = 0x0a;
+  b[o++] = 1;
+  b[o++] = 4;
+  b.set(V6, o);
+  o += 16;
+  b[o++] = 0x01;
+  b[o++] = 0xbb;
+  b[o++] = 0x0d;
+  b[o++] = 0x0a;
+  b[o++] = 0x41;
   return b.slice(0, o);
 }
 const v6 = W.parseVLESS(vlessBufV6(UUID), auth);
@@ -157,7 +201,7 @@ const cl = W.renderClash(env, url, UUID, "a.example.com");
 ok("clash 含 vless 节点", cl.includes("vless-a-example-com-443"));
 ok("clash 含 trojan 节点", cl.includes("trojan-a-example-com-443"));
 ok("clash 含 groups", cl.includes("proxy-groups:") && cl.includes("type: url-test") && cl.includes("type: select"));
-eq("clash 节点数", (cl.match(/^    type: (vless|trojan)$/gm) || []).length, 8);  // 2 节点 x 2 协议 x 2 模式
+eq("clash 节点数", (cl.match(/^    type: (vless|trojan)$/gm) || []).length, 8); // 2 节点 x 2 协议 x 2 模式
 
 const sb = JSON.parse(W.renderSingbox(env, url, UUID, "a.example.com"));
 eq("singbox outbounds 数", sb.outbounds.length, 12); // 2 urltest + 1 selector + 8 节点 + direct
@@ -180,13 +224,12 @@ eq("proto=vless 只出 vless", (onlyVless.match(/^    type: (vless|trojan)$/gm) 
 const nolTrojan = W.renderClash({ uuids: UUID, nodes: "a.com:443:tls" }, url, UUID, "a.com");
 eq("无密码不出 trojan", nolTrojan.includes("type: trojan"), false);
 
-
 /* ---------- 7. 新增：标签 / RTT 学习 / 排序 / 订阅头 ---------- */
 eq("tagOf(ip)", W.tagOf("104.16.0.1"), "104-16-0-1");
 eq("tagOf(domain)", W.tagOf("a.example.com"), "a-example-com");
 eq("城市表命中", W.COLO_CITY["HKG"], "香港");
 
-ok("path 带 ip 标签", cl.includes("path: \"/?ed=2560&ip=a-example-com-443&mode=tput\""));
+ok("path 带 ip 标签", cl.includes('path: "/?ed=2560&ip=a-example-com-443&mode=tput"'));
 
 // 学习：让 c.example.com 变得更快，排序应该翻转
 const cf1 = { asn: 4134, city: "Guangzhou", colo: "HKG", clientTcpRtt: 40, edgeL4: { deliveryRate: 9000 } };
@@ -208,21 +251,34 @@ eq("无数据保持原顺序", ordered0[0].host, "a.example.com");
 // 订阅头
 const h = W.subHeaders({ quotaBytes: 107374182400, expireAt: "2027-01-01T00:00:00Z" }, { up: 111, down: 222 });
 ok("Subscription-Userinfo 含总量", h["Subscription-Userinfo"].includes("total=107374182400"));
-ok("Subscription-Userinfo 含用量", h["Subscription-Userinfo"].includes("upload=111") && h["Subscription-Userinfo"].includes("download=222"));
+ok(
+  "Subscription-Userinfo 含用量",
+  h["Subscription-Userinfo"].includes("upload=111") && h["Subscription-Userinfo"].includes("download=222"),
+);
 ok("expire 被转成秒", /expire=1[78]\d{8}/.test(h["Subscription-Userinfo"]));
 
 /* ---------- admin 入口链接 / 订阅复制 ---------- */
 {
-  const html = W.renderAdmin(new URL("https://edge.example.com/admin"), {
-    list: [{ id: UUID, pwd: "pw123", note: "n", enabled: true, managed: true }],
-  }, {}, "KEY42");
+  const html = W.renderAdmin(
+    new URL("https://edge.example.com/admin"),
+    {
+      list: [{ id: UUID, pwd: "pw123", note: "n", enabled: true, managed: true }],
+    },
+    {},
+    "KEY42",
+  );
   ok("admin 每行有控制页跳转", html.includes(`https://edge.example.com/${UUID}?k=KEY42`), "");
   ok("admin 每行有 cl 订阅复制", html.includes(`https://edge.example.com/${UUID}/cl?k=KEY42`), "");
   ok("admin 每行有 sb 订阅复制", html.includes(`https://edge.example.com/${UUID}/sb?k=KEY42`), "");
-  ok("admin 有复制脚本", html.includes("navigator.clipboard") && html.includes('data-copy'), "");
-  const htmlK = W.renderAdmin(new URL("https://edge.example.com/admin?k=KEY42"), {
-    list: [{ id: UUID, pwd: "pw123", note: "n", enabled: true, managed: true }],
-  }, {}, "");
+  ok("admin 有复制脚本", html.includes("navigator.clipboard") && html.includes("data-copy"), "");
+  const htmlK = W.renderAdmin(
+    new URL("https://edge.example.com/admin?k=KEY42"),
+    {
+      list: [{ id: UUID, pwd: "pw123", note: "n", enabled: true, managed: true }],
+    },
+    {},
+    "",
+  );
   ok("?k= 打开时表单也带 k", htmlK.includes('action="/admin/op?k=KEY42"'), "");
 }
 
@@ -236,7 +292,15 @@ ok("expire 被转成秒", /expire=1[78]\d{8}/.test(h["Subscription-Userinfo"]));
   const oldTok = await W.sessionToken(env2, Date.now() - 1000);
   eq("过期令牌拒绝", await W.adminAuthed(withTok(oldTok), u2, env2), false);
   eq("换 adminKey 后旧令牌失效", await W.adminAuthed(withTok(tok), u2, { adminKey: "fedcba9876543210" }), false);
-  eq("?k= 直连仍然可用", await W.adminAuthed(new Request("https://edge.example.com/admin?k=0123456789abcdef"), new URL("https://edge.example.com/admin?k=0123456789abcdef"), env2), true);
+  eq(
+    "?k= 直连仍然可用",
+    await W.adminAuthed(
+      new Request("https://edge.example.com/admin?k=0123456789abcdef"),
+      new URL("https://edge.example.com/admin?k=0123456789abcdef"),
+      env2,
+    ),
+    true,
+  );
 }
 
 /* ---------- 主 UUID / 跨 isolate 归属 ---------- */
@@ -247,7 +311,8 @@ eq("都没有返回空串", W.primaryId({}), "");
 /* ---------- 面板托管用户的 Trojan 密码 ---------- */
 {
   const authM = {
-    uuids: new Set([UUID]), trojan: new Map(),
+    uuids: new Set([UUID]),
+    trojan: new Map(),
     list: [{ id: UUID, pwd: "ManagedPwd123", enabled: true, managed: true, note: "" }],
   };
   const envM = { nodes: "a.example.com:443:tls" };
@@ -255,34 +320,46 @@ eq("都没有返回空串", W.primaryId({}), "");
   const clM = W.renderClash(envM, new URL("https://x/" + UUID), UUID, "a.example.com", {}, [], authM);
   ok("托管用户订阅会出 Trojan", clM.includes("type: trojan"));
   ok("托管用户订阅用生成的密码", clM.includes('password: "ManagedPwd123"'));
-  const authEmpty = { uuids: new Set([UUID]), trojan: new Map(), list: [{ id: UUID, pwd: "", enabled: true, managed: true, note: "" }] };
+  const authEmpty = {
+    uuids: new Set([UUID]),
+    trojan: new Map(),
+    list: [{ id: UUID, pwd: "", enabled: true, managed: true, note: "" }],
+  };
   eq("托管用户没密码时不出 Trojan", W.trojanPasswordOf(envM, UUID, authEmpty), "");
 }
 
 /* ---------- 用户表：托管启用状态 / 密码覆盖 ---------- */
 {
   const kv = (users) => ({ get: async (k) => (k === "users" ? JSON.stringify(users) : null) });
-  W.S.usersCache = { v: null, t: 0 }; W.S.usersSig = "";
+  W.S.usersCache = { v: null, t: 0 };
+  W.S.usersSig = "";
   const envD = { uuid: UUID, STATS: kv([{ id: UUID, pwd: "pw-managed", enabled: false, managed: true }]) };
   const aD = await W.loadUsers(envD);
   eq("托管禁用覆盖 env 启用状态", aD.uuids.has(UUID), false);
   eq("禁用用户不注册 Trojan", aD.trojan.size, 0);
 
-  W.S.usersCache = { v: null, t: 0 }; W.S.usersSig = "";
-  const envE = { uuid: UUID, pwd: "pw-env", STATS: kv([{ id: UUID, pwd: "pw-managed", enabled: true, managed: true }]) };
+  W.S.usersCache = { v: null, t: 0 };
+  W.S.usersSig = "";
+  const envE = {
+    uuid: UUID,
+    pwd: "pw-env",
+    STATS: kv([{ id: UUID, pwd: "pw-managed", enabled: true, managed: true }]),
+  };
   const aE = await W.loadUsers(envE);
   eq("托管启用后恢复 UUID", aE.uuids.has(UUID), true);
   eq("托管密码覆盖 env 密码只留一个", aE.trojan.size, 1);
 
   // 单密码模式下多个 env 用户共享哈希：归属要稳定，禁用一人不能误删另一人
   const U2 = "df1af8dd-3efe-407b-a5b6-4950afa4ac6f";
-  W.S.usersCache = { v: null, t: 0 }; W.S.usersSig = "";
+  W.S.usersCache = { v: null, t: 0 };
+  W.S.usersSig = "";
   const shared = { uuids: UUID + "," + U2, pwd: "same-pwd", STATS: kv([]) };
   const aS = await W.loadUsers(shared);
   eq("共享密码只注册一个哈希", aS.trojan.size, 1);
   eq("共享密码归属第一个用户", [...aS.trojan.values()][0], UUID);
 
-  W.S.usersCache = { v: null, t: 0 }; W.S.usersSig = "";
+  W.S.usersCache = { v: null, t: 0 };
+  W.S.usersSig = "";
   const sharedOff = { uuids: UUID + "," + U2, pwd: "same-pwd", STATS: kv([{ id: U2, enabled: false, managed: true }]) };
   const aOff = await W.loadUsers(sharedOff);
   eq("禁用共享用户之一不撤掉另一人", [...aOff.trojan.values()][0], UUID);
@@ -334,13 +411,25 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
 {
   const envY = { ...env, pwd: 'a"b\\c', nodes: 'bad"host:443:tls#x' };
   const y = W.renderClash(envY, new URL("https://x/" + UUID), UUID, "a.example.com", {}, []);
-  ok("Clash 密码转义引号", y.includes('password: "a\\"b\\\\c"'), y.split("\n").find((l) => l.includes("password")));
-  ok("Clash 主机名按需加引号", y.includes('server: "bad\\"host"'), y.split("\n").find((l) => l.includes("server")));
+  ok(
+    "Clash 密码转义引号",
+    y.includes('password: "a\\"b\\\\c"'),
+    y.split("\n").find((l) => l.includes("password")),
+  );
+  ok(
+    "Clash 主机名按需加引号",
+    y.includes('server: "bad\\"host"'),
+    y.split("\n").find((l) => l.includes("server")),
+  );
   ok("Clash 名字仍然带引号", y.includes('name: "vless-bad-host-443-T"'));
 
   const envN = { ...env, pwd: 'a"b\nc', nodes: "n.example.com:443:tls" };
   const yn = W.renderClash(envN, new URL("https://x/" + UUID), UUID, "a.example.com", {}, []);
-  ok("Clash 密码里的换行被转义", yn.includes('password: "a\\"b\\nc"'), yn.split("\n").find((l) => l.includes("password")));
+  ok(
+    "Clash 密码里的换行被转义",
+    yn.includes('password: "a\\"b\\nc"'),
+    yn.split("\n").find((l) => l.includes("password")),
+  );
 }
 
 /* ---------- 上行队列：8MB 上限，读走才释放额度 ---------- */
@@ -473,6 +562,79 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   for (const h of priv) ok(`私网拦截 ${h}`, W.isPrivateHost(h), h);
   const pub = ["1.1.1.1", "8.8.8.8", "2606:4700:4700::1111", "2001:4860:4860::8888", "example.com", "::ffff:8.8.8.8"];
   for (const h of pub) ok(`公网放行 ${h}`, !W.isPrivateHost(h), h);
+}
+
+/* ---------- 全局候选名单：新探到的节点不能永远排在第 41 位 ---------- */
+{
+  W.S.alive.clear();
+  W.S.nstat.clear();
+  W.S.seed = {
+    v: 6,
+    ts: 0,
+    poolGen: 0,
+    poolN: 0,
+    builtAt: 0,
+    byColo: { "*": { ts: 1, nodes: [] } },
+    cnt: null,
+  };
+  W.S.seedAt = 0;
+  for (let i = 0; i < 40; i++) {
+    W.S.seed.byColo["*"].nodes.push({ k: `old${i}:443`, h: `old${i}`, p: 443, cc: "", ms: 100 });
+  }
+  for (let i = 0; i < 5; i++) {
+    W.S.alive.set(`new${i}:443`, { h: `new${i}`, p: 443, cc: "", ms: 50 + i });
+  }
+  let saved = null;
+  const envSeed = {
+    STATS: {
+      get: async () => null,
+      put: async (k, v) => {
+        saved = v;
+      },
+    },
+  };
+  await W.SEEDS.write(envSeed, true, true);
+  const doc = JSON.parse(saved);
+  const names = doc.byColo["*"].nodes.map((n) => n.k);
+  eq("名单仍截断在 40 条", names.length, 40);
+  ok(
+    "新探到的节点进入全局名单",
+    names.some((k) => k.startsWith("new")),
+  );
+}
+
+/* ---------- 落盘前读失败：不能拿空表覆盖旧快照 ---------- */
+{
+  W.S.seedAt = 0;
+  W.S.seedReadFail = false;
+  let puts = 0;
+  const envDown = {
+    STATS: {
+      get: async () => {
+        throw new Error("kv down");
+      },
+      put: async () => {
+        puts++;
+      },
+    },
+  };
+  const rw = await W.SEEDS.write(envDown, true, true);
+  eq("seed 读失败时拒绝落盘", rw.ok, false);
+  eq("seed 读失败时一次都没写", puts, 0);
+
+  W.S.snapChecked = 0;
+  W.S.snapBusy = false;
+  W.S.stats.set("flush-u", { up: 1, down: 2, conns: 1, first: Date.now(), last: Date.now() });
+  await W.flushSnap(envDown, true);
+  eq("snap 读失败时不覆盖旧快照", puts, 0);
+  W.S.stats.delete("flush-u");
+
+  const envDown2 = {
+    STATS: envDown.STATS,
+    METER: { idFromName: (x) => x, get: () => ({ fetch: async () => Response.json({}) }) },
+  };
+  await W.usageSnapWrite(envDown2, [{ id: "snap-u1" }]);
+  eq("usage 快照读失败时不写", puts, 0);
 }
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);

@@ -6,7 +6,7 @@ import { cnt, cntDelta, cntUnsend } from "../core/counter";
 import { p90Local } from "../core/hist";
 import { costOf, nsGet, ZERO_STAT } from "../nodes/score";
 import { S } from "../core/state";
-import { kvGet, kvSet } from "../store/index";
+import { kvGetStrict, kvSet } from "../store/index";
 
 /* 代理节点：信誉表分桶读写 */
 /* ---- seed：按机房分桶 ---- */
@@ -93,8 +93,12 @@ export class SeedStore {
     if (S.seedAt && Date.now() - S.seedAt < SEED_TTL) return S.seed;
     let v = null;
     try {
-      v = await kvGet<Seed>(env, SEED_KEY);
-    } catch (e) {}
+      v = await kvGetStrict<Seed>(env, SEED_KEY);
+      S.seedReadFail = false;
+    } catch (e) {
+      // 读失败 ≠ 空表：记下来，write 绝不能拿空表覆盖别的机房
+      S.seedReadFail = true;
+    }
     if (v && Array.isArray(v.nodes) && !v.byColo) {
       // 旧结构：整张表属于"当前机房"，迁移时不做跨机房假设
       v = {
@@ -166,7 +170,7 @@ export class SeedStore {
     // 读到空表时只缓存 1 分钟：否则一个刚部署的 isolate 会"空着"整整半小时，
     // 期间该机房所有连接都只能直连。
     const hasAny = !!(S.seed && S.seed.byColo && (this.bucket().nodes || []).length);
-    S.seedAt = hasAny ? Date.now() : Date.now() - SEED_TTL + 60000;
+    S.seedAt = S.seedReadFail ? Date.now() - SEED_TTL + 60000 : hasAny ? Date.now() : Date.now() - SEED_TTL + 60000;
     return S.seed;
   }
 
@@ -180,6 +184,7 @@ export class SeedStore {
     // 必须先读到已有 seed 再写：否则一个"还没读过"的 isolate 会拿空对象覆盖，
     // 把 poolGen 和所有机房的桶一起抹掉（踩过一次，池子直接变 0）。
     await this.read(env);
+    if (S.seedReadFail) return { ok: false, err: "seed read failed" };
     // 全局写节流：任何 isolate 落盘前先看 seed 上的时间戳。
     // 8 个 isolate 各自 30 分钟一写 = 384/天，加上现有的就顶到额度了。
     if (!force && Date.now() - (S.seed.ts || 0) < 20 * 60000) return { ok: true, skipped: true };
@@ -192,11 +197,14 @@ export class SeedStore {
     const bucket = this.bucket();
     const base = new Map();
     for (const n of bucket.nodes || []) if (n && n.k) base.set(n.k, { ...n });
-    const keys = new Set([...base.keys(), ...S.alive.keys(), ...S.nstat.keys()]);
+    // 顺序很重要：alive 在前。listOnly（cron 不知道自己在哪个机房）按插入顺序截断，
+    // 如果先遍历旧 base，新探到的节点会一直排在第 41 位之后，全局名单永远不更新。
+    const keys = new Set([...S.alive.keys(), ...base.keys(), ...S.nstat.keys()]);
+    const rows: SeedNode[] = [];
     for (const k of keys) {
       if (!k || k.lastIndexOf(":") <= 0) continue;
       if (listOnly) {
-        base.set(k, this.packName(k));
+        rows.push(this.packName(k));
         continue;
       }
       const old = base.get(k) || {};
@@ -214,9 +222,9 @@ export class SeedStore {
         packed.b = packed.b || old.b;
         packed.sb = packed.sb || old.sb;
       }
-      base.set(k, packed);
+      rows.push(packed);
     }
-    const scored = [...base.values()].map((n) => ({ n, v: listOnly ? 0 : costOf(n.k, "lat") }));
+    const scored = rows.map((n) => ({ n, v: listOnly ? 0 : costOf(n.k, "lat") }));
     scored.sort((a, b) => a.v - b.v);
     const nodes = scored.slice(0, SEED_MAX).map((x) => x.n);
     if (!nodes.length) {
@@ -232,6 +240,7 @@ export class SeedStore {
       };
       try {
         await kvSet(env, SEED_KEY, S.seed, { expirationTtl: PX_TTL });
+        S.seedDirty = false;
         return { ok: true, empty: true };
       } catch (e) {
         S.seed = prevSeed;

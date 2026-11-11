@@ -1,5 +1,6 @@
 import { P_T, shadowRate } from "../core/util";
 import { S } from "../core/state";
+import { dwellOf } from "../px/selector";
 import { SC } from "../core/const";
 import { renderStatsHtml, renderHtml } from "../views/panel";
 import { fmtBytes } from "../views/html";
@@ -44,7 +45,7 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
         quota: fmtBytes(effectiveQuota(env, (st.up || 0) + (st.down || 0))) + "（到顶自动翻倍）",
         expire: env.expireAt ? String(env.expireAt).slice(0, 10) : "长期",
         [P_T + "Pwd"]: trojanPasswordOf(env, id, c.auth),
-        policy: `滞回 15% · 驻留 ${Math.round(SC.DWELL / 60000)} 分钟 · 每小时最多 ${SC.BUDGET} 次切换 · 影子 ${Math.round(shadowRate(env) * 100)}%`,
+        policy: `滞回 15% · 驻留 ${Math.round(Math.min(dwellOf(env, "lat"), dwellOf(env, "tput")) / 60000)} 分钟 · 每小时最多 ${SC.BUDGET} 次切换 · 影子 ${Math.round(shadowRate(env) * 100)}%`,
       };
       return html(renderHtml(env, url, id, host, pageKey, info), 200, { "content-security-policy": CSP_STATIC });
     }

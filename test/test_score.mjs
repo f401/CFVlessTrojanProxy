@@ -4,16 +4,34 @@ import { webcrypto } from "node:crypto";
 // Node 18 没有全局 crypto（Workers 有），补一个给 tlsHello() 用
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
-let pass = 0, fail = 0;
-const eq = (n, a, b) => { if (JSON.stringify(a) === JSON.stringify(b)) pass++; else { fail++; console.log(`FAIL ${n}\n  got : ${JSON.stringify(a)}\n  want: ${JSON.stringify(b)}`); } };
-const ok = (n, c, info = "") => { if (c) pass++; else { fail++; console.log(`FAIL ${n}  ${info}`); } };
+let pass = 0,
+  fail = 0;
+const eq = (n, a, b) => {
+  if (JSON.stringify(a) === JSON.stringify(b)) pass++;
+  else {
+    fail++;
+    console.log(`FAIL ${n}\n  got : ${JSON.stringify(a)}\n  want: ${JSON.stringify(b)}`);
+  }
+};
+const ok = (n, c, info = "") => {
+  if (c) pass++;
+  else {
+    fail++;
+    console.log(`FAIL ${n}  ${info}`);
+  }
+};
 
 const S = W.S;
 const reset = () => {
-  S.alive.clear(); S.nstat.clear();
-  S.hostNode.clear(); S.hostDirect.clear(); S.hostRankCache.clear();
-  S.curs = { lat: "", tput: "" }; S.prev = { lat: "", tput: "" };
-  S.lastSwitch = { lat: 0, tput: 0 }; S.switchHits = { lat: [], tput: [] };
+  S.alive.clear();
+  S.nstat.clear();
+  S.hostNode.clear();
+  S.hostDirect.clear();
+  S.hostRankCache.clear();
+  S.curs = { lat: "", tput: "" };
+  S.prev = { lat: "", tput: "" };
+  S.lastSwitch = { lat: 0, tput: 0 };
+  S.switchHits = { lat: [], tput: [] };
 };
 const node = (k, patch = {}) => {
   const i = k.lastIndexOf(":");
@@ -27,13 +45,14 @@ eq("空直方图 p50", W.pcts(W.nsGet("x:1")).p50, 0);
 eq("空直方图 p90", W.pcts(W.nsGet("x:1")).p90, 0);
 
 const s1 = W.nsGet("h1:443");
-s1.hist[7] = 10;                       // 2 MB/s 桶
+s1.hist[7] = 10; // 2 MB/s 桶
 const q1 = W.pcts(s1);
 ok("单桶 p50 落在 2MB 附近", q1.p50 > 1.4e6 && q1.p50 < 2.9e6, q1.p50);
 ok("单桶 cap ≤ p50*2.5", q1.cap <= q1.p50 * 2.5 + 1, `${q1.cap} vs ${q1.p50}`);
 
 const s2 = W.nsGet("h2:443");
-s2.hist[4] = 9; s2.hist[10] = 1;       // 256KB ×9 + 16MB ×1
+s2.hist[4] = 9;
+s2.hist[10] = 1; // 256KB ×9 + 16MB ×1
 const q2 = W.pcts(s2);
 ok("p90 被单次突发拉高（> p50）", q2.p90 > q2.p50, `${q2.p90} / ${q2.p50}`);
 ok("cap 抑制了突发", q2.cap <= q2.p50 * 2.5 + 1);
@@ -42,8 +61,11 @@ ok("cap 抑制了突发", q2.cap <= q2.p50 * 2.5 + 1);
 reset();
 node("a:443", { tcp: 50, tls: 60, okW: 20 });
 node("b:443", { tcp: 200, tls: 60, okW: 20 });
-ok("lat：低延迟更优", W.costOf("a:443", "lat") < W.costOf("b:443", "lat"),
-  `${W.costOf("a:443", "lat")} vs ${W.costOf("b:443", "lat")}`);
+ok(
+  "lat：低延迟更优",
+  W.costOf("a:443", "lat") < W.costOf("b:443", "lat"),
+  `${W.costOf("a:443", "lat")} vs ${W.costOf("b:443", "lat")}`,
+);
 
 reset();
 node("good:443", { tcp: 50, tls: 60, okW: 20 });
@@ -56,16 +78,23 @@ ok("tput：无样本时用先验（≈51s）", W.costOf("t1:443", "tput") > 5000
 
 node("t2:443", { tcp: 50 });
 const st2n = W.S.nstat.get("t2:443");
-st2n.hist[7] = 5; st2n.sumW = 5; st2n.sumW2 = 5;
-st2n.recentBytesW = 5 * 1048576; st2n.lastSampleAt = Date.now();
-ok("tput：有效样本后低于先验", W.costOf("t2:443", "tput") < W.costOf("t1:443", "tput") - 3000,
-  `${W.costOf("t2:443", "tput")} vs ${W.costOf("t1:443", "tput")}`);
+st2n.hist[7] = 5;
+st2n.sumW = 5;
+st2n.sumW2 = 5;
+st2n.recentBytesW = 5 * 1048576;
+st2n.lastSampleAt = Date.now();
+ok(
+  "tput：有效样本后低于先验",
+  W.costOf("t2:443", "tput") < W.costOf("t1:443", "tput") - 3000,
+  `${W.costOf("t2:443", "tput")} vs ${W.costOf("t1:443", "tput")}`,
+);
 
 // 累计字节不能"复活"旧速率：没有近期权重就不该有吞吐置信度
 reset();
 node("cum:443", { tcp: 50 });
 const sc = W.S.nstat.get("cum:443");
-sc.bytesDown = 200 * 1048576; sc.hist[7] = 5;
+sc.bytesDown = 200 * 1048576;
+sc.hist[7] = 5;
 eq("旧累计字节不通过吞吐准入", W.scoreParts("cum:443", "tput").confB, 0);
 
 // 读时衰减：不产生新事件，旧样本自己变旧
@@ -74,8 +103,7 @@ node("age:443", { tcp: 50, okW: 10 });
 const sa = W.S.nstat.get("age:443");
 const beforeW = W.effView(sa).okW;
 sa.at = Date.now() - 6 * 3600e3;
-ok("6 小时后有效权重减半", Math.abs(W.effView(sa).okW - beforeW / 2) < 0.01,
-  `${beforeW} → ${W.effView(sa).okW}`);
+ok("6 小时后有效权重减半", Math.abs(W.effView(sa).okW - beforeW / 2) < 0.01, `${beforeW} → ${W.effView(sa).okW}`);
 ok("老化后分数变差", W.costOf("age:443", "lat") > 0);
 
 // 吞吐置信度看"有效窗口数"，不看连接数
@@ -83,31 +111,57 @@ reset();
 node("one:443", { tcp: 50 });
 node("many:443", { tcp: 50 });
 const sOne = W.S.nstat.get("one:443");
-sOne.hist[7] = 4; sOne.sumW = 4; sOne.sumW2 = 16; sOne.recentBytesW = 8 * 1048576; sOne.lastSampleAt = Date.now();
+sOne.hist[7] = 4;
+sOne.sumW = 4;
+sOne.sumW2 = 16;
+sOne.recentBytesW = 8 * 1048576;
+sOne.lastSampleAt = Date.now();
 const sMany = W.S.nstat.get("many:443");
-sMany.hist[7] = 4; sMany.sumW = 4; sMany.sumW2 = 4; sMany.recentBytesW = 8 * 1048576; sMany.lastSampleAt = Date.now();
-ok("一个 4 权重样本 nEff=1", Math.abs(W.scoreParts("one:443", "tput").nEff - 1) < 0.01,
-  String(W.scoreParts("one:443", "tput").nEff));
-ok("四个独立样本 nEff=4", Math.abs(W.scoreParts("many:443", "tput").nEff - 4) < 0.01,
-  String(W.scoreParts("many:443", "tput").nEff));
+sMany.hist[7] = 4;
+sMany.sumW = 4;
+sMany.sumW2 = 4;
+sMany.recentBytesW = 8 * 1048576;
+sMany.lastSampleAt = Date.now();
+ok(
+  "一个 4 权重样本 nEff=1",
+  Math.abs(W.scoreParts("one:443", "tput").nEff - 1) < 0.01,
+  String(W.scoreParts("one:443", "tput").nEff),
+);
+ok(
+  "四个独立样本 nEff=4",
+  Math.abs(W.scoreParts("many:443", "tput").nEff - 4) < 0.01,
+  String(W.scoreParts("many:443", "tput").nEff),
+);
 ok("多样本置信度更高", W.scoreParts("many:443", "tput").confB > W.scoreParts("one:443", "tput").confB);
 
 // 偶然一次高速不能长期占首位
 reset();
 node("lucky:443", { tcp: 50 });
 const sL = W.S.nstat.get("lucky:443");
-sL.hist[11] = 1; sL.sumW = 1; sL.sumW2 = 1; sL.recentBytesW = 1048576; sL.lastSampleAt = Date.now();
+sL.hist[11] = 1;
+sL.sumW = 1;
+sL.sumW2 = 1;
+sL.recentBytesW = 1048576;
+sL.lastSampleAt = Date.now();
 node("steady:443", { tcp: 50 });
 const sS = W.S.nstat.get("steady:443");
-sS.hist[7] = 8; sS.sumW = 8; sS.sumW2 = 8; sS.recentBytesW = 12 * 1048576; sS.lastSampleAt = Date.now();
-ok("偶然高速样本不算数", W.costOf("steady:443", "tput") < W.costOf("lucky:443", "tput"),
-  `${W.costOf("steady:443", "tput")} vs ${W.costOf("lucky:443", "tput")}`);
+sS.hist[7] = 8;
+sS.sumW = 8;
+sS.sumW2 = 8;
+sS.recentBytesW = 12 * 1048576;
+sS.lastSampleAt = Date.now();
+ok(
+  "偶然高速样本不算数",
+  W.costOf("steady:443", "tput") < W.costOf("lucky:443", "tput"),
+  `${W.costOf("steady:443", "tput")} vs ${W.costOf("lucky:443", "tput")}`,
+);
 
 // seed 只作为先验：置信度封顶 0.25，过期即回落
 reset();
 node("seed:443", { tcp: 50 });
 const sSeed = W.S.nstat.get("seed:443");
-sSeed.seedBps = 2 * 1048576; sSeed.seedAt = Date.now();
+sSeed.seedBps = 2 * 1048576;
+sSeed.seedAt = Date.now();
 const pSeed = W.scoreParts("seed:443", "tput");
 eq("seed 先验来源", pSeed.priorSource, "seed");
 ok("seed 把先验拉到约 15s", pSeed.e10Ms > 12000 && pSeed.e10Ms < 18000, String(pSeed.e10Ms));
@@ -120,18 +174,19 @@ eq("seed 过期回落默认先验", W.scoreParts("seed:443", "tput").priorSource
   sSeed.seedAt = Date.now() - 24.1 * 3600e3;
   const eB = W.scoreParts("seed:443", "tput").e10Ms;
   ok("seed 到期平滑回落（跳变 < 1s）", Math.abs(eA - eB) < 1000, `${Math.round(eA)} vs ${Math.round(eB)}`);
-// 一条短样本不该抹掉 8MB/s 的 seed 先验；够 3 个有效窗口才作废
-{
-  reset();
-  node("sp:443", {});
-  const sp = W.nsGet("sp:443");
-  sp.seedBps = 8 * 1048576; sp.seedAt = Date.now();
-  W.nsSpeed("sp:443", 512 * 1024, 512 * 1024, {}, 1);
-  eq("单条本地样本保留 seed", sp.seedBps, 8 * 1048576);
-  W.nsSpeed("sp:443", 512 * 1024, 512 * 1024, {}, 1);
-  W.nsSpeed("sp:443", 512 * 1024, 512 * 1024, {}, 1);
-  eq("3 个有效窗口后 seed 作废", sp.seedBps, 0);
-}
+  // 一条短样本不该抹掉 8MB/s 的 seed 先验；够 3 个有效窗口才作废
+  {
+    reset();
+    node("sp:443", {});
+    const sp = W.nsGet("sp:443");
+    sp.seedBps = 8 * 1048576;
+    sp.seedAt = Date.now();
+    W.nsSpeed("sp:443", 512 * 1024, 512 * 1024, {}, 1);
+    eq("单条本地样本保留 seed", sp.seedBps, 8 * 1048576);
+    W.nsSpeed("sp:443", 512 * 1024, 512 * 1024, {}, 1);
+    W.nsSpeed("sp:443", 512 * 1024, 512 * 1024, {}, 1);
+    eq("3 个有效窗口后 seed 作废", sp.seedBps, 0);
+  }
 }
 
 /* ---------- 3. 门槛与过滤 ---------- */
@@ -139,26 +194,39 @@ reset();
 eq("无样本 avail = 0.5", W.availOf(W.nsGet("z:443")), 0.5);
 {
   const s = W.nsGet("z2:443");
-  s.okW = 1; s.failW = 5;
+  s.okW = 1;
+  s.failW = 5;
   ok("1 成功 5 失败 → avail < 0.75", W.availOf(s) < 0.75, W.availOf(s));
 }
 reset();
 node("u:443", { okW: 2, failW: 8, tcp: 50 });
-eq("长期低可用被排除", W.candsFor("lat").some((x) => x.k === "u:443"), false);
+eq(
+  "长期低可用被排除",
+  W.candsFor("lat").some((x) => x.k === "u:443"),
+  false,
+);
 
 reset();
 node("small:443", { okW: 0, failW: 1, tcp: 50 });
-ok("小样本失败只软惩罚，不出局", W.candsFor("lat").some((x) => x.k === "small:443"), true);
+ok(
+  "小样本失败只软惩罚，不出局",
+  W.candsFor("lat").some((x) => x.k === "small:443"),
+  true,
+);
 
 reset();
 node("e:443", { tS: 0, eCloseP: 6, tcp: 50 });
 eq("中转后大量空关闭 → 可疑", W.emptyCloseSuspect("e:443"), true);
-eq("可疑节点被排除", W.candsFor("lat").some((x) => x.k === "e:443"), false);
+eq(
+  "可疑节点被排除",
+  W.candsFor("lat").some((x) => x.k === "e:443"),
+  false,
+);
 // 空关闭计数必须跟着半衰期衰减，否则老账永远赖着，节点一旦攒够 5 次就被永久排除
 {
   const se = W.nsGet("e:443");
-  se.at = Date.now() - 12 * 3600e3;          // 两个半衰期
-  W.nsEmptyClose("e:443", true);             // 触发衰减后再 +1
+  se.at = Date.now() - 12 * 3600e3; // 两个半衰期
+  W.nsEmptyClose("e:443", true); // 触发衰减后再 +1
   ok("空关闭计数按半衰期衰减", se.eCloseP > 2 && se.eCloseP < 2.6, String(se.eCloseP));
   eq("衰减后不再可疑", W.emptyCloseSuspect("e:443"), false);
 }
@@ -184,13 +252,28 @@ reset();
 node("d1:443", { tcp: 300, tls: 60, okW: 20 });
 node("d2:443", { tcp: 50, tls: 60, okW: 20 });
 S.curs.lat = "d1:443";
-S.lastSwitch.lat = Date.now();          // 刚切过 → 驻留期内
+S.lastSwitch.lat = Date.now(); // 刚切过 → 驻留期内
 eq("驻留期内不切", W.SEL.maybeSwitch({ pxDwellMin: 0 }, "lat"), false);
+
+// 驻留配置必须真的生效：pxDwellMin=30 且刚切过 30 分钟 → 默认 10 分钟已过，但 30 分钟还没到
+eq("dwell 默认 lat 10 分钟", W.dwellOf({}, "lat"), 10 * 60000);
+eq("dwell 默认 tput 20 分钟", W.dwellOf({}, "tput"), 20 * 60000);
+eq("dwell 接受正数覆盖", W.dwellOf({ pxDwellMin: "30" }, "lat"), 30 * 60000);
+eq("dwell 0 回落默认", W.dwellOf({ pxDwellMin: "0" }, "lat"), 10 * 60000);
+reset();
+node("w1:443", { tcp: 300, tls: 60, okW: 20 });
+node("w2:443", { tcp: 50, tls: 60, okW: 20 });
+S.curs.lat = "w1:443";
+S.lastSwitch.lat = Date.now() - 30 * 60000;
+eq("pxDwellMin=60 覆盖默认 10 分钟", W.SEL.maybeSwitch({ pxDwellMin: "60" }, "lat"), false);
+eq("未设置时按默认 10 分钟切换", W.SEL.maybeSwitch({}, "lat"), true);
 
 reset();
 node("f1:443", { tcp: 100, okW: 10 });
 node("f2:443", { tcp: 200, okW: 10 });
-S.curs.lat = "f1:443"; S.prev.lat = "f2:443"; S.lastSwitch.lat = Date.now();
+S.curs.lat = "f1:443";
+S.prev.lat = "f2:443";
+S.lastSwitch.lat = Date.now();
 W.SEL.onFail({}, "lat", "f1:443", false);
 eq("切换后 60s 内失败 → 回滚", S.curs.lat, "f2:443");
 
@@ -198,7 +281,9 @@ eq("切换后 60s 内失败 → 回滚", S.curs.lat, "f2:443");
 reset();
 node("g1:443", { tcp: 100, okW: 10 });
 node("g2:443", { tcp: 200, okW: 10 });
-S.curs.lat = "g1:443"; S.prev.lat = "g2:443"; S.lastSwitch.lat = Date.now();
+S.curs.lat = "g1:443";
+S.prev.lat = "g2:443";
+S.lastSwitch.lat = Date.now();
 W.freezeNode("g2:443");
 W.SEL.onFail({}, "lat", "g1:443", false);
 ok("不回滚到已冻结的 prev", S.curs.lat !== "g2:443", S.curs.lat);
@@ -207,7 +292,8 @@ ok("不回滚到已冻结的 prev", S.curs.lat !== "g2:443", S.curs.lat);
 reset();
 const fakeWs = { bufferedAmount: 0, readyState: 1, send() {}, close() {} };
 const c = new W.Connection({}, {}, "tput", "tag");
-c.down += 1024; c.onUp(10);
+c.down += 1024;
+c.onUp(10);
 eq("down 累计", c.down, 1024);
 eq("up 累计", c.up, 10);
 eq("初始水位 = 512KB", c.mark, 512 * 1024);
@@ -219,8 +305,7 @@ c.sampleDown = 0;
 c.down = 2 * 1024 * 1024;
 const keep = await c.tick(fakeWs);
 eq("tick 返回 true（未触发背压）", keep, true);
-ok("tick 后节点有吞吐样本", (W.S.nstat.get("n:443").bytesDown || 0) > 0,
-  JSON.stringify(W.S.nstat.get("n:443")));
+ok("tick 后节点有吞吐样本", (W.S.nstat.get("n:443").bytesDown || 0) > 0, JSON.stringify(W.S.nstat.get("n:443")));
 eq("tick 推进了水位", c.mark > c.down, true);
 
 // 直连（node 为空）不应产生样本
@@ -266,7 +351,9 @@ eq("5 秒内同一错误只记一次", W.S.errs.length, e0 + 1);
 // 成功连接要给节点记 ok/tS，否则面板永远显示 0、可用性门槛永远不生效
 reset();
 const c6 = new W.Connection({}, {}, "tput", "");
-c6.id = "u3"; c6.node = "ok2:443"; c6.down = 2048;
+c6.id = "u3";
+c6.node = "ok2:443";
+c6.down = 2048;
 c6.flush(true);
 eq("成功连接记一次 ok", (W.S.nstat.get("ok2:443") || {}).okW, 1);
 eq("成功连接进入可用性样本", (W.S.nstat.get("ok2:443") || {}).tS, 1);
@@ -275,24 +362,32 @@ eq("成功连接进入可用性样本", (W.S.nstat.get("ok2:443") || {}).tS, 1);
 reset();
 node("sc:443", {});
 const cBps = new W.Connection({}, {}, "tput", "");
-cBps.id = "u-bps"; cBps.node = "sc:443"; cBps.host = "stream.test";
-cBps.down = 2 * 1024 * 1024; cBps.tAttach = Date.now() - 1000; cBps.siteEmitted = 2;
+cBps.id = "u-bps";
+cBps.node = "sc:443";
+cBps.host = "stream.test";
+cBps.down = 2 * 1024 * 1024;
+cBps.tAttach = Date.now() - 1000;
+cBps.siteEmitted = 2;
 cBps.flush(true);
 eq("长连接收尾不覆盖站点 bps", (W.S.hostNode.get("stream.test").get("sc:443") || {}).bps, undefined);
 
 // resetFail 只清计数：成功样本由 flush 统一记一次，不能在这里重复 +1
 reset();
 node("rf:443", {});
-S.pxFailSeen = 1; S.pxFailMem = 2;
+S.pxFailSeen = 1;
+S.pxFailMem = 2;
 await W.SEL.resetFail({}, "rf:443");
 eq("resetFail 不重复记成功", W.nsGet("rf:443").okW, 0);
 eq("resetFail 清零记忆", S.pxFailMem, 0);
 
 reset();
 const c7 = new W.Connection({}, {}, "tput", "");
-c7.id = "u4"; c7.node = "bad2:443"; c7.down = 2048; c7.failed = true;
+c7.id = "u4";
+c7.node = "bad2:443";
+c7.down = 2048;
+c7.failed = true;
 c7.flush(true);
-eq("断流的连接不记 ok", ((W.S.nstat.get("bad2:443") || {}).okW) || 0, 0);
+eq("断流的连接不记 ok", (W.S.nstat.get("bad2:443") || {}).okW || 0, 0);
 
 /* ---------- 7. 站点诊断 ---------- */
 const hn = (node, cc, n, ok, bad) => ({ node, cc, n, ok, bad, bytes: 0, ttfb: 0 });
@@ -300,9 +395,11 @@ const hn = (node, cc, n, ok, bad) => ({ node, cc, n, ok, bad, bytes: 0, ttfb: 0 
 eq("无样本 → empty", W.diagVerdict([], { ok: 0, bad: 0 }).kind, "empty");
 eq("全部正常 → ok", W.diagVerdict([hn("a", "US", 2, 2, 0)], { ok: 0, bad: 0 }).kind, "ok");
 eq("个别节点被拦 → ip", W.diagVerdict([hn("a", "US", 2, 2, 0), hn("b", "DE", 2, 0, 2)], { ok: 0, bad: 0 }).kind, "ip");
-eq("同国多节点被拦 → geo",
+eq(
+  "同国多节点被拦 → geo",
   W.diagVerdict([hn("a", "BG", 2, 0, 2), hn("b", "BG", 2, 0, 2), hn("c", "DE", 2, 2, 0)], { ok: 0, bad: 0 }).kind,
-  "geo");
+  "geo",
+);
 eq("全挂但直连正常 → pool", W.diagVerdict([hn("a", "US", 2, 0, 2)], { ok: 2, bad: 0 }).kind, "pool");
 eq("全挂直连也挂 → unknown", W.diagVerdict([hn("a", "US", 2, 0, 2)], { ok: 0, bad: 2 }).kind, "unknown");
 
@@ -347,20 +444,32 @@ const mkDO = (init) => {
   // 真实运行时里 blockConcurrencyWhile 会挡住后续请求；这里用 gate 模拟
   let gate = Promise.resolve();
   const state = {
-    blockConcurrencyWhile: (fn) => { gate = Promise.resolve().then(fn); return gate; },
+    blockConcurrencyWhile: (fn) => {
+      gate = Promise.resolve().then(fn);
+      return gate;
+    },
     storage: {
       get: async (k) => store.get(k),
-      put: async (k, v) => { store.set(k, v); },
-      delete: async (k) => { store.delete(k); },
+      put: async (k, v) => {
+        store.set(k, v);
+      },
+      delete: async (k) => {
+        store.delete(k);
+      },
     },
   };
   const m = new W.Meter(state, {});
   const raw = m.fetch.bind(m);
-  m.fetch = async (req) => { await gate; return raw(req); };
+  m.fetch = async (req) => {
+    await gate;
+    return raw(req);
+  };
   return { store, m };
 };
 const do1 = mkDO();
-await do1.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
+await do1.m.fetch(
+  new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }),
+);
 await do1.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 5, down: 7, conns: 1 }) }));
 const j1 = await (await do1.m.fetch(new Request("https://m/get"))).json();
 eq("DO 累计", [j1.up, j1.down, j1.conns], [15, 27, 2]);
@@ -370,8 +479,18 @@ eq("DO 当日字节", [j1.dU, j1.dD], [15, 27]);
 // 旧 isolate 带着昨天的日计数晚到：不能把全局 g 回滚到昨天
 {
   const doG = mkDO();
-  await doG.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 1, down: 1, conns: 1, c: { d: "2099-01-01", conn: 2 } }) }));
-  await doG.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 1, down: 1, conns: 1, c: { d: "2000-01-01", conn: 9 } }) }));
+  await doG.m.fetch(
+    new Request("https://m/add", {
+      method: "POST",
+      body: JSON.stringify({ up: 1, down: 1, conns: 1, c: { d: "2099-01-01", conn: 2 } }),
+    }),
+  );
+  await doG.m.fetch(
+    new Request("https://m/add", {
+      method: "POST",
+      body: JSON.stringify({ up: 1, down: 1, conns: 1, c: { d: "2000-01-01", conn: 9 } }),
+    }),
+  );
   const jg = await (await doG.m.fetch(new Request("https://m/cnt"))).json();
   eq("全局日计数不被旧批次回滚", jg.g.d, "2099-01-01");
   eq("旧批次计数被丢弃", jg.g.conn, 2);
@@ -382,7 +501,9 @@ eq("DO 当日字节", [j1.dU, j1.dD], [15, 27]);
   const do2 = mkDO();
   const spd = {};
   for (let i = 0; i < 80; i++) spd[`n${i}:443`] = { med: 1, p90: 1, cap: 1, n: 1, at: i + 1 };
-  await do2.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 0, down: 0, conns: 0, spd }) }));
+  await do2.m.fetch(
+    new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 0, down: 0, conns: 0, spd }) }),
+  );
   const j2 = await (await do2.m.fetch(new Request("https://m/cnt"))).json();
   eq("节点快照最多 64 个", Object.keys(j2.s).length, 64);
   ok("保留最新节点", !!j2.s["n79:443"] && !j2.s["n0:443"]);
@@ -424,7 +545,7 @@ node("a:443", { tcp: 50 });
 node("b:443", { tcp: 80 });
 const st2 = { host: "brand-new.test" };
 const rnd0 = Math.random;
-Math.random = () => 0;                   // 强制走探索分支
+Math.random = () => 0; // 强制走探索分支
 const p2 = W.SEL.pick({ pxShadow: 0.05 }, "tput", st2);
 Math.random = rnd0;
 eq("新域名挑全局最优的未试节点", p2, "a:443");
@@ -516,7 +637,12 @@ eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1
   const mkEnv = () => ({
     METER: {
       idFromName: (n) => n,
-      get: () => ({ fetch: async () => { calls++; return new Response(JSON.stringify(body)); } }),
+      get: () => ({
+        fetch: async () => {
+          calls++;
+          return new Response(JSON.stringify(body));
+        },
+      }),
     },
   });
   W.S.nodeSnapCache = { t: 0, v: {} };
@@ -526,21 +652,48 @@ eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1
   eq("60 秒内走缓存，不再打 DO", calls, 1);
   eq("缓存内容一致", again["a:443"].p90, 200);
 
-  const bad = { METER: { idFromName: (n) => n, get: () => ({ fetch: async () => { throw new Error("do down"); } }) } };
+  const bad = {
+    METER: {
+      idFromName: (n) => n,
+      get: () => ({
+        fetch: async () => {
+          throw new Error("do down");
+        },
+      }),
+    },
+  };
   W.S.nodeSnapCache = { t: 0, v: {} };
   eq("DO 挂了返回空表而不是抛错", await W.nodeSnapGet(bad, "u1"), {});
 }
 
 // 面板渲染：KB/s 带样本数；没有样本显示"未用"
 {
-  const html1 = W.renderStatsHtml({}, "u", { up: 0, down: 0, todayUp: 0, todayDown: 0 },
-    {}, [{ h: "a", p: 443, ms: 10, cc: "US" }], { "a:443": { bps: 2048 * 1024, n: 7 } });
+  const html1 = W.renderStatsHtml(
+    {},
+    "u",
+    { up: 0, down: 0, todayUp: 0, todayDown: 0 },
+    {},
+    [{ h: "a", p: 443, ms: 10, cc: "US" }],
+    { "a:443": { bps: 2048 * 1024, n: 7 } },
+  );
   ok("面板显示 KB/s 与样本数", html1.includes("2048 KB/s (n=7)"), html1.match(/\d+ KB\/s[^<]*/)?.[0]);
-  const html2 = W.renderStatsHtml({}, "u", { up: 0, down: 0, todayUp: 0, todayDown: 0 },
-    {}, [{ h: "b", p: 443, ms: 10, cc: "US" }], {});
+  const html2 = W.renderStatsHtml(
+    {},
+    "u",
+    { up: 0, down: 0, todayUp: 0, todayDown: 0 },
+    {},
+    [{ h: "b", p: 443, ms: 10, cc: "US" }],
+    {},
+  );
   ok("没有吞吐样本显示未用", html2.includes("未用"));
-  const html3 = W.renderStatsHtml({}, "u", { up: 0, down: 0, todayUp: 0, todayDown: 0 },
-    { "<img src=x onerror=alert(1)>": { rtt: 10, colo: "HKG", hits: 1, ok: 1, fail: 0, ts: 1 } }, [], {});
+  const html3 = W.renderStatsHtml(
+    {},
+    "u",
+    { up: 0, down: 0, todayUp: 0, todayDown: 0 },
+    { "<img src=x onerror=alert(1)>": { rtt: 10, colo: "HKG", hits: 1, ok: 1, fail: 0, ts: 1 } },
+    [],
+    {},
+  );
   ok("入口标签做了 HTML 转义", !html3.includes("<img src=x"), html3.slice(0, 80));
 }
 
@@ -550,7 +703,9 @@ eq("无样本 pFailRisk = 0.1（不加不确定性溢价）", W.pFailOf(W.nsGet(
 
 {
   const s = W.nsGet("seedrel:443");
-  s.seedN = 10; s.seedFail = 5; s.seedAt = Date.now();
+  s.seedN = 10;
+  s.seedFail = 5;
+  s.seedAt = Date.now();
   const p = W.pFailOf(s);
   ok("seed 只修正先验均值（≈0.167）", p > 0.15 && p < 0.18, String(p));
   s.seedAt = Date.now() - 48 * 3600e3;
@@ -570,7 +725,7 @@ node("e2:443", { tcp: 60 });
 S.curs.tput = "e1:443";
 const stE = { host: "explore.test" };
 const rnd1 = Math.random;
-Math.random = () => 0.07;               // 7%：样本不足(10%)会探索，样本够了(5%)不探索
+Math.random = () => 0.07; // 7%：样本不足(10%)会探索，样本够了(5%)不探索
 const picked1 = W.SEL.pick({ pxShadow: 0.05 }, "tput", stE);
 const explored1 = stE.trial === true || stE.hostTrial === true;
 ok("样本不足时 7% 也会探索", explored1, `picked=${picked1}`);
@@ -579,7 +734,11 @@ reset();
 node("f1:443", { tcp: 50 });
 node("f2:443", { tcp: 60 });
 const sf = W.S.nstat.get("f1:443");
-sf.hist[7] = 4; sf.sumW = 4; sf.sumW2 = 4; sf.recentBytesW = 8 * 1048576; sf.lastSampleAt = Date.now();
+sf.hist[7] = 4;
+sf.sumW = 4;
+sf.sumW2 = 4;
+sf.recentBytesW = 8 * 1048576;
+sf.lastSampleAt = Date.now();
 S.curs.tput = "f1:443";
 const stF = { host: "steady.test" };
 const picked2 = W.SEL.pick({ pxShadow: 0.05 }, "tput", stF);
@@ -600,7 +759,11 @@ const c30 = W.candsFor("lat");
 eq("30 个候选全部返回", c30.length, 30);
 ok("大规模下启用了排行缓存", W.S.rankCache.t > 0);
 W.nsGet(c30[0].k).blackUntil = Date.now() + 60000;
-eq("缓存之外仍会过滤黑名单", W.candsFor("lat").some((x) => x.k === c30[0].k), false);
+eq(
+  "缓存之外仍会过滤黑名单",
+  W.candsFor("lat").some((x) => x.k === c30[0].k),
+  false,
+);
 
 reset();
 node("bs:443", {});
@@ -619,7 +782,14 @@ for (let i = 0; i < 3; i++) W.hostNodeMark("site-seed.test", "hpb:443", { ok: 1,
 W.hostNodeMark("site-seed.test", "hpb:443", { bps: 2 * 1048576 });
 {
   const box = new Map();
-  const env = { STATS: { get: async (k) => box.get(k) || null, put: async (k, v) => { box.set(k, v); } } };
+  const env = {
+    STATS: {
+      get: async (k) => box.get(k) || null,
+      put: async (k, v) => {
+        box.set(k, v);
+      },
+    },
+  };
   W.S.colo = "TST";
   W.S.seedAt = 0;
   await W.SEEDS.write(env, false, true);
@@ -627,7 +797,9 @@ W.hostNodeMark("site-seed.test", "hpb:443", { bps: 2 * 1048576 });
   const row = doc.byColo.TST.hp.find((x) => x.h === "site-seed.test" && x.k === "hpb:443");
   eq("seed 的站点偏好带上了 bps", Math.round((row && row.bps) || 0), 2 * 1048576);
   // 模拟另一个 isolate 冷启动
-  W.S.hostNode.clear(); W.S.seedAt = 0; W.S.seed = { v: 0, ts: 0, poolGen: 0, poolN: 0, builtAt: 0, byColo: {} };
+  W.S.hostNode.clear();
+  W.S.seedAt = 0;
+  W.S.seed = { v: 0, ts: 0, poolGen: 0, poolN: 0, builtAt: 0, byColo: {} };
   await W.SEEDS.read(env);
   const back = W.S.hostNode.get("site-seed.test").get("hpb:443");
   eq("别的 isolate 能读到站点级 bps", Math.round((back && back.bps) || 0), 2 * 1048576);
@@ -652,7 +824,8 @@ eq("latN = 探活 + 成功连接", W.scoreParts("ln:443", "lat").latN, 8);
 reset();
 {
   const s = W.nsGet("sitefail:443");
-  const beforeFail = s.failW, beforeBlack = s.blackUntil;
+  const beforeFail = s.failW,
+    beforeBlack = s.blackUntil;
   W.nsSiteFail("sitefail:443");
   ok("站点失败只加 0.2 全局权重", Math.abs(s.failW - beforeFail - 0.2) < 1e-9, String(s.failW));
   eq("站点失败不进冷却阶梯", s.blackUntil, beforeBlack);
@@ -673,7 +846,9 @@ ok("总分用 max(慢, 快)", W.scoreParts("fk:443", "lat").pFailRisk >= W.pFail
 reset();
 {
   const s = W.nsGet("flap:443");
-  s.winAt = Date.now(); s.winOk = 2; s.winFail = 3;
+  s.winAt = Date.now();
+  s.winOk = 2;
+  s.winFail = 3;
   W.nsFail("flap:443");
   ok("抖动（窗口内成败参半）触发 5 分钟冷却", s.blackUntil - Date.now() > 4 * 60000, String(s.blackUntil - Date.now()));
 }
@@ -711,7 +886,7 @@ node("g3:443", { tcp: 400, okW: 10 });
 W.hostNodeMark("thr.test", "g1:443", { ok: 1, bad: 0, bytes: 100, ttfb: 800 });
 W.hostNodeMark("thr.test", "g2:443", { ok: 1, bad: 0, bytes: 100, ttfb: 60 });
 const rndThr = Math.random;
-Math.random = () => 0;                   // 即使掷出 0 也不能进冷启动分支
+Math.random = () => 0; // 即使掷出 0 也不能进冷启动分支
 const pThr = W.SEL.pick({ pxShadow: 0 }, "lat", { host: "thr.test" });
 Math.random = rndThr;
 eq("站点样本不足 3 个节点 → 退回全局", pThr, "g1:443");
@@ -728,7 +903,14 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
   W.S.snapCache = { v: { v: 1, ts: 1, date: "", stats: {}, rtt: {}, errs: [] }, t: Date.now() };
   W.S.rttMiss.clear();
   let reads = 0;
-  const envR = { STATS: { get: async () => { reads += 1; return null; } } };
+  const envR = {
+    STATS: {
+      get: async () => {
+        reads += 1;
+        return null;
+      },
+    },
+  };
   await W.loadRtt(envR, "miss-u");
   eq("rtt 缺失第一次读 KV", reads, 1);
   await W.loadRtt(envR, "miss-u");
@@ -746,34 +928,49 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
 
 // 全局闸门命中时不能每条连接都读一次 KV：一次检查后本地基线要推进
 {
-  let gets = 0, puts = 0;
-  const envS = { STATS: {
-    get: async () => { gets += 1; return JSON.stringify({ v: 1, ts: Date.now(), date: "", stats: {}, rtt: {}, errs: [] }); },
-    put: async () => { puts += 1; },
-  } };
+  let gets = 0,
+    puts = 0;
+  const envS = {
+    STATS: {
+      get: async () => {
+        gets += 1;
+        return JSON.stringify({ v: 1, ts: Date.now(), date: "", stats: {}, rtt: {}, errs: [] });
+      },
+      put: async () => {
+        puts += 1;
+      },
+    },
+  };
   W.S.stats.set("snap-u", { up: 1, down: 2, conns: 1, first: Date.now(), last: Date.now() });
   W.S.snapBytes = 3 * 1048576;
   W.S.snapWritten = Date.now() - 3 * 3600e3;
-  W.S.snapChecked = 0; W.S.snapBusy = false;
+  W.S.snapChecked = 0;
+  W.S.snapBusy = false;
   await W.flushSnap(envS);
   await W.flushSnap(envS);
   eq("快照全局闸门只读一次 KV", gets, 1);
   eq("闸门命中不写 KV", puts, 0);
-  W.S.stats.clear(); W.S.snapBytes = 0; W.S.snapWritten = 0; W.S.snapChecked = 0;
+  W.S.stats.clear();
+  W.S.snapBytes = 0;
+  W.S.snapWritten = 0;
+  W.S.snapChecked = 0;
 }
 
 // 日计数批次失败要能退回基线，否则这批连接数永久丢
 {
   W.S.cntDay = new Date().toISOString().slice(0, 10);
-  W.S.cnt.conn = 7; W.S.cntSent.conn = 0;
+  W.S.cnt.conn = 7;
+  W.S.cntSent.conn = 0;
   const dl = W.cntDelta();
   eq("cntDelta 取出增量", dl.conn, 7);
   eq("cntDelta 推进基线", W.S.cntSent.conn, 7);
   W.cntUnsend(dl);
   eq("cntUnsend 退回基线", W.S.cntSent.conn, 0);
-  W.S.cnt.conn = 0; W.S.cntSent.conn = 0;
+  W.S.cnt.conn = 0;
+  W.S.cntSent.conn = 0;
   // 跨天出口也要清零，不能把昨天的计数继续发出去
-  W.S.cntDay = "2000-01-01"; W.S.cnt.conn = 9;
+  W.S.cntDay = "2000-01-01";
+  W.S.cnt.conn = 9;
   eq("跨天后计数不再发送", Object.keys(W.cntDelta()).length, 0);
   W.S.cntDay = new Date().toISOString().slice(0, 10);
 }
@@ -791,7 +988,8 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
 // 影子/站点试探失败只罚节点，不推进全局失败记忆
 reset();
 node("tr:443", { tcp: 50 });
-S.pxFailMem = 0; S.pxFailSeen = 0;
+S.pxFailMem = 0;
+S.pxFailSeen = 0;
 await W.SEL.bumpFail({}, "tput", "tr:443", true);
 eq("影子失败不进全局失败记忆", S.pxFailMem, 0);
 eq("影子失败不置失败标志", S.pxFailSeen, 0);
@@ -803,16 +1001,26 @@ eq("影子失败冻结节点", W.isFrozen("tr:443"), true);
   const box = new Map();
   const envU = {
     uuid: "7c53c12a-88b1-4fda-b6e7-4da62e47a4e1",
-    STATS: { get: async (k) => box.get(k) || null, put: async (k, v) => { box.set(k, v); } },
+    STATS: {
+      get: async (k) => box.get(k) || null,
+      put: async (k, v) => {
+        box.set(k, v);
+      },
+    },
     METER: {
       idFromName: (id) => id,
-      get: () => ({ fetch: async () => ({ ok: true, json: async () => ({ up: 3000000000, down: 5000000000, conns: 10, first: 1 }) }) }),
+      get: () => ({
+        fetch: async () => ({
+          ok: true,
+          json: async () => ({ up: 3000000000, down: 5000000000, conns: 10, first: 1 }),
+        }),
+      }),
     },
   };
-  W.S.usersCache = { v: null, t: 0 }; W.S.usersSig = ""; W.S.meterCache.clear();
-  await W.usageSnapWrite(envU, [
-    { id: envU.uuid, pwd: "", note: "", enabled: true, managed: false },
-  ]);
+  W.S.usersCache = { v: null, t: 0 };
+  W.S.usersSig = "";
+  W.S.meterCache.clear();
+  await W.usageSnapWrite(envU, [{ id: envU.uuid, pwd: "", note: "", enabled: true, managed: false }]);
   const doc = JSON.parse(box.get("usage:snap"));
   eq("大用量快照不溢出", doc.users[envU.uuid].up, 3000000000);
   eq("大下行快照不溢出", doc.users[envU.uuid].down, 5000000000);
@@ -838,7 +1046,10 @@ reset();
     blockConcurrencyWhile: (fn) => Promise.resolve().then(fn),
     storage: {
       get: async (k) => store.get(k),
-      put: async (k, v) => { if (fail) throw new Error("put down"); store.set(k, v); },
+      put: async (k, v) => {
+        if (fail) throw new Error("put down");
+        store.set(k, v);
+      },
       delete: async (k) => store.delete(k),
     },
   };
@@ -846,8 +1057,12 @@ reset();
   await Promise.resolve();
   let threw = false;
   try {
-    await m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
-  } catch (e) { threw = true; }
+    await m.fetch(
+      new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }),
+    );
+  } catch (e) {
+    threw = true;
+  }
   eq("DO 落盘失败会抛错", threw, true);
   eq("DO 落盘失败回滚内存", m.c.up, 0);
   fail = false;
@@ -868,7 +1083,7 @@ reset();
 
 /* ---------- 9. 影子概率：选择器 / 控制页 / /proxyip 同源 ---------- */
 eq("pxShadow 未设置 → 5%", W.shadowRate({}), 0.05);
-eq("pxShadow=\"0\" → 关闭探索", W.shadowRate({ pxShadow: "0" }), 0);
+eq('pxShadow="0" → 关闭探索', W.shadowRate({ pxShadow: "0" }), 0);
 eq("pxShadow=0.2 原样", W.shadowRate({ pxShadow: "0.2" }), 0.2);
 eq("pxShadow 非法 → 回落 5%", W.shadowRate({ pxShadow: "abc" }), 0.05);
 eq("pxShadow 负数 → 回落 5%", W.shadowRate({ pxShadow: "-1" }), 0.05);
@@ -901,7 +1116,9 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
 /* ---------- 11. /set 恢复累计不能抹掉今日 ---------- */
 {
   const doS = mkDO();
-  await doS.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
+  await doS.m.fetch(
+    new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }),
+  );
   await doS.m.fetch(
     new Request("https://m/set", {
       method: "POST",
@@ -918,7 +1135,9 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
 {
   const today = new Date().toISOString().slice(0, 10);
   const doT = mkDO();
-  await doT.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
+  await doT.m.fetch(
+    new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }),
+  );
   await doT.m.fetch(
     new Request("https://m/set", {
       method: "POST",
@@ -929,7 +1148,9 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
   eq("同日快照 dU/dD 取较大值", [jt.dU, jt.dD], [33, 44]);
 
   const doY = mkDO();
-  await doY.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
+  await doY.m.fetch(
+    new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }),
+  );
   await doY.m.fetch(
     new Request("https://m/set", {
       method: "POST",
@@ -956,7 +1177,10 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
       }),
     },
   };
-  store.set("usage:snap", JSON.stringify({ ts: 0, users: { "snap-u1": { up: 1, down: 1, conns: 1, d: "2000-01-01", dU: 999, dD: 999 } } }));
+  store.set(
+    "usage:snap",
+    JSON.stringify({ ts: 0, users: { "snap-u1": { up: 1, down: 1, conns: 1, d: "2000-01-01", dU: 999, dD: 999 } } }),
+  );
   W.S.meterCache.clear();
   await W.usageSnapWrite(envS, [{ id: "snap-u1" }]);
   const snap = JSON.parse(store.get("usage:snap"));
@@ -976,7 +1200,11 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
     seen.push(x);
     live--;
   });
-  eq("eachLimit 覆盖全部任务", seen.sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7]);
+  eq(
+    "eachLimit 覆盖全部任务",
+    seen.sort((a, b) => a - b),
+    [1, 2, 3, 4, 5, 6, 7],
+  );
   ok("eachLimit 并发不超过 3", peak <= 3, String(peak));
 }
 
@@ -992,6 +1220,15 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
   eq("spd 容器是 null 原型", Object.getPrototypeOf(doP.m.s), null);
   eq("__proto__ 不作为自有键写入", Object.prototype.hasOwnProperty.call(doP.m.s, "__proto__"), false);
   ok("正常节点仍保留", !!doP.m.s["ok:443"]);
+}
+
+/* ---------- 探活不能灌水面板成功率 ---------- */
+{
+  const s = W.nsGet("probe-only:443");
+  W.nsProbe("probe-only:443", 50, 40, 10);
+  eq("探活不增加 ok", s.ok, 0);
+  eq("探活仍记延迟样本", s.pN, 1);
+  W.S.nstat.delete("probe-only:443");
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

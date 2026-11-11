@@ -133,7 +133,7 @@ export function nsProbe(k: string, ms: number, tcp: number, tls: number) {
   nsDecay(s, now);
   s.pN += 1; s.pSum += ms; s.pSumSq += ms * ms;
   s.pF *= 0.5;
-  s.ok += 1;
+  // 探活只进延迟样本：不要动 s.ok，否则面板成功率会被探测次数灌水
   if (tcp > 0) s.tcp = s.tcp ? s.tcp * (1 - SC.A) + tcp * SC.A : tcp;
   if (tls > 0) s.tls = s.tls ? s.tls * (1 - SC.A) + tls * SC.A : tls;
   s.at = now;

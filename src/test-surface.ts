@@ -27,6 +27,7 @@ import {
   nsGet,
   nsOk,
   nsSpeed,
+  nsProbe,
   p90Of,
   pFailOf,
   pcts,
@@ -66,11 +67,13 @@ export { loadRtt, rttLearn, rttMark } from "./nodes/metrics";
 export { subHeaders, effectiveQuota } from "./core/quota";
 export { S } from "./core/state";
 export { SEL } from "./px/selector";
+export { dwellOf } from "./px/selector";
 export { SEEDS } from "./px/seed";
 export { Connection } from "./proxy/connection";
 export {
   nsGet,
   nsSpeed,
+  nsProbe,
   nsOk,
   nsFail,
   nsSiteFail,

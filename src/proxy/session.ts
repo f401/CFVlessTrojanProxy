@@ -363,6 +363,8 @@ export async function handleDns(ws: WebSocketLike, firstBody: Uint8Array, st: Co
     });
     const ab = await resp.arrayBuffer();
     const u8 = new Uint8Array(ab);
+    // DNS 响应也要计入下行：否则 UDP/53 的流量完全不计费/不进面板
+    st.down += u8.length;
     const len = new Uint8Array([(u8.length >> 8) & 0xff, u8.length & 0xff]);
     const out = new Uint8Array(2 + u8.length);
     out.set(len, 0);

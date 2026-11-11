@@ -124,7 +124,7 @@ export class Meter {
       const c = this.c;
       const oldC = { ...this.c },
         oldG = { ...this.g },
-        oldS = { ...this.s },
+        oldS = Object.assign(Object.create(null), this.s),
         oldE = this.e.slice();
       // 计数搭便车：同一次 /add 请求把 isolate 的日计数也带上来，0 额外请求
       if (d.c && typeof d.c === "object") {

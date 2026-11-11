@@ -54,6 +54,8 @@ export class AppState {
   gcnt: CounterDoc | null = null;
   seedAt = 0;
   seedDirty = false;
+  /** 上一次读 seed 是否失败：失败时 write 必须跳过，不能拿空表覆盖别人的桶 */
+  seedReadFail = false;
   pool: PoolEntry[] = [];
   scanN = 12;
   poolIdx = 0;

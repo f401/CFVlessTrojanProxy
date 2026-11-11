@@ -17,6 +17,17 @@ export async function kvGet<T = unknown>(env: Env, key: string): Promise<T | nul
   return (await unseal(env, raw)) as T | null;
 }
 
+/**
+ * 严格读取：KV 读失败时抛错，而不是伪装成"空值"。
+ * 落盘前必须先读旧值（seed / snap）：读失败就当空对象再写，会把别的
+ * isolate 的数据整份覆盖掉，所以这两处必须能区分"空"和"读不到"。
+ */
+export async function kvGetStrict<T = unknown>(env: Env, key: string): Promise<T | null> {
+  if (!env || !env.STATS) return null;
+  const raw = await env.STATS.get(key);
+  return (await unseal(env, raw)) as T | null;
+}
+
 export async function kvSet(env: Env, key: string, obj: unknown, opts?: { expirationTtl?: number }): Promise<void> {
   return kvPut(env.STATS, key, await seal(env, obj), opts);
 }
