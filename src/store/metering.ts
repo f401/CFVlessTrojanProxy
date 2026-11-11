@@ -51,7 +51,12 @@ export function pendAdd(id: string, up: number, down: number, isNew?: boolean) {
 }
 
 export function scheduleFlush(env: Env, delay?: number) {
-  if (S.tflush) return;
+  if (S.tflush) {
+    // 大流量触发 delay=0 时，不能被之前排好的 30 秒定时器压住
+    if (delay !== 0) return;
+    clearTimeout(S.tflush);
+    S.tflush = null;
+  }
   const d = delay === undefined ? S.pendMs : delay;
   S.tflush = setTimeout(() => {
     S.tflush = null;
