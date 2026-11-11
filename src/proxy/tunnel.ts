@@ -3,6 +3,7 @@ import { WS_OPEN, closeQuietly, errMsg, safeSend, toU8 } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
 import { nsDecay, nsGet, nsSiteFail } from "../nodes/score";
 import { cnt } from "../px/pool";
+import { S } from "../core/state";
 import type { Connection } from "./connection";
 
 export function pipeBack(sock: Socket, ws: WebSocketLike, st: Connection, onClose?: (gotData: boolean) => void): void {
@@ -65,7 +66,11 @@ export function pipeBack(sock: Socket, ws: WebSocketLike, st: Connection, onClos
               sn.fail = (sn.fail || 0) + 0.5;
               sn.tF = (sn.tF || 0) + 0.5;
               // 中途断流的节点先凉 60 秒；站点级试探不冻结（可能只是对这个站不行）
-              if (!st.hostTrial) sn.freeUntil = Math.max(sn.freeUntil || 0, now + 60000);
+              if (!st.hostTrial) {
+                sn.freeUntil = Math.max(sn.freeUntil || 0, now + 60000);
+                S.hostRankCache.clear();   // 站点排行不能继续推荐刚断流的节点
+                S.rankCache.t = 0;
+              }
               sn.at = now;
             }
           }

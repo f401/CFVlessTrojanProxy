@@ -603,6 +603,8 @@ W.hostNodeMark("site-bps.test", "bs:443", { bps: 1048576 });
 const hs = W.S.hostNode.get("site-bps.test").get("bs:443");
 eq("中途吞吐采样不算连接样本", hs.n, 1);
 ok("站点 bps 记录下来了", hs.bps > 0, String(hs.bps));
+W.hostNodeMark("neutral.test", "n0:443", { ok: 0, bad: 0, bytes: 100, ttfb: 100 });
+eq("0 字节 0 失败不算站点样本", W.S.hostNode.get("neutral.test").get("n0:443").n, 0);
 
 // 站点倾向要能跨 isolate：hp 必须把 bps 一起写进 seed，否则换个实例只剩 ttfb
 reset();

@@ -286,9 +286,9 @@ export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
     s = { n: 0, ok: 0, bad: 0, bytes: 0, ttfb: 0, at: 0 };
     m.set(node, s);
   }
-  // 只带 bps 的调用是"中途采样"，不能当成一条新的连接样本
+  // 只带 bps 的调用是"中途采样"，0 字节 0 失败的收尾也不是有效站点样本
   const isConn = o.ok !== undefined || o.bad !== undefined;
-  if (isConn) {
+  if (isConn && (o.ok || o.bad)) {
     s.n += 1;
     if (o.ok) s.ok += 1;
     if (o.bad) s.bad += 1;
