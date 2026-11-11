@@ -121,4 +121,4 @@ export { renderAdmin } from "./views/panel";
 export { adminAuthed, sessionToken } from "./edge/auth";
 export { html, CSP_STATIC } from "./edge/respond";
 export { wsToStream } from "./proxy/ws-in";
-export { handleDns } from "./proxy/session";
+export { handleDns, handleUpgrade } from "./proxy/session";

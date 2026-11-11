@@ -6,7 +6,7 @@
   "scripts": {
     "check": "node tools/tsc.js",
     "build": "node tools/tsc.js && node tools/bundle.js",
-    "test": "node test/mk_test.mjs && node test/test_v3.mjs && node test/smoke_v3.mjs && node test/test_score.mjs && node test/golden.mjs",
+    "test": "node test/mk_test.mjs && node test/test_v3.mjs && node test/smoke_v3.mjs && node test/test_score.mjs && node test/sim_v3.mjs && node test/golden.mjs",
     "arch": "node tools/check-arch.js",
     "format": "prettier --write \"src/**/*.ts\" \"types/*.d.ts\"",
     "obf": "node obf/pre.js && node obf/obf_mid.js",

@@ -18,6 +18,7 @@ node test/mk_test.mjs >/dev/null
 node test/test_v3.mjs >/dev/null
 node test/smoke_v3.mjs >/dev/null
 node test/test_score.mjs >/dev/null
+node test/sim_v3.mjs >/dev/null
 node test/golden.mjs >/dev/null
 echo "✓ 测试通过"
 
