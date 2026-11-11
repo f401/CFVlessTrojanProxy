@@ -220,7 +220,9 @@ export async function debug(c: UserCtx): Promise<Response> {
             if (url.searchParams.get("probe") === "1") {
               probe = await Promise.all(
                 alive.slice(0, 8).map(async (a) => {
-                  const r = await probeSni(a.h, a.p, diagHost, port);
+                  // 第 4 个参数是探测超时（ms），不是目标端口；以前把 port 传进去，
+                  // 默认 443 会把超时压到 443ms，正常的慢站全被判死。
+                  const r = await probeSni(a.h, a.p, diagHost);
                   return { node: a.h + ":" + a.p, cc: a.cc || "", ...r };
                 })
               );

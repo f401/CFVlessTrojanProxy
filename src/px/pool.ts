@@ -198,12 +198,15 @@ export async function pxGet(env: Env) {
     for (const n of src.slice(0, SEED_COLD_N)) {
       if (!n || !n.k) continue;
       const i = n.k.lastIndexOf(":");
+      // 跨机房桶只借名字：n.ms 是别的机房的延迟，直接用会污染本地评分
+      const ms = foreign
+        ? (refMs[n.k] || SC.P_TCP)
+        : ((n.ms && n.ms !== SC.P_TCP) ? n.ms : (refMs[n.k] || n.ms || SC.P_TCP));
       S.alive.set(n.k, {
         h: n.h || n.k.slice(0, i),
         p: n.p || Number(n.k.slice(i + 1)) || 443,
         cc: n.cc || "",
-        // ms 是探活测的真实值；本机房还没测过（还是占位值）就借名单桶的
-        ms: (n.ms && n.ms !== SC.P_TCP) ? n.ms : (refMs[n.k] || n.ms || SC.P_TCP),
+        ms,
         src: "seed",
       });
     }

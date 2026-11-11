@@ -191,7 +191,7 @@ onFail(env: Env, mode: Mode, k: string, trial: boolean) {
   const m = mode === "lat" ? "lat" : "tput";
   const prev = S.prev[m];
   const now = Date.now();
-  if (k === S.curs[m] && prev && now - (S.lastSwitch[m] || 0) < SC.ROLL_WIN) {
+  if (k === S.curs[m] && prev && !isBlack(prev) && !isFrozen(prev) && now - (S.lastSwitch[m] || 0) < SC.ROLL_WIN) {
     S.curs[m] = prev;
     S.prev[m] = "";
     S.lastSwitch[m] = now;

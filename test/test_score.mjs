@@ -194,6 +194,15 @@ S.curs.lat = "f1:443"; S.prev.lat = "f2:443"; S.lastSwitch.lat = Date.now();
 W.SEL.onFail({}, "lat", "f1:443", false);
 eq("切换后 60s 内失败 → 回滚", S.curs.lat, "f2:443");
 
+// 回滚目标自己已经冻结/冷却时，不能把游标送回坏节点
+reset();
+node("g1:443", { tcp: 100, okW: 10 });
+node("g2:443", { tcp: 200, okW: 10 });
+S.curs.lat = "g1:443"; S.prev.lat = "g2:443"; S.lastSwitch.lat = Date.now();
+W.freezeNode("g2:443");
+W.SEL.onFail({}, "lat", "g1:443", false);
+ok("不回滚到已冻结的 prev", S.curs.lat !== "g2:443", S.curs.lat);
+
 /* ---------- 5. Connection（热路径 + tick） ---------- */
 reset();
 const fakeWs = { bufferedAmount: 0, readyState: 1, send() {}, close() {} };

@@ -225,7 +225,8 @@ export async function dial(host: string, port: number) {
       throw lastErr || new Error("目标解析失败");
     }
   }
-
+  // DNS 可能把域名解析到内网/元数据地址：NAT64 编码之前必须再验一次
+  if (isPrivateHost(v4)) throw lastErr || new Error("目标解析到内网地址");
   return await connect({ hostname: nat64FromV4(v4), port });
 }
 
