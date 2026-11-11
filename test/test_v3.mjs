@@ -255,5 +255,21 @@ eq("都没有返回空串", W.primaryId({}), "");
   eq("托管用户没密码时不出 Trojan", W.trojanPasswordOf(envM, UUID, authEmpty), "");
 }
 
+/* ---------- 用户表：托管启用状态 / 密码覆盖 ---------- */
+{
+  const kv = (users) => ({ get: async (k) => (k === "users" ? JSON.stringify(users) : null) });
+  W.S.usersCache = { v: null, t: 0 }; W.S.usersSig = "";
+  const envD = { uuid: UUID, STATS: kv([{ id: UUID, pwd: "pw-managed", enabled: false, managed: true }]) };
+  const aD = await W.loadUsers(envD);
+  eq("托管禁用覆盖 env 启用状态", aD.uuids.has(UUID), false);
+  eq("禁用用户不注册 Trojan", aD.trojan.size, 0);
+
+  W.S.usersCache = { v: null, t: 0 }; W.S.usersSig = "";
+  const envE = { uuid: UUID, pwd: "pw-env", STATS: kv([{ id: UUID, pwd: "pw-managed", enabled: true, managed: true }]) };
+  const aE = await W.loadUsers(envE);
+  eq("托管启用后恢复 UUID", aE.uuids.has(UUID), true);
+  eq("托管密码覆盖 env 密码只留一个", aE.trojan.size, 1);
+}
+
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

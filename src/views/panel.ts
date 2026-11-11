@@ -1,7 +1,7 @@
 import { escapeHtml, fmtBytes } from "./html";
 import { effectiveQuota } from "../core/quota";
 import { Meter } from "../store/meter";
-import { p90Of, scoreMerged , ZERO_STAT } from "../nodes/score";
+import { costOf, p90Of, ZERO_STAT } from "../nodes/score";
 import { S } from "../core/state";
 import { COLO_CITY, loadNodes, pickProtos } from "./sub";
 import { P_T, VERSION, enc, toHex } from "../core/util";
@@ -446,12 +446,14 @@ export function renderStatsHtml(env: Env, id: string, s: StatsView, learned: Rec
         ? Math.round(st.bps / 1024) + " KB/s" + (nSamp ? ` (n=${Math.round(nSamp)})` : "")
         : "未用（本实例无下载样本）";
       const p = (nsMap && nsMap[k]) || {};
+      // nsOf 已经算过 tput 分；没有就走本地评分，别拿延迟分冒充总评分
+      const score = Number(p.tput) || costOf(k, "tput");
       const tip =
         `lat ${Math.round(Number(p.lat) || 0)}ms · tput ${Math.round(Number(p.tput) || 0)}ms` +
         ` · E10 ${Math.round(Number(p.e10) || 0)}ms · pFail ${Number(p.pFail) || 0}` +
         ` · pStall ${Number(p.pStall) || 0} · confB ${Number(p.confB) || 0}` +
         ` · nEff ${Number(p.nEff) || 0} · latN ${Number(p.latN) || 0} · ${p.gate || "ok"}`;
-      return { x, k, score: scoreMerged(k, nsMap), kbps, rate, ok, bad, cc: x.cc || "", tip };
+      return { x, k, score, kbps, rate, ok, bad, cc: x.cc || "", tip };
     })
     .sort((a, b) => a.score - b.score)
     .slice(0, 10)

@@ -59,6 +59,12 @@ export async function proxyip(c: UserCtx): Promise<Response> {
             S.lastUp = 0;
             S.lastManual = 0;
             S.funnel = { direct: 0, node: 0, v6: 0 };
+            // 站点画像/排行缓存也必须一起清：否则 reset 后 pick 还会推荐已经不存在的节点
+            S.hostNode.clear();
+            S.hostDirect.clear();
+            S.hostRankCache.clear();
+            S.rankCache = { t: 0, v: {} };
+            S.candN = 0;
             return json({ ok: true, alive: 0, curs: S.curs });
           }
 

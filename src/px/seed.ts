@@ -170,7 +170,18 @@ async write(env: Env, listOnly = false, force = false) {
     const old = base.get(k) || {};
     const packed = this.packNode(k);
     packed.b = Math.min(packed.b || old.b || 0, 8 * 1048576);   // 本地没样本时保留历史，但设上限
-    if (!packed.n && old.n) { packed.n = old.n; packed.f = old.f || 0; }
+    if (!packed.n && old.n) {
+      // 节点已经不在 alive/nstat 里时，packNode 只能给出先验值；
+      // 把旧条目的延迟/协议/国家/先验速率全部继承下来，别越写越空。
+      packed.n = old.n;
+      packed.f = old.f || 0;
+      packed.tcp = old.tcp || 0;
+      packed.tls = old.tls || 0;
+      packed.ms = old.ms || packed.ms;
+      packed.cc = packed.cc || old.cc;
+      packed.b = old.b || packed.b;
+      packed.sb = old.sb || packed.sb;
+    }
     base.set(k, packed);
   }
   const scored = [...base.values()].map((n) => ({ n, v: listOnly ? 0 : costOf(n.k, "lat") }));

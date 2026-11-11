@@ -150,6 +150,8 @@ export async function ensurePool(env: Env) {
 
 /** 两阶段提交新候选池：先写新代际键，成功后再改 seed.poolGen */
 export async function commitPool(env: Env, fresh: PoolEntry[], allowShrink = false) {
+  // 路由手动 refill 可能把多个源的合并结果直接传进来；落 KV/进内存前统一截断
+  fresh = fresh.slice(0, POOL_MAX);
   const oldN = S.pool.length || Number(S.seed.poolN) || 0;
   const newN = fresh.length;
   if (!newN) return { ok: false, reason: "empty" };

@@ -97,7 +97,13 @@ export async function loadRtt(env: Env, id: string) {
         S.rttMiss.set(id, Date.now() + 10 * 60000);
       }
     }
-    return { ...stored, ...mem };
+    const out = { ...stored, ...mem };
+    const keys = Object.keys(out);
+    if (keys.length > RTT_MAX) {
+      keys.sort((a, b) => (out[a].ts || 0) - (out[b].ts || 0));
+      for (let i = 0; i < keys.length - RTT_MAX; i++) delete out[keys[i]];
+    }
+    return out;
   } catch (e) {
     return mem;
   }

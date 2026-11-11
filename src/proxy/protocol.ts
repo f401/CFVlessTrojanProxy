@@ -37,11 +37,20 @@ export async function loadUsers(env: Env): Promise<Auth> {
     } else {
       if (note && !rec.note) rec.note = note;
       if (managedFlag) rec.managed = true;
+      rec.enabled = enabled !== false;   // 托管记录最后写，必须能覆盖 env 的启用状态
     }
-    if (pwd) rec.pwd = pwd;
+    if (pwd) {
+      if (rec.pwd && rec.pwd !== pwd) {
+        for (const [h, uid] of trojan) if (uid === id) trojan.delete(h);
+      }
+      rec.pwd = pwd;
+    }
     if (rec.enabled) {
       uuids.add(id);
       if (rec.pwd) trojan.set(toHex(sha224Bytes(enc.encode(rec.pwd))), id);
+    } else {
+      uuids.delete(id);
+      for (const [h, uid] of trojan) if (uid === id) trojan.delete(h);
     }
   };
 

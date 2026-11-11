@@ -45,7 +45,8 @@ export function pendAdd(id: string, up: number, down: number, isNew?: boolean) {
   p.down += down || 0;
   S.pendBytes += (up || 0) + (down || 0);
   if (isNew) p.conns += 1;
-  if (S.pend.size > 500) S.pend.clear();
+  // 以前超过 500 个用户就整体 clear()，一次丢掉所有未推送的字节账。
+  // 用户数由用户表决定，内存有界，保留比丢账安全。
   S.pend.set(id, p);
 }
 

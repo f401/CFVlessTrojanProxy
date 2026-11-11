@@ -461,8 +461,6 @@ export function costOf(k: string, mode: Mode, now = Date.now()): number {
   return scoreParts(k, mode, now).score;
 }
 
-export function scoreMerged(k: string, _ns?: unknown) { return costOf(k, "lat"); }
-
 /** 是否处于冷却期 */
 export function isBlack(k: string) {
   const s = S.nstat.get(k);
