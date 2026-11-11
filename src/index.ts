@@ -27,7 +27,9 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     try {
       const url = new URL(request.url);
-      const host = request.headers.get("Host") || url.hostname;
+      // 用 URL 的 hostname：Host 头可能带 :port，直接拿去当节点 server 会生成
+      // "edge.example.com:443:443" 这种坏地址；hostname 已经去掉端口
+      const host = url.hostname || request.headers.get("Host") || "";
       const cf = request.cf || {};
       S.colo = (cf && cf.colo) || S.colo || "??";   // 本 isolate 的机房：所有统计按它分桶
 
