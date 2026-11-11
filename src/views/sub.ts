@@ -97,15 +97,12 @@ export const tagOf = (h: string) =>
 export const nodeTag = (n: SubNode) => `${tagOf(n.host)}-${n.port}`;
 
 /**
- * 解析 env.nodes 配置成入口节点列表（host:port:mode）。
- * @param {object} env Worker 环境
- * @param {string} host 当前请求的 Host
- * @returns {Array<{host:string,port:number,mode:string}>} 节点数组
+ * 解析 env.nodes 配置成入口节点列表（host:port:mode）；全部非法时回落默认端口。
  */
 export function loadNodes(env: Env, host: string): SubNode[] {
   const raw = String(env.nodes || "").trim();
   if (raw) {
-    return raw
+    const list = raw
       .split(",")
       .map((s) => {
         const p = s.trim().split(":");
@@ -116,6 +113,8 @@ export function loadNodes(env: Env, host: string): SubNode[] {
         return h && port ? { host: h, port, tls, name } : null;
       })
       .filter((x): x is SubNode => !!x);
+    // env.nodes 全是坏行时不能返回空：空 proxies / outbounds 会让整份订阅非法
+    if (list.length) return list;
   }
   return DEFAULT_PORTS.map(([port, tls]) => ({ host, port, tls, name: host }));
 }

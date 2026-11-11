@@ -526,6 +526,12 @@ eq("都没有返回空串", W.primaryId({}), "");
   }
 }
 
+/* ---------- env.nodes 全是坏行时回落默认端口 ---------- */
+{
+  eq("非法 nodes 回落到默认端口", W.loadNodes({ nodes: "bad" }, "a.example.com").length, 5);
+  eq("半坏 nodes 只保留有效项", W.loadNodes({ nodes: "bad,a.example.com:443:tls" }, "a.example.com").length, 1);
+}
+
 /* ---------- 随机密码：长度 / 字符集 / 默认值 ---------- */
 {
   const A = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";

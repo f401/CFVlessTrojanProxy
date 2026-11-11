@@ -10,7 +10,7 @@ import { checkTarget, dial, expandV6, isV6Literal, parseProxyIp } from "./dial";
 import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./protocol";
 import { cnt } from "../core/counter";
 import { kickFlush } from "../store/index";
-import { nextNode, nsEmptyClose } from "../nodes/score";
+import { nextNode, nsEmptyClose, nsFail } from "../nodes/score";
 import { SEL } from "../px/selector";
 import { S } from "../core/state";
 import { flushSnap, pendFlush, statBump } from "../store/index";
@@ -162,6 +162,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
               st.retried = true;
             } catch (e) {
               // 同国家再试一个，仍然失败就结束（不跨地区）
+              nsFail(st.node); // 冷却坏节点，否则下一条连接还会撞同一个
               const alt = await SEL.region(env, ipRegion, mode, st.node);
               if (alt && !checkTarget(alt.h, alt.p)) {
                 st.node = alt.h + ":" + alt.p;
@@ -172,6 +173,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
                 } catch (e2) {}
               }
               if (!sock) {
+                nsFail(st.node);
                 failRegion(`地区 ${ipRegion} 节点连接失败`);
                 return;
               }

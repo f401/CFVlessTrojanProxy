@@ -247,6 +247,9 @@ eq(
   eq("地区无节点返回 null", await W.SEL.region({}, "JP", "lat"), null);
   eq("nextNode 按国家过滤", W.nextNode("lat", "", "US"), "us1:443");
   eq("nextNode 避开后无同国节点", W.nextNode("lat", "us1:443", "US"), "");
+  W.nsFail("de1:443");
+  const deCold = await W.SEL.region({}, "DE", "lat");
+  eq("地区跳过冷却节点", deCold && deCold.h + ":" + deCold.p, "de2:443");
 }
 
 /* ---------- 4b. Selector ---------- */
