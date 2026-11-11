@@ -4,6 +4,7 @@ import { SEEDS } from "../px/seed";
 import { S } from "../core/state";
 
 /* 代理节点：统计与评分（纯计算） */
+/* 热点文件：为守住单文件 560 行门禁，保留紧凑排版；扩展时优先拆函数。 */
 /**
  * 取节点统计对象（不存在则初始化）。
  * @param {string} k "host:port"
