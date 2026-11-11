@@ -742,6 +742,7 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
 
 // 日计数批次失败要能退回基线，否则这批连接数永久丢
 {
+  W.S.cntDay = new Date().toISOString().slice(0, 10);
   W.S.cnt.conn = 7; W.S.cntSent.conn = 0;
   const dl = W.cntDelta();
   eq("cntDelta 取出增量", dl.conn, 7);
@@ -749,6 +750,10 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
   W.cntUnsend(dl);
   eq("cntUnsend 退回基线", W.S.cntSent.conn, 0);
   W.S.cnt.conn = 0; W.S.cntSent.conn = 0;
+  // 跨天出口也要清零，不能把昨天的计数继续发出去
+  W.S.cntDay = "2000-01-01"; W.S.cnt.conn = 9;
+  eq("跨天后计数不再发送", Object.keys(W.cntDelta()).length, 0);
+  W.S.cntDay = new Date().toISOString().slice(0, 10);
 }
 
 // 真实成功要解除冻结，否则一个 30 分钟冻结只有等它自己过期

@@ -40,6 +40,14 @@ export const BOOT = [
 
 /* 日计数器：用来回答"一天多少连接、多少走节点、切换几次"这些以前只能估的量 */
 
+/** 跨天重置日计数：任何出口（cntView/cntDelta）都要先过这一层 */
+function rollCntDay() {
+  const d = new Date().toISOString().slice(0, 10);
+  if (S.cntDay === d) return;
+  S.cntDay = d;
+  for (const key of S.cntKeys) { S.cnt[key] = 0; S.cntSent[key] = 0; }
+}
+
 /**
  * 计数（跨天自动清零）
  * @param {string} k 计数名
@@ -51,11 +59,7 @@ export function cnt(k: string, n: number = 1) {
     try { console.error("[cnt] unknown key", k); } catch (e) {}
     return;
   }
-  const d = new Date().toISOString().slice(0, 10);
-  if (S.cntDay !== d) {
-    S.cntDay = d;
-    for (const key of S.cntKeys) { S.cnt[key] = 0; S.cntSent[key] = 0; }
-  }
+  rollCntDay();
   S.cnt[k] = (S.cnt[k] || 0) + (n === undefined ? 1 : n);
 }
 
@@ -102,10 +106,12 @@ export function kickFlush(env: Env, id: string | null) {
 
 /** 取出"上次落盘之后"的增量，并把基线推到当前值 */
 export function cntView() {
+  rollCntDay();
   return { ...S.cnt, d: S.cntDay || new Date().toISOString().slice(0, 10) };
 }
 
 export function cntDelta() {
+  rollCntDay();
   const out: Record<string, number> = {};
   for (const k of S.cntKeys) {
     const v = (S.cnt[k] || 0) - (S.cntSent[k] || 0);
