@@ -426,6 +426,37 @@ eq("都没有返回空串", W.primaryId({}), "");
   }
 }
 
+/* ---------- flushPx(force) 必须真的跳过 20 分钟节流 ---------- */
+{
+  const now = Date.now();
+  const seedDoc = {
+    v: 6,
+    ts: now,
+    poolGen: 1,
+    poolN: 1,
+    builtAt: now,
+    byColo: { "*": { ts: now, nodes: [{ k: "seed-node:443", h: "seed-node", p: 443, ms: 50 }] } },
+    cnt: null,
+  };
+  W.S.seed = seedDoc;
+  W.S.seedAt = now;
+  W.S.seedDirty = true;
+  let puts = 0;
+  const envSeed = {
+    STATS: {
+      get: async () => JSON.stringify(seedDoc),
+      put: async () => {
+        puts++;
+      },
+    },
+  };
+  await W.flushPx(envSeed, false);
+  eq("非 force 在 20 分钟节流内跳过", puts, 0);
+  W.S.seedDirty = true;
+  await W.flushPx(envSeed, true);
+  ok("force 必须写进 KV", puts > 0);
+}
+
 /* ---------- 随机密码：长度 / 字符集 / 默认值 ---------- */
 {
   const A = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";

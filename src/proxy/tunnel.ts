@@ -6,7 +6,12 @@ import { cnt } from "../core/counter";
 import { S } from "../core/state";
 import type { Connection } from "./connection";
 
-export function pipeBack(sock: Socket, ws: WebSocketLike, st: Connection, onClose?: (gotData: boolean) => void): void {
+export function pipeBack(
+  sock: Socket,
+  ws: WebSocketLike,
+  st: Connection,
+  onClose?: (gotData: boolean) => void | Promise<void>,
+): void {
   sock.readable
     .pipeTo(
       new WritableStream({
@@ -33,8 +38,17 @@ export function pipeBack(sock: Socket, ws: WebSocketLike, st: Connection, onClos
           }
         },
         close() {
-          if (onClose) onClose(st.down > 0);
-          else {
+          if (onClose) {
+            // onClose 是 async（可能再拨号 / attach）：这里必须接住 rejection，
+            // 否则会在事件回调里变成 unhandled rejection，Workers 直接记 1101。
+            try {
+              Promise.resolve(onClose(st.down > 0)).catch((e) => {
+                logErr("pipe close: " + errMsg(e), st.node || "");
+              });
+            } catch (e) {
+              logErr("pipe close: " + errMsg(e), st.node || "");
+            }
+          } else {
             try {
               ws.close(1000, "done");
             } catch (e) {}

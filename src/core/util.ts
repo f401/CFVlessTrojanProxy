@@ -3,7 +3,7 @@ export const WS_OPEN = 1;
 export const WS_BUFFER_LIMIT = 1024 * 1024; // 下行发送缓冲超过 1MB 就开始背压
 export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给到 60 秒
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐了
-export const VERSION = "6.8";
+export const VERSION = "6.9";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 
@@ -32,6 +32,16 @@ export function shadowRate(env: Env) {
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 0) return SHADOW_DEFAULT;
   return Math.min(1, n);
+}
+
+/**
+ * 可选的请求超时信号：运行时没有 AbortSignal.timeout 时返回 undefined（不影响请求）。
+ * 只用于 cron / 诊断这类"慢一点没关系，但不能无限等"的外部 fetch。
+ */
+export function timeoutSignal(ms: number): AbortSignal | undefined {
+  const AS =
+    typeof AbortSignal === "undefined" ? null : (AbortSignal as unknown as { timeout?: (n: number) => AbortSignal });
+  return AS && typeof AS.timeout === "function" ? AS.timeout(Math.max(1, ms)) : undefined;
 }
 
 /**

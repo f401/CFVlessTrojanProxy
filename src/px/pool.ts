@@ -235,7 +235,7 @@ export async function flushPx(env: Env, force?: boolean) {
     if (Date.now() - last < SEED_WRITE_GAP) return { ok: true, skipped: true };
   }
   S.nsWriteAt = Date.now();
-  return SEEDS.write(env, S.colo ? undefined : true);
+  return SEEDS.write(env, S.colo ? undefined : true, !!force);
 }
 
 /** 对外：本机房的存活节点列表 */

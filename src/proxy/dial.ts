@@ -1,5 +1,6 @@
 import { S } from "../core/state";
 import { connect } from "cloudflare:sockets";
+import { timeoutSignal } from "../core/util";
 import { DENY_PORTS, isPrivateHost } from "../core/net";
 export { DENY_PORTS, checkTarget, isPrivateHost } from "../core/net";
 
@@ -20,7 +21,7 @@ export async function dohQuery(domain: string, type: "A" | "AAAA") {
   for (const base of DOH_ENDPOINTS) {
     try {
       const url = `${base}?name=${encodeURIComponent(domain)}&type=${type}`;
-      const r = await fetch(url, { headers: { accept: "application/dns-json" } });
+      const r = await fetch(url, { signal: timeoutSignal(5000), headers: { accept: "application/dns-json" } });
       if (!r.ok) continue;
       const j = await r.json();
       const want = String(type).toUpperCase() === "AAAA" ? 28 : 1;

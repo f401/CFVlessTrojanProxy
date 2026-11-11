@@ -13,7 +13,7 @@ export class Meter {
   q: Promise<unknown> = Promise.resolve();
   /**
    * 构造：从 storage 恢复累计值；blockConcurrencyWhile 保证恢复完成前不处理请求。
-   * @param {DurableObjectState} state DO 状态对象（storage / alarm / blockConcurrencyWhile）
+   * @param {DurableObjectState} state DO 状态对象（storage / blockConcurrencyWhile）
    */
   constructor(state: DurableObjectState, env: Env) {
     this.st = state;

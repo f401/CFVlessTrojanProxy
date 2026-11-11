@@ -62,7 +62,7 @@ fetch(request)
 tools/tsc.js      tsc（strict:true，0 error 才继续）
 tools/bundle.js   esbuild → dist/_worker.js（生产）/ dist/_test.js（测试出口）
 tools/check-arch.js 分层 / 循环 / 顶层 let / 体积
-test/*.mjs        409 断言 + 8 项逐字节 golden
+test/*.mjs        411 断言 + 8 项逐字节 golden
 obf/*.js          预处理 + 混淆（Meter 类名保留）
 scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → obf → PUT
 ```
@@ -79,6 +79,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 6. DO 存储键 `"a"` 是单键格式，老键 `c/e/s/g` 只读兼容，不要回写。
 7. `rg=xx` 是**硬要求**：只在该国节点里选，找不到/连不上就断开，禁止回落到直连或全球节点。
 8. 落盘前读旧值（seed / snap / usage）必须用 `kvGetStrict`；读失败要跳过写，不能当空表覆盖。
+9. cron 与手动 `?refresh=1` 互斥：`S.cronBusy` 覆盖整轮 `cronOnce`，忙时不再排队；
+   否则两轮 `cronScan` 会双跑探活、双写 seed、互相覆盖 `poolIdx`。
 
 ## 6 目录之外的约定
 

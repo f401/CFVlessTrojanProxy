@@ -14,7 +14,7 @@ import { nextNode, nsEmptyClose } from "../nodes/score";
 import { SEL } from "../px/selector";
 import { S } from "../core/state";
 import { flushSnap, pendFlush, statBump } from "../store/index";
-import { WS_OPEN, closeQuietly, enc, safeSend, toU8 } from "../core/util";
+import { WS_OPEN, closeQuietly, enc, safeSend, timeoutSignal, toU8 } from "../core/util";
 import { connect } from "cloudflare:sockets";
 
 /**
@@ -389,6 +389,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
 export async function handleDns(ws: WebSocketLike, firstBody: Uint8Array, st: Connection): Promise<void> {
   const send = async (dnsMsg: Uint8Array) => {
     const resp = await fetch("https://1.1.1.1/dns-query", {
+      signal: timeoutSignal(5000),
       method: "POST",
       headers: { "content-type": "application/dns-message" },
       body: dnsMsg,

@@ -3,7 +3,7 @@ import { logErr } from "../nodes/metrics";
 import { checkTarget } from "../core/net";
 import { aliveList } from "./pool";
 import { S } from "../core/state";
-import { dec, enc, toHex, withTimeout } from "../core/util";
+import { dec, enc, timeoutSignal, toHex, withTimeout } from "../core/util";
 import { connect } from "cloudflare:sockets";
 
 /* 代理节点：探活与池子抓取 */
@@ -175,6 +175,7 @@ export async function refillPool(env: Env): Promise<PoolRefill> {
     const before = seen.size;
     try {
       const r = await fetch(src, {
+        signal: timeoutSignal(10000),
         headers: {
           "user-agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -219,6 +220,7 @@ export async function geoLabel(ips: string[]) {
   if (!ips.length) return out;
   try {
     const r = await fetch("http://ip-api.com/batch?fields=status,countryCode", {
+      signal: timeoutSignal(5000),
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(ips.slice(0, 100)),
