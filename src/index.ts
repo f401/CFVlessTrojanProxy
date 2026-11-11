@@ -36,23 +36,24 @@ export default {
       }
 
       const auth = await loadUsers(env);
-      if (auth.uuids.size === 0) {
-        return new Response("未配置 uuid（请设置环境变量 uuid 或 uuids）", { status: 500 });
-      }
-
       const seg = url.pathname.split("/").filter(Boolean);
       const first = (seg[0] || "").toLowerCase();
       const pageKey = env.pageKey || "";
       const keyOk = !pageKey || url.searchParams.get("k") === pageKey;
 
+      /* ---------- 管理面板（会话登录） ---------- */
+      // 放在 uuid 检查之前：全新部署没有 uuid 时也要能进 /admin 建第一个用户
+      if (first === "admin") {
+        return admin({ request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf });
+      }
+
+      if (auth.uuids.size === 0) {
+        return new Response("未配置 uuid（请设置环境变量 uuid 或 uuids）", { status: 500 });
+      }
+
       /* ---------- 健康检查 ---------- */
       if (first === "health") {
         return health({ request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf });
-      }
-
-      /* ---------- 管理面板（会话登录） ---------- */
-      if (first === "admin") {
-        return admin({ request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf });
       }
 
       /* ---------- 需要合法 UUID 的路由 ---------- */
