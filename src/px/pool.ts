@@ -26,6 +26,7 @@ export const SEED_VER = 6;
 export { SC, HIST_BASE, HIST_N } from "../core/const";
 
 export const MODES: Mode[] = ["lat", "tput"];
+const ALIVE_MAX = 400;                  // 长期运行 alive 上限：池子换代不会永久累积
 
 
 
@@ -399,6 +400,26 @@ export async function cronScan(env: Env) {
     const s = S.nstat.get(k);
     const ban = s ? (s.blackUntil || 0) - Date.now() : 0;
     if (ban > 30 * 60000 && k !== S.curs.tput && k !== S.curs.lat) S.alive.delete(k);
+  }
+
+  // ③b alive 长期只增不减：池子换代后旧节点会一直留着，最终拖慢每次评分。
+  //     优先保留当前池和两个游标，其余按延迟从差到好裁掉。
+  if (S.alive.size > ALIVE_MAX) {
+    const inPool = new Set(pool.map((x) => x.h + ":" + x.p));
+    const keep = new Set([S.curs.tput, S.curs.lat]);
+    const rows = [...S.alive.entries()].filter(([k]) => !keep.has(k));
+    rows.sort((a, b) => {
+      const ap = inPool.has(a[0]) ? 0 : 1;
+      const bp = inPool.has(b[0]) ? 0 : 1;
+      if (ap !== bp) return ap - bp;
+      return (a[1].ms || 9999) - (b[1].ms || 9999);
+    });
+    for (const [k] of rows) {
+      if (S.alive.size <= ALIVE_MAX) break;
+      S.alive.delete(k);
+    }
+    S.hostRankCache.clear();
+    S.rankCache.t = 0;
   }
 
   // ④ 国家码补全

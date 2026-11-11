@@ -29,7 +29,7 @@ export function rttMark(id: string | null, tag: string | null, ok: boolean) {
   if (!id || !tag) return;
   let bucket = S.rtt.get(id);
   if (!bucket) {
-    bucket = {};
+    bucket = Object.create(null) as Record<string, RttEntry>;   // 防 ?ip=__proto__ 污染原型
     S.rtt.set(id, bucket);
   }
   const e = bucket[tag] || { rtt: 0, colo: "", bw: 0, hits: 0, ok: 0, fail: 0, ts: Date.now() };
@@ -56,7 +56,7 @@ export function rttLearn(cf: CfMeta | null, tag: string | null, id: string | nul
   const key = id;
   let bucket = S.rtt.get(key);
   if (!bucket) {
-    bucket = {};
+    bucket = Object.create(null) as Record<string, RttEntry>;
     S.rtt.set(key, bucket);
   }
 

@@ -269,6 +269,20 @@ eq("都没有返回空串", W.primaryId({}), "");
   const aE = await W.loadUsers(envE);
   eq("托管启用后恢复 UUID", aE.uuids.has(UUID), true);
   eq("托管密码覆盖 env 密码只留一个", aE.trojan.size, 1);
+
+  // 单密码模式下多个 env 用户共享哈希：归属要稳定，禁用一人不能误删另一人
+  const U2 = "df1af8dd-3efe-407b-a5b6-4950afa4ac6f";
+  W.S.usersCache = { v: null, t: 0 }; W.S.usersSig = "";
+  const shared = { uuids: UUID + "," + U2, pwd: "same-pwd", STATS: kv([]) };
+  const aS = await W.loadUsers(shared);
+  eq("共享密码只注册一个哈希", aS.trojan.size, 1);
+  eq("共享密码归属第一个用户", [...aS.trojan.values()][0], UUID);
+
+  W.S.usersCache = { v: null, t: 0 }; W.S.usersSig = "";
+  const sharedOff = { uuids: UUID + "," + U2, pwd: "same-pwd", STATS: kv([{ id: U2, enabled: false, managed: true }]) };
+  const aOff = await W.loadUsers(sharedOff);
+  eq("禁用共享用户之一不撤掉另一人", [...aOff.trojan.values()][0], UUID);
+  eq("另一个用户仍在 uuids", aOff.uuids.has(UUID), true);
 }
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);

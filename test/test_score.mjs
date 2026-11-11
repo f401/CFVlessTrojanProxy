@@ -730,6 +730,10 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
   const capB = W.S.rtt.get("cap-u");
   eq("rtt 标签最多 24 个", Object.keys(capB).length, 24);
   ok("保留的是最新的标签", !!capB.t39 && !capB.t0);
+  // ?ip=__proto__ 不能污染 Object.prototype
+  W.rttMark("proto-u", "__proto__", true);
+  eq("rtt 标签不污染原型", {}.rtt, undefined);
+  ok("__proto__ 作为普通键保存", Object.prototype.hasOwnProperty.call(W.S.rtt.get("proto-u"), "__proto__"));
 }
 
 // 全局闸门命中时不能每条连接都读一次 KV：一次检查后本地基线要推进

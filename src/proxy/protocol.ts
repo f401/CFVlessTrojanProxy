@@ -27,6 +27,26 @@ export async function loadUsers(env: Env): Promise<Auth> {
   const uuids = new Set<string>();
   const trojan = new Map<string, string>();
   const list: UserRec[] = [];
+  const hashOf = (pwd: string) => toHex(sha224Bytes(enc.encode(pwd)));
+
+  /** 共享密码只保留一个稳定 owner；不要让后加载的用户把前面的顶掉 */
+  const setTrojan = (id: string, pwd: string) => {
+    const h = hashOf(pwd);
+    const cur = trojan.get(h);
+    if (!cur || cur === id) { trojan.set(h, id); return; }
+    const owner = list.find((x) => x.id === cur);
+    if (!owner || !owner.enabled) trojan.set(h, id);
+  };
+
+  /** 只撤销该 id 自己的映射；如果密码是多人共享的，转给另一个启用用户 */
+  const delTrojanFor = (id: string) => {
+    for (const [h, uid] of trojan) {
+      if (uid !== id) continue;
+      const other = list.find((x) => x.id !== id && x.enabled && x.pwd && hashOf(x.pwd) === h);
+      if (other) trojan.set(h, other.id);
+      else trojan.delete(h);
+    }
+  };
 
   const add = (id: string, pwd?: string, note?: string, enabled?: boolean, managedFlag?: boolean) => {
     if (!RE_UUID.test(id)) return;
@@ -40,17 +60,15 @@ export async function loadUsers(env: Env): Promise<Auth> {
       rec.enabled = enabled !== false;   // 托管记录最后写，必须能覆盖 env 的启用状态
     }
     if (pwd) {
-      if (rec.pwd && rec.pwd !== pwd) {
-        for (const [h, uid] of trojan) if (uid === id) trojan.delete(h);
-      }
+      if (rec.pwd && rec.pwd !== pwd) delTrojanFor(id);
       rec.pwd = pwd;
     }
     if (rec.enabled) {
       uuids.add(id);
-      if (rec.pwd) trojan.set(toHex(sha224Bytes(enc.encode(rec.pwd))), id);
+      if (rec.pwd) setTrojan(id, rec.pwd);
     } else {
       uuids.delete(id);
-      for (const [h, uid] of trojan) if (uid === id) trojan.delete(h);
+      delTrojanFor(id);
     }
   };
 
