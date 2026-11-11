@@ -220,6 +220,10 @@ ok("expire 被转成秒", /expire=1[78]\d{8}/.test(h["Subscription-Userinfo"]));
   ok("admin 每行有 cl 订阅复制", html.includes(`https://edge.example.com/${UUID}/cl?k=KEY42`), "");
   ok("admin 每行有 sb 订阅复制", html.includes(`https://edge.example.com/${UUID}/sb?k=KEY42`), "");
   ok("admin 有复制脚本", html.includes("navigator.clipboard") && html.includes('data-copy'), "");
+  const htmlK = W.renderAdmin(new URL("https://edge.example.com/admin?k=KEY42"), {
+    list: [{ id: UUID, pwd: "pw123", note: "n", enabled: true, managed: true }],
+  }, {}, "");
+  ok("?k= 打开时表单也带 k", htmlK.includes('action="/admin/op?k=KEY42"'), "");
 }
 
 /* ---------- 管理会话：过期令牌不再永久有效 ---------- */

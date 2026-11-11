@@ -272,6 +272,9 @@ export function renderAdminHint() {
  * @returns {string} HTML
  */
 export function renderAdmin(url: URL, users: { list: UserRec[] }, statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }>, pageKey = "") {
+  // 用 ?k=adminKey 直接打开面板时，表单 POST 也必须带同一个 k
+  const ak = url.searchParams.get("k") || "";
+  const opAction = "/admin/op" + (ak ? "?k=" + encodeURIComponent(ak) : "");
   const rows = users.list
     .map((u: UserRec) => {
       const s = statsMap[u.id] || {};
@@ -279,7 +282,7 @@ export function renderAdmin(url: URL, users: { list: UserRec[] }, statsMap: Reco
       const today = fmtBytes((s.todayUp || 0) + (s.todayDown || 0));
       const dis = u.enabled === false;
       const ops = u.managed
-        ? `<form method="post" action="/admin/op" style="display:inline">
+        ? `<form method="post" action="${escapeHtml(opAction)}" style="display:inline">
              <input type="hidden" name="id" value="${u.id}">
              <button name="op" value="toggle">${dis ? "启用" : "禁用"}</button>
              <button name="op" value="reset">重置密码</button>
@@ -338,7 +341,7 @@ code{background:#f3f4f6;padding:1px 5px;border-radius:4px}
 <h1>用户管理</h1>
 <div class="sub">共 ${users.list.length} 个用户，启用 ${total} 个 · 数据存于 KV，面板改动立即生效</div>
 
-<form class="add" method="post" action="/admin/op">
+<form class="add" method="post" action="${escapeHtml(opAction)}">
   <input type="hidden" name="op" value="add">
   备注：<input type="text" name="note" placeholder="例如：朋友A" size="18">
   <button type="submit">新增用户（自动生成 UUID + 密码）</button>
