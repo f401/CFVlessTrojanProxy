@@ -361,8 +361,15 @@ export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = f
   // —— 延迟 ——
   const tcp = s.tcp || (a && a.ms) || SC.P_TCP;
   const tls = s.tls || SC.P_TLS;
-  const Lobs = tcp + tls * SC.TLS_G + Math.max(0, tls - 2 * tcp - SC.LOSS_SLACK) * SC.LOSS_G;
-  const Lprior = (a && a.ms) || (SC.P_TCP + SC.P_TLS * SC.TLS_G);
+  const probeL = tcp + tls * SC.TLS_G + Math.max(0, tls - 2 * tcp - SC.LOSS_SLACK) * SC.LOSS_G;
+  // 探活只能证明"连得上"，真实首字节才代表转发能力：差距过大时以真实值为准，
+  // 否则"探活 25ms、实际 350ms"的节点会永久霸榜（仿真里它吃掉 100% 流量）。
+  const realL = s.msLocal || 0;
+  // 只有"真实首字节比探活估计慢一倍以上"才算撒谎：正常波动不参与
+  const liar = realL > probeL * 2 + 150 ? Math.min(realL, probeL + 1500) : 0;
+  const Lobs = liar || probeL;
+  // 先验也要被真实值兜底：否则 confL=0 时只看探活 ms，撒谎节点照样排第一
+  const Lprior = Math.max((a && a.ms) || SC.P_TCP + SC.P_TLS * SC.TLS_G, liar);
   // 真实连接也提供了握手观测，和探活样本一起算延迟置信度
   const confL = 1 - Math.exp(-e.latN / 4);
   const latencyMs = confL * Lobs + (1 - confL) * Lprior;

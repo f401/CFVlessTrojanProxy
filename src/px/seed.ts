@@ -67,7 +67,6 @@ export class SeedStore {
     const s = nsGet(o.k);
     if (!s.tcp && o.tcp) s.tcp = o.tcp;
     if (!s.tls && o.tls) s.tls = o.tls;
-    if (!s.msLocal && o.ms) s.msLocal = o.ms;
     // seed 是"别的 isolate 的观测"：不混进本地 okW/failW，只修正 Beta 先验。
     const at = o.at || Date.now();
     const sn = o.n || 0;

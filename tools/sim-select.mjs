@@ -9,7 +9,7 @@ const MB = 1048576;
 /* ---------- 可控时钟 + 可复现随机 ---------- */
 let NOW = Date.UTC(2026, 0, 1);
 Date.now = () => NOW;
-let seed = 20260101;
+let seed = Number(process.env.SEED || 20260101);
 const rnd = () => {
   seed |= 0;
   seed = (seed + 0x6d2b79f5) | 0;
@@ -19,7 +19,11 @@ const rnd = () => {
 };
 Math.random = rnd;
 
-if (process.env.TRIAL_N) W.SC.TRIAL_N = Number(process.env.TRIAL_N);
+if (process.env.FAIL) W.SC.FAIL = Number(process.env.FAIL);
+if (process.env.H_LAT_REL) W.SC.H_LAT_REL = Number(process.env.H_LAT_REL);
+if (process.env.PFAIL_MIN) W.SC.PFAIL_MIN = Number(process.env.PFAIL_MIN);
+if (process.env.TRIAL_LAT) W.SC.TRIAL_LAT = Number(process.env.TRIAL_LAT);
+if (process.env.TRIAL_TPUT) W.SC.TRIAL_TPUT = Number(process.env.TRIAL_TPUT);
 if (process.env.BETA_A) W.SC.BETA_A = Number(process.env.BETA_A);
 if (process.env.BETA_B) W.SC.BETA_B = Number(process.env.BETA_B);
 
@@ -130,7 +134,6 @@ function addNode(n) {
   const s = W.nsGet(n.key);
   s.tcp = n.probeTcp;
   s.tls = n.tls;
-  s.msLocal = n.probeTcp + n.tls;
   s.at = NOW;
   byKey.set(n.key, n);
 }
@@ -156,6 +159,7 @@ async function request(n, mode) {
   if (w > 0) W.nsSpeed(n.key, bps, bytes, ENV, Math.min(4, w));
   if (n.stall > 0) W.nsStall(n.key, n.stall * dur, dur);
   W.nsOk(n.key, 0, 0);
+  W.nsLatency(n.key, n.tcp + n.tls * 1.2); // 真实首字节回流（对应 Connection.flush）
   return true;
 }
 
@@ -267,6 +271,13 @@ async function run(sc, hours) {
       tailRatio += ratio;
       if (n === best) tailTop++;
     }
+  }
+
+  if (process.env.DUMP && sc.name === "静态异质" && mode === "lat") {
+    console.log("[dump] cur", S.curs.lat, "hits n0/n10", hits.get("n0:443"), hits.get("n10:443"),
+      "score n0/n10", Math.round(W.costOf("n0:443", "lat")), Math.round(W.costOf("n10:443", "lat")),
+      "p n0/n10", W.pFailOf(W.nsGet("n0:443")).toFixed(3), W.pFailOf(W.nsGet("n10:443")).toFixed(3),
+      "H", W.SC.H_LAT_REL);
   }
 
   return {

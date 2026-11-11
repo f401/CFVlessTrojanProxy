@@ -21,7 +21,8 @@ export const SC = {
   BUDGET: 3,
   ROLL_WIN: 60000,
   ROLL_FREEZE: 30 * 60000,
-  TRIAL_N: 3,
+  TRIAL_LAT: 60, // 延迟模式试用样本数：3 个样本定生死＝把运气当能力
+  TRIAL_TPUT: 3, // 吞吐模式每个试用样本都是 10MB，只补到能排出名次
 
   // —— v2 评分 ——
   BETA_A: 1, // 失败率先验 α（无数据时均值 10%）

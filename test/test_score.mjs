@@ -1350,5 +1350,15 @@ S.lastSwitch = { lat: Date.now() - 7 * 3600e3, tput: 0 };
 W.SEL.sched({ pxSchedH: 6 });
 eq("6 小时没切换才轮换", S.curs.lat, "sc2:443");
 
+// 真实首字节回流：探活快、实际慢的节点不能按探活算延迟
+reset();
+node("liar:443", { tcp: 25, tls: 40, okW: 5 });
+W.nsLatency("liar:443", 420);
+ok("真实首字节远慢于探活 → 按真实值算", W.scoreParts("liar:443", "lat").latencyMs > 300, String(W.scoreParts("liar:443", "lat").latencyMs));
+reset();
+node("honest:443", { tcp: 60, tls: 40, okW: 5 });
+W.nsLatency("honest:443", 130);
+ok("真实首字节与探活接近 → 不触发", W.scoreParts("honest:443", "lat").latencyMs < 200, String(W.scoreParts("honest:443", "lat").latencyMs));
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -193,7 +193,8 @@ export class Selector {
   /** 待测队列：样本不足的节点，最久没试的优先（单遍扫描，不排序） */
   trial(mode: Mode) {
     let best = "",
-      bestT = Infinity;
+      bestN = Infinity,
+      bestMs = Infinity;
     for (const k of S.alive.keys()) {
       if (k === S.curs[mode] || isBlack(k) || isFrozen(k)) continue;
       const a = (S.alive.get(k) || {}) as NodeEntry;
@@ -201,12 +202,15 @@ export class Selector {
       const s = S.nstat.get(k) || ZERO_STAT;
       if (suspectOf(s)) continue; // 连得上却传不出数据的节点，不值得占一次试探预算
       const n = (s.okW || 0) + (s.failW || 0);
-      // 样本够了就不再试探：按有效吞吐窗口数判断，而不是累计字节
-      if (this.nEffOf(k) >= SC.N_EFF_MIN && n >= SC.TRIAL_N) continue;
-      const t = s.lastTry || 0;
-      if (t < bestT) {
-        bestT = t;
+      const enough = mode === "tput" ? SC.TRIAL_TPUT : SC.TRIAL_LAT;
+      if (n >= enough) continue; // 样本够了才毕业（3 个样本定生死＝把运气当能力）
+      // 按"还差多少样本"排队：少样本优先，同档挑探活更快的，
+      // 探索预算压在最有希望的节点上，而不是平均撒给所有节点。
+      const ms = a.ms || 999;
+      if (n < bestN - 0.5 || (n <= bestN + 0.5 && ms < bestMs)) {
         best = k;
+        bestN = n;
+        bestMs = ms;
       }
     }
     return best;

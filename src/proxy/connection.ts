@@ -5,7 +5,7 @@ import { pipeBack } from "./tunnel";
 
 import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
-import { availOf, nsFail, nsOk, nsSpeed, nsStall } from "../nodes/score";
+import { availOf, nsFail, nsLatency, nsOk, nsSpeed, nsStall } from "../nodes/score";
 import { markSeedDirty } from "../px/seed";
 import { S } from "../core/state";
 import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";
@@ -253,6 +253,8 @@ export class Connection {
         // 第一行就是 `if (!S.pxFailSeen) return` —— 健康节点永远 n=0，
         // 面板显示"一个连接都没有"，可用性门槛也永远不触发。
         if (this.node && !this.failed && this.down > 0) nsOk(this.node, 0, 0);
+        // 真实首字节回流：探活只能证明连得上，转发快不快只有这条路径知道
+        if (this.node && this.ttfb > 0) nsLatency(this.node, this.ttfb);
         // 按站点的节点画像：谁对这个站行、谁不行（诊断与站点级选路用）
         if (this.host) {
           if (this.node) {
