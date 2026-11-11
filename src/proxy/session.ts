@@ -81,7 +81,8 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
           }
 
           const u8 = toU8(chunk);
-          // 同一个 UDP 连接里的后续 DNS 报文：首包已经解析过，不能再当协议头
+          // 同一个 UDP 连接里的后续 DNS 报文：首包已经解析过，不能再当协议头。
+          // 上行字节在 write() 入口已经计过，这里只转发，不要重复 onUp。
           if (st.udp) {
             await handleDns(serverWS, u8, st);
             return;
