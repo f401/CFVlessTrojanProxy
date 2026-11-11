@@ -596,6 +596,14 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
     yn.includes('password: "a\\"b\\nc"'),
     yn.split("\n").find((l) => l.includes("password")),
   );
+
+  const envTab = { ...env, pwd: "a\tb", nodes: "n.example.com:443:tls" };
+  const yt = W.renderClash(envTab, new URL("https://x/" + UUID), UUID, "a.example.com", {}, []);
+  ok(
+    "Clash 密码里的制表符被转义",
+    yt.includes('password: "a\\tb"'),
+    yt.split("\n").find((l) => l.includes("password")),
+  );
 }
 
 /* ---------- 上行队列：8MB 上限，读走才释放额度 ---------- */
