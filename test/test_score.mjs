@@ -822,5 +822,30 @@ reset();
   W.freezeNode("cd:443");
   ok("冻结不缩短已有冻结", s.freeUntil >= Date.now() + 59 * 60000, String(s.freeUntil - Date.now()));
 }
+// DO 落盘失败要回滚内存，否则 pendFlush 重发同一批会双计
+{
+  let fail = true;
+  const store = new Map();
+  const state = {
+    blockConcurrencyWhile: (fn) => Promise.resolve().then(fn),
+    storage: {
+      get: async (k) => store.get(k),
+      put: async (k, v) => { if (fail) throw new Error("put down"); store.set(k, v); },
+      delete: async (k) => store.delete(k),
+    },
+  };
+  const m = new W.Meter(state, {});
+  await Promise.resolve();
+  let threw = false;
+  try {
+    await m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
+  } catch (e) { threw = true; }
+  eq("DO 落盘失败会抛错", threw, true);
+  eq("DO 落盘失败回滚内存", m.c.up, 0);
+  fail = false;
+  await m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
+  eq("恢复后只记一次", m.c.up, 10);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

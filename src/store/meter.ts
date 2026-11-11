@@ -92,6 +92,7 @@ export class Meter {
         d = await req.json();
       } catch (e) {}
       const c = this.c;
+      const oldC = { ...this.c }, oldG = { ...this.g }, oldS = { ...this.s }, oldE = this.e.slice();
       // 计数搭便车：同一次 /add 请求把 isolate 的日计数也带上来，0 额外请求
       if (d.c && typeof d.c === "object") {
         const d0 = String(d.c.d || new Date().toISOString().slice(0, 10));
@@ -139,8 +140,14 @@ export class Meter {
       c.dD = (c.dD || 0) + (Number(d.down) || 0);
       c.ts = Date.now();
       if (!c.first) c.first = c.ts;
-      // 每次都落盘：DO 随时可能被驱逐，靠内存攒着会在驱逐时全丢
-      await this.save();
+      // 每次都落盘：DO 随时可能被驱逐，靠内存攒着会在驱逐时全丢。
+      // 落盘失败必须回滚内存，否则 pendFlush 重发同一批会把用量算两遍。
+      try {
+        await this.save();
+      } catch (e) {
+        this.c = oldC; this.g = oldG; this.s = oldS; this.e = oldE;
+        throw e;
+      }
       return this.json();
     }
 
@@ -155,12 +162,13 @@ export class Meter {
         d = await req.json();
       } catch (e) {}
       if ((this.c.up || 0) + (this.c.down || 0) + (this.c.conns || 0) === 0) {
+        const oldC = { ...this.c };
         this.c.up = Number(d.up) || 0;
         this.c.down = Number(d.down) || 0;
         this.c.conns = Number(d.conns) || 0;
         this.c.first = Number(d.first) || Date.now();
         this.c.ts = Date.now();
-        await this.save();
+        try { await this.save(); } catch (e) { this.c = oldC; throw e; }
       }
       return this.json();
     }
@@ -174,6 +182,7 @@ export class Meter {
       const cur = (this.c.up || 0) + (this.c.down || 0);
       const want = (Number(d.up) || 0) + (Number(d.down) || 0);
       if (want > cur) {
+        const oldC = { ...this.c };
         this.c = {
           up: Number(d.up) || 0,
           down: Number(d.down) || 0,
@@ -181,14 +190,15 @@ export class Meter {
           first: Number(d.first) || this.c.first || Date.now(),
           ts: Date.now(),
         };
-        await this.save();
+        try { await this.save(); } catch (e) { this.c = oldC; throw e; }
       }
       return this.json();
     }
 
     if (p.endsWith("/reset")) {
+      const oldC = { ...this.c };
       this.c = { up: 0, down: 0, conns: 0, first: 0, ts: Date.now(), d: "", dU: 0, dD: 0 };
-      await this.save();
+      try { await this.save(); } catch (e) { this.c = oldC; throw e; }
       return this.json();
     }
 
