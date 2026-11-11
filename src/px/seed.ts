@@ -175,12 +175,12 @@ async write(env: Env, listOnly = false, force = false) {
       // 把旧条目的延迟/协议/国家/先验速率全部继承下来，别越写越空。
       packed.n = old.n;
       packed.f = old.f || 0;
-      packed.tcp = old.tcp || 0;
-      packed.tls = old.tls || 0;
-      packed.ms = old.ms || packed.ms;
+      packed.tcp = packed.tcp || old.tcp || 0;
+      packed.tls = packed.tls || old.tls || 0;
+      packed.ms = (packed.ms && packed.ms !== SC.P_TCP) ? packed.ms : (old.ms || packed.ms);
       packed.cc = packed.cc || old.cc;
-      packed.b = old.b || packed.b;
-      packed.sb = old.sb || packed.sb;
+      packed.b = packed.b || old.b;
+      packed.sb = packed.sb || old.sb;
     }
     base.set(k, packed);
   }
