@@ -1,7 +1,7 @@
 // 节点选择的"地面真值"仿真：批量伪造节点（真实延迟/失败率/带宽/卡顿/探活撒谎），
 // 用真实的 pick / region / bumpFail / nsProbe / nsSpeed 跑，最后和上帝视角对比。
 //   用法：node test/mk_test.mjs && node tools/sim-select.mjs [小时数]
-//   环境变量：SEEDS=3（每个场景跑几个随机种子）、SEED0=1、ONLY=场景名、RATE=请求/秒
+//   环境变量：SEEDS=3、SEED0=1、ONLY=名字、FAIL/H_LAT_REL/TRIAL_LAT... 覆盖 SC
 import * as W from "../test/_bundle.mjs";
 
 const S = W.S;
@@ -11,7 +11,7 @@ const MB = 1048576;
 const T0 = Date.UTC(2026, 0, 1);
 let NOW = T0;
 Date.now = () => NOW;
-let seed = 20260101;
+let seed = 1;
 const rnd = () => {
   seed |= 0;
   seed = (seed + 0x6d2b79f5) | 0;
@@ -31,8 +31,6 @@ if (process.env.BETA_B) W.SC.BETA_B = Number(process.env.BETA_B);
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
 
 /* ---------- 节点 ---------- */
-// tcp/tls：真实握手；pFail：真实失败率；bw：真实带宽(MB/s)；stall：背压占比
-// probeTcp：探活看到的延迟（可单独伪造，用来造"探活很快、实际很慢"的节点）
 const N = (id, tcp, pFail, bw, o = {}) => ({
   id,
   key: id + ":443",
@@ -63,12 +61,10 @@ function basePool() {
   return out;
 }
 
+const fillers = (n, f) => Array.from({ length: n }, (_, i) => f(i));
+
 function bigPool() {
-  const out = [N("b0", 60, 0.005, 14)];
-  for (let i = 1; i < 100; i++) {
-    out.push(N("b" + i, 100 + ((i * 53) % 300), 0.02 + ((i * 29) % 4) * 0.01, 1 + ((i * 17) % 20)));
-  }
-  return out;
+  return [N("b0", 60, 0.005, 14), ...fillers(99, (i) => N("b" + (i + 1), 100 + ((i * 53) % 300), 0.02 + ((i * 29) % 4) * 0.01, 1 + ((i * 17) % 20)))];
 }
 
 function regionPool() {
@@ -82,73 +78,61 @@ function regionPool() {
   return out;
 }
 
+/* ---------- 场景 ---------- */
 const scenarios = [
-  { name: "静态异质", pool: basePool, mode: "lat" },
-  { name: "静态异质", pool: basePool, mode: "tput" },
-  { name: "大池100", pool: bigPool, mode: "lat", hours: 8 },
-  { name: "大池100", pool: bigPool, mode: "tput", hours: 8 },
-  { name: "中途上新", pool: basePool, mode: "lat", eventAt: 2 * 3600, eventNode: N("fresh", 35, 0.003, 15) },
-  { name: "中途劣化", pool: basePool, mode: "lat", eventAt: 2 * 3600, eventKey: "n0:443", eventP: 0.45 },
-  {
-    name: "带宽崩塌",
-    pool: basePool,
-    mode: "tput",
-    hours: 6,
-    eventAt: 2 * 3600,
-    eventKey: "n1:443",
-    eventBw: 0.5,
-  },
-  {
-    name: "同质池",
-    pool: () => {
-      const out = [];
-      for (let i = 0; i < 10; i++) out.push(N("h" + i, 95 + i * 2, 0.01 + i * 0.001, 4 + i * 0.2));
-      return out;
-    },
-    mode: "lat",
-  },
-  {
-    name: "客户端限速",
-    pool: () => {
-      const out = [];
-      for (let i = 0; i < 10; i++) out.push(N("c" + i, 60 + i * 4, 0.005, 1)); // 全部被客户端压到 1MB/s
-      return out;
-    },
-    mode: "tput",
-  },
-  { name: "探活伪装", pool: () => [N("fake", 350, 0.0, 10, { probeTcp: 25 }), ...basePool().slice(0, 8)], mode: "lat" },
-  {
-    name: "三个撒谎",
-    pool: () => [
-      N("f1", 300, 0.0, 10, { probeTcp: 25 }),
-      N("f2", 380, 0.004, 8, { probeTcp: 30 }),
-      N("f3", 260, 0.0, 12, { probeTcp: 20 }),
-      ...basePool().slice(0, 6),
-    ],
-    mode: "lat",
-  },
-  {
-    name: "抖动节点",
-    pool: () => [N("flap", 70, 0.2, 10, { burstOnly: true }), ...basePool().slice(0, 6)],
-    mode: "lat",
-    hours: 6,
-    flap: true,
-  },
-  {
-    name: "全坏池",
-    pool: () => [0, 1, 2, 3, 4, 5].map((i) => N("bad" + i, 80 + i * 20, 0.15 + i * 0.05, 4 + i)),
-    mode: "lat",
-  },
-  {
-    name: "低流量",
-    pool: basePool,
-    mode: "lat",
-    hours: 24,
-    rate: 1 / 60, // 每分钟 1 个请求
-  },
-  { name: "地区DE", pool: regionPool, mode: "lat", region: "DE" },
-  { name: "地区JP", pool: regionPool, mode: "lat", region: "JP" },
-  { name: "地区US", pool: regionPool, mode: "lat", region: "US" },
+  /* 池子规模 */
+  { group: "规模", name: "1 节点", pool: () => [N("s0", 60, 0.005, 12)], mode: "lat" },
+  { group: "规模", name: "5 节点", pool: () => [N("s0", 60, 0.005, 12), ...fillers(4, (i) => N("s" + (i + 1), 120 + i * 40, 0.01 + i * 0.01, 6))], mode: "lat" },
+  { group: "规模", name: "20 节点", pool: basePool, mode: "lat" },
+  { group: "规模", name: "100 节点", pool: bigPool, mode: "lat", hours: 8 },
+  { group: "规模", name: "300 节点", pool: () => [N("b0", 60, 0.005, 14), ...fillers(299, (i) => N("b" + (i + 1), 100 + ((i * 53) % 300), 0.02 + ((i * 29) % 4) * 0.01, 1 + ((i * 17) % 20)))], mode: "lat", hours: 8, seeds: 1 },
+
+  /* 失败率分布 */
+  { group: "失败分布", name: "全好池", pool: () => fillers(10, (i) => N("g" + i, 60 + i * 30, i * 0.0005, 4 + i)), mode: "lat" },
+  { group: "失败分布", name: "长尾", pool: () => fillers(20, (i) => N("t" + i, 60 + i * 15, Math.pow(i / 19, 3) * 0.3, 3 + i * 0.5)), mode: "lat" },
+  { group: "失败分布", name: "双峰", pool: () => [...fillers(10, (i) => N("ok" + i, 80 + i * 20, 0.005, 6)), ...fillers(10, (i) => N("bad" + i, 50 + i * 10, 0.2, 10))], mode: "lat" },
+  { group: "失败分布", name: "全坏池", pool: () => fillers(6, (i) => N("bad" + i, 80 + i * 20, 0.15 + i * 0.05, 4 + i)), mode: "lat" },
+
+  /* 故障动态（2h 时触发） */
+  { group: "故障动态", name: "永久死亡", pool: basePool, mode: "lat", hours: 6, eventAt: 7200, eventKey: "n0:443", eventP: 1 },
+  { group: "故障动态", name: "死亡后恢复", pool: () => [N("phoenix", 70, 1, 10), ...basePool().slice(0, 6)], mode: "lat", hours: 8, eventAt: 7200, eventKey: "phoenix:443", eventP: 0.005 },
+  { group: "故障动态", name: "周期抖动", pool: () => [N("flap", 70, 0.2, 10, { burstOnly: true }), ...basePool().slice(0, 6)], mode: "lat", hours: 6, flap: true },
+  { group: "故障动态", name: "线性劣化", pool: basePool, mode: "lat", hours: 6, eventAt: 7200, eventKey: "n0:443", ramp: { from: 0.005, to: 0.4, ms: 3600 } },
+  { group: "故障动态", name: "线性恢复", pool: () => [N("cured", 70, 0.4, 10), ...basePool().slice(0, 6)], mode: "lat", hours: 8, eventAt: 7200, eventKey: "cured:443", ramp: { from: 0.4, to: 0.005, ms: 3600 } },
+
+  /* 延迟分布 */
+  { group: "延迟", name: "同延迟", pool: () => fillers(10, (i) => N("h" + i, 100, 0.005 + i * 0.001, 5 + i * 0.5)), mode: "lat" },
+  { group: "延迟", name: "宽分布", pool: () => fillers(10, (i) => N("w" + i, 40 + i * 40, 0.005, 5)), mode: "lat" },
+  { group: "延迟", name: "抖动 30%", pool: () => fillers(10, (i) => N("j" + i, 60 + i * 20, 0.005, 5)), mode: "lat", jitter: 0.3 },
+
+  /* 探活与真实不一致 */
+  { group: "探活", name: "探活撒谎", pool: () => [N("fake", 350, 0.0, 10, { probeTcp: 25 }), ...basePool().slice(0, 8)], mode: "lat" },
+  { group: "探活", name: "反向撒谎", pool: () => [N("shy", 60, 0.005, 20, { probeTcp: 420 }), ...basePool().slice(0, 8)], mode: "lat", hours: 8 },
+  { group: "探活", name: "撒谎×3", pool: () => [N("f1", 300, 0.0, 10, { probeTcp: 25 }), N("f2", 380, 0.004, 8, { probeTcp: 30 }), N("f3", 260, 0.0, 12, { probeTcp: 20 }), ...basePool().slice(0, 6)], mode: "lat" },
+  { group: "探活", name: "探活抖动", pool: () => [N("pj", 65, 0.005, 12), ...basePool().slice(0, 8)], mode: "lat", probeJitter: true },
+
+  /* 流量强度 */
+  { group: "流量", name: "1/分钟", pool: basePool, mode: "lat", hours: 24, rate: 1 / 60 },
+  { group: "流量", name: "1/秒", pool: basePool, mode: "lat" },
+  { group: "流量", name: "5/秒", pool: basePool, mode: "lat", rate: 5 },
+
+  /* 地区 */
+  { group: "地区", name: "单节点", pool: () => [N("d0", 60, 0.005, 12, { cc: "DE" })], mode: "lat", region: "DE" },
+  { group: "地区", name: "全坏", pool: () => fillers(3, (i) => N("d" + i, 80 + i * 20, 0.2, 5, { cc: "DE" })), mode: "lat", region: "DE" },
+  { group: "地区", name: "空地区", pool: regionPool, mode: "lat", region: "FR" },
+  { group: "地区", name: "正常 DE", pool: regionPool, mode: "lat", region: "DE" },
+
+  /* 链路 */
+  { group: "链路", name: "客户端限速", pool: () => fillers(10, (i) => N("c" + i, 60 + i * 4, 0.005, 1)), mode: "tput" },
+  { group: "链路", name: "卡顿 30%", pool: () => fillers(6, (i) => N("st" + i, 60 + i * 20, 0.005, 10, { stall: i < 3 ? 0.3 : 0 })), mode: "tput" },
+  { group: "链路", name: "带宽崩塌", pool: basePool, mode: "tput", hours: 6, eventAt: 7200, eventKey: "n1:443", eventBw: 0.5 },
+
+  /* 池子变动 */
+  { group: "池变动", name: "加 5 个节点", pool: basePool, mode: "lat", eventAt: 7200, eventAdd: fillers(5, (i) => N("new" + i, 40 + i * 15, 0.004, 18 - i)) },
+  { group: "池变动", name: "删当前最优", pool: basePool, mode: "lat", eventAt: 7200, eventDel: "n10:443" },
+
+  /* 长跑 */
+  { group: "长跑", name: "24h", pool: basePool, mode: "lat", hours: 24, seeds: 1 },
 ];
 
 /* ---------- 状态 ---------- */
@@ -186,34 +170,37 @@ function addNode(n) {
 
 const rttOf = (n) => n.tcp + n.tls * 1.2;
 function trueCost(n, mode) {
+  if (n.pFail >= 1) return Infinity;
   const bytes = mode === "tput" ? 10 * MB : 0.2 * MB;
   const work = (bytes / Math.max(1, n.bw * MB * (1 - n.stall))) * 1000;
   return (rttOf(n) + work) / (1 - n.pFail);
 }
 
-async function request(n, mode, burst) {
+async function request(n, mode, burst, jitter) {
   const pf = burst ? 1 : n.burstOnly ? 0 : n.pFail;
   if (rnd() < pf) {
     await W.SEL.bumpFail(ENV, mode, n.key, false);
     return false;
   }
+  const rtt = rttOf(n) * (jitter ? 1 + (rnd() - 0.5) * jitter : 1);
   const bytes = mode === "tput" ? 10 * MB : 0.2 * MB;
-  const dur = rttOf(n) + (bytes / Math.max(1, n.bw * MB * (1 - n.stall))) * 1000;
+  const dur = rtt + (bytes / Math.max(1, n.bw * MB * (1 - n.stall))) * 1000;
   const bps = bytes / (dur / 1000);
   const w = Math.min(1, bytes / (512 * 1024)) * Math.min(1, dur / 1000);
   if (w > 0) W.nsSpeed(n.key, bps, bytes, ENV, Math.min(4, w));
   if (n.stall > 0) W.nsStall(n.key, n.stall * dur, dur);
   W.nsOk(n.key, 0, 0);
-  W.nsLatency(n.key, rttOf(n)); // 真实首字节回流（对应 Connection.flush）
+  W.nsLatency(n.key, rtt); // 真实首字节回流（对应 Connection.flush）
   return true;
 }
 
-function cron() {
+function cron(sc) {
   for (const n of pool) {
     if (rnd() < n.pFail * 0.4) W.nsProbeFail(n.key);
     else {
       const j = 0.9 + rnd() * 0.2;
-      W.nsProbe(n.key, (n.probeTcp + n.tls) * j, n.probeTcp * j, n.tls * j);
+      const pj = sc.probeJitter ? 0.4 + rnd() * 1.2 : 1;
+      W.nsProbe(n.key, (n.probeTcp * pj + n.tls) * j, n.probeTcp * pj * j, n.tls * j);
     }
   }
   W.SEL.afterScan(ENV);
@@ -227,14 +214,14 @@ async function run(sc, hours, seedVal) {
   for (const n of pool) addNode(n);
   const mode = sc.mode;
 
-  const scoped = sc.region ? pool.filter((n) => n.cc === sc.region) : pool;
+  const scoped = () => (sc.region ? pool.filter((n) => n.cc === sc.region) : pool);
   let best = null;
   let oracle = Infinity;
   let reliable = Infinity;
   const recompute = () => {
     oracle = Infinity;
     best = null;
-    for (const n of sc.region ? pool.filter((x) => x.cc === sc.region) : pool) {
+    for (const n of scoped()) {
       const c = trueCost(n, mode);
       if (c < oracle) {
         oracle = c;
@@ -242,27 +229,35 @@ async function run(sc, hours, seedVal) {
       }
     }
   };
-  for (const n of scoped) if (n.pFail <= 0.05) reliable = Math.min(reliable, trueCost(n, mode));
+  for (const n of scoped()) if (n.pFail > 0 && n.pFail <= 0.05) reliable = Math.min(reliable, trueCost(n, mode));
   recompute();
 
   const rate = sc.rate || 1;
   const ticks = hours * 3600;
   let reqs = 0, fails = 0, direct = 0, costSum = 0, ratioSum = 0, bad = 0, top1 = 0;
-  let switches = 0, lastCurs = "";
-  let firstBestAt = -1, eventSeenAt = -1, leftEventAt = -1, fakeHits = 0, flapHits = 0;
-  let badCursorTicks = 0, afterEventTicks = 0;
+  let switches = 0, lastCurs = "", regionFail = 0;
+  let firstBestAt = -1, leaveEventAt = -1, reuseAt = -1, fakeHits = 0, afterEvent = 0, onEvent = 0;
   const tailFrom = Math.floor(ticks * 0.75);
   let tailN = 0, tailTop = 0;
   const ratios = [];
 
   for (let t = 0; t < ticks; t++) {
     NOW += 1000;
-    if (t % 1800 === 0) cron();
+    if (t % 1800 === 0) cron(sc);
 
     if (sc.eventAt && t === sc.eventAt) {
       if (sc.eventNode) {
         pool.push(sc.eventNode);
         addNode(sc.eventNode);
+      }
+      if (sc.eventAdd) for (const n of sc.eventAdd) {
+        pool.push(n);
+        addNode(n);
+      }
+      if (sc.eventDel) {
+        S.alive.delete(sc.eventDel);
+        byKey.delete(sc.eventDel);
+        pool = pool.filter((x) => x.key !== sc.eventDel);
       }
       if (sc.eventKey) {
         const n = byKey.get(sc.eventKey);
@@ -271,8 +266,14 @@ async function run(sc, hours, seedVal) {
       }
       recompute();
     }
+    if (sc.ramp && t >= sc.eventAt && t < sc.eventAt + sc.ramp.ms && t % 300 === 0) {
+      const n = byKey.get(sc.eventKey);
+      const f = (t - sc.eventAt) / sc.ramp.ms;
+      n.pFail = sc.ramp.from + (sc.ramp.to - sc.ramp.from) * f;
+      recompute();
+    }
+    if (sc.flap) byKey.get("flap:443").burst = Math.floor(t / 600) % 5 === 0;
 
-    if (sc.flap) byKey.get("flap:443").burst = Math.floor(t / 600) % 5 === 0; // 每 10 分钟挂 2 分钟
     const nReq = Math.floor(rate) + (rnd() < rate - Math.floor(rate) ? 1 : 0);
     for (let q = 0; q < nReq; q++) {
       let key = "";
@@ -289,15 +290,16 @@ async function run(sc, hours, seedVal) {
       }
       const n = byKey.get(key);
       if (!n) {
-        direct++;
+        if (sc.region) regionFail++;
+        else direct++;
         continue;
       }
       reqs++;
-      const ok = await request(n, mode, n.burst);
+      const ok = await request(n, mode, n.burst, sc.jitter);
       if (!ok) fails++;
       const c = trueCost(n, mode);
-      const ratio = oracle > 0 ? c / oracle : 1;
-      costSum += c;
+      const ratio = Number.isFinite(oracle) && oracle > 0 && Number.isFinite(c) ? c / oracle : 1;
+      costSum += Number.isFinite(c) ? c : Number.isFinite(oracle) ? oracle * 2 : 1e6;
       ratioSum += ratio;
       ratios.push(ratio);
       if (ratio > 1.5) bad++;
@@ -306,14 +308,15 @@ async function run(sc, hours, seedVal) {
         if (firstBestAt < 0) firstBestAt = t;
       }
       if (sc.eventAt && t >= sc.eventAt) {
-        afterEventTicks++;
-        if (n.key === (sc.eventKey || (sc.eventNode && sc.eventNode.key))) {
-          badCursorTicks++;
-          if (leftEventAt < 0 && t > sc.eventAt + 1) leftEventAt = t;
-        } else if (leftEventAt < 0) leftEventAt = t;
+        afterEvent++;
+        const ek = sc.eventKey || (sc.eventDel || "");
+        if (n.key === ek) {
+          onEvent++;
+          if (leaveEventAt < 0 && t > sc.eventAt + 1) leaveEventAt = t;
+        } else if (leaveEventAt < 0) leaveEventAt = t;
+        if (reuseAt < 0 && ek && n.key === ek) reuseAt = t;
       }
       if (n.id.startsWith("fake") || n.id.startsWith("f")) fakeHits++;
-      if (n.id === "flap") flapHits++;
       if (t >= tailFrom) {
         tailN++;
         if (n === best) tailTop++;
@@ -328,6 +331,7 @@ async function run(sc, hours, seedVal) {
     reqs,
     failPct: (fails / Math.max(1, reqs)) * 100,
     directPct: (direct / Math.max(1, reqs + direct)) * 100,
+    regionFailPct: (regionFail / Math.max(1, reqs + regionFail + direct)) * 100,
     meanRatio: ratioSum / Math.max(1, reqs),
     p95: ratios[Math.min(ratios.length - 1, Math.floor(ratios.length * 0.95))] || 1,
     meanCost: costSum / Math.max(1, reqs),
@@ -338,11 +342,10 @@ async function run(sc, hours, seedVal) {
     tailTopPct: (tailTop / Math.max(1, tailN)) * 100,
     swPerH: switches / hours,
     firstBest: firstBestAt < 0 ? "-" : fmt(firstBestAt),
-    eventSeen: sc.eventAt ? (eventSeenAt < 0 ? "" : fmt(eventSeenAt)) : "",
-    leaveEvent: sc.eventAt ? (leftEventAt < 0 ? "never" : fmt(leftEventAt - sc.eventAt)) : "",
+    leaveEvent: sc.eventAt ? (leaveEventAt < 0 ? "never" : fmt(leaveEventAt - sc.eventAt)) : "",
+    reuse: reuseAt < 0 ? "" : fmt(reuseAt - (sc.eventAt || 0)),
     fakeShare: (fakeHits / Math.max(1, reqs)) * 100,
-    flapShare: (flapHits / Math.max(1, reqs)) * 100,
-    badCursorPct: sc.eventAt ? (badCursorTicks / Math.max(1, afterEventTicks)) * 100 : 0,
+    onEventPct: sc.eventAt ? (onEvent / Math.max(1, afterEvent)) * 100 : 0,
   };
 }
 
@@ -353,18 +356,24 @@ const mean = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
 const hours = Number(process.argv[2] || 4);
 const seeds = Number(process.env.SEEDS || 3);
 const seed0 = Number(process.env.SEED0 || 1);
-console.log(`仿真 ${hours} 小时 × ${seeds} 个随机种子 / 每 30 分钟 cron / 默认 1 请求每秒\n`);
+console.log(`仿真 ${hours}h × ${seeds} 种子 / cron 30 分钟 / 默认 1 请求每秒\n`);
 console.log(
-  p("场景", 12) + p("模式", 5) + p("请求", 8) + p("失败%", 7) + p("直连%", 7) +
-    p("代价倍率", 18) + p("P95", 7) + p(">1.5x", 7) + p("末段命中", 9) + "切/小时",
+  p("场景", 14) + p("模式", 5) + p("请求", 8) + p("失败%", 7) + p("直连%", 7) +
+    p("代价倍率", 18) + p("P95", 7) + p(">1.5x", 7) + p("末段", 7) + "切/小时",
 );
 
 const list = process.env.ONLY ? scenarios.filter((x) => x.name.includes(process.env.ONLY)) : scenarios;
 const rows = [];
+let group = "";
 for (const sc of list) {
+  if (sc.group !== group) {
+    group = sc.group;
+    console.log(`\n[${group}]`);
+  }
   const h = sc.hours || hours;
+  const nSeed = sc.seeds || seeds;
   const rs = [];
-  for (let i = 0; i < seeds; i++) rs.push(await run(sc, h, seed0 + i));
+  for (let i = 0; i < nSeed; i++) rs.push(await run(sc, h, seed0 + i));
   const ratios = rs.map((r) => r.meanRatio);
   const row = {
     name: sc.name,
@@ -372,37 +381,39 @@ for (const sc of list) {
     reqs: mean(rs.map((r) => r.reqs)),
     failPct: mean(rs.map((r) => r.failPct)),
     directPct: mean(rs.map((r) => r.directPct)),
+    regionFailPct: mean(rs.map((r) => r.regionFailPct)),
     meanRatio: mean(ratios),
     lo: Math.min(...ratios),
     hi: Math.max(...ratios),
     p95: mean(rs.map((r) => r.p95)),
     badPct: mean(rs.map((r) => r.badPct)),
-    top1Pct: mean(rs.map((r) => r.top1Pct)),
     tailTopPct: mean(rs.map((r) => r.tailTopPct)),
     swPerH: mean(rs.map((r) => r.swPerH)),
-    firstBest: rs[0].firstBest,
     leaveEvent: rs[0].leaveEvent,
+    reuse: rs[0].reuse,
     fakeShare: mean(rs.map((r) => r.fakeShare)),
-    badCursorPct: mean(rs.map((r) => r.badCursorPct)),
+    onEventPct: mean(rs.map((r) => r.onEventPct)),
     oracle: rs[0].oracle,
     reliable: rs[0].reliable,
     meanCost: mean(rs.map((r) => r.meanCost)),
   };
   rows.push(row);
   console.log(
-    p(row.name, 12) + p(row.mode, 5) + p(Math.round(row.reqs), 8) + p(row.failPct.toFixed(1), 7) +
-      p(row.directPct.toFixed(0) + "%", 7) +
+    p(row.name, 14) + p(row.mode, 5) + p(Math.round(row.reqs), 8) + p(row.failPct.toFixed(1), 7) +
+      p((row.regionFailPct > row.directPct ? row.regionFailPct : row.directPct).toFixed(0) + "%", 7) +
       p(`${row.meanRatio.toFixed(2)}x (${row.lo.toFixed(2)}-${row.hi.toFixed(2)})`, 18) +
       p(row.p95.toFixed(1) + "x", 7) + p(row.badPct.toFixed(0) + "%", 7) +
-      p(row.tailTopPct.toFixed(0) + "%", 9) + row.swPerH.toFixed(1),
+      p(row.tailTopPct.toFixed(0) + "%", 7) + row.swPerH.toFixed(1),
   );
 }
 
-console.log("\n细节：");
+console.log("\n事件/细节：");
 for (const r of rows) {
   const extra = [];
-  if (r.leaveEvent && r.leaveEvent !== "never") extra.push(`事件后 ${r.leaveEvent} 换走，旧节点仍占 ${r.badCursorPct.toFixed(0)}%`);
-  if (r.name.includes("撒谎") || r.name === "探活伪装") extra.push(`撒谎节点吃掉 ${r.fakeShare.toFixed(0)}%`);
-  extra.push(`上帝 ${Math.round(r.oracle)}ms / 可靠 ${Math.round(r.reliable)}ms / 本算法 ${Math.round(r.meanCost)}ms`);
-  console.log(`- ${r.name}/${r.mode}: ${extra.join("；")}`);
+  if (r.leaveEvent) extra.push(`事件后 ${r.leaveEvent} 离开，旧节点仍占 ${r.onEventPct.toFixed(0)}%`);
+  if (r.reuse) extra.push(`${r.reuse} 后重新用上`);
+  if (r.regionFailPct > 0) extra.push(`1011 失败 ${r.regionFailPct.toFixed(0)}%`);
+  if (r.name.includes("撒谎")) extra.push(`撒谎节点吃 ${r.fakeShare.toFixed(0)}%`);
+  extra.push(`上帝 ${Number.isFinite(r.oracle) ? Math.round(r.oracle) : "∞"}ms / 本算法 ${Math.round(r.meanCost)}ms`);
+  console.log(`- ${r.name}: ${extra.join("；")}`);
 }
