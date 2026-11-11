@@ -1,7 +1,7 @@
 import { errMsg } from "../core/util";
 
 import { SC } from "../core/const";
-import { PX_TTL, SEED_KEY, SEED_MAX, SEED_TTL, SEED_VER, cnt, cntDelta } from "./pool";
+import { PX_TTL, SEED_KEY, SEED_MAX, SEED_TTL, SEED_VER, cnt, cntDelta, cntUnsend } from "./pool";
 import { costOf, nsGet, p90Local , ZERO_STAT } from "../nodes/score";
 import { S } from "../core/state";
 import { kvGet, kvSet } from "../store/index";
@@ -160,6 +160,9 @@ async write(env: Env, listOnly = false, force = false) {
   // 全局写节流：任何 isolate 落盘前先看 seed 上的时间戳。
   // 8 个 isolate 各自 30 分钟一写 = 384/天，加上现有的就顶到额度了。
   if (!force && Date.now() - (S.seed.ts || 0) < 20 * 60000) return { ok: true, skipped: true };
+  // KV 写失败时要能恢复内存状态：否则 seedAt/ts 被推进，调用方以为已落盘
+  const prevSeed = S.seed, prevG = S.gcnt, prevDirty = S.seedDirty, prevAt = S.seedAt;
+  let sentDelta: Record<string, number> | null = null;
   const bucket = this.bucket();
   const base = new Map();
   for (const n of bucket.nodes || []) if (n && n.k) base.set(n.k, { ...n });
@@ -202,6 +205,7 @@ async write(env: Env, listOnly = false, force = false) {
       await kvSet(env, SEED_KEY, S.seed, { expirationTtl: PX_TTL });
       return { ok: true, empty: true };
     } catch (e) {
+      S.seed = prevSeed; S.gcnt = prevG; S.seedDirty = prevDirty; S.seedAt = prevAt;
       return { ok: false, err: String(errMsg(e)).slice(0, 80) };
     }
   }
@@ -209,6 +213,7 @@ async write(env: Env, listOnly = false, force = false) {
   const d0 = new Date().toISOString().slice(0, 10);
   const gc: CounterDoc = S.seed.cnt && S.seed.cnt.d === d0 ? { ...S.seed.cnt } as CounterDoc : { d: d0 };
   const dlt = cntDelta();
+  sentDelta = dlt;
   for (const [k, n] of Object.entries(dlt)) gc[k] = (gc[k] || 0) + n;
 
   const byColo = { ...(S.seed.byColo || {}) };
@@ -282,6 +287,8 @@ async write(env: Env, listOnly = false, force = false) {
     await kvSet(env, SEED_KEY, S.seed, { expirationTtl: PX_TTL });
     return { ok: true };
   } catch (e) {
+    S.seed = prevSeed; S.gcnt = prevG; S.seedDirty = prevDirty; S.seedAt = prevAt;
+    if (sentDelta) cntUnsend(sentDelta);
     return { ok: false, err: String(errMsg(e)).slice(0, 80) };
   }
 }
