@@ -61,5 +61,4 @@ interface ResponseInitLike {
 }
 
 // 运行时由入口 import { connect } from "cloudflare:sockets" 提供；类型指向模块导出
-declare const connect: (o: { hostname: string; port: number }) => import("cloudflare:sockets").Socket;
 declare const WebSocketPair: { new (): { 0: WebSocketLike; 1: WebSocketLike } };

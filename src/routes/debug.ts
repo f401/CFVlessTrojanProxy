@@ -1,4 +1,5 @@
 import { errMsg, shadowRate } from "../core/util";
+import { connect } from "cloudflare:sockets";
 
 import { SC } from "../core/const";
 import { S } from "../core/state";
