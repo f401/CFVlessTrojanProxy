@@ -240,6 +240,8 @@ interface Auth {
   uuids: Set<string>;
   trojan: Map<string, string>;
   list: UserRec[];
+  /** false = KV 读失败且无可用缓存（可能缺托管用户），cron 不要拿它写快照 */
+  ok?: boolean;
 }
 
 /** 候选池里的一条 */

@@ -110,7 +110,7 @@ export async function loadUsers(env: Env): Promise<Auth> {
     add(String(m.id).toLowerCase(), m.pwd, m.note || "", m.enabled !== false, true);
   }
 
-  const out = { uuids, trojan, list };
+  const out = { uuids, trojan, list, ok: readOk };
   S.usersCache = { v: out, t: readOk ? Date.now() : Date.now() - USERS_TTL + 60000 };
   return out;
 }

@@ -76,6 +76,11 @@ export async function admin(c: RouteCtx): Promise<Response> {
       const op = String(f.get("op") || "");
       const target = String(f.get("id") || "").toLowerCase();
       const cur = await loadUsers(env);
+      // 读 KV 失败且没有完整缓存时，cur.list 可能缺托管用户；此时任何
+      // 增删改都会把缺失的用户从 KV 里整份删掉，必须拒绝
+      if (cur.ok === false) {
+        return new Response("用户表暂时读不到（KV 故障），为避免覆盖请稍后重试", { status: 503 });
+      }
       let list = cur.list.filter((x) => x.managed).map((x) => ({ ...x }));
 
       if (op === "add") {

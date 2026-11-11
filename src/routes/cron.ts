@@ -50,7 +50,9 @@ async function cronOnce(env: Env): Promise<void> {
       await eachLimit(Object.keys(snap.users), 8, (id) => restoreUsage(env, id, snap).then(() => undefined));
     }
     const users = await loadUsers(env);
-    await usageSnapWrite(env, users.list);
+    // 读 KV 失败且没有完整缓存时 list 可能缺托管用户：此时写快照会把
+    // 这些用户的历史用量整份抹掉，宁可这一轮不写
+    if (users.ok !== false) await usageSnapWrite(env, users.list);
   } catch (e) {}
   // 不传 force：让 flushSnap 走「1h/2h + 全局 45 分钟闸门」的节奏
   try {

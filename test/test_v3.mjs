@@ -730,6 +730,25 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   for (const h of pub) ok(`公网放行 ${h}`, !W.isPrivateHost(h), h);
 }
 
+/* ---------- KV 读失败且无缓存：loadUsers 必须标记 ok=false ---------- */
+{
+  W.S.usersCache = { v: null, t: 0 };
+  W.S.usersSig = "";
+  const a = await W.loadUsers({
+    uuid: UUID,
+    pwd: "pw",
+    STATS: {
+      get: async () => {
+        throw new Error("kv down");
+      },
+    },
+  });
+  eq("KV 失败无缓存时 ok=false", a.ok, false);
+  ok("仍然保留 env 用户", a.uuids.has(UUID));
+  W.S.usersCache = { v: null, t: 0 };
+  W.S.usersSig = "";
+}
+
 /* ---------- 地区列表：去重后再截断 ---------- */
 {
   eq("regions 去重且最多 6 个", await W.regionListAsync({ regions: "HK,HK,JP,US,SG,DE,NL" }), [
