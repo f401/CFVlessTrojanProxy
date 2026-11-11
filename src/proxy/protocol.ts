@@ -15,6 +15,7 @@ export const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 export async function loadUsers(env: Env): Promise<Auth> {
   const sig = `${env.uuids || env.uuid || ""}|${secretPwd(env)}`;
   if (S.usersCache.v && S.usersSig === sig && Date.now() - S.usersCache.t < USERS_TTL) return S.usersCache.v;
+  const prevSig = S.usersSig;
   S.usersSig = sig;
 
   let managed: Partial<UserRec>[] = [];
@@ -25,7 +26,7 @@ export async function loadUsers(env: Env): Promise<Auth> {
     // KV 抖动不等于"没有用户"：有旧缓存就继续用，别让所有托管用户被踢下线
     readOk = false;
   }
-  if (!readOk && S.usersCache.v) {
+  if (!readOk && S.usersCache.v && prevSig === sig) {
     S.usersCache.t = Date.now() - USERS_TTL + 60000; // 1 分钟后再试，别每个请求都打 KV
     return S.usersCache.v;
   }

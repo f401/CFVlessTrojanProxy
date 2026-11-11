@@ -217,8 +217,10 @@ export function nodePath(n: RankedNode) {
  * @param {string[]} protos 要输出的协议
  * @returns {Array<object>} 地区节点数组
  */
-export function regionEntries(regions: string[], host: string, pass: string, protos: string[]): RegionEntry[] {
+// prettier-ignore
+export function regionEntries(regions: string[], host: string, pass: string, protos: string[], url?: URL): RegionEntry[] {
   const out: RegionEntry[] = [];
+  const listen = Number(url && url.port) || (url && url.protocol === "http:" ? 80 : 443);
   for (const cc of regions) {
     for (const proto of protos) {
       if (proto === "trojan" && !pass) continue;
@@ -227,7 +229,7 @@ export function regionEntries(regions: string[], host: string, pass: string, pro
         proto,
         name: `${proto}-region-${cc}`,
         server: host,
-        port: 443,
+        port: listen,
         path: `/?ed=2560&ip=region-${cc}&rg=${cc.toLowerCase()}`,
       });
     }
@@ -321,7 +323,7 @@ export function renderClash(
 
   // 地区出口节点（强制走该国的中转），不分模式
   const regNames = [];
-  for (const e of regionEntries(regions, host, pass, protos)) {
+  for (const e of regionEntries(regions, host, pass, protos, url)) {
     emit(e.name, e.proto, e.server, e.port, e.path, true, "");
     regNames.push(e.name);
     all.push(e.name);
@@ -428,7 +430,7 @@ export function renderSingbox(
     }
   }
 
-  for (const e of regionEntries(regions, host, pass, protos)) {
+  for (const e of regionEntries(regions, host, pass, protos, url)) {
     tags.push(e.name);
     regNames.push(e.name);
     const o: Record<string, unknown> = {
@@ -534,7 +536,7 @@ export function renderLinks(
       }
     }
   }
-  for (const e of regionEntries(regions, host, pass, protos)) {
+  for (const e of regionEntries(regions, host, pass, protos, url)) {
     const q = [
       "encryption=none",
       "security=tls",
@@ -544,8 +546,8 @@ export function renderLinks(
       `path=${encodeURIComponent(e.path)}`,
       `#${encodeURIComponent(e.name)}`,
     ].join("&");
-    if (e.proto === "vless") lines.push(`vless://${id}@${host}:443?${q}`);
-    else lines.push(`trojan://${encodeURIComponent(pass)}@${host}:443?${q}`);
+    if (e.proto === "vless") lines.push(`vless://${id}@${host}:${e.port}?${q}`);
+    else lines.push(`trojan://${encodeURIComponent(pass)}@${host}:${e.port}?${q}`);
   }
   return btoa(lines.join("\n"));
 }

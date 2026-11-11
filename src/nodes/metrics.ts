@@ -64,8 +64,10 @@ export function rttLearn(cf: CfMeta | null, tag: string | null, id: string | nul
   const bw = (cf.edgeL4 && cf.edgeL4.deliveryRate) || 0;
 
   if (cur) {
-    cur.rtt = Math.round(cur.rtt * 0.7 + rtt * 0.3); // EWMA，抗抖动
-    cur.hits += 1;
+    // 老 KV 里的条目可能缺 hits/rtt（早期版本没有这两个字段），别让 EWMA 变成 NaN
+    const base = typeof cur.rtt === "number" && cur.rtt > 0 ? cur.rtt : rtt;
+    cur.rtt = Math.round(base * 0.7 + rtt * 0.3); // EWMA，抗抖动
+    cur.hits = (cur.hits || 0) + 1;
     cur.ts = Date.now();
     if (cf.colo) cur.colo = cf.colo;
     if (bw) cur.bw = bw;

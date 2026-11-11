@@ -374,7 +374,7 @@ eq("都没有返回空串", W.primaryId({}), "");
     list: [{ id: UUID, pwd: "pw", enabled: true, managed: true, note: "" }],
   };
   W.S.usersCache = { v: fake, t: Date.now() - 400000 };
-  W.S.usersSig = "";
+  W.S.usersSig = UUID + "|pw";
   const envFailUsers = {
     uuid: UUID,
     pwd: "pw",
@@ -403,20 +403,18 @@ eq("都没有返回空串", W.primaryId({}), "");
         done = p;
       },
     };
-    await W.runCron({}, ctx1);
+    const envCron = { STATS: { get: async () => null, put: async () => {} } };
+    await W.runCron(envCron, ctx1);
     await done; // 等 waitUntil 的任务真正跑完，闸门必须回到 false
     eq("runCron 结束后闸门释放", W.S.cronBusy, false);
 
     W.S.cronBusy = true;
     let skipped = null;
-    await W.runCron(
-      {},
-      {
-        waitUntil: (p) => {
-          skipped = p;
-        },
+    await W.runCron(envCron, {
+      waitUntil: (p) => {
+        skipped = p;
       },
-    );
+    });
     await new Promise((r) => setTimeout(r, 30));
     eq("cron 忙时不重复跑（闸门保持）", W.S.cronBusy, true);
     eq("cron 忙时不排新任务", skipped, null);
@@ -455,6 +453,47 @@ eq("都没有返回空串", W.primaryId({}), "");
   W.S.seedDirty = true;
   await W.flushPx(envSeed, true);
   ok("force 必须写进 KV", puts > 0);
+}
+
+/* ---------- 地区节点沿用请求端口（8443 部署不能写死 443） ---------- */
+{
+  const u843 = new URL(`https://edge.example.com:8443/${UUID}`);
+  const y = W.renderClash({ ...env, regions: "HK" }, u843, UUID, "edge.example.com", {}, ["HK"]);
+  ok(
+    "Clash 地区节点用 8443",
+    y.includes("port: 8443"),
+    y
+      .split("\n")
+      .filter((l) => l.includes("port:"))
+      .join(" | "),
+  );
+  const links = Buffer.from(
+    W.renderLinks({ ...env, regions: "HK" }, u843, UUID, "edge.example.com", {}, ["HK"]),
+    "base64",
+  ).toString("utf8");
+  ok(
+    "明文订阅地区节点用 8443",
+    links.includes("edge.example.com:8443"),
+    links
+      .split("\n")
+      .filter((l) => l.includes("region"))
+      .join(" | "),
+  );
+}
+
+/* ---------- 老 RTT 条目缺 hits/rtt 时不能变 NaN ---------- */
+{
+  W.S.rtt.clear();
+  W.rttLearn({ clientTcpRtt: 100, colo: "HKG" }, "tag", "rtt-u");
+  const b = W.S.rtt.get("rtt-u").tag;
+  eq("RTT 首次写入", [b.rtt, b.hits], [100, 1]);
+  // 模拟早期版本写下的条目：没有 hits，rtt 也是 0
+  W.S.rtt.get("rtt-u").tag = { rtt: 0, colo: "", bw: 0, ok: 0, fail: 0, ts: 0 };
+  W.rttLearn({ clientTcpRtt: 200, colo: "HKG" }, "tag", "rtt-u");
+  const c = W.S.rtt.get("rtt-u").tag;
+  ok("老条目补 hits", c.hits === 1, String(c.hits));
+  ok("老条目 rtt 不变 NaN", Number.isFinite(c.rtt) && c.rtt > 0, String(c.rtt));
+  W.S.rtt.clear();
 }
 
 /* ---------- 随机密码：长度 / 字符集 / 默认值 ---------- */

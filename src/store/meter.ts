@@ -128,7 +128,7 @@ export class Meter {
         oldS = Object.assign(Object.create(null), this.s),
         oldE = this.e.slice();
       // 计数搭便车：同一次 /add 请求把 isolate 的日计数也带上来，0 额外请求
-      if (d.c && typeof d.c === "object") {
+      if (d.c && typeof d.c === "object" && !Array.isArray(d.c)) {
         const d0 = String(d.c.d || new Date().toISOString().slice(0, 10));
         // 只接受"今天"或更新的一天：旧的 isolate 可能带着昨天的计数晚到，
         // 不能让它把全局日计数回滚到昨天，更不能把旧数加进今天。
