@@ -87,6 +87,8 @@ export function nsEmptyClose(k: string, viaP: boolean) {
   nsDecay(s, now);
   if (viaP) s.eCloseP = (s.eCloseP || 0) + 1;
   else s.eCloseD = (s.eCloseD || 0) + 1;
+  // 跨过可疑门槛时，候选/站点排行缓存不能继续推荐它
+  if (viaP && s.eCloseP >= 5) { S.hostRankCache.clear(); S.rankCache.t = 0; }
   s.at = now;
 }
 
