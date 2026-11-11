@@ -30,7 +30,7 @@ export async function runCron(env: Env, ctx: ExecutionContext): Promise<void> {
         // 先把快照续回 DO（重建脚本后不会从 0 开始），再写新快照
         const snap = await usageSnapGet(env);
         if (snap && snap.users) {
-          for (const id of Object.keys(snap.users)) await restoreUsage(env, id, snap);
+          await Promise.all(Object.keys(snap.users).map((id) => restoreUsage(env, id, snap)));
         }
         const users = await loadUsers(env);
         await usageSnapWrite(env, users.list);
