@@ -77,18 +77,18 @@ ok("失败率高更差", W.costOf("bad:443", "lat") > W.costOf("good:443", "lat"
 
 reset();
 node("t1:443", { tcp: 50 });
-ok("tput：无样本时用先验（≈51s）", W.costOf("t1:443", "tput") > 50000, W.costOf("t1:443", "tput"));
+ok("tput：无样本时用先验（≈5s）", W.costOf("t1:443", "tput") > 4500, W.costOf("t1:443", "tput"));
 
 node("t2:443", { tcp: 50 });
 const st2n = W.S.nstat.get("t2:443");
-st2n.hist[7] = 5;
+st2n.hist[9] = 5; // 8 MB/s
 st2n.sumW = 5;
 st2n.sumW2 = 5;
 st2n.recentBytesW = 5 * 1048576;
 st2n.lastSampleAt = Date.now();
 ok(
   "tput：有效样本后低于先验",
-  W.costOf("t2:443", "tput") < W.costOf("t1:443", "tput") - 3000,
+  W.costOf("t2:443", "tput") < W.costOf("t1:443", "tput") - 2000,
   `${W.costOf("t2:443", "tput")} vs ${W.costOf("t1:443", "tput")}`,
 );
 
@@ -163,11 +163,11 @@ ok(
 reset();
 node("seed:443", { tcp: 50 });
 const sSeed = W.S.nstat.get("seed:443");
-sSeed.seedBps = 2 * 1048576;
+sSeed.seedBps = 20 * 1048576;
 sSeed.seedAt = Date.now();
 const pSeed = W.scoreParts("seed:443", "tput");
 eq("seed 先验来源", pSeed.priorSource, "seed");
-ok("seed 把先验拉到约 15s", pSeed.e10Ms > 12000 && pSeed.e10Ms < 18000, String(pSeed.e10Ms));
+ok("seed 把先验拉到约 1.5s", pSeed.e10Ms > 1000 && pSeed.e10Ms < 2200, String(pSeed.e10Ms));
 sSeed.seedAt = Date.now() - 48 * 3600e3;
 eq("seed 过期回落默认先验", W.scoreParts("seed:443", "tput").priorSource, "prior");
 // 到期前后不能跳变：24h 整那一刻置信度应该已经衰减到 0，而不是 0.125 → 0

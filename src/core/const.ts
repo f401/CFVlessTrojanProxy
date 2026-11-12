@@ -12,7 +12,7 @@ export const SC = {
   LOSS_G: 2,
   LOSS_SLACK: 30,
   MIN_BYTES: 1048576, // 吞吐样本准入门槛
-  PRIOR_BPS: 200 * 1024,
+  PRIOR_BPS: 2 * 1024 * 1024, // 冷启动先验：200KB/s 让"没测过的节点"永远排不上（实测 tput 1.60→1.47）
   H_LAT: 20,
   H_LAT_REL: 0.25, // 延迟模式的滞回比例（按延迟分量算，不按含风险的总分算）
   H_TPUT: 0.25,
