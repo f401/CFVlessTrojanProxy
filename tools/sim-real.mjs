@@ -44,6 +44,7 @@ if (process.env.TRIAL_LAT) W.SC.TRIAL_LAT = Number(process.env.TRIAL_LAT);
 
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
 if (process.env.PX_SHADOW !== undefined) ENV.pxShadow = Number(process.env.PX_SHADOW);
+if (process.env.PX_DWELL !== undefined) ENV.pxDwellMin = Number(process.env.PX_DWELL);
 if (process.env.FAIL) W.SC.FAIL = Number(process.env.FAIL);
 if (process.env.STALL) W.SC.STALL = Number(process.env.STALL);
 if (process.env.BETA_A) W.SC.BETA_A = Number(process.env.BETA_A);
@@ -232,11 +233,6 @@ function install(n, isNew = false) {
   s.tcp = n.probeTcp;
   s.tls = n.tls;
   s.at = NOW;
-  // 模拟"别的 isolate 测过这个节点"：把真实带宽当 seedBps 注入
-  if (process.env.SEED_BPS) {
-    s.seedBps = n.bw * MB;
-    s.seedAt = NOW;
-  }
   n.born = isNew ? NOW : -1e9;
   byKey.set(n.key, n);
 }
@@ -270,8 +266,18 @@ async function request(n, mode, size, siteShare, jitter) {
   return { ok: true };
 }
 
+// 探活预算：线上每轮只重测 12 个（轮转）+ 当前/前 3 名，不是全池。
+// REST=0 表示"全测"（旧行为），用来量化这段预算的代价。
 function cron(probeFail) {
-  for (const n of pool) {
+  const restN = process.env.REST === undefined ? 12 : Number(process.env.REST);
+  const cur = S.curs.tput || S.curs.lat;
+  const top3 = W.candsFor("tput")
+    .map((x) => x.k)
+    .filter((k) => k !== cur)
+    .slice(0, 3);
+  const must = new Set([cur, ...top3].filter(Boolean));
+  const rest = pool.filter((n) => !must.has(n.key)).slice(0, restN);
+  for (const n of [...pool.filter((n) => must.has(n.key)), ...rest]) {
     // 死掉的节点探活必须失败，否则 seed 会把死节点当好的传播出去
     if (n.down || rnd() < n.pFail * 0.4 * probeFail) W.nsProbeFail(n.key);
     else W.nsProbe(n.key, (n.probeTcp + n.tls) * (0.9 + rnd() * 0.2), n.probeTcp, n.tls);
