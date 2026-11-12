@@ -32,7 +32,6 @@ interface Env {
   METER: DurableObjectNamespace;
   kek?: string;
 
-  pageKey?: string;
   adminHash?: string;
   [k: string]: unknown;
 }

@@ -1,20 +1,14 @@
-import { errMsg, shadowRate } from "../core/util";
+import { errMsg } from "../core/util";
 import { connect } from "cloudflare:sockets";
 
-import { SC } from "../core/const";
 import { S } from "../core/state";
-import { dial } from "../proxy/dial";
-
-import { json, text } from "../edge/respond";
-import { diagVerdict, hostKey, hostRank, logErr } from "../nodes/metrics";
-import { ZERO_STAT, capOf, costOf, scoreParts, nsGet, p90Of, pFailOf, pStallOf, pctOf } from "../nodes/score";
-import { nodeSnapGet } from "../store/index";
+import { json } from "../edge/respond";
+import { diagVerdict, hostKey } from "../nodes/metrics";
+import { nsGet } from "../nodes/score";
 import { checkTarget, dohQuery, expandV6, resolveAAAA } from "../proxy/dial";
-import { aliveList, commitPool, cronScan, flushPx, nsOf, pxGet, pxSet } from "../px/pool";
-import { cnt, cntView } from "../core/counter";
-import { spdSnapshot } from "../core/node-snapshot";
+import { aliveList, commitPool, flushPx, pxSet } from "../px/pool";
 import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
-import { restoreUsage, primaryId } from "../store/index";
+import { restoreUsage } from "../store/index";
 import { adminOnly } from "../edge/auth";
 
 import type { RouteCtx } from "../edge/types";
@@ -23,7 +17,7 @@ type UserCtx = RouteCtx & { id: string };
 
 /** /<uuid>/debug：站点诊断（?diag=<host>&probe=1 做一次 SNI 探测） */
 export async function debug(c: UserCtx): Promise<Response> {
-  const { env, url, host, id, first, ctx } = c;
+  const { env, url, host: _host, id, first: _first, ctx: _ctx } = c;
 
   /* ---------- 站点诊断：这个站该用哪个节点 / 为什么被拦 ---------- */
   const diagHost = String(url.searchParams.get("diag") || "")

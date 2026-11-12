@@ -1,7 +1,6 @@
 import { errMsg } from "./core/util";
 
 import { handleUpgrade } from "./proxy/session";
-import { Meter } from "./store/meter";
 import { health } from "./routes/health";
 import { logs } from "./routes/logs";
 import { runCron } from "./routes/cron";
@@ -116,7 +115,7 @@ export default {
     }
   },
 
-  scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+  scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     return runCron(env, ctx);
   },
 };

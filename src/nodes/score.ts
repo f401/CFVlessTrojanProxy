@@ -1,5 +1,5 @@
 import { HIST_BASE, HIST_N, SC } from "../core/const";
-import { capOf, p90Of, pctOf, p90Local, pcts } from "../core/hist";
+import { pcts } from "../core/hist";
 export { capOf, p90Of, pctOf, p90Local, pcts } from "../core/hist";
 import { S } from "../core/state";
 
@@ -89,7 +89,7 @@ export function nsEmptyClose(k: string, viaP: boolean) {
   if (viaP) s.eCloseP = (s.eCloseP || 0) + 1;
   else s.eCloseD = (s.eCloseD || 0) + 1;
   // 跨过可疑门槛时，候选/站点排行缓存不能继续推荐它
-  if (viaP && s.eCloseP >= 5) { S.hostRankCache.clear(); S.rankCache.t = 0; }
+  if (viaP && s.eCloseP >= 5) { S.hostRankCache.clear(); invalidateRank(); }
   s.at = now;
 }
 
@@ -168,7 +168,7 @@ export function nsProbeFail(k: string) {
     s.blackUntil = Math.max(s.blackUntil || 0, now + 10 * 60000);
     // 探活也能拉黑节点：排行缓存里可能还留着它，下次 pick 不能继续推荐
     S.hostRankCache.clear();
-    S.rankCache.t = 0;
+    invalidateRank();
   }
   s.at = now;
 }
@@ -197,7 +197,7 @@ export function nsFail(k: string) {
   }
   s.at = now;
   S.hostRankCache.clear();             // 冷却中的节点不该继续被站点排行推荐
-  S.rankCache.t = 0;                   // 失败改变了排序前提
+  invalidateRank();                    // 失败改变了排序前提
 }
 
 /**
@@ -221,10 +221,10 @@ export function nsSiteFail(k: string) {
  * @param {string} k "host:port"
  * @param {number} bps 字节/秒
  * @param {number} bytes 该样本覆盖的字节数
- * @param {object} [env] 用于节流落盘
+ * @param {object} _env 保留位（落盘已统一走 store 的调度，这里不再用）
  * @returns {void}
  */
-export function nsSpeed(k: string, bps: number, bytes: number, env: Env, w = 1) {
+export function nsSpeed(k: string, bps: number, bytes: number, _env: Env, w = 1) {
   if (!k || !(bps > 0)) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -440,7 +440,7 @@ export function freezeNode(k: string) {
   const s = nsGet(k);
   s.freeUntil = Math.max(s.freeUntil || 0, Date.now() + SC.ROLL_FREEZE);
   S.hostRankCache.clear();     // 站点排行里不能再推荐它
-  S.rankCache.t = 0;
+  invalidateRank();
 }
 
 /**
@@ -480,15 +480,23 @@ export function usable(k: string, now = Date.now()): boolean {
 }
 
 /** 候选列表（已过滤黑名单/冻结，按代价升序） */
-const CAND_TTL = 20000;      // 排行缓存有效期
+const CAND_TTL = 20000;      // 排行缓存寿命（按模式各记各的时间）
 const CAND_CACHE_MIN = 24;   // 候选少的时候不必缓存（重算也就几十 µs）
+
+/** 排行缓存作废：节点状态变了就调它（两处时间戳一起清，避免只清一半） */
+export function invalidateRank() {
+  S.rankCache = { t: 0, at: {}, v: {} };
+}
 
 export function rankedCands(mode: Mode) {
   const m: Mode = mode === "tput" ? "tput" : "lat";
   const useCache = S.alive.size >= CAND_CACHE_MIN;
+  const now = Date.now();
   if (useCache) {
     const c = S.rankCache;
-    if (c.t && Date.now() - c.t < CAND_TTL && c.v[m]) return c.v[m];
+    // 按模式各存一个写入时间：共用 t 时，另一种模式的重算会给本条"续命"，
+    // lat 的实际有效期能拖到 40 s（失败/冷却要等这么久才反映到排序）。
+    if (c.t && now - (c.at[m] || 0) < CAND_TTL && c.v[m]) return c.v[m];
   }
   const out: { k: string; v: number }[] = [];
   for (const k of S.alive.keys()) {
@@ -497,7 +505,7 @@ export function rankedCands(mode: Mode) {
   }
   out.sort((a, b) => a.v - b.v);
   S.candN = out.length;
-  if (useCache) S.rankCache = { t: Date.now(), v: { ...S.rankCache.v, [m]: out } };
+  if (useCache) S.rankCache = { t: now, at: { ...S.rankCache.at, [m]: now }, v: { ...S.rankCache.v, [m]: out } };
   return out;
 }
 

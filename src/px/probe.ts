@@ -1,7 +1,6 @@
 import type { Socket } from "cloudflare:sockets";
 import { logErr } from "../nodes/metrics";
 import { checkTarget } from "../core/net";
-import { S } from "../core/state";
 import { dec, enc, timeoutSignal, toHex, withTimeout } from "../core/util";
 import { connect } from "cloudflare:sockets";
 
@@ -166,7 +165,7 @@ export interface PoolRefill {
  * @param {object} env Worker 环境
  * @returns {Promise<PoolRefill>} 合并后的候选池与各源统计
  */
-export async function refillPool(env: Env): Promise<PoolRefill> {
+export async function refillPool(_env: Env): Promise<PoolRefill> {
   const seen = new Map<string, PoolEntry>();
   const sources: Record<string, { lines: number; ok: number }> = Object.create(null);
   for (const src of POOL_SOURCES) {

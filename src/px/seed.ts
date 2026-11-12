@@ -1,8 +1,8 @@
 import { errMsg } from "../core/util";
 
 import { SC, SEED_WRITE_GAP } from "../core/const";
-import { PX_TTL, SEED_KEY, SEED_MAX, SEED_TTL, SEED_VER } from "./const";
-import { cnt, cntDelta, cntUnsend } from "../core/counter";
+import { PX_TTL, SEED_KEY, SEED_MAX, SEED_READ_MS, SEED_VER } from "./const";
+import { cntDelta, cntUnsend } from "../core/counter";
 import { p90Local } from "../core/hist";
 import { costOf, nsGet, ZERO_STAT } from "../nodes/score";
 import { S } from "../core/state";
@@ -89,7 +89,7 @@ export class SeedStore {
    * @returns {Promise<object>} SEED
    */
   async read(env: Env) {
-    if (S.seedAt && Date.now() - S.seedAt < SEED_TTL) return S.seed;
+    if (S.seedAt && Date.now() - S.seedAt < SEED_READ_MS) return S.seed;
     let v = null;
     try {
       v = await kvGetStrict<Seed>(env, SEED_KEY);
@@ -169,7 +169,8 @@ export class SeedStore {
     // 读到空表时只缓存 1 分钟：否则一个刚部署的 isolate 会"空着"整整半小时，
     // 期间该机房所有连接都只能直连。
     const hasAny = !!(S.seed && S.seed.byColo && (this.bucket().nodes || []).length);
-    S.seedAt = S.seedReadFail ? Date.now() - SEED_TTL + 60000 : hasAny ? Date.now() : Date.now() - SEED_TTL + 60000;
+    // 读失败 / 读到空表都只当缓存 1 分钟（提前 29 分钟过期）
+    S.seedAt = S.seedReadFail || !hasAny ? Date.now() - SEED_READ_MS + 60000 : Date.now();
     return S.seed;
   }
 

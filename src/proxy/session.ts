@@ -10,7 +10,7 @@ import { checkTarget, dial, expandV6, isV6Literal, parseProxyIp } from "./dial";
 import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./protocol";
 import { cnt } from "../core/counter";
 import { kickFlush } from "../store/index";
-import { nextNode, nsEmptyClose, nsFail } from "../nodes/score";
+import { nsEmptyClose, nsFail } from "../nodes/score";
 import { SEL } from "../px/selector";
 import { S } from "../core/state";
 import { flushSnap, pendFlush, statBump } from "../store/index";

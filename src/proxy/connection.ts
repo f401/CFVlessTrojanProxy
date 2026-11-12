@@ -1,11 +1,9 @@
 import { SC } from "../core/const";
 import type { Socket } from "cloudflare:sockets";
 import { errMsg } from "../core/util";
-import { pipeBack } from "./tunnel";
-
 import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
-import { availOf, nsFail, nsLatency, nsOk, nsSpeed, nsStall } from "../nodes/score";
+import { nsLatency, nsOk, nsSpeed, nsStall } from "../nodes/score";
 import { markSeedDirty } from "../px/seed";
 import { S } from "../core/state";
 import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";

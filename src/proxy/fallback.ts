@@ -6,7 +6,7 @@ import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 
 export async function dialAnother(
-  env: Env,
+  _env: Env,
   st: Connection,
   mode: Mode,
   tag?: string | null,

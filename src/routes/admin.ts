@@ -8,7 +8,7 @@ import type { RouteCtx } from "../edge/types";
 
 /** /admin：登录（挑战-应答）+ 用户增删改。未设 adminKey 时整个面板关闭 */
 export async function admin(c: RouteCtx): Promise<Response> {
-  const { env, url, request, host, first, seg, pageKey } = c;
+  const { env, url, request, host: _host, first, seg, pageKey } = c;
   /* ---------- 管理面板（会话登录） ---------- */
   if (first === "admin") {
     const adminKey = String(env.adminKey || "");

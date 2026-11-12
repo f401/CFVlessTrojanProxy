@@ -59,7 +59,7 @@ VLESS / Trojan over WebSocket，跑在 Cloudflare Workers 上。
 ```bash
 ./scripts/fetch-deps.sh     # typescript + 混淆器（首次）
 npm run build               # tsc + 打包 → dist/_worker.js
-npm test                    # 119 项断言
+npm test                    # 468 项断言 + 8 项 golden
 npm run obf                 # → _worker_v3.mid.js（可部署）
 ```
 

@@ -1,13 +1,13 @@
 import { errMsg } from "../core/util";
 
 import { SEED_WRITE_GAP } from "../core/const";
-import { HIST_BASE, HIST_N, SC } from "../core/const";
+import { SC } from "../core/const";
 import { logErr } from "../nodes/metrics";
 import { POOL_MAX, POOL_TTL_MS, geoLabel, probeProxy, refillPool } from "./probe";
 import {
   candsFor,
   capOf,
-  costOf,
+  invalidateRank,
   scoreParts,
   nsLatency,
   nsProbe,
@@ -16,18 +16,16 @@ import {
   pFailOf,
   pStallOf,
   pctOf,
-  pcts,
 } from "../nodes/score";
 import { BUCKET_DEF, SEEDS } from "./seed";
-import { SEED_KEY, SEED_TTL, SEED_MAX, PX_TTL, SEED_VER, MODES, keyOf } from "./const";
+import { PX_TTL, MODES, keyOf } from "./const";
 import { S } from "../core/state";
-import { kvGet, kvSet, scheduleFlush } from "../store/index";
+import { kvGet, kvSet } from "../store/index";
 
 /* 代理节点：状态 / 信誉分桶 / 选择 / cron */
 /* ---- 轮换模块：内存为权威，KV 只存「候选池 + 分机房节点信誉」 ---- */
 
 export const SEED_COLD_N = 48; // 冷启动灌进 alive 的节点数
-export { SC, HIST_BASE, HIST_N } from "../core/const";
 
 const ALIVE_MAX = 800; // 长期运行 alive 上限：池子换代不会永久累积（800 节点 ≈ 1 MB 统计 + candsFor 0.9ms）
 
@@ -56,7 +54,7 @@ export async function ensurePool(env: Env) {
     if (Array.isArray(v) && v.length) {
       S.pool = v.slice(0, POOL_MAX);
       S.poolGen = gen;
-      S.rankCache.t = 0;
+      invalidateRank();
     }
   } catch (e) {}
   return S.pool;
@@ -80,7 +78,7 @@ export async function commitPool(env: Env, fresh: PoolEntry[], allowShrink = fal
   }
   S.pool = fresh;
   S.poolGen = gen;
-  S.rankCache.t = 0;
+  invalidateRank();
   S.poolBuilt = Date.now();
   S.seed.poolGen = gen;
   await SEEDS.write(env, S.colo ? undefined : true, true);
@@ -338,7 +336,7 @@ export async function cronScan(env: Env) {
   if (pruned) {
     // 站点排行里可能还留着刚被删的节点
     S.hostRankCache.clear();
-    S.rankCache.t = 0;
+    invalidateRank();
   }
 
   // ③b alive 长期只增不减：池子换代后旧节点会一直留着，最终拖慢每次评分。
@@ -358,7 +356,7 @@ export async function cronScan(env: Env) {
       S.alive.delete(k);
     }
     S.hostRankCache.clear();
-    S.rankCache.t = 0;
+    invalidateRank();
   }
 
   // ④ 国家码补全
@@ -379,10 +377,10 @@ export async function cronScan(env: Env) {
       if ((s.at || 0) > cut) continue;
       S.nstat.delete(k);
     }
-    if (S.nstat.size > 800) {
+    if (S.nstat.size > ALIVE_MAX) {
       const old = [...S.nstat.entries()].filter(([k]) => !live.has(k)).sort((a, b) => (a[1].at || 0) - (b[1].at || 0));
       for (const [k] of old) {
-        if (S.nstat.size <= 600) break;
+        if (S.nstat.size <= ALIVE_MAX * 0.75) break;
         S.nstat.delete(k);
       }
     }

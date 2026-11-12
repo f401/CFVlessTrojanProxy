@@ -1,4 +1,3 @@
-import { cnt } from "../core/counter";
 import { seal, unseal } from "./index";
 
 /* do */

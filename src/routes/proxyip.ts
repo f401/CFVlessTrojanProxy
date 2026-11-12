@@ -2,20 +2,16 @@ import { errMsg, shadowRate } from "../core/util";
 
 import { SC } from "../core/const";
 import { S } from "../core/state";
-import { dial } from "../proxy/dial";
-
-import { json, text } from "../edge/respond";
-import { diagVerdict, hostKey, hostRank, logErr } from "../nodes/metrics";
-import { ZERO_STAT, capOf, costOf, scoreParts, nsGet, p90Of, pFailOf, pStallOf, pctOf } from "../nodes/score";
+import { json } from "../edge/respond";
+import { hostRank, logErr } from "../nodes/metrics";
+import { costOf, invalidateRank, scoreParts } from "../nodes/score";
 import { nodeSnapGet } from "../store/index";
-import { checkTarget, dohQuery, expandV6, resolveAAAA } from "../proxy/dial";
-import { aliveList, commitPool, cronScan, flushPx, nsOf, pxGet, pxSet } from "../px/pool";
+import { cronScan, nsOf, pxGet } from "../px/pool";
 import { SEL } from "../px/selector";
-import { cnt, cntView } from "../core/counter";
+import { cntView } from "../core/counter";
 import { spdSnapshot } from "../core/node-snapshot";
-import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
 import { regionListAsync } from "../px/regions";
-import { restoreUsage, primaryId } from "../store/index";
+import { primaryId } from "../store/index";
 import { adminOnly } from "../edge/auth";
 
 import type { RouteCtx } from "../edge/types";
@@ -24,7 +20,7 @@ type UserCtx = RouteCtx & { id: string };
 
 /** /<uuid>/proxyip：中转池现状（?why=1 带选择原因） */
 export async function proxyip(c: UserCtx): Promise<Response> {
-  const { env, url, host, id } = c;
+  const { env, url, host: _host, id } = c;
 
   // 全局日计数（从 snap 快照读，最多 1 小时延迟）
   if (url.searchParams.get("day") === "1") {
@@ -64,7 +60,7 @@ export async function proxyip(c: UserCtx): Promise<Response> {
     S.hostNode.clear();
     S.hostDirect.clear();
     S.hostRankCache.clear();
-    S.rankCache = { t: 0, v: {} };
+    invalidateRank();
     S.candN = 0;
     return json({ ok: true, alive: 0, curs: S.curs });
   }

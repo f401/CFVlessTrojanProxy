@@ -1,57 +1,3 @@
-import { Connection } from "./proxy/connection";
-import {
-  diagVerdict,
-  hostDirectMark,
-  hostKey,
-  hostNodeMark,
-  hostRank,
-  hostScore,
-  hostUntried,
-  logErr,
-  rttLearn,
-} from "./nodes/metrics";
-import { checkTarget, isPrivateHost } from "./proxy/dial";
-
-import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./proxy/protocol";
-import { nsOf, pxGet } from "./px/pool";
-import { tlsHello } from "./px/probe";
-import {
-  availOf,
-  bestFor,
-  candsFor,
-  nextNode,
-  capOf,
-  costOf,
-  emptyCloseSuspect,
-  freezeNode,
-  nsFail,
-  nsGet,
-  nsOk,
-  nsSpeed,
-  nsProbe,
-  nsProbeFail,
-  nsStall,
-  nsLatency,
-  p90Of,
-  pFailOf,
-  pcts,
-} from "./nodes/score";
-import { SEEDS } from "./px/seed";
-import { SEL } from "./px/selector";
-import { S } from "./core/state";
-import {
-  COLO_CITY,
-  loadNodes,
-  nodeLabel,
-  orderNodes,
-  renderClash,
-  renderLinks,
-  renderSingbox,
-  tagOf,
-  trojanPasswordOf,
-} from "./views/sub";
-import { VERSION, sha224Bytes, toHex } from "./core/util";
-
 // 测试专用出口：只在 dist/_test.js 里存在，生产包不含此文件
 export { sha224Bytes, toHex, VERSION, shadowRate, eachLimit, withTimeout } from "./core/util";
 export { detectProtocol, parseVLESS, parseTrojan, loadUsers } from "./proxy/protocol";
@@ -92,6 +38,7 @@ export {
   capOf,
   costOf,
   scoreParts,
+  invalidateRank,
   effView,
   ageFactor,
   candsFor,

@@ -1,7 +1,7 @@
 import { S } from "../core/state";
 import { connect } from "cloudflare:sockets";
 import { timeoutSignal } from "../core/util";
-import { DENY_PORTS, isPrivateHost } from "../core/net";
+import { isPrivateHost } from "../core/net";
 export { DENY_PORTS, checkTarget, isPrivateHost } from "../core/net";
 
 /** 查 AAAA 记录（用于绕过 CF 对 IPv4 的内部隔离） */

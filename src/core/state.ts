@@ -24,8 +24,9 @@ export class AppState {
   funnel: Record<string, number> = { direct: 0, node: 0, v6: 0 };
   candN = 0; // 最近一次 candsFor 的候选数（观测用）
   inflight: Map<string, number> = new Map(); // 节点在途连接数（负载均衡用）
-  // 候选排行缓存：只在大规模（alive≥24）时启用，20 秒一轮
-  rankCache: { t: number; v: Record<string, RankRow[]> } = { t: 0, v: {} };
+  // 候选排行缓存：只在大规模（alive≥24）时启用，各模式各自 20 秒
+  // t 是全局作废戳（0 = 作废），at[m] 是该模式真正写入的时间
+  rankCache: { t: number; at: Record<string, number>; v: Record<string, RankRow[]> } = { t: 0, at: {}, v: {} };
   // Thompson 采样的成员表缓存（按延迟前 TS_K 个），20 秒重建一次
   tsMem: { at: number; keys: string[] } = { at: 0, keys: [] };
 

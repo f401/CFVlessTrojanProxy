@@ -782,6 +782,16 @@ for (let i = 0; i < 30; i++) node(`m${i}:443`, { tcp: 50 + i, okW: 10 });
 const c30 = W.candsFor("lat");
 eq("30 个候选全部返回", c30.length, 30);
 ok("大规模下启用了排行缓存", W.S.rankCache.t > 0);
+// 排行缓存按模式各算各的：曾经两模式共用 t，tput 重算会给 lat 续命（实际有效期 40 s）
+W.invalidateRank();
+eq("缓存起点：30 个候选", W.candsFor("lat").length, 30);
+W.S.rankCache.t = Date.now(); // 全局戳是新的……
+W.S.rankCache.at = { lat: Date.now() - 25000, tput: Date.now() }; // ……但 lat 那条是 25 秒前算的
+node("pm-new:443", { tcp: 90, okW: 10 });
+eq("lat 缓存过期就重算（不被 tput 续命）", W.candsFor("lat").length, 31);
+W.S.rankCache.at = { lat: Date.now(), tput: Date.now() - 25000 };
+node("pm-new2:443", { tcp: 91, okW: 10 });
+eq("lat 缓存新鲜就复用（不白算）", W.candsFor("lat").length, 31);
 W.nsGet(c30[0].k).blackUntil = Date.now() + 60000;
 eq(
   "缓存之外仍会过滤黑名单",

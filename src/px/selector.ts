@@ -363,7 +363,7 @@ export class Selector {
    * @param {boolean} trial 是否为影子连接
    * @returns {void}
    */
-  onFail(env: Env, mode: Mode, k: string, trial: boolean) {
+  onFail(_env: Env, mode: Mode, k: string, trial: boolean) {
     if (!k) return;
     nsFail(k);
     if (trial) {

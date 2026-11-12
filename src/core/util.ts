@@ -3,7 +3,7 @@ export const WS_OPEN = 1;
 export const WS_BUFFER_LIMIT = 1024 * 1024; // 下行发送缓冲超过 1MB 就开始背压
 export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给到 60 秒
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐了
-export const VERSION = "6.33";
+export const VERSION = "6.34";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 
@@ -106,8 +106,6 @@ export function toU8(d: unknown) {
   if (typeof d === "string") return enc.encode(d);
   return new Uint8Array(0);
 }
-
-export const isUUID = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 /**
  * 16 字节 → 标准 UUID 字符串（8-4-4-4-12）。

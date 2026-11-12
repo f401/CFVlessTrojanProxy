@@ -63,10 +63,10 @@ fetch(request)
 ## 4 构建与门禁
 
 ```
-tools/tsc.js      tsc（strict:true，0 error 才继续）
+tools/tsc.js      tsc（strict:true + noUnusedLocals/Parameters，0 error 才继续）
 tools/bundle.js   esbuild → dist/_worker.js（生产）/ dist/_test.js（测试出口）
 tools/check-arch.js 分层 / 循环 / 顶层 let / 体积
-test/*.mjs        448 断言 + 8 项逐字节 golden（含数据面模拟）；`src` 与 `types` 的 any 数量均为 0
+test/*.mjs        468 断言 + 8 项逐字节 golden（含数据面模拟）；`src` 与 `types` 的 any 数量均为 0
 obf/*.js          预处理 + 混淆（Meter 类名保留）
 scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → obf → PUT
 ```
@@ -85,6 +85,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 8. 落盘前读旧值（seed / snap / usage）必须用 `kvGetStrict`；读失败要跳过写，不能当空表覆盖。
 9. cron 与手动 `?refresh=1` 互斥：`S.cronBusy` 覆盖整轮 `cronOnce`，忙时不再排队；
    否则两轮 `cronScan` 会双跑探活、双写 seed、互相覆盖 `poolIdx`。
+10. 排行缓存只准用 `invalidateRank()` 作废，不要手写 `S.rankCache.t = 0` ——
+    两个模式的时间戳要一起清，漏一个就会出现"失败后排行不失效"。
 
 ## 6 目录之外的约定
 
@@ -127,6 +129,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 10. **排行缓存**：`alive≥24` 时 `candsFor` 结果缓存 20 秒，且**只缓存排序、不缓存可用性**——
     黑名单/冻结每次返回前都会重新过滤；`nsFail`/`freezeNode`/候选池换代会把缓存打掉。
     200 候选实测 0.98ms → 0.15ms。
+    **每个模式各记一个写入时间**（`at[lat]` / `at[tput]`）：两模式共用一个 `t` 时，
+    后算的那个会给另一个"续命"，20 秒的实际有效期能拖到 40 秒（6.34 修）。
 11. **站点吞吐中途采样**：长连接每 60 秒补一个站点级 bps 窗口（≥256KB 才记），
     这类采样只带 `bps`，不计入 `n/ok/bad`，避免把一条长连接算成多条连接样本。
 12. **失败三态归因**：`node`（连不上节点）/ `site`（连上了但目标侧拒绝，只加 0.2 权重、不进冷却阶梯）/
