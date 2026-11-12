@@ -14,7 +14,7 @@ const reset = () => {
   S.lastSwitch = { lat: 0, tput: 0 };
   S.switchHits = { lat: [], tput: [] };
   S.inflight.clear();
-  S.rankCache = { t: 0, v: {} };
+  S.rankCache = { t: 0, at: {}, v: {} };
   S.candN = 0;
 };
 const node = (k, patch = {}) => {
@@ -127,7 +127,7 @@ for (let i = 0; i < 400; i++) {
 for (const m of ["lat", "tput"]) {
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < 50; i++) {
-    S.rankCache = { t: 0, v: {} };
+    S.rankCache = { t: 0, at: {}, v: {} };
     W.candsFor(m);
   }
   const us = Number(process.hrtime.bigint() - t0) / 50 / 1000;

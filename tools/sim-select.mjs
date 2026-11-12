@@ -227,7 +227,7 @@ function reset() {
   S.lastSwitch = { lat: 0, tput: 0 };
   S.switchHits = { lat: [], tput: [] };
   S.inflight.clear();
-  S.rankCache = { t: 0, v: {} };
+  S.rankCache = { t: 0, at: {}, v: {} };
   S.candN = 0;
   S.pxFailMem = 0;
   S.pxFailSeen = 0;

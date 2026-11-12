@@ -10,7 +10,8 @@
     "arch": "node tools/check-arch.js",
     "format": "prettier --write \"src/**/*.ts\" \"types/*.d.ts\"",
     "obf": "node obf/pre.js && node obf/obf_mid.js",
-    "all": "npm run arch && npm run build && npm test && npm run obf"
+    "all": "npm run arch && npm run build && npm test && npm run obf",
+    "sim": "node tools/sim-count.mjs"
   },
   "devDependencies": {
     "prettier": "3.9.10",

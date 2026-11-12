@@ -792,6 +792,13 @@ eq("lat 缓存过期就重算（不被 tput 续命）", W.candsFor("lat").length
 W.S.rankCache.at = { lat: Date.now(), tput: Date.now() - 25000 };
 node("pm-new2:443", { tcp: 91, okW: 10 });
 eq("lat 缓存新鲜就复用（不白算）", W.candsFor("lat").length, 31);
+
+// 线上 alive 实测就是 18 个：低于 CAND_CACHE_MIN(24)，排行全程现算
+reset();
+for (let i = 0; i < 18; i++) node(`n18-${i}:443`, { tcp: 60 + i, okW: 10 });
+W.invalidateRank();
+eq("18 个候选全部返回", W.candsFor("lat").length, 18);
+eq("18 个节点（线上实测值）不启用排行缓存", W.S.rankCache.t, 0);
 W.nsGet(c30[0].k).blackUntil = Date.now() + 60000;
 eq(
   "缓存之外仍会过滤黑名单",

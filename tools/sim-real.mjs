@@ -38,6 +38,9 @@ if (process.env.TS_TTL !== undefined) W.SC.TS_TTL = Number(process.env.TS_TTL);
 if (process.env.TRIAL_TPUT) W.SC.TRIAL_TPUT = Number(process.env.TRIAL_TPUT);
 if (process.env.ROUTE_T_LAT) W.SC.ROUTE_T_LAT = Number(process.env.ROUTE_T_LAT);
 if (process.env.ROUTE_T_TPUT) W.SC.ROUTE_T_TPUT = Number(process.env.ROUTE_T_TPUT);
+if (process.env.ROUTE_K) W.SC.ROUTE_K = Number(process.env.ROUTE_K);
+if (process.env.WATCH_N) W.SC.WATCH_N = Number(process.env.WATCH_N);
+if (process.env.TRIAL_LAT) W.SC.TRIAL_LAT = Number(process.env.TRIAL_LAT);
 
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
 
@@ -206,7 +209,7 @@ function reset() {
   S.lastSwitch = { lat: 0, tput: 0 };
   S.switchHits = { lat: [], tput: [] };
   S.inflight.clear();
-  S.rankCache = { t: 0, v: {} };
+  S.rankCache = { t: 0, at: {}, v: {} };
   S.candN = 0;
   S.pxFailMem = 0;
   S.pxFailSeen = 0;
@@ -417,6 +420,7 @@ const profiles = [
   { name: "全真实", nodes: 30, tputShare: 0.25, markov: true, siteShare: 0.2, churn: 2, diurnal: true, jitter: 0.3 },
 ];
 
+export async function main() {
 const hours = Number(process.argv[2] || 12);
 const seeds = Number(process.env.SEEDS || 2);
 const list = process.env.ONLY ? profiles.filter((x) => x.name.includes(process.env.ONLY)) : profiles;
@@ -444,3 +448,9 @@ for (const p of list) {
       mean(rs.map((r) => r.downPct)).toFixed(1),
   );
 }
+}
+
+export { profiles, run, fmt, mean };
+
+// 作为库被 sim-count.mjs 引入时不自动跑主流程（否则一 import 就打印全表）
+if (!process.env.SIM_LIB) await main();

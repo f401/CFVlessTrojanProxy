@@ -55,7 +55,7 @@ function reset() {
   S.lastSwitch = { lat: 0, tput: 0 };
   S.switchHits = { lat: [], tput: [] };
   S.inflight.clear();
-  S.rankCache = { t: 0, v: {} };
+  S.rankCache = { t: 0, at: {}, v: {} };
   S.candN = 0;
   S.pxFailMem = 0;
   S.pxFailSeen = 0;
@@ -128,11 +128,11 @@ async function run(n, hours, seedVal) {
   const mem = (process.memoryUsage().heapUsed - mem0) / MB;
 
   const candLat = bench(() => {
-    S.rankCache = { t: 0, v: {} };
+    S.rankCache = { t: 0, at: {}, v: {} };
     W.candsFor("lat");
   });
   const candTput = bench(() => {
-    S.rankCache = { t: 0, v: {} };
+    S.rankCache = { t: 0, at: {}, v: {} };
     W.candsFor("tput");
   }, 10);
   S.seedAt = NOW + 3600e3; // 让 SEEDS.read 直接返回，只量选路本身
