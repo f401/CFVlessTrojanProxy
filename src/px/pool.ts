@@ -26,10 +26,10 @@ import { kvGet, kvSet, scheduleFlush } from "../store/index";
 /* 代理节点：状态 / 信誉分桶 / 选择 / cron */
 /* ---- 轮换模块：内存为权威，KV 只存「候选池 + 分机房节点信誉」 ---- */
 
-export const SEED_COLD_N = 32; // 冷启动灌进 alive 的节点数
+export const SEED_COLD_N = 48; // 冷启动灌进 alive 的节点数
 export { SC, HIST_BASE, HIST_N } from "../core/const";
 
-const ALIVE_MAX = 400; // 长期运行 alive 上限：池子换代不会永久累积
+const ALIVE_MAX = 800; // 长期运行 alive 上限：池子换代不会永久累积（800 节点 ≈ 1 MB 统计 + candsFor 0.9ms）
 
 // 灾备种子：seed 被清空时用它兜底，避免"池子有 2000 条但一个能用的都没有"。
 // 这些是历史上实测可用的中转，会被正常探活/熔断覆盖，不是永久白名单。
@@ -247,7 +247,7 @@ export async function cronScan(env: Env) {
   }
 
   // ① 探新候选
-  const scanN = Math.max(12, Math.min(60, S.scanN || 12));
+  const scanN = Math.max(12, Math.min(120, S.scanN || 12)); // 每轮最多探 120 个：1600 候选约 6.7 小时轮完
   const idx = S.poolIdx % Math.max(pool.length, 1);
   const batch = pool.slice(idx, idx + scanN);
   const hits = [];
@@ -379,10 +379,10 @@ export async function cronScan(env: Env) {
       if ((s.at || 0) > cut) continue;
       S.nstat.delete(k);
     }
-    if (S.nstat.size > 400) {
+    if (S.nstat.size > 800) {
       const old = [...S.nstat.entries()].filter(([k]) => !live.has(k)).sort((a, b) => (a[1].at || 0) - (b[1].at || 0));
       for (const [k] of old) {
-        if (S.nstat.size <= 300) break;
+        if (S.nstat.size <= 600) break;
         S.nstat.delete(k);
       }
     }

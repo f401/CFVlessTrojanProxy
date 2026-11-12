@@ -59,7 +59,7 @@ export function takePoolLine(line: string, src: string, seen: Map<string, PoolEn
 }
 
 export const POOL_TTL_MS = 24 * 3600e3; // 候选池重建周期（上游源每天都会变）
-export const POOL_MAX = 800; // 候选池硬上限
+export const POOL_MAX = 1600; // 候选池硬上限
 // 换节点策略（可用环境变量覆盖；驻留时间见 selector.dwellOf）
 //   pxFailMax  : 连续失败多少次才允许换（默认 3）
 //   pxForceAt  : 失败到这个数就无视驻留强制换（默认 5）
