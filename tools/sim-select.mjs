@@ -30,6 +30,40 @@ if (process.env.BETA_B) W.SC.BETA_B = Number(process.env.BETA_B);
 
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
 
+/* 可选路由：softmax（按分数在 top-K 里抽签），用来和"单游标 + 滞回"对比 */
+if (process.env.ROUTE === "softmax") {
+  const K = Number(process.env.KTOP || 12);
+  const T = Number(process.env.TEMP || 80);
+  const draw = (list) => {
+    if (!list.length) return "";
+    const v0 = list[0].v;
+    const w = list.map((x) => Math.exp(-(x.v - v0) / T));
+    let tot = 0;
+    for (const x of w) tot += x;
+    let r = Math.random() * tot;
+    for (let i = 0; i < list.length; i++) {
+      r -= w[i];
+      if (r <= 0) return list[i].k;
+    }
+    return list[0].k;
+  };
+  W.SEL.pick = (_env, mode) => draw(W.candsFor(mode).slice(0, K));
+  W.SEL.region = async (_env, cc, mode, avoid = "") => {
+    const want = String(cc || "").toUpperCase();
+    if (!want) return null;
+    const list = W.candsFor(mode)
+      .filter((r) => {
+        const a = S.alive.get(r.k);
+        return a && String(a.cc || "").toUpperCase() === want && r.k !== avoid;
+      })
+      .slice(0, K);
+    const k = draw(list);
+    if (!k) return null;
+    const a = S.alive.get(k);
+    return a || null;
+  };
+}
+
 /* ---------- 节点 ---------- */
 const N = (id, tcp, pFail, bw, o = {}) => ({
   id,
