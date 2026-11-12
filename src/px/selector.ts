@@ -16,6 +16,7 @@ import { pxPolicy } from "./probe";
 import {
   bestFor,
   candsFor,
+  rankedCands,
   costOf,
   freezeNode,
   isBlack,
@@ -219,19 +220,24 @@ export class Selector {
   pickByScore(mode: Mode): string {
     const T = mode === "tput" ? SC.ROUTE_T_TPUT : SC.ROUTE_T_LAT;
     if (!(T > 0)) return ""; // 关闭抽签：调用方退回粘滞游标
-    const list = candsFor(mode);
+    // 只取前 K 个可用候选：candsFor 会对全表做一次 filter（400 节点 ~60µs/次）
+    const list: { k: string; v: number }[] = [];
+    for (const x of rankedCands(mode)) {
+      if (list.length >= SC.ROUTE_K) break;
+      if (!S.alive.has(x.k) || isBlack(x.k) || isFrozen(x.k)) continue;
+      list.push(x);
+    }
     if (!list.length) return "";
-    const k = Math.min(SC.ROUTE_K, list.length);
     const v0 = list[0].v;
     let tot = 0;
-    const w = new Array(k);
-    for (let i = 0; i < k; i++) {
+    const w = new Array(list.length);
+    for (let i = 0; i < list.length; i++) {
       const e = Math.exp(-(list[i].v - v0) / T);
       w[i] = e;
       tot += e;
     }
     let r = Math.random() * tot;
-    for (let i = 0; i < k; i++) {
+    for (let i = 0; i < list.length; i++) {
       r -= w[i];
       if (r <= 0) return list[i].k;
     }
@@ -246,10 +252,14 @@ export class Selector {
   }
 
   /** 待测队列：样本不足的节点，最久没试的优先（单遍扫描，不排序） */
-  trial(mode: Mode) {
-    let best = "",
-      bestN = Infinity,
-      bestMs = Infinity;
+  // watchlist 缓存：全表排序很贵（400 节点 ~1.5ms），60 秒重算一次就够
+  private watchAt: Record<Mode, number> = { lat: 0, tput: 0 };
+  private watch: Record<Mode, string[]> = { lat: [], tput: [] };
+
+  /** 重建 watchlist：探活快 + 样本少的 32 个候选 */
+  buildWatch(mode: Mode) {
+    const enough = mode === "tput" ? SC.TRIAL_TPUT : SC.TRIAL_LAT;
+    const cands: { k: string; v: number }[] = [];
     for (const k of S.alive.keys()) {
       if (k === S.curs[mode] || isBlack(k) || isFrozen(k)) continue;
       const a = (S.alive.get(k) || {}) as NodeEntry;
@@ -257,18 +267,37 @@ export class Selector {
       const s = S.nstat.get(k) || ZERO_STAT;
       if (suspectOf(s)) continue; // 连得上却传不出数据的节点，不值得占一次试探预算
       const n = (s.okW || 0) + (s.failW || 0);
-      const enough = mode === "tput" ? SC.TRIAL_TPUT : SC.TRIAL_LAT;
       if (n >= enough) continue; // 样本够了才毕业（3 个样本定生死＝把运气当能力）
-      // 按"还差多少样本"排队：少样本优先，同档挑探活更快的，
-      // 探索预算压在最有希望的节点上，而不是平均撒给所有节点。
-      const ms = a.ms || 999;
-      if (n < bestN - 0.5 || (n <= bestN + 0.5 && ms < bestMs)) {
-        best = k;
-        bestN = n;
-        bestMs = ms;
-      }
+      cands.push({ k, v: (a.ms || 250) + SC.WATCH_BONUS / Math.sqrt(n + 1) });
     }
-    return best;
+    cands.sort((x, y) => x.v - y.v);
+    this.watch[mode] = cands.slice(0, SC.WATCH_N).map((x) => x.k);
+    this.watchAt[mode] = Date.now();
+    return this.watch[mode];
+  }
+
+  /** 探索预算只花在 watchlist 里：5% 摊到 N 个节点等于没探索 */
+  trial(mode: Mode) {
+    const enough = mode === "tput" ? SC.TRIAL_TPUT : SC.TRIAL_LAT;
+    const pickIn = (list: string[]) => {
+      let best = "",
+        bestN = Infinity;
+      for (const k of list) {
+        if (k === S.curs[mode] || !S.alive.has(k) || isBlack(k) || isFrozen(k)) continue;
+        const s = S.nstat.get(k) || ZERO_STAT;
+        if (suspectOf(s)) continue;
+        const n = (s.okW || 0) + (s.failW || 0);
+        if (n >= enough) continue;
+        if (n < bestN - 0.5) {
+          best = k;
+          bestN = n;
+        }
+      }
+      return best;
+    };
+    let list = this.watch[mode];
+    if (!list.length || Date.now() - this.watchAt[mode] > 60000) list = this.buildWatch(mode);
+    return pickIn(list) || pickIn(this.buildWatch(mode));
   }
 
   /** 重新评估是否该换节点（cron 与失败路径共用） */

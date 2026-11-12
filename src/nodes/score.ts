@@ -117,7 +117,7 @@ export function pFailFast(s: NodeStats, now = Date.now()): number {
   const k = Math.pow(0.5, Math.max(0, now - s.winAt) / SC.WIN_HL);
   const bad = (s.winFail || 0) * k;
   const n = bad + (s.winOk || 0) * k;
-  if (n < 3) return 0;
+  if (n < 2.5) return 0; // 3 次有效样本才发言（浮点衰减后 3.0 会略小于 3）
   return Math.min(0.9, bad / n);
 }
 
@@ -483,15 +483,12 @@ export function usable(k: string, now = Date.now()): boolean {
 const CAND_TTL = 20000;      // 排行缓存有效期
 const CAND_CACHE_MIN = 24;   // 候选少的时候不必缓存（重算也就几十 µs）
 
-export function candsFor(mode: Mode) {
+export function rankedCands(mode: Mode) {
   const m: Mode = mode === "tput" ? "tput" : "lat";
   const useCache = S.alive.size >= CAND_CACHE_MIN;
   if (useCache) {
     const c = S.rankCache;
-    if (c.t && Date.now() - c.t < CAND_TTL && c.v[m]) {
-      // 缓存只冻结排序，不冻结"能不能用"：黑名单/冻结每次都要重新过滤
-      return c.v[m].filter((r) => S.alive.has(r.k) && !isBlack(r.k) && !isFrozen(r.k));
-    }
+    if (c.t && Date.now() - c.t < CAND_TTL && c.v[m]) return c.v[m];
   }
   const out: { k: string; v: number }[] = [];
   for (const k of S.alive.keys()) {
@@ -502,6 +499,11 @@ export function candsFor(mode: Mode) {
   S.candN = out.length;
   if (useCache) S.rankCache = { t: Date.now(), v: { ...S.rankCache.v, [m]: out } };
   return out;
+}
+
+export function candsFor(mode: Mode) {
+  // 缓存只冻结排序，不冻结"能不能用"：黑名单/冻结每次都要重新过滤
+  return rankedCands(mode).filter((r) => S.alive.has(r.k) && !isBlack(r.k) && !isFrozen(r.k));
 }
 
 /**
