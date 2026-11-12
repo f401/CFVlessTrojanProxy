@@ -143,6 +143,7 @@ export async function proxyip(c: UserCtx): Promise<Response> {
     failCount: S.pxFailMem,
     probeWhy: S.probeWhy,
     probeColo: S.probeColo,
+    reProbeN: S.reProbeN,
     funnel: stat.funnel || { direct: 0, node: 0, v6: 0 },
     rotatePolicy: {
       minDwellSec: Math.round(SC.DWELL / 1000),

@@ -21,7 +21,11 @@ export class AppState {
   hits = 0;
   // 探活结果按原因分类：区分"连不上"（可能是地区/线路）和"连上了但不是 CF 反代"（节点事实）
   probeWhy: Record<string, number> = {};
-  probeColo = ""; // 这批探活是在哪个机房做的（cron 拿不到 colo，记 "cron"）
+  probeColo = "";
+  /** 待复测：上一轮探活比同 /24 邻居慢一大截的节点（探活抖动一次不该定生死） */
+  reProbe: string[] = [];
+  /** 复测累计次数：线上用它判断"探活抖动"到底有多频繁（=0 说明这条优化没触发过） */
+  reProbeN = 0; // 这批探活是在哪个机房做的（cron 拿不到 colo，记 "cron"）
   needPx: Map<string, number> = new Map();
   colo = "";
   funnel: Record<string, number> = { direct: 0, node: 0, v6: 0 };

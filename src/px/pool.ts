@@ -254,6 +254,27 @@ export async function cronScan(env: Env) {
     if (!pool.length) return;
   }
 
+  // ①a 复测上一轮"比同 /24 邻居慢一大截"的节点：一次抖动会被 EWMA 吃掉 30%，
+  //     紧接着再测一次就能拉回来。每个节点最多复测一次，每轮最多 4 个。
+  const again = S.reProbe.splice(0, 4);
+  if (again.length) {
+    S.reProbeN += again.length;
+    const rr = await Promise.all(
+      again.map(async (k) => {
+        const i = k.lastIndexOf(":");
+        return { k, r: await probeProxy(k.slice(0, i), Number(k.slice(i + 1)) || 443) };
+      }),
+    );
+    for (const { k, r } of rr) {
+      noteProbe(r);
+      if (r && !r.bad) {
+        nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
+        const a = S.alive.get(k);
+        if (a && r.ms < (a.ms || 1e9)) a.ms = r.ms;
+      }
+    }
+  }
+
   // ① 探新候选
   const scanN = Math.max(12, Math.min(120, S.scanN || 12)); // 每轮最多探 120 个：1600 候选约 6.7 小时轮完
   const idx = S.poolIdx % Math.max(pool.length, 1);
@@ -268,6 +289,30 @@ export async function cronScan(env: Env) {
   S.poolIdx = (idx + scanN) % Math.max(pool.length, 1);
   S.probes += batch.length;
   S.hits += hits.length;
+  // ①c 同批对照：同一个 /24 里其它节点都很快、只有它慢 3 倍以上 → 下一轮复测。
+  //     不用绝对阈值（不同 /24 的基线差很多），也不动选路，只是多测一次。
+  {
+    const by24 = new Map<string, number[]>();
+    for (const x of hits) {
+      if (!x) continue;
+      const p = String(x.h).split(".");
+      if (p.length !== 4 || !(x.ms > 0)) continue;
+      const k24 = p.slice(0, 3).join(".");
+      const arr = by24.get(k24) || [];
+      arr.push(x.ms);
+      by24.set(k24, arr);
+    }
+    for (const x of hits) {
+      if (!x) continue;
+      const p = String(x.h).split(".");
+      if (p.length !== 4 || !(x.ms > 0) || S.reProbe.length >= 8) continue;
+      const arr = by24.get(p.slice(0, 3).join(".")) || [];
+      if (arr.length < 3) continue;
+      const med = arr.slice().sort((a, b) => a - b)[Math.floor(arr.length / 2)];
+      const k = keyOf(x);
+      if (x.ms > Math.max(3 * med, 250) && !S.reProbe.includes(k)) S.reProbe.push(k);
+    }
+  }
 
   for (const x of hits) {
     if (!x) continue;
