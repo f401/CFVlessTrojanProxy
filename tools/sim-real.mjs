@@ -138,7 +138,8 @@ async function request(n, mode, size, siteShare, jitter) {
   const dur = rtt + (size / (n.bw * MB)) * 1000;
   const bps = size / (dur / 1000);
   // 与 Connection 的采样门槛保持一致：<32KB 或 <300ms 的请求不进吞吐直方图
-  if (size >= 32 * K && dur >= 300) {
+  // 与 Connection.flush 一致：dt>=50 且（dt>=300 或 ≥1MB）
+  if (size >= 32 * K && dur >= 50 && (dur >= 300 || size >= MB)) {
     const w = Math.min(1, size / (512 * K)) * Math.min(1, dur / 1000);
     if (w > 0) W.nsSpeed(n.key, bps, size, ENV, Math.min(4, w));
   }
@@ -169,11 +170,12 @@ async function run(p, hours, seedVal) {
 
   const ticks = hours * 3600;
   let reqs = 0, fails = 0, siteFails = 0, costSum = 0, ratioSum = 0, bad = 0, top = 0;
-  let sw = 0, lastLat = "", lastTput = "", newSeen = 0, newTotal = 0, downHits = 0;
+  let sw = 0, lastLat = "", lastTput = "", newSeen = 0, newTotal = 0, downHits = 0, ratioRelSum = 0;
   const tailFrom = Math.floor(ticks * 0.7);
   let tailN = 0, tailTop = 0, tailRatio = 0;
   const ratios = [];
   const downLeft = [];
+  const hits = new Map();
 
   for (let t = 0; t < ticks; t++) {
     NOW += 1000;
@@ -233,22 +235,26 @@ async function run(p, hours, seedVal) {
       if (!n) continue;
       reqs++;
       if (n.down) downHits++;
+      hits.set(n.key, (hits.get(n.key) || 0) + 1);
       const r = await request(n, mode, size, p.siteShare || 0, p.jitter || 0);
       if (!r.ok) {
         fails++;
         if (r.site) siteFails++;
       }
       // 上帝视角：当前活着的最优
-      let best = Infinity;
+      let best = Infinity, bestRel = Infinity;
       for (const x of pool) {
         if (x.down) continue;
         const c = costOf(x, size);
         if (c < best) best = c;
+        if (x.pFail <= 0.02 && c < bestRel) bestRel = c;
       }
       const c = Number.isFinite(costOf(n, size)) ? costOf(n, size) : (Number.isFinite(best) ? best * 2 : 1e6);
       const ratio = Number.isFinite(best) && best > 0 ? c / best : 1;
+      const ratioRel = Number.isFinite(bestRel) && bestRel > 0 ? c / bestRel : 1;
       costSum += c;
       ratioSum += ratio;
+      ratioRelSum += ratioRel;
       ratios.push(ratio);
       if (ratio > 1.5) bad++;
       if (n === pool[0]) top++;
@@ -265,6 +271,13 @@ async function run(p, hours, seedVal) {
     }
   }
 
+  if (process.env.DUMP) {
+    const rows = [...byKey.values()].map((n) => ({ k: n.key, bw: +n.bw.toFixed(1), tcp: Math.round(n.tcp), pf: +n.pFail.toFixed(3), sc: Math.round(W.costOf(n.key, "tput")), hits: hits.get(n.key) || 0, cost: Math.round(costOf(n, 10 * MB)) }));
+    rows.sort((a, b) => a.cost - b.cost);
+    console.log("[dump]", p.name, "cur", S.curs.tput);
+    console.log("[dump] oracle", rows[0], "cursor", rows.find((r) => r.k === S.curs.tput));
+    console.log("[dump] top-score", rows.slice().sort((a, b) => a.sc - b.sc).slice(0, 3));
+  }
   ratios.sort((a, b) => a - b);
   return {
     name: p.name,
@@ -272,6 +285,7 @@ async function run(p, hours, seedVal) {
     failPct: (fails / Math.max(1, reqs)) * 100,
     sitePct: (siteFails / Math.max(1, reqs)) * 100,
     ratio: ratioSum / Math.max(1, reqs),
+    ratioRel: ratioRelSum / Math.max(1, reqs),
     p95: ratios[Math.min(ratios.length - 1, Math.floor(ratios.length * 0.95))] || 1,
     bad: (bad / Math.max(1, reqs)) * 100,
     sw: sw / hours,
@@ -302,18 +316,19 @@ const list = process.env.ONLY ? profiles.filter((x) => x.name.includes(process.e
 console.log(`真实画像仿真 ${hours}h × ${seeds} 种子 / 30 个节点 / 对数正态延迟与带宽\n`);
 console.log(
   fmt("画像", 18) + fmt("请求", 9) + fmt("失败%", 7) + fmt("其中站点%", 11) +
-    fmt("代价倍率", 16) + fmt("P95", 7) + fmt(">1.5x", 7) + fmt("末段", 7) + fmt("切/小时", 8) + fmt("新节点%", 9) + "打到死节点%",
+    fmt("倍率/可靠倍率", 20) + fmt("P95", 7) + fmt(">1.5x", 7) + fmt("末段", 7) + fmt("切/小时", 8) + fmt("新节点%", 9) + "打到死节点%",
 );
 
 for (const p of list) {
   const rs = [];
-  for (let i = 0; i < seeds; i++) rs.push(await run(p, hours, 100 + i));
+  const s0 = Number(process.env.SEED0 || 100);
+  for (let i = 0; i < seeds; i++) rs.push(await run(p, hours, s0 + i));
   const rat = rs.map((r) => r.ratio);
   console.log(
     fmt(p.name, 18) + fmt(Math.round(mean(rs.map((r) => r.reqs))), 9) +
       fmt(mean(rs.map((r) => r.failPct)).toFixed(1), 7) +
       fmt(mean(rs.map((r) => r.sitePct)).toFixed(1), 11) +
-      fmt(`${mean(rat).toFixed(2)}x (${Math.min(...rat).toFixed(2)}-${Math.max(...rat).toFixed(2)})`, 16) +
+      fmt(`${mean(rat).toFixed(2)}x / ${mean(rs.map((r) => r.ratioRel)).toFixed(2)}x`, 20) +
       fmt(mean(rs.map((r) => r.p95)).toFixed(1) + "x", 7) +
       fmt(mean(rs.map((r) => r.bad)).toFixed(0) + "%", 7) +
       fmt(mean(rs.map((r) => r.tail)).toFixed(2) + "x", 7) +

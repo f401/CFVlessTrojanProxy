@@ -233,7 +233,17 @@ export class Connection {
       const now = Date.now();
       const dt = now - this.sampleAt;
       const bytes = this.down - this.sampleDown;
-      if (this.node && this.sampleAt && dt >= 300 && bytes >= 32768 && now - this.lastEmit >= 5000) {
+      // 快速节点（10MB 在 300ms 内传完，>33MB/s）以前永远进不了直方图：
+      // dt>=300ms 的闸门把它们全挡了，e10 只能停在 51 秒先验上。
+      // 字节够多（≥1MB）时不再要求 300ms —— 1MB 已经过了慢启动。
+      if (
+        this.node &&
+        this.sampleAt &&
+        dt >= 50 &&
+        (dt >= 300 || bytes >= 1048576) &&
+        bytes >= 32768 &&
+        now - this.lastEmit >= 5000
+      ) {
         let w = this.takeWeight(bytes, dt);
         const stallWin = this.stallMs - this.stallMark;
         if (stallWin > dt * 0.5) w *= 0.3;

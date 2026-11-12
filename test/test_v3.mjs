@@ -802,7 +802,7 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   await W.SEEDS.write(envSeed, true, true);
   const doc = JSON.parse(saved);
   const names = doc.byColo["*"].nodes.map((n) => n.k);
-  eq("名单仍截断在 40 条", names.length, 40);
+  eq("名单不超过 SEED_MAX（200）", names.length, 45);
   ok(
     "新探到的节点进入全局名单",
     names.some((k) => k.startsWith("new")),
