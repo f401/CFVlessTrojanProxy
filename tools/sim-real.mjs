@@ -27,11 +27,85 @@ const gauss = () => {
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
 if (process.env.PRIOR_BPS) W.SC.PRIOR_BPS = Number(process.env.PRIOR_BPS);
+if (process.env.LAT_TS !== undefined) W.SC.LAT_TS = Number(process.env.LAT_TS);
 if (process.env.TRIAL_TPUT) W.SC.TRIAL_TPUT = Number(process.env.TRIAL_TPUT);
 if (process.env.ROUTE_T_LAT) W.SC.ROUTE_T_LAT = Number(process.env.ROUTE_T_LAT);
 if (process.env.ROUTE_T_TPUT) W.SC.ROUTE_T_TPUT = Number(process.env.ROUTE_T_TPUT);
 
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
+
+if (process.env.RANK === "ts") {
+  const gate = Number(process.env.GATE || 0.02);
+  W.SEL.pick = (_env, mode) => {
+    const all = W.candsFor(mode);
+    if (!all.length) return "";
+    const K = Number(process.env.KTOP || 0);
+    let pool = all;
+    if (K > 0) {
+      pool = all
+        .map((x) => ({ x, p: W.scoreParts(x.k, mode) }))
+        .filter((r) => r.p.pFailRisk <= gate)
+        .sort((a, b) => a.p.latencyMs - b.p.latencyMs)
+        .slice(0, K)
+        .map((r) => r.x);
+    }
+    let best = "", bv = Infinity;
+    for (const x of pool) {
+      const p = W.scoreParts(x.k, mode);
+      if (K === 0 && p.pFailRisk > gate) continue;
+      let v = 0;
+      if (mode === "tput") {
+        // e10 的后验：对数正态，相对误差 ~0.5/sqrt(有效窗口数)
+        const sg = 0.5 / Math.sqrt(Math.max(1, p.nEff));
+        v = p.e10Ms * Math.exp(gauss() * sg) + 0.5 * p.latencyMs;
+      } else {
+        // 延迟的后验：正态，标准差 = latency / sqrt(样本数)
+        const sd = p.latencyMs / Math.sqrt(Math.max(1, p.latN));
+        v = p.latencyMs + gauss() * sd;
+      }
+      if (v < bv) { bv = v; best = x.k; }
+    }
+    return best || all[0].k;
+  };
+}
+if (process.env.RANK === "rawsoft") {
+  const gate = Number(process.env.GATE || 0.02);
+  const T = Number(process.env.TEMP || 20);
+  W.SEL.pick = (_env, mode) => {
+    const all = W.candsFor(mode);
+    const list = [];
+    for (const x of all) {
+      const p = W.scoreParts(x.k, mode);
+      if (p.pFailRisk > gate) continue;
+      const v = mode === "tput" ? p.e10Ms + 0.5 * p.latencyMs : p.latencyMs + 2500 * p.pStall;
+      list.push({ k: x.k, v });
+    }
+    if (!list.length) return all.length ? all[0].k : "";
+    list.sort((a, b) => a.v - b.v);
+    const top = list.slice(0, 12);
+    const v0 = top[0].v;
+    let tot = 0;
+    const w = top.map((x) => { const e = Math.exp(-(x.v - v0) / T); tot += e; return e; });
+    let r = Math.random() * tot;
+    for (let i = 0; i < top.length; i++) { r -= w[i]; if (r <= 0) return top[i].k; }
+    return top[0].k;
+  };
+}
+if (process.env.RANK === "raw") {
+  const gate = Number(process.env.GATE || 0.02);
+  W.SEL.pick = (_env, mode) => {
+    const list = W.candsFor(mode);
+    if (!list.length) return "";
+    let best = "", bv = Infinity;
+    for (const x of list) {
+      const p = W.scoreParts(x.k, mode);
+      if (p.pFailRisk > gate) continue;
+      const v = mode === "tput" ? p.e10Ms + 0.5 * p.latencyMs : p.latencyMs;
+      if (v < bv) { bv = v; best = x.k; }
+    }
+    return best || list[0].k;
+  };
+}
 
 /* 备选设计：乐观初始化 + 贪心（没测过的节点按"已知最好"估，而不是 51 秒先验） */
 if (process.env.ALT === "optim") {
@@ -267,6 +341,11 @@ async function run(p, hours, seedVal) {
     console.log("[dump]", p.name, "cur", S.curs.tput);
     console.log("[dump] oracle", rows[0], "cursor", rows.find((r) => r.k === S.curs.tput));
     console.log("[dump] top-score", rows.slice().sort((a, b) => a.sc - b.sc).slice(0, 3));
+  }
+  if (process.env.DUMP) {
+    const rows = [...byKey.values()].map((n) => ({ k: n.key, tcp: Math.round(n.tcp), pf: +n.pFail.toFixed(3), hits: hits.get(n.key) || 0, sc: Math.round(W.costOf(n.key, "lat")), lat: Math.round(W.scoreParts(n.key, "lat").latencyMs), n: Math.round(W.scoreParts(n.key, "lat").latN) }));
+    rows.sort((a, b) => b.hits - a.hits);
+    console.log("[hits]", p.name, rows.slice(0, 5).map((r) => `${r.k}:${r.hits}(${r.tcp}ms,${r.pf},n=${r.n})`).join(" "));
   }
   ratios.sort((a, b) => a - b);
   return {

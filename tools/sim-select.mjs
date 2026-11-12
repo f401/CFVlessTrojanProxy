@@ -32,6 +32,23 @@ if (process.env.BETA_B) W.SC.BETA_B = Number(process.env.BETA_B);
 
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
 
+/* 备选：失败率只做门槛，排序只看可测量（延迟/吞吐） */
+if (process.env.RANK === "raw") {
+  const gate = Number(process.env.GATE || 0.02);
+  W.SEL.pick = (_env, mode) => {
+    const list = W.candsFor(mode);
+    if (!list.length) return "";
+    let best = "", bv = Infinity;
+    for (const x of list) {
+      const p = W.scoreParts(x.k, mode);
+      if (p.pFailRisk > gate) continue;
+      const v = mode === "tput" ? p.e10Ms + 0.5 * p.latencyMs : p.latencyMs;
+      if (v < bv) { bv = v; best = x.k; }
+    }
+    return best || list[0].k;
+  };
+}
+
 /* 备选：地区模式"延迟优先"——失败率只做门槛，不进分数 */
 if (process.env.RGN === "fast") {
   const gate = Number(process.env.RGN_GATE || 0.08);
