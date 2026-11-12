@@ -14,6 +14,7 @@ import { aliveList, pxGet } from "./pool";
 import { cnt } from "../core/counter";
 import { pxPolicy } from "./probe";
 import {
+  ageFactor,
   bestFor,
   candsFor,
   rankedCands,
@@ -30,6 +31,13 @@ import {
   nsSiteFail,
 } from "../nodes/score";
 import { S } from "../core/state";
+
+/** 标准正态（Box-Muller）；不用 while，避免 Math.random 被打桩成 0 时死循环 */
+function gauss(): number {
+  const u = Math.random() || 1e-9;
+  const v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
 
 /**
  * 切换后的最短驻留时间。pxDwellMin 只接受正数覆盖；未设置 / 0 / 非法时
@@ -84,6 +92,13 @@ export class Selector {
   pick(env: Env, mode: Mode, st: PickState | null) {
     const m = mode === "lat" ? "lat" : "tput";
     const now = Date.now();
+    if (m === "lat" && SC.LAT_TS > 0 && SC.TS_CURSOR === 0) {
+      const k = this.pickLat();
+      if (k) {
+        if (st) st.node = k;
+        return k;
+      }
+    }
     let cur = S.curs[m];
     // 游标可能是上一代候选池里的节点：池子刷新后 alive 里已经没有它了。
     // 以前会一直把连接拨到这个死地址，直到 cron 的 maybeSwitch 才发现。
@@ -127,6 +142,15 @@ export class Selector {
             return best;
           }
         }
+      }
+    }
+
+    // ②.5 延迟模式：Thompson 采样 + 失败门槛
+    if (m === "lat" && SC.LAT_TS > 0) {
+      const k = this.pickLat();
+      if (k) {
+        if (st) st.node = k;
+        return k;
       }
     }
 
@@ -242,6 +266,57 @@ export class Selector {
       if (r <= 0) return list[i].k;
     }
     return list[0].k;
+  }
+
+  private tsAt = 0;
+  private tsRows: { k: string; lat: number; n: number; risk: number }[] = [];
+
+  private refreshTS(now: number) {
+    if (SC.TS_TTL > 0 && this.tsAt && now - this.tsAt < SC.TS_TTL && this.tsRows.length) return;
+    const rows: { k: string; lat: number; n: number; risk: number }[] = [];
+    const cold: { k: string; lat: number; n: number; risk: number }[] = [];
+    for (const k of S.alive.keys()) {
+      if (isBlack(k) || isFrozen(k) || !usable(k)) continue;
+      const p = scoreParts(k, "lat", now);
+      const row = { k, lat: p.latencyMs, n: p.latN, risk: p.pFailRisk };
+      rows.push(row);
+      if (p.latN < 3 && cold.length < SC.TS_COLD) cold.push(row);
+    }
+    rows.sort((a, b) => a.lat - b.lat);
+    const top = rows.slice(0, SC.TS_K);
+    for (const c of cold) if (top.indexOf(c) < 0) top.push(c);
+    this.tsRows = top;
+    this.tsAt = now;
+  }
+
+  /** 延迟模式：失败率做门槛，排序从 N(lat, lat/√n) 里抽一个 */
+  private pickLat(): string {
+    const now = Date.now();
+    this.refreshTS(now);
+    let best = "",
+      bv = Infinity;
+    for (const r of this.tsRows) {
+      if (!S.alive.has(r.k) || isBlack(r.k) || isFrozen(r.k)) continue;
+      // 样本数取实时值：缓存 20 秒的 n 会让"刚拿到样本"的节点继续按未知处理，
+      // 结果是一直被抽中（实测这条缓存会把 1.22x 拉成 1.75x）。
+      const st = S.nstat.get(r.k);
+      const n = st ? (st.pN + st.okW) * ageFactor(now - (st.at || now)) : 1;
+      // TS_COLD_PASS=1：样本不足的节点先放进来（否则门槛把它们永远锁在外面）
+      if (SC.TS_COLD_PASS === 0 || n >= 3) {
+        if (r.risk > SC.FAIL_GATE) continue;
+      }
+      const sd = r.lat / Math.sqrt(Math.max(1, n));
+      const v = r.lat + gauss() * sd;
+      if (v < bv) {
+        bv = v;
+        best = r.k;
+      }
+    }
+    if (best) return best;
+    if (SC.TS_FB === 1) return bestFor("lat");
+    let lo: { k: string; lat: number; n: number; risk: number } | null = null;
+    for (const r of this.tsRows) if (!lo || r.risk < lo.risk) lo = r;
+    return lo ? lo.k : "";
   }
 
   /** 有效吞吐窗口数：sumW²/sumW2（样本不足就不值得长期驻留） */

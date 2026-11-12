@@ -28,6 +28,10 @@ const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
 if (process.env.PRIOR_BPS) W.SC.PRIOR_BPS = Number(process.env.PRIOR_BPS);
 if (process.env.LAT_TS !== undefined) W.SC.LAT_TS = Number(process.env.LAT_TS);
+if (process.env.TS_COLD_PASS !== undefined) W.SC.TS_COLD_PASS = Number(process.env.TS_COLD_PASS);
+if (process.env.TS_FB !== undefined) W.SC.TS_FB = Number(process.env.TS_FB);
+if (process.env.TS_CURSOR !== undefined) W.SC.TS_CURSOR = Number(process.env.TS_CURSOR);
+if (process.env.TS_TTL !== undefined) W.SC.TS_TTL = Number(process.env.TS_TTL);
 if (process.env.TRIAL_TPUT) W.SC.TRIAL_TPUT = Number(process.env.TRIAL_TPUT);
 if (process.env.ROUTE_T_LAT) W.SC.ROUTE_T_LAT = Number(process.env.ROUTE_T_LAT);
 if (process.env.ROUTE_T_TPUT) W.SC.ROUTE_T_TPUT = Number(process.env.ROUTE_T_TPUT);
