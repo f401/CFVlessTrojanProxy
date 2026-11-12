@@ -261,7 +261,9 @@ async function request(n, mode, burst, jitter) {
   const rtt = rttOf(n) * (jitter ? 1 + (rnd() - 0.5) * jitter : 1);
   const bytes = mode === "tput" ? 10 * MB : 0.2 * MB;
   const dur = rtt + (bytes / Math.max(1, n.bw * MB * (1 - n.stall))) * 1000;
-  const bps = bytes / (dur / 1000);
+  // STALLFIX：把背压时间从采样分母里扣掉（模拟"只算真正在传的时间"）
+  const stallMs = process.env.STALLFIX ? n.stall * dur : 0;
+  const bps = bytes / (Math.max(dur * 0.4, dur - stallMs) / 1000);
   const w = Math.min(1, bytes / (512 * 1024)) * Math.min(1, dur / 1000);
   if (w > 0) W.nsSpeed(n.key, bps, bytes, ENV, Math.min(4, w));
   if (n.stall > 0) W.nsStall(n.key, n.stall * dur, dur);

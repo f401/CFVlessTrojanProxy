@@ -43,6 +43,13 @@ if (process.env.WATCH_N) W.SC.WATCH_N = Number(process.env.WATCH_N);
 if (process.env.TRIAL_LAT) W.SC.TRIAL_LAT = Number(process.env.TRIAL_LAT);
 
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
+if (process.env.PX_SHADOW !== undefined) ENV.pxShadow = Number(process.env.PX_SHADOW);
+if (process.env.FAIL) W.SC.FAIL = Number(process.env.FAIL);
+if (process.env.STALL) W.SC.STALL = Number(process.env.STALL);
+if (process.env.BETA_A) W.SC.BETA_A = Number(process.env.BETA_A);
+if (process.env.BETA_B) W.SC.BETA_B = Number(process.env.BETA_B);
+if (process.env.HL) W.SC.HL = Number(process.env.HL);
+if (process.env.H_LAT_REL) W.SC.H_LAT_REL = Number(process.env.H_LAT_REL);
 
 if (process.env.RANK === "ts2") {
   // 成员表缓存 20 秒（按延迟取前 64），统计每条连接重算
