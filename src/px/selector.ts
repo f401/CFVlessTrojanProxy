@@ -86,9 +86,11 @@ export class Selector {
     let cur = S.curs[m];
     // 游标可能是上一代候选池里的节点：池子刷新后 alive 里已经没有它了。
     // 以前会一直把连接拨到这个死地址，直到 cron 的 maybeSwitch 才发现。
+    // 游标只做面板/健康展示：真正走谁由 pickByScore 抽签决定。
+    // 这里仍然维护游标，是为了面板/health 不显示一个已经死掉或冷却的节点。
     if (!cur || !S.alive.has(cur) || isBlack(cur) || isFrozen(cur)) {
       cur = bestFor(m);
-      S.curs[m] = cur; // 没有候选就清空：别让面板/health 一直显示一个已经不存在的节点
+      S.curs[m] = cur;
     }
     if (!cur) cnt("noCand");
     const host = st && st.host ? String(st.host) : "";
@@ -162,12 +164,35 @@ export class Selector {
         return t;
       }
     }
-    // ④ 负载感知：当前节点在途连接多的时候，允许溢出到分数接近的空闲候选
+    // ④ 延迟模式：加权抽签（前 K 名按 exp(-(v-v0)/T) 抽）
+    //    吞吐模式仍走粘滞游标 —— 抽签在"带宽崩塌"场景实测更差（2.68x → 4.22x）。
+    const pick = this.pickByScore(m);
+    if (pick) {
+      let chosen = pick;
+      // 负载感知：抽中的节点在途多时，换到分数接近、在途更少的候选
+      if ((S.inflight.get(chosen) || 0) >= 2) {
+        const cv = costOf(chosen, m);
+        let alt = "",
+          bv = Infinity;
+        for (const x of candsFor(m).slice(0, 8)) {
+          if (x.k === chosen) continue;
+          if (x.v > cv * 1.5) continue;
+          if ((S.inflight.get(x.k) || 0) >= (S.inflight.get(chosen) || 0)) continue;
+          if (x.v < bv) {
+            bv = x.v;
+            alt = x.k;
+          }
+        }
+        if (alt) chosen = alt;
+      }
+      if (st) st.node = chosen;
+      return chosen;
+    }
+    // ⑤ 吞吐模式（或抽签关闭）：粘滞游标 + 负载溢出
     if (cur && (S.inflight.get(cur) || 0) >= 2) {
       const cv = costOf(cur, m);
       let alt = "",
         bv = Infinity;
-      // 看前 8 个而不是前 3 个：前 3 可能全忙，后面仍有同分数的空闲节点
       for (const x of candsFor(m).slice(0, 8)) {
         if (x.k === cur) continue;
         if (x.v > cv * 1.5) continue;
@@ -181,6 +206,36 @@ export class Selector {
     }
     if (st) st.node = cur;
     return cur;
+  }
+
+  /**
+   * 加权抽签（softmax）：在候选前 K 名里按 exp(-(v-v0)/T) 抽。
+   * 单游标 + 滞回的毛病是"谁先拿到流量谁就永远赢"：游标拿 95% 流量 → 样本多 →
+   * pFail 趋近 0 → 分数更低 → 继续拿流量。抽签让每个候选按分数分到流量，
+   * 估计自然收敛；代价是"当前节点"不再是一个固定值（面板看 S.curs 的领先者）。
+   * @param {string} mode "lat" | "tput"
+   * @returns {string} 节点 key，没有候选返回 ""
+   */
+  pickByScore(mode: Mode): string {
+    const T = mode === "tput" ? SC.ROUTE_T_TPUT : SC.ROUTE_T_LAT;
+    if (!(T > 0)) return ""; // 关闭抽签：调用方退回粘滞游标
+    const list = candsFor(mode);
+    if (!list.length) return "";
+    const k = Math.min(SC.ROUTE_K, list.length);
+    const v0 = list[0].v;
+    let tot = 0;
+    const w = new Array(k);
+    for (let i = 0; i < k; i++) {
+      const e = Math.exp(-(list[i].v - v0) / T);
+      w[i] = e;
+      tot += e;
+    }
+    let r = Math.random() * tot;
+    for (let i = 0; i < k; i++) {
+      r -= w[i];
+      if (r <= 0) return list[i].k;
+    }
+    return list[0].k;
   }
 
   /** 有效吞吐窗口数：sumW²/sumW2（样本不足就不值得长期驻留） */

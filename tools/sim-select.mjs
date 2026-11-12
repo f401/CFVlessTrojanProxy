@@ -21,6 +21,7 @@ const rnd = () => {
 };
 Math.random = rnd;
 
+if (process.env.ROUTE_T) W.SC.ROUTE_T = Number(process.env.ROUTE_T);
 if (process.env.FAIL) W.SC.FAIL = Number(process.env.FAIL);
 if (process.env.H_LAT_REL) W.SC.H_LAT_REL = Number(process.env.H_LAT_REL);
 if (process.env.TRIAL_LAT) W.SC.TRIAL_LAT = Number(process.env.TRIAL_LAT);
@@ -271,6 +272,7 @@ async function run(sc, hours, seedVal) {
   let reqs = 0, fails = 0, direct = 0, costSum = 0, ratioSum = 0, bad = 0, top1 = 0;
   let switches = 0, lastCurs = "", regionFail = 0;
   let firstBestAt = -1, leaveEventAt = -1, reuseAt = -1, fakeHits = 0, afterEvent = 0, onEvent = 0;
+  const hits = new Map();
   const tailFrom = Math.floor(ticks * 0.75);
   let tailN = 0, tailTop = 0;
   const ratios = [];
@@ -350,6 +352,7 @@ async function run(sc, hours, seedVal) {
         } else if (leaveEventAt < 0) leaveEventAt = t;
         if (reuseAt < 0 && ek && n.key === ek) reuseAt = t;
       }
+      hits.set(n.key, (hits.get(n.key) || 0) + 1);
       if (n.id.startsWith("fake") || n.id.startsWith("f")) fakeHits++;
       if (t >= tailFrom) {
         tailN++;
@@ -358,6 +361,10 @@ async function run(sc, hours, seedVal) {
     }
   }
 
+  if (process.env.DUMP && sc.name === "带宽崩塌" && mode === "tput") {
+    const rows = [...hits.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+    console.log("[dump]", rows.map(([k, v]) => `${k}:${v}(${Math.round(W.costOf(k, "tput"))}ms,n=${Math.round((W.nsGet(k).okW||0))})`).join(" "));
+  }
   ratios.sort((a, b) => a - b);
   return {
     name: sc.name,

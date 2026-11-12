@@ -22,6 +22,8 @@ const ok = (n, c, info = "") => {
 };
 
 const S = W.S;
+W.SC.ROUTE_T_LAT = 0; // 单测默认确定行为：关闭抽签，走粘滞游标
+W.SC.ROUTE_T_TPUT = 0;
 const reset = () => {
   S.alive.clear();
   S.nstat.clear();
@@ -1359,6 +1361,23 @@ reset();
 node("honest:443", { tcp: 60, tls: 40, okW: 5 });
 W.nsLatency("honest:443", 130);
 ok("真实首字节与探活接近 → 不触发", W.scoreParts("honest:443", "lat").latencyMs < 200, String(W.scoreParts("honest:443", "lat").latencyMs));
+
+// 加权抽签：T=0 退化成一个确定的最优；T>0 时按分数分布抽
+reset();
+node("ra:443", { tcp: 60, okW: 20 });
+node("rb:443", { tcp: 80, okW: 20 });
+W.SC.ROUTE_T_LAT = 0;
+eq("T=0 走粘滞游标（等价选第一）", W.SEL.pick({ pxShadow: 0 }, "lat", { host: "" }), "ra:443");
+W.SC.ROUTE_T_LAT = 20;
+let na = 0, nb = 0;
+for (let i = 0; i < 600; i++) {
+  const k = W.SEL.pick({ pxShadow: 0 }, "lat", { host: "" });
+  if (k === "ra:443") na++;
+  else if (k === "rb:443") nb++;
+}
+ok("T=20 两个候选都抽得到", na > 0 && nb > 0, `${na}/${nb}`);
+ok("T=20 更快的抽得更多", na > nb * 1.5, `${na}/${nb}`);
+W.SC.ROUTE_T_LAT = 0;
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

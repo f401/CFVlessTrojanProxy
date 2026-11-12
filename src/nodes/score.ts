@@ -185,7 +185,9 @@ export function nsFail(k: string) {
   bumpWin(s, now, false);
   s.failW += 1; s.fail += 1; s.tF = (s.tF || 0) + 1;
   s.streak = (s.streak || 0) + 1;
-  const ladder = [60000, 300000, 900000, 3600000];
+  // 小池子一次失败就 60 秒没有候选（直接回落直连），首档缩到 10 秒；
+  // 最后一档 20 分钟，而不是 1 小时 —— 恢复的节点不该被关这么久。
+  const ladder = [S.alive.size < 5 ? 10000 : 60000, 300000, 900000, 1200000];
   s.blackUntil = Math.max(s.blackUntil || 0, now + ladder[Math.min(s.streak, 4) - 1]);
   if (s.streak >= 4) s.streak = 0;     // 给第五次机会
   // 抖动：10 分钟内成败参半（≥4 次）→ 冷却 5 分钟，而不是等"连续"失败
