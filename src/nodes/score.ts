@@ -237,6 +237,8 @@ export function nsSpeed(k: string, bps: number, bytes: number, _env: Env, w = 1)
   s.sumW2 += weight * weight;
   s.recentBytesW += (bytes || 0) * weight;
   s.lastSampleAt = now;
+  // 分位只跟直方图形状有关，而衰减是等比缩放 → 采样时算一次就够，读的时候 O(1)
+  s.capBps = pcts(s).cap;
   // 本地样本够 3 个有效窗口才让导入的先验作废：
   // 第一条 512KB 的短样本（nEff=1）本身不参与 confB，却会把 8MB/s 的 seed
   // 直接抹成 200KB/s 默认先验，节点会被误判成慢节点。
@@ -343,7 +345,7 @@ export const E10_PRIOR = (TEN_MB / SC.PRIOR_BPS) * 1000;   // 无吞吐样本时
 export interface ScoreParts {
   mode: Mode; score: number; latencyMs: number; e10Ms: number;
   pFailRisk: number; pStall: number; capBps: number; confB: number;
-  nEff: number; latN: number; sampleAgeMs: number;
+  nEff: number; latN: number; sampleAgeMs: number; xferMs: number;
   priorSource: "seed" | "prior"; gate: string;
 }
 
@@ -369,9 +371,12 @@ export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = f
   const realL = s.msLocal || 0;
   // 只有"真实首字节比探活估计慢一倍以上"才算撒谎：正常波动不参与
   const liar = realL > probeL * 2 + 150 ? Math.min(realL, probeL + 1500) : 0;
-  const Lobs = liar || probeL;
+  // 反向同理：探活明显高估（真实快一倍以上）也要认真实值，否则"探活 420ms、实际 60ms"
+  // 的节点永远翻不了身 —— 真实样本只能证明"更慢"，不能证明"更快"，这条得专门开。
+  const shy = !liar && realL > 0 && probeL > realL * 2 + 150 ? realL : 0;
+  const Lobs = liar || shy || probeL;
   // 先验也要被真实值兜底：否则 confL=0 时只看探活 ms，撒谎节点照样排第一
-  const Lprior = Math.max((a && a.ms) || SC.P_TCP + SC.P_TLS * SC.TLS_G, liar);
+  const Lprior = Math.max((a && a.ms) || SC.P_TCP + SC.P_TLS * SC.TLS_G, liar, shy);
   // 真实连接也提供了握手观测，和探活样本一起算延迟置信度
   const confL = 1 - Math.exp(-e.latN / 4);
   const latencyMs = confL * Lobs + (1 - confL) * Lprior;
@@ -390,6 +395,8 @@ export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = f
   const cSeed = !s.seedBps ? 0 : SC.SEED_CONF * seedLeft;
   const priorBps = cSeed > 0 ? cSeed * s.seedBps + (1 - cSeed) * SC.PRIOR_BPS : SC.PRIOR_BPS;
   const e10Prior = (TEN_MB / priorBps) * 1000;
+  // 延迟模式：分数里要算上"传完一个典型请求"的时间，否则 98ms/1.5MB/s 和 93ms/25MB/s 看起来一样
+  const xferMs = m === "lat" ? (SC.LAT_BYTES / Math.max(8 * 1024, s.capBps || SC.PRIOR_BPS)) * 1000 : 0;
   const e10Local = (TEN_MB / Math.max(capBps, 8 * 1024)) * 1000;
   const e10Ms = confB * e10Local + (1 - confB) * e10Prior;
 
@@ -400,7 +407,7 @@ export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = f
 
   let score = m === "tput"
     ? e10Ms + 0.5 * latencyMs + SC.FAIL * pFailRisk + SC.STALL * pStall
-    : latencyMs + SC.FAIL * pFailRisk + SC.STALL * pStall;
+    : latencyMs + xferMs + SC.FAIL * pFailRisk + SC.STALL * pStall;
 
   // 低速惩罚只在"确实测出来"时才加，避免对无数据节点重复处罚
   if (m === "tput" && confB > 0.25 && capBps > 0 && capBps < 8 * 1024) score += 400;
@@ -414,7 +421,7 @@ export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = f
 
   return {
     mode: m, score, latencyMs, e10Ms, pFailRisk, pStall, capBps, confB,
-    nEff, latN: e.latN, sampleAgeMs: Number.isFinite(sampleAge) ? sampleAge : -1,
+    nEff, latN: e.latN, sampleAgeMs: Number.isFinite(sampleAge) ? sampleAge : -1, xferMs,
     priorSource: cSeed > 0 ? "seed" : "prior", gate,
   };
 }

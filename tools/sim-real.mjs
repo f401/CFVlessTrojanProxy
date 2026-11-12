@@ -46,6 +46,7 @@ const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
 if (process.env.PX_SHADOW !== undefined) ENV.pxShadow = Number(process.env.PX_SHADOW);
 if (process.env.PX_DWELL !== undefined) ENV.pxDwellMin = Number(process.env.PX_DWELL);
 if (process.env.FAIL) W.SC.FAIL = Number(process.env.FAIL);
+if (process.env.LAT_BYTES) W.SC.LAT_BYTES = Number(process.env.LAT_BYTES);
 if (process.env.STALL) W.SC.STALL = Number(process.env.STALL);
 if (process.env.BETA_A) W.SC.BETA_A = Number(process.env.BETA_A);
 if (process.env.BETA_B) W.SC.BETA_B = Number(process.env.BETA_B);

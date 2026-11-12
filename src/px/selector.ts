@@ -265,23 +265,38 @@ export class Selector {
   // watchlist 缓存：全表排序很贵（400 节点 ~1.5ms），60 秒重算一次就够
   private watchAt: Record<Mode, number> = { lat: 0, tput: 0 };
   private watch: Record<Mode, string[]> = { lat: [], tput: [] };
+  /** watchlist 里"探活高估"的那几个：不算它们的样本进度，免得抢占正常探索 */
+  private rehab: Record<Mode, Set<string>> = { lat: new Set(), tput: new Set() };
 
   /** 重建 watchlist：探活快 + 样本少的 32 个候选 */
   buildWatch(mode: Mode) {
     const enough = mode === "tput" ? SC.TRIAL_TPUT : SC.TRIAL_LAT;
     const cands: { k: string; v: number }[] = [];
+    const rehab: { k: string; v: number }[] = [];
     for (const k of S.alive.keys()) {
       if (k === S.curs[mode] || isBlack(k) || isFrozen(k)) continue;
       const a = (S.alive.get(k) || {}) as NodeEntry;
-      if (!a.ms || a.ms > 250) continue; // 只试"探活不慢"的节点，慢的试了只会更慢
       const s = S.nstat.get(k) || ZERO_STAT;
       if (suspectOf(s)) continue; // 连得上却传不出数据的节点，不值得占一次试探预算
       const n = (s.okW || 0) + (s.failW || 0);
+      if (!a.ms) continue;
+      if (a.ms > 250) {
+        // 探活慢的节点一般不值得试；但"探活被瞬时拥塞抬到 400ms、实际 60ms"的节点
+        // 永远拿不到真实样本就永远翻不了身（真实样本只能证明更慢）。留两个名额给它，
+        // 按"最久没试过"轮转，样本进度按 +3 计，不抢占正常探索。
+        if (!S.alive.size || a.ms > SC.REHAB_MS || n > 0) continue;
+        rehab.push({ k, v: s.lastTry || 0 });
+        continue;
+      }
       if (n >= enough) continue; // 样本够了才毕业（3 个样本定生死＝把运气当能力）
       cands.push({ k, v: (a.ms || 250) + SC.WATCH_BONUS / Math.sqrt(n + 1) });
     }
     cands.sort((x, y) => x.v - y.v);
-    this.watch[mode] = cands.slice(0, SC.WATCH_N).map((x) => x.k);
+    rehab.sort((x, y) => x.v - y.v);
+    const rh = rehab.slice(0, SC.REHAB_N);
+    this.rehab[mode] = new Set(rh.map((x) => x.k));
+    const room = Math.max(0, SC.WATCH_N - rh.length);
+    this.watch[mode] = [...cands.slice(0, room).map((x) => x.k), ...rh.map((x) => x.k)];
     this.watchAt[mode] = Date.now();
     return this.watch[mode];
   }
@@ -296,7 +311,7 @@ export class Selector {
         if (k === S.curs[mode] || !S.alive.has(k) || isBlack(k) || isFrozen(k)) continue;
         const s = S.nstat.get(k) || ZERO_STAT;
         if (suspectOf(s)) continue;
-        const n = (s.okW || 0) + (s.failW || 0);
+        const n = (s.okW || 0) + (s.failW || 0) + (this.rehab[mode].has(k) ? 3 : 0);
         if (n >= enough) continue;
         if (n < bestN - 0.5) {
           best = k;

@@ -807,6 +807,24 @@ W.noteProbe({ bad: "not-tls" });
 W.noteProbe({ bad: "no-cf-cert" });
 W.noteProbe({ ms: 12, tcp: 5, tls: 7 });
 eq("探活结果按原因分类", W.S.probeWhy, { err: 1, notTls: 1, noCf: 1, ok: 1 });
+
+/* 延迟模式必须能看见带宽：同延迟下 1MB/s 的节点分数要明显更高 */
+reset();
+node("wide:443", { tcp: 60, okW: 10 });
+node("narrow:443", { tcp: 60, okW: 10 });
+W.nsSpeed("wide:443", 20 * 1048576, 1048576, {}, 1);
+W.nsSpeed("narrow:443", 1 * 1048576, 1048576, {}, 1);
+ok(
+  "lat：同延迟下窄带宽节点分数更高",
+  W.costOf("wide:443", "lat") + 50 < W.costOf("narrow:443", "lat"),
+  `${Math.round(W.costOf("wide:443", "lat"))} vs ${Math.round(W.costOf("narrow:443", "lat"))}`,
+);
+
+/* 探活高估（420ms）要能被真实样本（80ms）纠正，否则这种节点永远翻不了身 */
+reset();
+node("shy2:443", { tcp: 420, okW: 10 });
+W.nsLatency("shy2:443", 80);
+ok("lat：探活高估被真实样本纠正", W.scoreParts("shy2:443", "lat").latencyMs < 200, Math.round(W.scoreParts("shy2:443", "lat").latencyMs));
 W.nsGet(c30[0].k).blackUntil = Date.now() + 60000;
 eq(
   "缓存之外仍会过滤黑名单",

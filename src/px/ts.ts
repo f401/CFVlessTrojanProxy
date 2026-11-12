@@ -51,7 +51,8 @@ export function pickTS(mode: Mode): string {
     // 未测节点不参与抽样：先验 10% 会被门槛全挡掉，交给 bestFor 一个一个热身
     if (p.pFailRisk > SC.FAIL_GATE) continue;
     const sd = p.latencyMs / Math.sqrt(Math.max(1, p.latN));
-    const v = p.latencyMs + gauss() * sd;
+    // 带宽也要进抽样值：延迟模式的"快"是首字节快，窄带宽节点照样能把 200KB 拖到几百毫秒
+    const v = p.latencyMs + p.xferMs + gauss() * sd;
     if (v < bv) {
       bv = v;
       best = k;

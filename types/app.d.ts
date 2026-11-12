@@ -110,6 +110,8 @@ interface NodeStats {
   runMs: number;
   bytesDown: number;
   hist: number[];
+  /** 直方图分位算出来的能力值（p90 与 p50×2.5 取小），采样时算一次，读 O(1) */
+  capBps?: number;
   /** 加权直方图：权重和、权重平方和、近期有效字节、最后样本时刻 */
   sumW: number;
   sumW2: number;
