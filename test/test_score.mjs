@@ -799,6 +799,14 @@ for (let i = 0; i < 18; i++) node(`n18-${i}:443`, { tcp: 60 + i, okW: 10 });
 W.invalidateRank();
 eq("18 个候选全部返回", W.candsFor("lat").length, 18);
 eq("18 个节点（线上实测值）不启用排行缓存", W.S.rankCache.t, 0);
+
+/* 探活失败要分原因：err 可能是地区/线路，notTls/noCf 是节点事实 */
+W.S.probeWhy = {};
+W.noteProbe(null);
+W.noteProbe({ bad: "not-tls" });
+W.noteProbe({ bad: "no-cf-cert" });
+W.noteProbe({ ms: 12, tcp: 5, tls: 7 });
+eq("探活结果按原因分类", W.S.probeWhy, { err: 1, notTls: 1, noCf: 1, ok: 1 });
 W.nsGet(c30[0].k).blackUntil = Date.now() + 60000;
 eq(
   "缓存之外仍会过滤黑名单",

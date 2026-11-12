@@ -141,6 +141,8 @@ export async function proxyip(c: UserCtx): Promise<Response> {
     current: S.curs.tput || S.curs.lat || "",
     curs: { ...S.curs },
     failCount: S.pxFailMem,
+    probeWhy: S.probeWhy,
+    probeColo: S.probeColo,
     funnel: stat.funnel || { direct: 0, node: 0, v6: 0 },
     rotatePolicy: {
       minDwellSec: Math.round(SC.DWELL / 1000),

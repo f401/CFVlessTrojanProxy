@@ -50,7 +50,7 @@ export {
   freezeNode,
   isFrozen,
 } from "./nodes/score";
-export { nsOf, pxGet, flushPx } from "./px/pool";
+export { nsOf, pxGet, flushPx, noteProbe } from "./px/pool";
 export { spdSnapshot } from "./core/node-snapshot";
 export { cntDelta, cntUnsend, cntView } from "./core/counter";
 export {

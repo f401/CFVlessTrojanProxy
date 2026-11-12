@@ -19,6 +19,9 @@ export class AppState {
   pxFailSeen = 0;
   probes = 0;
   hits = 0;
+  // 探活结果按原因分类：区分"连不上"（可能是地区/线路）和"连上了但不是 CF 反代"（节点事实）
+  probeWhy: Record<string, number> = {};
+  probeColo = ""; // 这批探活是在哪个机房做的（cron 拿不到 colo，记 "cron"）
   needPx: Map<string, number> = new Map();
   colo = "";
   funnel: Record<string, number> = { direct: 0, node: 0, v6: 0 };

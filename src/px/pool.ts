@@ -23,6 +23,16 @@ import { S } from "../core/state";
 import { kvGet, kvSet } from "../store/index";
 
 /* 代理节点：状态 / 信誉分桶 / 选择 / cron */
+
+/**
+ * 探活结果分类。null 有两种可能：连不上（DNS/拒绝/超时）或握手途中异常，
+ * 这两类"可能是地区/线路问题"；not-tls / no-cf-cert 是节点事实（它就不是 CF 反代）。
+ * @param {object|null} r probeProxy 的返回
+ */
+export function noteProbe(r: { bad?: string } | null) {
+  const k = !r ? "err" : r.bad === "not-tls" ? "notTls" : r.bad === "no-cf-cert" ? "noCf" : "ok";
+  S.probeWhy[k] = (S.probeWhy[k] || 0) + 1;
+}
 /* ---- 轮换模块：内存为权威，KV 只存「候选池 + 分机房节点信誉」 ---- */
 
 export const SEED_COLD_N = 48; // 冷启动灌进 alive 的节点数
@@ -249,8 +259,10 @@ export async function cronScan(env: Env) {
   const idx = S.poolIdx % Math.max(pool.length, 1);
   const batch = pool.slice(idx, idx + scanN);
   const hits = [];
+  S.probeColo = S.colo || "cron";
   for (let i = 0; i < batch.length; i += 10) {
     const part = await Promise.all(batch.slice(i, i + 10).map((c) => probeProxy(c.h, c.p)));
+    for (const x of part) noteProbe(x);
     hits.push(...part.filter((x) => x && !x.bad));
   }
   S.poolIdx = (idx + scanN) % Math.max(pool.length, 1);
@@ -287,6 +299,7 @@ export async function cronScan(env: Env) {
     }),
   );
   for (const { k, r } of rres) {
+    noteProbe(r);
     if (r && !r.bad) {
       nsLatency(k, r.ms);
       nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
@@ -310,6 +323,7 @@ export async function cronScan(env: Env) {
       }),
     );
     for (const { k, r } of rres2) {
+      noteProbe(r);
       if (r && !r.bad) {
         nsLatency(k, r.ms);
         nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
