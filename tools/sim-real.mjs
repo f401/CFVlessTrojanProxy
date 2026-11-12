@@ -33,6 +33,28 @@ if (process.env.ROUTE_T_TPUT) W.SC.ROUTE_T_TPUT = Number(process.env.ROUTE_T_TPU
 
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
 
+/* 备选设计：乐观初始化 + 贪心（没测过的节点按"已知最好"估，而不是 51 秒先验） */
+if (process.env.ALT === "optim") {
+  W.SEL.pick = (_env, mode) => {
+    const list = W.candsFor(mode);
+    if (!list.length) return "";
+    let bestE = Infinity;
+    for (const x of list) {
+      const p = W.scoreParts(x.k, mode);
+      if (p.confB >= 0.2 && p.e10Ms < bestE) bestE = p.e10Ms;
+    }
+    if (!Number.isFinite(bestE)) bestE = 51000;
+    let bk = "", bv = Infinity;
+    for (const x of list) {
+      const p = W.scoreParts(x.k, mode);
+      const e = p.confB >= 0.2 ? p.e10Ms : Math.min(p.e10Ms, bestE * 1.3);
+      const v = (mode === "tput" ? e + 0.5 * p.latencyMs : p.latencyMs) + 8000 * p.pFailRisk + 2500 * p.pStall;
+      if (v < bv) { bv = v; bk = x.k; }
+    }
+    return bk;
+  };
+}
+
 /* ---------- 节点画像 ---------- */
 let seq = 0;
 function mkNode(o = {}) {
@@ -163,6 +185,16 @@ async function run(p, hours, seedVal) {
         if (t < n.until) continue;
         n.down = !n.down;
         n.until = t + (n.down ? 120 + Math.floor(rnd() * 780) : 1800 + Math.floor(rnd() * 5400));
+      }
+    }
+
+    // 带宽普查：每 p.census 小时给每个节点一个 5MB 的"测量样本"
+    const censusH = p.census || Number(process.env.CENSUS || 0);
+    if (censusH && t > 0 && t % (censusH * 3600) === 0) {
+      for (const n of pool) {
+        if (n.down) continue;
+        W.nsSpeed(n.key, n.bw * MB, 5 * MB, ENV, 1);
+        W.nsOk(n.key, 0, 0);
       }
     }
 
