@@ -27,6 +27,8 @@ const gauss = () => {
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
 if (process.env.PRIOR_BPS) W.SC.PRIOR_BPS = Number(process.env.PRIOR_BPS);
+if (process.env.ACTIVE_LAT) W.SC.ACTIVE_LAT = Number(process.env.ACTIVE_LAT);
+if (process.env.ACTIVE_TPUT) W.SC.ACTIVE_TPUT = Number(process.env.ACTIVE_TPUT);
 if (process.env.LAT_TS !== undefined) W.SC.LAT_TS = Number(process.env.LAT_TS);
 if (process.env.TS_COLD_PASS !== undefined) W.SC.TS_COLD_PASS = Number(process.env.TS_COLD_PASS);
 if (process.env.TS_FB !== undefined) W.SC.TS_FB = Number(process.env.TS_FB);

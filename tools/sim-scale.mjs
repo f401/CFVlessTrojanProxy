@@ -18,6 +18,8 @@ const rnd = () => {
 Math.random = rnd;
 
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
+if (process.env.ACTIVE_LAT) W.SC.ACTIVE_LAT = Number(process.env.ACTIVE_LAT);
+if (process.env.ACTIVE_TPUT) W.SC.ACTIVE_TPUT = Number(process.env.ACTIVE_TPUT);
 
 /* 一个唯一最优 + N-1 个严格更差的填充（保证上帝视角稳定） */
 function buildPool(n, cc) {
@@ -144,6 +146,7 @@ async function run(n, hours, seedVal) {
   const oracle = trueCost(pool2[0]);
   const ticks = hours * 3600;
   let reqs = 0, ratioSum = 0, bad = 0, top = 0, sw = 0, last = "";
+  const hits = new Map();
   const tailFrom = Math.floor(ticks * 0.7);
   let tailN = 0, tailTop = 0;
   for (let t = 0; t < ticks; t++) {
@@ -154,6 +157,7 @@ async function run(n, hours, seedVal) {
       sw++;
       last = S.curs.lat;
     }
+    hits.set(key, (hits.get(key) || 0) + 1);
     const node = byKey.get(key);
     if (!node) continue;
     reqs++;
@@ -174,6 +178,16 @@ async function run(n, hours, seedVal) {
     return JSON.stringify(rows).length;
   })();
 
+  if (process.env.DUMP) {
+    const hits = new Map();
+    // 只统计最后一次 pick 的分数分布
+    const rows = [...hits.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+    console.log("[dump]", n, "active", S.active.lat.size, "hasGood", S.active.lat.has("good:443"), "candN", S.candN,
+      rows.map(([k, v]) => {
+        const nd = byKey.get(k);
+        return k + ":" + v + (nd ? "(" + Math.round(nd.tcp) + "ms," + Math.round(100 * nd.pFail) + "%)" : "");
+      }).join(" "));
+  }
   let seen = 0;
   for (const st of S.nstat.values()) if ((st.okW || 0) + (st.failW || 0) >= 2) seen++;
   return {
