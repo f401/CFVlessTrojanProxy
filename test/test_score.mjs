@@ -22,6 +22,7 @@ const ok = (n, c, info = "") => {
 };
 
 const S = W.S;
+W.SC.LAT_TS = 0; // 单测确定性：关闭 TS
 W.SC.ROUTE_T_LAT = 0; // 单测默认确定行为：关闭抽签，走粘滞游标
 W.SC.ROUTE_T_TPUT = 0;
 const reset = () => {

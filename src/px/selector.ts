@@ -10,6 +10,7 @@ import { SC } from "../core/const";
 import { shadowRate } from "../core/util";
 import { hostKey, hostRank, hostUntried, logErr } from "../nodes/metrics";
 import { MODES, keyOf } from "./const";
+import { pickTS } from "./ts";
 import { aliveList, pxGet } from "./pool";
 import { cnt } from "../core/counter";
 import { pxPolicy } from "./probe";
@@ -127,6 +128,15 @@ export class Selector {
             return best;
           }
         }
+      }
+    }
+
+    // ②.5 延迟模式：Thompson 采样（失败率做门槛，只信已测节点）
+    if (m === "lat" && SC.LAT_TS > 0) {
+      const k = pickTS(m);
+      if (k) {
+        if (st) st.node = k;
+        return k;
       }
     }
 

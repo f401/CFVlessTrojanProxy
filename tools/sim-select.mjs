@@ -21,6 +21,7 @@ const rnd = () => {
 };
 Math.random = rnd;
 
+if (process.env.LAT_TS !== undefined) W.SC.LAT_TS = Number(process.env.LAT_TS);
 if (process.env.ROUTE_T_LAT) W.SC.ROUTE_T_LAT = Number(process.env.ROUTE_T_LAT);
 if (process.env.ROUTE_T_TPUT) W.SC.ROUTE_T_TPUT = Number(process.env.ROUTE_T_TPUT);
 if (process.env.FAIL) W.SC.FAIL = Number(process.env.FAIL);

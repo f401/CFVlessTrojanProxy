@@ -26,6 +26,8 @@ export class AppState {
   inflight: Map<string, number> = new Map(); // 节点在途连接数（负载均衡用）
   // 候选排行缓存：只在大规模（alive≥24）时启用，20 秒一轮
   rankCache: { t: number; v: Record<string, RankRow[]> } = { t: 0, v: {} };
+  // Thompson 采样的成员表缓存（按延迟前 TS_K 个），20 秒重建一次
+  tsMem: { at: number; keys: string[] } = { at: 0, keys: [] };
 
   // —— 日计数 ——
   cntKeys = [

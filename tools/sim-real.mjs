@@ -40,6 +40,32 @@ if (process.env.ROUTE_T_TPUT) W.SC.ROUTE_T_TPUT = Number(process.env.ROUTE_T_TPU
 
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
 
+if (process.env.RANK === "ts2") {
+  // 成员表缓存 20 秒（按延迟取前 64），统计每条连接重算
+  const K = Number(process.env.KTOP || 64);
+  const gate = Number(process.env.GATE || 0.02);
+  let memAt = 0;
+  let mem = [];
+  W.SEL.pick = (_env, mode) => {
+    const now = Date.now();
+    if (!memAt || now - memAt > 20000 || !mem.length) {
+      const rows = W.candsFor(mode)
+        .map((x) => ({ k: x.k, lat: W.scoreParts(x.k, mode).latencyMs }))
+        .sort((a, b) => a.lat - b.lat);
+      mem = rows.slice(0, K).map((x) => x.k);
+      memAt = now;
+    }
+    let best = "", bv = Infinity;
+    for (const k of mem) {
+      const p = W.scoreParts(k, mode);
+      if (process.env.COLD === "0" ? p.pFailRisk > gate : p.latN >= 3 && p.pFailRisk > gate) continue;
+      const sd = p.latencyMs / Math.sqrt(Math.max(1, p.latN));
+      const v = p.latencyMs + gauss() * sd;
+      if (v < bv) { bv = v; best = k; }
+    }
+    return best || (W.candsFor(mode)[0] || { k: "" }).k;
+  };
+}
 if (process.env.RANK === "ts") {
   const gate = Number(process.env.GATE || 0.02);
   W.SEL.pick = (_env, mode) => {
