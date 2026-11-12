@@ -26,7 +26,7 @@ import { kvGet, kvSet, scheduleFlush } from "../store/index";
 /* 代理节点：状态 / 信誉分桶 / 选择 / cron */
 /* ---- 轮换模块：内存为权威，KV 只存「候选池 + 分机房节点信誉」 ---- */
 
-export const SEED_COLD_N = 24; // 冷启动灌进 alive 的节点数（SEED_MAX=200 之后取 24）
+export const SEED_COLD_N = 32; // 冷启动灌进 alive 的节点数
 export { SC, HIST_BASE, HIST_N } from "../core/const";
 
 const ALIVE_MAX = 400; // 长期运行 alive 上限：池子换代不会永久累积

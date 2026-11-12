@@ -32,6 +32,28 @@ if (process.env.BETA_B) W.SC.BETA_B = Number(process.env.BETA_B);
 
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
 
+/* 备选：地区模式"延迟优先"——失败率只做门槛，不进分数 */
+if (process.env.RGN === "fast") {
+  const gate = Number(process.env.RGN_GATE || 0.08);
+  W.SEL.region = async (_env, cc, mode, avoid = "") => {
+    const want = String(cc || "").toUpperCase();
+    const list = W.candsFor(mode).filter((r) => {
+      const a = S.alive.get(r.k);
+      return a && String(a.cc || "").toUpperCase() === want && r.k !== avoid;
+    });
+    if (!list.length) return null;
+    let best = "", bv = Infinity;
+    for (const r of list) {
+      const p = W.scoreParts(r.k, mode);
+      if (p.pFailRisk > gate) continue; // 只挡"明显坏"的
+      const v = p.latencyMs + 2500 * p.pStall;
+      if (v < bv) { bv = v; best = r.k; }
+    }
+    if (!best) best = list[0].k;
+    return S.alive.get(best) || null;
+  };
+}
+
 /* 可选路由：softmax（按分数在 top-K 里抽签），用来和"单游标 + 滞回"对比 */
 if (process.env.ROUTE === "softmax") {
   const K = Number(process.env.KTOP || 12);
