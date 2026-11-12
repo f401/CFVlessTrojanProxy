@@ -27,6 +27,7 @@ const gauss = () => {
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
 if (process.env.PRIOR_BPS) W.SC.PRIOR_BPS = Number(process.env.PRIOR_BPS);
+if (process.env.SEED_CONF) W.SC.SEED_CONF = Number(process.env.SEED_CONF);
 if (process.env.ACTIVE_LAT) W.SC.ACTIVE_LAT = Number(process.env.ACTIVE_LAT);
 if (process.env.ACTIVE_TPUT) W.SC.ACTIVE_TPUT = Number(process.env.ACTIVE_TPUT);
 if (process.env.LAT_TS !== undefined) W.SC.LAT_TS = Number(process.env.LAT_TS);
@@ -221,6 +222,11 @@ function install(n, isNew = false) {
   s.tcp = n.probeTcp;
   s.tls = n.tls;
   s.at = NOW;
+  // 模拟"别的 isolate 测过这个节点"：把真实带宽当 seedBps 注入
+  if (process.env.SEED_BPS) {
+    s.seedBps = n.bw * MB;
+    s.seedAt = NOW;
+  }
   n.born = isNew ? NOW : -1e9;
   byKey.set(n.key, n);
 }
