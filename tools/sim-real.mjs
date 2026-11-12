@@ -190,16 +190,6 @@ async function run(p, hours, seedVal) {
       }
     }
 
-    // 带宽普查：每 p.census 小时给每个节点一个 5MB 的"测量样本"
-    const censusH = p.census || Number(process.env.CENSUS || 0);
-    if (censusH && t > 0 && t % (censusH * 3600) === 0) {
-      for (const n of pool) {
-        if (n.down) continue;
-        W.nsSpeed(n.key, n.bw * MB, 5 * MB, ENV, 1);
-        W.nsOk(n.key, 0, 0);
-      }
-    }
-
     // 节点换血：每 30 分钟换掉 p.churn 个
     if (p.churn && t > 0 && t % 1800 === 0) {
       for (let i = 0; i < p.churn; i++) {
