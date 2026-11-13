@@ -98,6 +98,7 @@ export function renderClash(
   }
 
   // 钉在具体 CF 边缘 IP 上的入口条目（客户端用它们做「哪个边缘最快」的实测）
+  const optX = url.searchParams.get("x") === "1";
   const edgeNames: string[] = [];
   for (const mode of ["tput", "lat"]) {
     const suffix = mode === "lat" ? "L" : "T";
@@ -157,7 +158,7 @@ export function renderClash(
     groups.push(q(regNames));
   }
 
-  if (edgeNames.length) {
+  if (optX && edgeNames.length) {
     groups.push(`  - name: "${G_X}"`);
     groups.push("    type: url-test");
     groups.push("    url: https://x.com/");
@@ -171,7 +172,7 @@ export function renderClash(
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
   groups.push(
-    `    proxies: ["${G_TPUT}", "${G_LAT}"${edgeNames.length ? `, "${G_EDGE}"` : ""}${edgeNames.length ? `, "${G_X}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
+    `    proxies: ["${G_TPUT}", "${G_LAT}"${edgeNames.length ? `, "${G_EDGE}"` : ""}${optX && edgeNames.length ? `, "${G_X}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
   );
 
   return [
@@ -196,7 +197,7 @@ export function renderClash(
     ...groups,
     "",
     "rules:",
-    ...(edgeNames.length
+    ...(optX && edgeNames.length
       ? X_RULES.map((d) => `  - DOMAIN-SUFFIX,${d},${G_X}`)
       : []),
     "  - GEOIP,CN,DIRECT",
