@@ -19,6 +19,7 @@ interface Env {
 
   // —— 中转池 ——
   proxyip?: string;
+  pxHosts?: string; // 强制走中转的域名名单（默认推特全系；空 = 关闭；* = 全部）
   pxDwellMin?: string;
   pxFailMax?: string;
   pxForceAt?: string;

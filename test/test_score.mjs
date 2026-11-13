@@ -10,6 +10,8 @@ const eq = (n, a, b) => {
   if (JSON.stringify(a) === JSON.stringify(b)) pass++;
   else {
     fail++;
+
+
     console.log(`FAIL ${n}\n  got : ${JSON.stringify(a)}\n  want: ${JSON.stringify(b)}`);
   }
 };
@@ -1568,6 +1570,131 @@ for (let i = 0; i < 12 && W.S.rankCache.step.lat; i++) W.candsFor("lat");
 eq("大池分片：一轮算完清掉进度", W.S.rankCache.step.lat, undefined);
 eq("大池分片：一轮之后全局最优在榜首", W.candsFor("lat")[0].k, "b0:443");
 ok("大池分片：表里仍有 CAND_KEEP 名", W.candsFor("lat").length >= 224, String(W.candsFor("lat").length));
+  /* ---------- 29. 强制中转名单（CF 托管站点首连就走 proxyip） ---------- */
+  const eDef = {};
+  ok("未配置名单 = 空（改由 CF 托管识别决定）", W.pxHostList(eDef).length === 0 && W.isPxHost(eDef, "x.com") === false);
+  ok("手动名单仍可命中域名与子域", W.isPxHost({ pxHosts: "x.com" }, "x.com") === true && W.isPxHost({ pxHosts: "x.com" }, "api.x.com") === true);
+  ok("手动名单不误伤相似域", W.isPxHost({ pxHosts: "x.com" }, "notx.com") === false && W.isPxHost({ pxHosts: "x.com" }, "x.com.evil.cn") === false);
+  ok("pxHosts 为空 = 关闭名单", W.isPxHost({ pxHosts: "" }, "x.com") === false);
+  ok("pxHosts=* = 全部走中转", W.isPxHost({ pxHosts: "*" }, "example.com") === true);
+  ok("pxHosts 支持逗号与大小写", W.isPxHost({ pxHosts: "Foo.COM, bar.cn" }, "a.foo.com") === true && W.isPxHost({ pxHosts: "Foo.COM, bar.cn" }, "bar.cn") === true && W.isPxHost({ pxHosts: "Foo.COM, bar.cn" }, "baz.cn") === false);
+  ok("以点开头的条目只匹配子域", W.isPxHost({ pxHosts: ".x.com" }, "www.x.com") === true && W.isPxHost({ pxHosts: ".x.com" }, "x.com") === false);
+  ok("名单解析去空项", W.pxHostList({ pxHosts: " a.com , ,b.com, " }).length === 2);
+  ok("CF 网段：104.16/13 命中", W.isCfIp("104.16.0.5") === true && W.isCfIp("104.23.255.1") === true);
+  ok("CF 网段：172.64/13 命中", W.isCfIp("172.64.1.1") === true);
+  ok("CF 网段：131.0.72/22 命中", W.isCfIp("131.0.72.5") === true);
+  ok("CF 网段：非 CF 不命中", W.isCfIp("8.8.8.8") === false && W.isCfIp("1.1.1.1") === false && W.isCfIp("45.147.250.39") === false);
+  ok("CF 网段：IPv6/非法输入不命中", W.isCfIp("2001:db8::1") === false && W.isCfIp("") === false && W.isCfIp("104.16.0.256") === false);
 
+// 第 30 组：判定表（以 IP 为单位）
+W.vClear();
+const tg = "162.159.140.229";
+const chR = { kind: "r", ip: "45.136.117.194" };
+const chR2 = { kind: "r", ip: "185.253.117.147" };
+eq("直连通道的键是 d", W.chanKey(W.DIRECT), "d");
+eq("中继通道键带 IP", W.chanKey(chR), "r:45.136.117.194");
+eq("初始是 unknown", W.vState(tg, "d"), 0);
+W.recordTraffic({ target: tg, chan: W.DIRECT, down: 4096, ok: true });
+eq("流量成功只产生弱 ok", W.vState(tg, "d"), 1);
+W.recordTraffic({ target: tg, chan: W.DIRECT, down: 0, ok: false });
+eq("流量失败不得把弱 ok 降级", W.vState(tg, "d"), 1);
+W.recordProbe({ target: tg, chan: chR2, code: 403, ms: 90 });
+eq("probe 403 记为 blocked", W.vState(tg, "r:185.253.117.147"), 2);
+ok("blocked 通道被判坏", W.vBad(tg, "r:185.253.117.147"));
+W.vSetState(tg, "r:185.253.117.147", 1, 0);
+eq("弱证据不能冲掉强证据的 blocked", W.vState(tg, "r:185.253.117.147"), 2);
+W.recordProbe({ target: tg, chan: chR, code: 0, ms: 800 });
+eq("probe 连不上记为 dead", W.vState(tg, "r:45.136.117.194"), 3);
+W.recordProbe({ target: "*", chan: chR2, code: 200, ms: 60 });
+ok("精确键优先于通配", !W.vOk(tg, "r:185.253.117.147"));
+W.recordProbe({ target: "*", chan: chR, code: 200, ms: 55 });
+ok("通配键可作回退", W.vOk("1.2.3.4", "r:45.136.117.194"));
+ok("probe 同时写入池子统计", (W.nsGet("45.136.117.194:443").pN || 0) > 0);
+W.vClear();
+eq("清空后表为空", W.vAll().length, 0);
+// 第 31 组：通道策略（影子）与子请求预算
+const rCtx = { host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5", "45.136.117.194"], legacyWantsRelay: true };
+eq("cf 目标优先挑可用的中继", W.decide(rCtx).chan.kind, "r");
+eq("v6 客户端 + cf 目标只走非 CF 中继", W.decide({ ...rCtx, clientV6: true }).chan.ip, "45.136.117.194");
+eq("普通目标走直连", W.decide({ ...rCtx, cfHost: false }).chan.kind, "d");
+W.vClear(); W.S.polSame = 0; W.S.polDiff = 0; W.S.polWhy = {};
+W.shadow(rCtx);
+eq("影子模式统计一致", W.S.polSame, 1);
+W.shadow({ ...rCtx, legacyWantsRelay: false });
+eq("影子模式统计不一致", W.S.polDiff, 1);
+const pl = W.planRound(1600, 8);
+ok("预算不超过子请求硬上限", pl.adm + pl.vt + pl.edge <= pl.cap, JSON.stringify(pl));
+ok("池子很饿时优先给准入", pl.adm >= 4, JSON.stringify(pl));
+ok("策略默认只放开硬规则（level 1）", W.SC.POLICY === 1);
+ok("policyOn 在 level>=1 时为真", W.policyOn() === true);
+// 第 32 组：决策注入（core HOOK）与影子一致率
+ok("策略实现已注册到 HOOK", typeof W.HOOK.decide === "function");
+W.S.polSame = 0; W.S.polDiff = 0;
+W.S.alive.set("45.136.117.194:443", { h: "45.136.117.194", p: 443, cc: "XX", ms: 80 });
+const req6 = new Request("https://example.com/", { headers: { "cf-connecting-ip": "2001:db8::5" } });
+const req4 = new Request("https://example.com/", { headers: { "cf-connecting-ip": "1.2.3.4" } });
+eq("影子期不改变现状", W.pxDecision(req6, "x.com", true, false, false), false);
+eq("生效后 v6+CF 目标走中继", W.pxDecision(req6, "x.com", true, false, true), true);
+eq("生效后 v4 客户端不被硬规则改写", W.pxDecision(req4, "example.com", false, false, true), false);
+ok("影子统计有累计", W.S.polSame + W.S.polDiff >= 3, String(W.S.polSame + W.S.polDiff));
+ok("原因分布有键", Object.keys(W.S.polWhy).length > 0, JSON.stringify(W.S.polWhy));
+// 第 33 组：判定表接入选路（veto）
+W.vClear();
+W.recordProbe({ target: "x.com", chan: { kind: "r", ip: "45.136.117.194" }, code: 403, ms: 70 });
+ok("被判 blocked 的中继被 veto", W.HOOK.veto("x.com", "45.136.117.194") === true);
+ok("同站点未判过的中继不被 veto", W.HOOK.veto("x.com", "89.22.227.132") === false);
+ok("站点级判定不外溢到别的站点", W.HOOK.veto("y.com", "45.136.117.194") === false);
+W.recordProbe({ target: "*", chan: { kind: "r", ip: "89.22.227.132" }, code: 0, ms: 900 });
+ok("中继级（通配）判定对所有站点生效", W.HOOK.veto("y.com", "89.22.227.132") === true);
+W.vClear();
+ok("清空后不再 veto", W.HOOK.veto("x.com", "45.136.117.194") === false);
+// 第 34 组：连接证据钩子（traffic）
+W.vClear(); W.S.needPx.clear();
+W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false });
+ok("小响应把站点学成「优先中转」", (W.S.needPx.get("x.com") || 0) > Date.now());
+eq("小响应不判死中继", W.vState("x.com", "r:45.136.117.194"), 0);
+W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 90000, ok: true });
+eq("成功下行记成 ok（弱证据）", W.vState("x.com", "r:45.136.117.194"), 1);
+eq("弱证据来源是 0（流量）", W.vAll().filter((v) => v.t === "x.com")[0].src, 0);
+// 第 35 组：判定表跨 isolate 同步（只同步强证据）
+W.vClear(); W.S.vtSent.clear();
+W.recordProbe({ target: "x.com", chan: { kind: "r", ip: "45.136.117.194" }, code: 403, ms: 60 });
+const dl = W.HOOK.vtDelta();
+eq("强证据进增量", dl.length, 1);
+eq("增量键是 target|chan", dl[0].k, "x.com|r:45.136.117.194");
+eq("增量里是 blocked", dl[0].s, 2);
+eq("同一证据不重复上报", W.HOOK.vtDelta().length, 0);
+W.vClear();
+eq("清空后本地为空", W.vAll().length, 0);
+W.vImport(dl);
+eq("远端强证据可导入", W.vState("x.com", "r:45.136.117.194"), 2);
+ok("导入后 veto 生效", W.HOOK.veto("x.com", "45.136.117.194") === true);
+W.recordProbe({ target: "y.com", chan: { kind: "r", ip: "1.1.1.1" }, code: 200, ms: 40 });
+eq("ok 证据不进增量", W.HOOK.vtDelta().length, 0);
+W.vClear(); W.S.vtSent.clear();
+// 第 36 组：策略分级（0 影子 / 1 只硬规则 / 2 全生效）
+reset(); node("n1:443", {});
+const reqV6 = new Request("https://x/", { headers: { "cf-connecting-ip": "2001:db8::1" } });
+const reqV4 = new Request("https://x/", { headers: { "cf-connecting-ip": "1.2.3.4" } });
+ok("level 0 只影子：不改原判断", W.pxDecision(reqV6, "x.com", true, false, 0) === false);
+ok("level 1 硬规则生效：v6+CF 走中转", W.pxDecision(reqV6, "x.com", true, false, 1) === true);
+ok("level 1 软规则不生效：v4 保持原判断", W.pxDecision(reqV4, "x.com", true, false, 1) === false);
+ok("level 1 不改写「本来就要中转」的判断", W.pxDecision(reqV6, "x.com", false, true, 1) === true);
+ok("level 2 全生效：v4+CF 也走判定", W.pxDecision(reqV4, "x.com", true, false, 2) === true);
+ok("level 2 无候选时回落原判断", W.pxDecision(reqV4, "y.com", false, false, 2) === false);
+// 第 37 组：一轮 cron 的判定侧编排（预算 → 挑站点）
+W.vClear(); W.S.needPx.clear();
+eq("无信号时没有要扫的站", W.pickHosts(3).length, 0);
+W.S.needPx.set("x.com", Date.now() + 3600000);
+eq("needPx 未过期的排第一", W.pickHosts(3)[0], "x.com");
+W.S.needPx.set("old.com", Date.now() - 1000);
+eq("过期的 needPx 不算信号", W.pickHosts(3).length, 1);
+W.S.needPx.clear();
+W.vSetState("api.x.com", "r:1.1.1.1", 2, 1);
+eq("刚记下的 blocked 不复核", W.pickHosts(3).length, 0);
+const vrow = W.vAll()[0]; vrow.at = Date.now() - 1200000;
+eq("过了 15 分钟的 blocked 要复核", W.pickHosts(3)[0], "api.x.com");
+eq("预算 8 只够扫 2 个站", Math.floor(8 / W.SWEEP_COST), 2);
+W.vClear();
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

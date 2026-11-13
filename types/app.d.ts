@@ -387,6 +387,9 @@ interface MeterBody {
   spd?: Record<string, NodeSnap>;
   e?: ErrItem[];
   cl?: ClRec[];
+  /** `host|node` → 到期时间：中继对该站点被 403 的判定（跨 isolate 共享） */
+  blk?: Record<string, number>;
+  vt?: Array<{ k: string; s: number; t: number }>;
   /** 老快照：全局计数 / 节点快照 */
   g?: Record<string, number>;
   s?: Record<string, NodeSnap>;

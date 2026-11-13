@@ -1,5 +1,6 @@
 import { S } from "../core/state";
 import { cntDelta, cntUnsend } from "../core/counter";
+import { HOOK } from "../core/hook";
 import { eachLimit } from "../core/util";
 import { spdSnapshot } from "../core/node-snapshot";
 
@@ -74,6 +75,10 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
         body.c = { ...cd, d: today }; // 只挂一次，避免重复计
         body.spd = spdSnapshot(); // 节点快照：跨 isolate 可见
         body.e = S.errs.slice(-8); // 错误也带上去：/logs 才能跨 isolate
+        if (HOOK.vtDelta) {
+          const vt = HOOK.vtDelta();
+          if (vt.length) body.vt = vt;
+        }
         const cl = clSnapshot(40);
         if (cl.length) {
           body.cl = cl; // 连接观测（按节点聚合）：同理，离线可标定
@@ -101,6 +106,7 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
 }
 
 /** 连接观测快照：把本 isolate 的按节点聚合转成可上报的行（p50/p95 由最近 64 条首字节算） */
+
 export function clSnapshot(max = 40): ClRec[] {
   const out: ClRec[] = [];
   for (const [k, g] of S.cagg) {

@@ -36,6 +36,8 @@ fetch(request)
  │                          ├─ protocol.detect/parse      首包鉴权
  │                          ├─ nodes.selector.pick        选节点（站点偏好 → 单层抽样 → 游标兜底）
  │                          ├─ proxy.dial                 direct / node / v6 / proxyip 三级降级
+│                          │  （CF 托管目标先确认有没有非 CF 中继：优选 IP 本身就是 CF 边缘，
+│                          │    拿它中转到 CF 站只会更慢，见 isCfHost）
  │                          ├─ proxy.tunnel.pipeBack      双向搬运 + 512KB tick 结算
  │                          └─ store.pendAdd               字节进内存账本
  └─ HTTP

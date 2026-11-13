@@ -3,6 +3,9 @@ import { eachLimit, errMsg } from "../core/util";
 import { logErr } from "../nodes/metrics";
 import { S } from "../core/state";
 import { cronScan, flushPx } from "../px/pool";
+import { planRound } from "../route/budget";
+import { runRound } from "../route/round";
+import { edgeScan } from "../route/edge";
 import { SEL } from "../px/selector";
 import { flushSnap, pendFlush, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
 import { loadUsers } from "../proxy/protocol";
@@ -31,7 +34,11 @@ export async function runCron(env: Env, ctx: ExecutionContext): Promise<void> {
 
 async function cronOnce(env: Env): Promise<void> {
   try {
-    await cronScan(env);
+    // 一轮 cron 的子请求预算先算清：准入（池子）、判定（目标 x 通道）、入口（客户端→边缘）
+    const plan = planRound(S.pool.length, S.alive.size);
+    await cronScan(env, plan.adm);
+    await runRound(plan);
+    await edgeScan(env);
     SEL.afterScan(env);
   } catch (e) {
     logErr(`cron: ${errMsg(e)}`);

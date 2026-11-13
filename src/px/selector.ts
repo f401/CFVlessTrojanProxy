@@ -7,6 +7,8 @@ interface PickState {
 }
 
 import { SC } from "../core/const";
+import { HOOK } from "../core/hook";
+import { isCfIp } from "../core/net";
 import { shadowRate } from "../core/util";
 import { hostKey, hostRank, hostUntried, logErr } from "../nodes/metrics";
 import { MODES, keyOf } from "./const";
@@ -341,7 +343,7 @@ export class Selector {
   }
 
   /** 当前节点（"auto" 模式才用池子；手动配置直接返回） */
-  async current(env: Env, mode: Mode, st: PickState | null) {
+  async current(env: Env, mode: Mode, st: PickState | null, host = "", cfOnly = false) {
     const raw = String(env.proxyip || "").trim();
     if (!raw) return "";
     const m = mode === "lat" ? "lat" : "tput";
@@ -350,8 +352,41 @@ export class Selector {
       return raw;
     }
     await pxGet(env);
-    const k = this.pick(env, m, st);
-    return k || "";
+    const vet = HOOK.veto;
+    const bad = (k: string): boolean => (vet && host ? vet(host, k.slice(0, k.lastIndexOf(":"))) : false);
+    if (host && HOOK.prefer) {
+      const now = Date.now();
+      let best = "";
+      let bv = Infinity;
+      for (const k of S.alive.keys()) {
+        if (isBlack(k) || isFrozen(k) || bad(k)) continue;
+        const ip = k.slice(0, k.lastIndexOf(":"));
+        if (cfOnly && isCfIp((S.alive.get(k) || { h: "" } as { h?: string }).h || "")) continue;
+        if (!HOOK.prefer(host, ip)) continue;
+        const v = costOf(k, m, now);
+        if (v < bv) { bv = v; best = k; }
+      }
+      if (best) { if (st) st.node = best; return best; }
+    }
+    // 非 CF 出口优先，但只在分数可比时（1.5x + 50ms 带内）：CF 托管站点的
+    // 判定依据是出口 IP，非 CF 中继才可能改变结果；分数差太多则不值得。
+    if (host && S.relayOff.size) {
+      const now = Date.now();
+      let nk = "";
+      let nv = Infinity;
+      for (const rk of S.relayOff) {
+        if (!S.alive.has(rk) || isBlack(rk) || isFrozen(rk) || bad(rk)) continue;
+        const v = costOf(rk, m, now);
+        if (v < nv) { nv = v; nk = rk; }
+      }
+      const top = candsFor(m)[0];
+      const av = top ? top.v : Infinity;
+      if (nk && nv <= av * 1.5 + 50) { if (st) st.node = nk; return nk; }
+    }
+    // CF 托管目标：优先非 CF 出口，但没有时必须允许 CF 边缘中继 ——
+    // 直连经常被自家边缘丢掉，只有绕一次才拿得到响应（哪怕是 403）。
+    const first = this.pick(env, m, st);
+    return first || "";
   }
 
   /** cron 扫描收尾：重算两个模式的游标，再做定时轮换 */

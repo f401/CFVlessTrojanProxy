@@ -1,6 +1,21 @@
 import { secretPwd } from "../core/util";
 
 /* sub-common：订阅渲染共用的节点/标签/地区工具 */
+/** ?x=1 用的 CF 边缘入口（钉 IP 是为了拿到不同的落地机房；都是 anycast，同一 IP 也会乱跳）。 */
+export const X_EDGE_IPS = [
+  "104.18.32.1",
+  "172.66.0.96",
+  "162.159.140.98",
+  "104.26.0.1",
+  "104.20.2.1",
+  "104.16.0.5",
+  "188.114.96.1",
+  "104.20.1.1",
+];
+
+/** ?x=1 的规则域名（用拼接构造：混淆器会把 twitter/twimg/x.com 这类字面量替换成变量名，直接写会漏进 YAML）。 */
+export const X_RULES = ["x" + ".com", "twit" + "ter.com", "t" + ".co", "twim" + "g.com"];
+
 export const DEFAULT_PORTS: Array<[number, boolean]> = [
   [443, true],
   [8443, true],

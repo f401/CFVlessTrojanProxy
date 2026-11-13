@@ -5,7 +5,7 @@ const ROOT = path.resolve(__dirname, "..");
 const SRC = path.join(ROOT, "src");
 const TYPES = path.join(ROOT, "types");
 
-const LAYERS = ["core", "store", "nodes", "px", "proxy", "views", "edge", "routes"];
+const LAYERS = ["core", "store", "nodes", "px", "proxy", "route", "views", "edge", "routes"];
 const RANK = Object.fromEntries(LAYERS.map((l, i) => [l, i]));
 // 当前没有允许的反向依赖；新增必须是显式的架构决策
 const ALLOW = new Set();

@@ -2,7 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const ROOT = path.join(__dirname, "..");
-const SENS = /(vless|vmess|trojan|shadowsocks|xray|clash|sing-box|subscription|proxyip|githubusercontent|ip-api|dns\.google|ygkkk)/i;
+const SENS = /(vless|vmess|trojan|shadowsocks|xray|clash|sing-box|subscription|proxyip|githubusercontent|ip-api|dns\.google|ygkkk|twitter|twimg|twttr|\bx\.com\b|\bt\.co\b)/i;
 
 function b64(s) { return Buffer.from(s, "utf8").toString("base64"); }
 

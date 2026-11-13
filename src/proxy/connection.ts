@@ -1,4 +1,5 @@
 import { SC } from "../core/const";
+import { HOOK } from "../core/hook";
 import type { Socket } from "cloudflare:sockets";
 import { errMsg } from "../core/util";
 import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
@@ -79,7 +80,9 @@ export class Connection {
   // —— 观测 ——
   tAttach = 0; // 连上上游的时刻
   ttfb = 0; // 首字节耗时（ms），按站点的画像就靠它
-  sz = 0; // 目标流量（字节，0 = 按模式默认）：决定"传完一个请求"要算多少流量
+  sz = 0;
+  /** 目标站点是否托管在 CF 上（决定中继只能用非 CF 出口） */
+  cf = false; // 目标流量（字节，0 = 按模式默认）：决定"传完一个请求"要算多少流量
   directFail = false; // 直连阶段 0 字节关闭过（用于"直连对照"）
 
   // —— 身份与上下文 ——
@@ -290,9 +293,12 @@ export class Connection {
         // 第一行就是 `if (!S.pxFailSeen) return` —— 健康节点永远 n=0，
         // 面板显示"一个连接都没有"，可用性门槛也永远不触发。
         if (this.node && !this.failed && this.down > 0) nsOk(this.node, 0, 0);
-        // 真实首字节回流：探活只能证明连得上，转发快不快只有这条路径知道
-        if (this.node && this.ttfb > 0) nsLatency(this.node, this.ttfb);
-        // 按站点的节点画像：谁对这个站行、谁不行（诊断与站点级选路用）
+      // 通道证据：交给决策层（弱证据只可能把 unknown 提成 ok；判死只有 probe 能下）
+      if (this.host && HOOK.traffic) {
+        HOOK.traffic({ host: this.host, via: this.via as "node" | "direct" | "v6", node: this.node || "", down: this.down, ok: !this.failed && this.down > 0 });
+      }
+      // 真实首字节回流：探活只能证明连得上，转发快不快只有这条路径知道
+      if (this.node && this.ttfb > 0) nsLatency(this.node, this.ttfb);
         if (this.host) {
           if (this.node) {
             const life = this.tAttach ? Math.max(1, Date.now() - this.tAttach) : 0;

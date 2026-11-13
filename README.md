@@ -95,6 +95,7 @@ GET    /<uuid>/debug?restore=1               # 从 KV 快照续回用量
 | 参数 | 作用 |
 |---|---|
 | `/<uuid>/debug?cl=1` | 最近 40 条连接记录（`t/k/ms/dn/up/ok`）；加 `&do=1` 连 DO 环形 60 条一起读 |
+| `?px=1` / `?px=0`（节点链接参数） | 强制走中转 / 强制直连，覆盖「CF 托管自动识别」的结果 |
 | `/<uuid>/debug?diag=<host>` | 站点诊断：这个站该用哪个节点、为什么被拦，`&probe=1` 现场探一次 |
 | `/<uuid>/proxyip?why=1` | 选路分项（`latencyMs/jitMs/e10Ms/pFailRisk/pStall/confB/nEff`） |
 | `/<uuid>/debug?restore=1` | 从 KV 快照续回用量 |

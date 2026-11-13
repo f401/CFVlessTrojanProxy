@@ -1,30 +1,30 @@
-/* 通用工具：编码/哈希/字节处理/WS 发送 */
+/* 閫氱敤宸ュ叿锛氱紪鐮?鍝堝笇/瀛楄妭澶勭悊/WS 鍙戦€?*/
 export const WS_OPEN = 1;
-export const WS_BUFFER_LIMIT = 1024 * 1024; // 下行发送缓冲超过 1MB 就开始背压
-export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给到 60 秒
-export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐了
-export const VERSION = "6.42";
+export const WS_BUFFER_LIMIT = 1024 * 1024; // 涓嬭鍙戦€佺紦鍐茶秴杩?1MB 灏卞紑濮嬭儗鍘?
+export const WS_STALL_MS = 60000; // 瀹㈡埛绔竴鏃舵敹涓嶅姩寰堝父瑙侊紝缁欏埌 60 绉?
+export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 纭笂闄愶細鍒洜涓哄鎴风鎱㈠氨鎶婁笅杞芥帎浜?
+export const VERSION = "6.65";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 
 /* ==================================================================
- * §1  常量与工具
+ * 搂1  甯搁噺涓庡伐鍏?
  * ================================================================== */
 
 export const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"));
 
-// 密码绑定的读取：优先 env.pwd（中性名），兼容老的 env[P_T]
+// 瀵嗙爜缁戝畾鐨勮鍙栵細浼樺厛 env.pwd锛堜腑鎬у悕锛夛紝鍏煎鑰佺殑 env[P_T]
 export const secretPwd = (env: Env) => String((env && (env.pwd || env[P_T])) || "").trim();
 
-/** 影子流量默认比例：只在「当前节点样本不足」时才提升到 SC.EXPLORE_MAX */
+/** 褰卞瓙娴侀噺榛樿姣斾緥锛氬彧鍦ㄣ€屽綋鍓嶈妭鐐规牱鏈笉瓒炽€嶆椂鎵嶆彁鍗囧埌 SC.EXPLORE_MAX */
 export const SHADOW_DEFAULT = 0.05;
 
 /**
- * 解析 pxShadow。三处（选择器 / 控制页 / /proxyip）必须用同一套规则，
- * 否则面板显示 10%、实际跑 5%，或者 pxShadow=0 时显示成 10%。
- *   未设置 / 非法 → 默认 5%
- *   显式 0       → 0（关闭探索）
- *   >1           → 1（封顶）
+ * 瑙ｆ瀽 pxShadow銆備笁澶勶紙閫夋嫨鍣?/ 鎺у埗椤?/ /proxyip锛夊繀椤荤敤鍚屼竴濂楄鍒欙紝
+ * 鍚﹀垯闈㈡澘鏄剧ず 10%銆佸疄闄呰窇 5%锛屾垨鑰?pxShadow=0 鏃舵樉绀烘垚 10%銆?
+ *   鏈缃?/ 闈炴硶 鈫?榛樿 5%
+ *   鏄惧紡 0       鈫?0锛堝叧闂帰绱級
+ *   >1           鈫?1锛堝皝椤讹級
  */
 export function shadowRate(env: Env) {
   const raw = env ? env.pxShadow : undefined;
@@ -35,8 +35,8 @@ export function shadowRate(env: Env) {
 }
 
 /**
- * 可选的请求超时信号：运行时没有 AbortSignal.timeout 时返回 undefined（不影响请求）。
- * 只用于 cron / 诊断这类"慢一点没关系，但不能无限等"的外部 fetch。
+ * 鍙€夌殑璇锋眰瓒呮椂淇″彿锛氳繍琛屾椂娌℃湁 AbortSignal.timeout 鏃惰繑鍥?undefined锛堜笉褰卞搷璇锋眰锛夈€?
+ * 鍙敤浜?cron / 璇婃柇杩欑被"鎱竴鐐规病鍏崇郴锛屼絾涓嶈兘鏃犻檺绛?鐨勫閮?fetch銆?
  */
 export function timeoutSignal(ms: number): AbortSignal | undefined {
   const AS =
@@ -45,9 +45,9 @@ export function timeoutSignal(ms: number): AbortSignal | undefined {
 }
 
 /**
- * 给 Promise 加超时，并在结束时清掉定时器。
- * 直接用 Promise.race 会把 setTimeout 留在那里：一轮 cron 探 60 个节点，
- * 就是 60 个多余的 4 秒定时器，既占 CPU 又拖长请求生命周期。
+ * 缁?Promise 鍔犺秴鏃讹紝骞跺湪缁撴潫鏃舵竻鎺夊畾鏃跺櫒銆?
+ * 鐩存帴鐢?Promise.race 浼氭妸 setTimeout 鐣欏湪閭ｉ噷锛氫竴杞?cron 鎺?60 涓妭鐐癸紝
+ * 灏辨槸 60 涓浣欑殑 4 绉掑畾鏃跺櫒锛屾棦鍗?CPU 鍙堟嫋闀胯姹傜敓鍛藉懆鏈熴€?
  */
 export async function withTimeout<T>(p: Promise<T>, ms: number, msg = "timeout"): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -64,8 +64,8 @@ export async function withTimeout<T>(p: Promise<T>, ms: number, msg = "timeout")
 }
 
 /**
- * 有限并发地跑异步任务：既不让 50 个用户同时打 DO，也不退化成串行。
- * 顺序不保证，调用方只关心「全部完成」。
+ * 鏈夐檺骞跺彂鍦拌窇寮傛浠诲姟锛氭棦涓嶈 50 涓敤鎴峰悓鏃舵墦 DO锛屼篃涓嶉€€鍖栨垚涓茶銆?
+ * 椤哄簭涓嶄繚璇侊紝璋冪敤鏂瑰彧鍏冲績銆屽叏閮ㄥ畬鎴愩€嶃€?
  */
 export async function eachLimit<T>(list: readonly T[], limit: number, fn: (x: T) => Promise<void>): Promise<void> {
   const n = Math.max(1, Math.min(Math.floor(limit) || 1, list.length));
@@ -79,14 +79,14 @@ export async function eachLimit<T>(list: readonly T[], limit: number, fn: (x: T)
   await Promise.all(Array.from({ length: n }, worker));
 }
 
-// 协议名在运行时拼装，源码里不出现明文，混淆后也不会残留
+// 鍗忚鍚嶅湪杩愯鏃舵嫾瑁咃紝婧愮爜閲屼笉鍑虹幇鏄庢枃锛屾贩娣嗗悗涔熶笉浼氭畫鐣?
 export const P_V = String.fromCharCode(118, 108, 101, 115, 115); // 118 108 101 115 115
 export const P_T = String.fromCharCode(116, 114, 111, 106, 97, 110); // 116 114 111 106 97 110
 
 /**
- * 字节数组 → 小写十六进制字符串。
- * @param {Uint8Array|ArrayBuffer|number[]} u8 字节序列
- * @returns {string} 十六进制串，长度为字节数 × 2
+ * 瀛楄妭鏁扮粍 鈫?灏忓啓鍗佸叚杩涘埗瀛楃涓层€?
+ * @param {Uint8Array|ArrayBuffer|number[]} u8 瀛楄妭搴忓垪
+ * @returns {string} 鍗佸叚杩涘埗涓诧紝闀垮害涓哄瓧鑺傛暟 脳 2
  */
 export function toHex(u8: Uint8Array) {
   let s = "";
@@ -95,9 +95,9 @@ export function toHex(u8: Uint8Array) {
 }
 
 /**
- * 把 WebSocket 消息/ArrayBuffer/TypedArray 统一成 Uint8Array。
- * @param {unknown} d 原始消息体
- * @returns {Uint8Array} 字节视图
+ * 鎶?WebSocket 娑堟伅/ArrayBuffer/TypedArray 缁熶竴鎴?Uint8Array銆?
+ * @param {unknown} d 鍘熷娑堟伅浣?
+ * @returns {Uint8Array} 瀛楄妭瑙嗗浘
  */
 export function toU8(d: unknown) {
   if (d instanceof Uint8Array) return d;
@@ -108,9 +108,9 @@ export function toU8(d: unknown) {
 }
 
 /**
- * 16 字节 → 标准 UUID 字符串（8-4-4-4-12）。
- * @param {Uint8Array} b 长度至少 16 的字节数组
- * @returns {string} 小写 UUID
+ * 16 瀛楄妭 鈫?鏍囧噯 UUID 瀛楃涓诧紙8-4-4-4-12锛夈€?
+ * @param {Uint8Array} b 闀垮害鑷冲皯 16 鐨勫瓧鑺傛暟缁?
+ * @returns {string} 灏忓啓 UUID
  */
 export function uuidFromBytes(b: Uint8Array) {
   const h = toHex(b);
@@ -118,18 +118,18 @@ export function uuidFromBytes(b: Uint8Array) {
 }
 
 /**
- * 向 WebSocket 发送数据；连接已关闭或发送失败时静默忽略。
- * @param {WebSocket} ws 目标连接
- * @param {Uint8Array|ArrayBuffer} data 待发送数据
+ * 鍚?WebSocket 鍙戦€佹暟鎹紱杩炴帴宸插叧闂垨鍙戦€佸け璐ユ椂闈欓粯蹇界暐銆?
+ * @param {WebSocket} ws 鐩爣杩炴帴
+ * @param {Uint8Array|ArrayBuffer} data 寰呭彂閫佹暟鎹?
  * @returns {void}
  */
-export const WS_MSG_MAX = 256 * 1024; // 单帧上限：CF 对超大 WS 消息会直接断链
+export const WS_MSG_MAX = 256 * 1024; // 鍗曞抚涓婇檺锛欳F 瀵硅秴澶?WS 娑堟伅浼氱洿鎺ユ柇閾?
 
 export function safeSend(ws: WebSocketLike, data: Uint8Array) {
   try {
     if (!ws || ws.readyState !== WS_OPEN) return;
-    // 大块拆帧：一次 send 超过约 1 MB 时运行时可能直接重置连接，
-    // 表现就是"下载到 1 MB 左右必断"。
+    // 澶у潡鎷嗗抚锛氫竴娆?send 瓒呰繃绾?1 MB 鏃惰繍琛屾椂鍙兘鐩存帴閲嶇疆杩炴帴锛?
+    // 琛ㄧ幇灏辨槸"涓嬭浇鍒?1 MB 宸﹀彸蹇呮柇"銆?
     if (data && data.length > WS_MSG_MAX) {
       for (let i = 0; i < data.length; i += WS_MSG_MAX) {
         ws.send(data.subarray(i, Math.min(i + WS_MSG_MAX, data.length)));
@@ -138,13 +138,13 @@ export function safeSend(ws: WebSocketLike, data: Uint8Array) {
       ws.send(data);
     }
   } catch (e) {
-    /* 对端已关闭，忽略 */
+    /* 瀵圭宸插叧闂紝蹇界暐 */
   }
 }
 
 /**
- * 释放一次连接持有的全部资源（写锁 + 上游 socket）。
- * @param {object} st 连接状态对象
+ * 閲婃斁涓€娆¤繛鎺ユ寔鏈夌殑鍏ㄩ儴璧勬簮锛堝啓閿?+ 涓婃父 socket锛夈€?
+ * @param {object} st 杩炴帴鐘舵€佸璞?
  * @returns {void}
  */
 export function releaseAll(st: { writer: { releaseLock(): void } | null; sock: { close(): void } | null } | null) {
@@ -152,7 +152,7 @@ export function releaseAll(st: { writer: { releaseLock(): void } | null; sock: {
   try {
     if (st.writer) st.writer.releaseLock();
   } catch (e) {
-    /* 仍有未完成的写，忽略 */
+    /* 浠嶆湁鏈畬鎴愮殑鍐欙紝蹇界暐 */
   }
   st.writer = null;
   closeQuietly(st.sock);
@@ -160,8 +160,8 @@ export function releaseAll(st: { writer: { releaseLock(): void } | null; sock: {
 }
 
 /**
- * 静默关闭 socket，忽略重复关闭产生的异常。
- * @param {Socket|null} sock 待关闭的连接
+ * 闈欓粯鍏抽棴 socket锛屽拷鐣ラ噸澶嶅叧闂骇鐢熺殑寮傚父銆?
+ * @param {Socket|null} sock 寰呭叧闂殑杩炴帴
  * @returns {void}
  */
 export function closeQuietly(sock: { close(): void } | null | undefined) {
@@ -173,7 +173,7 @@ export function closeQuietly(sock: { close(): void } | null | undefined) {
 }
 
 /* ==================================================================
- * §2  SHA-224（Trojan 鉴权用；WebCrypto 不提供 SHA-224）
+ * 搂2  SHA-224锛圱rojan 閴存潈鐢紱WebCrypto 涓嶆彁渚?SHA-224锛?
  * ================================================================== */
 
 export const SHA_K = new Uint32Array([
@@ -193,9 +193,9 @@ export const SHA_H224 = new Uint32Array([
 export const rotr = (x: number, n: number) => ((x >>> n) | (x << (32 - n))) >>> 0;
 
 /**
- * 计算 SHA-224 摘要（纯 JS 实现，用于 Trojan 密码校验）。
- * @param {Uint8Array} data 待摘要数据
- * @returns {Uint8Array} 28 字节摘要
+ * 璁＄畻 SHA-224 鎽樿锛堢函 JS 瀹炵幇锛岀敤浜?Trojan 瀵嗙爜鏍￠獙锛夈€?
+ * @param {Uint8Array} data 寰呮憳瑕佹暟鎹?
+ * @returns {Uint8Array} 28 瀛楄妭鎽樿
  */
 export function sha224Bytes(data: Uint8Array | ArrayBuffer) {
   const data8 = toU8(data);
@@ -266,15 +266,15 @@ export function sha224Bytes(data: Uint8Array | ArrayBuffer) {
 }
 
 /* ==================================================================
- * §3  鉴权
- *    VLESS : env.uuids / env.uuid  —— 逗号分隔的 UUID 列表
- *    密码绑定: env.pwd            —— "uuid:password,uuid:password"
- *            密码在 isolate 首次使用时算成 sha224 哈希，映射回 uuid
+ * 搂3  閴存潈
+ *    VLESS : env.uuids / env.uuid  鈥斺€?閫楀彿鍒嗛殧鐨?UUID 鍒楄〃
+ *    瀵嗙爜缁戝畾: env.pwd            鈥斺€?"uuid:password,uuid:password"
+ *            瀵嗙爜鍦?isolate 棣栨浣跨敤鏃剁畻鎴?sha224 鍝堝笇锛屾槧灏勫洖 uuid
  * ================================================================== */
 
 /**
- * 把 catch 到的任意值转成一句可读的错误文本。
- * 统一入口，避免每个 catch 里写 `errMsg(e)`。
+ * 鎶?catch 鍒扮殑浠绘剰鍊艰浆鎴愪竴鍙ュ彲璇荤殑閿欒鏂囨湰銆?
+ * 缁熶竴鍏ュ彛锛岄伩鍏嶆瘡涓?catch 閲屽啓 `errMsg(e)`銆?
  */
 export function errMsg(e: unknown, max = 200): string {
   let out: string;

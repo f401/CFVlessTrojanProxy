@@ -1,7 +1,7 @@
 import { S } from "../core/state";
 import { connect } from "cloudflare:sockets";
-import { timeoutSignal } from "../core/util";
-import { isPrivateHost } from "../core/net";
+import { timeoutSignal, withTimeout } from "../core/util";
+import { isCfIp, isPrivateHost } from "../core/net";
 export { DENY_PORTS, checkTarget, isPrivateHost } from "../core/net";
 
 /** 查 AAAA 记录（用于绕过 CF 对 IPv4 的内部隔离） */
@@ -49,6 +49,35 @@ export async function resolveAAAA(domain: string) {
   return ip;
 }
 
+/**
+ * 解析域名的全部 A 记录（最多 4 条，带 10 分钟缓存）。
+ * 单个 A 记录可能指向已黑洞的边缘 IP，多试几个能显著提升成功率。
+ * @param {string} domain 域名
+ * @returns {Promise<string[]>} IPv4 列表（可能为空）
+ */
+export async function resolveV4All(domain: string): Promise<string[]> {
+  const hit = S.v4AllCache.get(domain);
+  if (hit && Date.now() - hit.t < 600000) return hit.ips;
+  const ips: string[] = [];
+  for (const base of DOH_ENDPOINTS) {
+    try {
+      const url = `${base}?name=${encodeURIComponent(domain)}&type=A`;
+      const r = await fetch(url, { signal: timeoutSignal(5000), headers: { accept: "application/dns-json" } });
+      if (!r.ok) continue;
+      const j = await r.json();
+      for (const a of (j.Answer || []) as DohAnswer[]) {
+        if (a.type === 1 && a.data && /^\d{1,3}(\.\d{1,3}){3}$/.test(a.data) && !ips.includes(a.data)) ips.push(a.data);
+      }
+      if (ips.length) break;
+    } catch (e) {
+      /* 换下一个 DoH */
+    }
+  }
+  if (!ips.length) return [];
+  if (S.v4AllCache.size > 300) S.v4AllCache.clear();
+  S.v4AllCache.set(domain, { ips, t: Date.now() });
+  return ips;
+}
 export const isV6Literal = (h: string) => typeof h === "string" && h.includes(":");
 
 /**
@@ -122,6 +151,15 @@ export function parseProxyIp(raw: string) {
 export async function dial(host: string, port: number) {
   let lastErr = null;
 
+  // IPv4 优先（仅 443）：connect({ hostname }) 走 A 还是 AAAA 由运行时决定，而 CF 边缘对「来自 CF
+  // 网络的 IPv6 连接」会直接回纯文本 403 `IPv6`（x.com 这类 CF 托管站必撞）。先取 A 记录连字面量，
+  // 等于把出口钉在 IPv4；DoH 拿不到结果时照旧走下面的三级，不会卡住主路径。
+  // 只对 443 生效：明文 80 没有这个问题，而 DoH 会多一次子请求。
+  if (port === 443 && !isV6Literal(host)) {
+    const s4 = await dial4(host, port, 1500);
+    if (s4) return s4;
+  }
+
   try {
     return await connect({ hostname: host, port });
   } catch (e) {
@@ -149,6 +187,67 @@ export async function dial(host: string, port: number) {
   // DNS 可能把域名解析到内网/元数据地址：NAT64 编码之前必须再验一次
   if (isPrivateHost(v4)) throw lastErr || new Error("目标解析到内网地址");
   return await connect({ hostname: nat64FromV4(v4), port });
+}
+
+/**
+ * 只走 IPv4 的直连：先用 DoH 取 A 记录，再连 IPv4 字面量。
+ *
+ * 为什么需要：`connect({ hostname })` 走 A 还是 AAAA 由运行时决定，落点不可控；
+ * 而部分站点（X / Twitter 这类）会直接拒绝 IPv6 出口（响应 403，body 就是 "IPv6"）。
+ * 先解析 A 记录再连字面量，等于把出口钉死在 IPv4 上。
+ * @param {string} host 目标主机
+ * @param {number} port 目标端口
+ * @returns {Promise<Socket|null>} 连不上时返回 null，由调用方决定回落
+ */
+/**
+ * 这个目标是否托管在 Cloudflare 上（或本身就是 CF 的 IP）。
+ * CF 托管的站点从 Worker 直连会撞自家边缘，属于「一开始就该走中转」的通用判据，
+ * 比写死域名名单可靠：任何接进 CF 的新站都自动被覆盖。
+ * @param {string} host 目标域名/IP
+ * @returns {Promise<boolean>} 命中 CF 网段返回 true
+ */
+/** 用一次 HTTP 请求判定「本 isolate 的出口」访问该站点会被怎么对待。
+ *  返回 {code, colo}：code 0 表示连 HTTP 都没拿到（当作未知）。
+ *  只在 CF 托管目标上用：这些站点会把我们的出口 IP 透传给源站，403 就是被按 IP 拒。 */
+export async function httpProbe(host: string, ms = 2500): Promise<{ code: number; colo: string }> {
+  try {
+    const r = await withTimeout(
+      fetch(`https://${host}/`, {
+        method: "GET",
+        redirect: "manual",
+        headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0 Safari/537.36" },
+      }),
+      ms,
+    );
+    const ray = (r.headers.get("cf-ray") || "").split("-").pop() || "";
+    return { code: r.status, colo: ray };
+  } catch (e) {
+    return { code: 0, colo: "" };
+  }
+}
+export async function isCfHost(host: string) {
+  if (isV4Literal(host)) return isCfIp(host);
+  let ips: string[] = [];
+  try {
+    ips = await resolveV4All(host);
+  } catch {
+    return false; // 解析失败不能挡住直连
+  }
+  for (const ip of ips) if (isCfIp(ip)) return true;
+  return false;
+}
+export async function dial4(host: string, port: number, budget = 0) {
+  const raw = isV4Literal(host) ? [host] : await withTimeout(resolveV4All(host), budget || 3000).catch(() => []);
+  const list: string[] = Array.isArray(raw) ? raw : [];
+  for (const ip of list.slice(0, 3)) {
+    if (!ip || isPrivateHost(ip)) continue;
+    try {
+      return await connect({ hostname: ip, port });
+    } catch (_) {
+      /* 换下一个 A 记录：x.com 这类站点有多个边缘 IP，单点失败不代表整站不可达 */
+    }
+  }
+  return null;
 }
 
 /* ==================================================================

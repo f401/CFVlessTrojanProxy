@@ -5,7 +5,11 @@ import { S } from "../core/state";
 import { json } from "../edge/respond";
 import { diagVerdict, hostKey } from "../nodes/metrics";
 import { nsGet } from "../nodes/score";
-import { checkTarget, dohQuery, expandV6, resolveAAAA } from "../proxy/dial";
+import { cfHttpCode } from "../proxy/cfverdict";
+import { sweepHost } from "../route/sweep";
+import { vAll } from "../route/verdict";
+import { planView } from "../route/budget";
+import { checkTarget, dohQuery, expandV6, httpProbe, isCfHost, resolveAAAA, resolveV4All } from "../proxy/dial";
 import { aliveList, commitPool, flushPx, pxSet } from "../px/pool";
 import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
 import { clSnapshot, restoreUsage } from "../store/index";
@@ -20,6 +24,13 @@ export async function debug(c: UserCtx): Promise<Response> {
   const { env, url, host: _host, id, first: _first, ctx: _ctx } = c;
 
   /* ---------- 连接记录：本 isolate 最近 40 条 +（&do=1）DO 环形 60 条 ---------- */
+  const vtHost = String(url.searchParams.get("vt") || "").slice(0, 80);
+  if (vtHost) {
+    const sw = await sweepHost(vtHost);
+    const plan = planView(S.pool.length, S.alive.size);
+    const pol = { same: S.polSame, diff: S.polDiff, why: S.polWhy };
+    return json({ host: vtHost, ips: sw.ips, nodes: sw.nodes, rows: sw.rows, table: vAll(), pol, plan });
+  }
   if (url.searchParams.get("cl") === "1") {
     const local = clSnapshot(40);
     let ring: ClRec[] = [];
@@ -89,6 +100,44 @@ export async function debug(c: UserCtx): Promise<Response> {
       }));
       basisLabel = "主动探测";
     }
+    // 判定：先看 DNS 解析出的 IP 在不在 CF 网段，再用 HTTP 探一次拿真实状态码
+    // （Worker 里唯一能“看见 403”的办法；隧道内 TLS 是端到端的，看不到状态行）
+    const ips = await resolveV4All(diagHost).catch(() => []);
+    const cfHosted = await isCfHost(diagHost).catch(() => false);
+    const live = await httpProbe(diagHost, 4000).catch(() => ({ code: 0, colo: "" }));
+    if (live.code) S.cfHttp.set(diagHost, { code: live.code, colo: live.colo, t: Date.now() });
+    const cfVerdict = {
+      ips,
+      cfHosted,
+      code: live.code,
+      colo: live.colo,
+      cached: cfHttpCode(diagHost),
+      blocked: live.code >= 400,
+    };
+    // 该站点在中继上被判 blocked/dead 的条目（来自判定表，带来源与时间）
+    const relayBlocked: Array<{ node: string; state: number; src: number; left: number }> = [];
+    for (const v of vAll()) {
+      if (!v.c.startsWith("r:") || v.state < 2) continue;
+      relayBlocked.push({ node: v.c.slice(2) + ":443", state: v.state, src: v.src, left: Math.round((v.at + 1800000 - Date.now()) / 1000) });
+    }
+    // &do=1：把 DO 里跨 isolate 的那份判定也拉出来看（否则只能看到本 isolate 学到的）
+    let ringBlk: Array<{ node: string; left: number }> = [];
+    if (url.searchParams.get("do") === "1" && env.METER) {
+      try {
+        const id = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
+        const rr = await env.METER.get(env.METER.idFromName(id)).fetch("https://meter/blk");
+        const jj = (await rr.json()) as { blk?: Record<string, number> };
+        const now2 = Date.now();
+        for (const [bk, exp] of Object.entries(jj.blk || {})) {
+          if (exp <= now2 || !bk.startsWith(diagHost + "|")) continue;
+          ringBlk.push({ node: bk.slice(diagHost.length + 1), left: Math.round((exp - now2) / 1000) });
+        }
+        ringBlk.sort((a, b) => b.left - a.left);
+      } catch (e) {
+        ringBlk = [];
+      }
+    }
+    relayBlocked.sort((a, b) => b.left - a.left);
     const v = diagVerdict(basis, direct);
 
     return json({
@@ -103,6 +152,9 @@ export async function debug(c: UserCtx): Promise<Response> {
       samples: rows,
       probe,
       alive: alive.length,
+      cfVerdict,
+      relayBlocked,
+      ringBlk,
       note: "Worker 看不到 HTTP 状态码（TLS 端到端），这里靠的是连接结果与对照",
     });
   }

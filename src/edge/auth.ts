@@ -27,9 +27,22 @@ export async function sessionToken(env: Env, exp?: number) {
   return `${e.toString(36)}.${sig.slice(0, 40)}`;
 }
 
+/** 管理员密钥的摘要（sha256 hex）：URL/日志里只放摘要，明文密钥不外出。
+ *  不缓存：admin 请求本来就少，算一次 sha256 只有微秒级，省掉模块级可变状态。 */
+async function adminDigest(env: Env): Promise<string> {
+  const key = String(env.adminKey || "");
+  return key ? await sha256Hex(key) : "";
+}
+
 export async function adminAuthed(request: Request, url: URL, env: Env) {
-  const k = url.searchParams.get("k");
-  if (k && env.adminKey && k === env.adminKey) return true;
+  // 优先用请求头：URL 里的 k= 会留在访问日志、浏览器历史、Referer 里，等于明文外泄
+  const hdr = request.headers.get("x-admin-key") || "";
+  const bearer = (request.headers.get("authorization") || "").replace(/^Bearers+/i, "");
+  const given = hdr || bearer || url.searchParams.get("k") || "";
+  if (given && env.adminKey) {
+    if (given === env.adminKey) return true; // 兼容旧用法
+    if (given.toLowerCase() === (await adminDigest(env))) return true; // sha256(adminKey) 等价凭证
+  }
   const tok = getCookie(request, "adm");
   if (!tok) return false;
   const dot = tok.indexOf(".");

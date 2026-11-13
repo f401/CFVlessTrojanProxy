@@ -1,4 +1,5 @@
-import { loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
+import { X_EDGE_IPS, X_RULES, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
+import { edgeNodes } from "../route/edge";
 
 export * from "./sub-common";
 export { renderSingbox } from "./sub-singbox";
@@ -29,7 +30,9 @@ export function renderClash(
   regions: string[] = [],
   auth?: Auth,
 ) {
-  const nodes = orderNodes(loadNodes(env, host), learned);
+  const manual = String(env.nodes || "").trim();
+  const extra = manual || url.searchParams.get("e") === "0" ? [] : edgeNodes(5);
+  const nodes = orderNodes([...loadNodes(env, host), ...extra], learned);
   const pass = trojanPasswordOf(env, id, auth);
   const protos = pickProtos(env, url, Boolean(pass));
   const out: string[] = [];
@@ -39,6 +42,8 @@ export function renderClash(
   const G_TPUT = "\ud83d\ude80 \u541e\u5410\u4f18\u5148";
   const G_REG = "\ud83c\udf0d \u5730\u533a";
   const G_MAN = "\ud83c\udfaf \u624b\u52a8";
+  const G_X = "\ud83d\udef0 x \u4e13\u7ebf";
+  const xIps = url.searchParams.get("x") === "1" ? X_EDGE_IPS : [];
 
   const emit = (
     name: string,
@@ -53,6 +58,7 @@ export function renderClash(
     out.push(`    type: ${proto}`);
     out.push(`    server: ${yamlScalar(server)}`);
     out.push(`    port: ${port}`);
+    out.push(`    ip-version: ipv4`);
     if (proto === "vless") out.push(`    uuid: ${id}`);
     else out.push(`    password: ${yamlStr(pass)}`);
     out.push(`    udp: false`);
@@ -95,6 +101,18 @@ export function renderClash(
     all.push(e.name);
   }
 
+  // ?x=1：额外发一批「钉在具体 CF 边缘 IP」的入口，配合 x 组做落地机房轮换。
+  const xNames: string[] = [];
+  for (const ip of xIps) {
+    for (const proto of protos) {
+      if (proto === "trojan" && !pass) continue;
+      const name = `x-${ip}-${proto === "trojan" ? "TJ" : "VL"}`;
+      emit(name, proto, ip, 443, `/?ed=2560&ip=xp&mode=lat`, true, "");
+      xNames.push(name);
+      all.push(name);
+    }
+  }
+
   const q = (arr: string[]) => `    proxies: [${arr.map((x) => `"${x}"`).join(", ")}]`;
   const pick = (arr: string[], n: number) => arr.slice(0, Math.max(1, Math.min(n, arr.length)));
 
@@ -121,6 +139,17 @@ export function renderClash(
     groups.push(q(regNames));
   }
 
+  if (xNames.length) {
+    groups.push(`  - name: "${G_X}"`);
+    groups.push("    type: url-test");
+    groups.push("    url: https://x.com/");
+    groups.push("    expected-status: 200");
+    groups.push("    interval: 120");
+    groups.push("    tolerance: 0");
+    groups.push("    lazy: false");
+    groups.push(q([...xNames, G_TPUT]));
+  }
+
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
   groups.push(
@@ -131,6 +160,7 @@ export function renderClash(
     "port: 7890",
     "allow-lan: true",
     "mode: rule",
+  "ipv6: false",
     "log-level: info",
     "unified-delay: true",
     "global-client-fingerprint: chrome",
@@ -139,6 +169,7 @@ export function renderClash(
     "  enhanced-mode: fake-ip",
     "  fake-ip-range: 198.18.0.1/16",
     "  nameserver: [223.5.5.5, 119.29.29.29]",
+  "  ipv6: false",
     "",
     "proxies:",
     ...out,
@@ -147,6 +178,9 @@ export function renderClash(
     ...groups,
     "",
     "rules:",
+    ...(xNames.length
+      ? X_RULES.map((d) => `  - DOMAIN-SUFFIX,${d},${G_X}`)
+      : []),
     "  - GEOIP,CN,DIRECT",
     `  - MATCH,${G_TPUT}`,
   ].join("\n");

@@ -7,6 +7,15 @@
  *   · 想知道"谁动了它" → 全仓搜索 S.xxx
  */
 export class AppState {
+  site = "";
+  /** 通道策略影子统计：建议与现状一致的次数 / 不一致次数 / 原因分布 */
+  polSame = 0;
+  polDiff = 0;
+  polWhy: Record<string, number> = {}; // 最近一次请求的 hostname（cron 探入口时用）
+  edge: Map<string, { h: string; p: number; ms: number; ok: number; fail: number; at: number }> = new Map();
+  edgeAt = 0;
+  edgeDirty = false;
+  edgeWrittenAt = 0;
   // —— 节点与选择 ——
   alive: Map<string, NodeEntry> = new Map();
   nstat: Map<string, NodeStats> = new Map();
@@ -29,6 +38,8 @@ export class AppState {
   /** 复测累计次数：线上用它判断"探活抖动"到底有多频繁（=0 说明这条优化没触发过） */
   reProbeN = 0; // 这批探活是在哪个机房做的（cron 拿不到 colo，记 "cron"）
   needPx: Map<string, number> = new Map();
+  /** 出口不在 CF 网段的可用节点（中转时优先） */
+  relayOff: Set<string> = new Set();
   colo = "";
   funnel: Record<string, number> = { direct: 0, node: 0, v6: 0 };
   candN = 0; // 最近一次 candsFor 的候选数（观测用）
@@ -52,6 +63,8 @@ export class AppState {
     "node",
     "eCloseD",
     "eCloseP",
+    "px4",
+    "pxf",
     "sw",
     "noCand",
     "tput",
@@ -75,6 +88,9 @@ export class AppState {
   /** 上一次读 seed 是否失败：失败时 write 必须跳过，不能拿空表覆盖别人的桶 */
   seedReadFail = false;
   pool: PoolEntry[] = [];
+  /** 已上报到 DO 的判定（键 `target|chan`，值 = 到期时间） */
+  vtSent: Map<string, number> = new Map();
+  vtLoaded = false;
   scanN = 12;
   poolIdx = 0;
   poolGen = 0;
@@ -124,6 +140,11 @@ export class AppState {
 
   // —— DNS 缓存 ——
   dnsCache: Map<string, { ip: string; t: number }> = new Map();
+  v4AllCache: Map<string, { ips: string[]; t: number }> = new Map();
+  /** 命中过 Cloudflare 托管的目标（host → 过期时间），省掉重复解析 */
+  /** 命中过 Cloudflare 托管的目标（host → 过期时间），省掉重复解析 */
+  cfHost: Map<string, number> = new Map();
+  cfHttp: Map<string, { code: number; colo: string; t: number }> = new Map();
   aaaaCache: Map<string, { ip: string; t: number }> = new Map();
 
   constructor() {

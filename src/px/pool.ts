@@ -1,22 +1,12 @@
 import { errMsg } from "../core/util";
+import { isCfIp } from "../core/net";
 
 import { SEED_WRITE_GAP } from "../core/const";
 import { SC } from "../core/const";
+import { HOOK } from "../core/hook";
 import { logErr } from "../nodes/metrics";
-import { POOL_MAX, POOL_TTL_MS, geoLabel, probeProxy, refillPool } from "./probe";
-import {
-  candsFor,
-  capOf,
-  invalidateRank,
-  scoreParts,
-  nsLatency,
-  nsProbe,
-  nsProbeFail,
-  p90Of,
-  pFailOf,
-  pStallOf,
-  pctOf,
-} from "../nodes/score";
+import { POOL_MAX, POOL_TTL_MS, geoLabel, probeProxy, probeSni, refillPool } from "./probe";
+import { candsFor, capOf, invalidateRank, scoreParts, nsLatency, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, isBlack, isFrozen } from "../nodes/score";
 import { BUCKET_DEF, SEEDS } from "./seed";
 import { PX_TTL, MODES, keyOf } from "./const";
 import { S } from "../core/state";
@@ -39,18 +29,9 @@ export const SEED_COLD_N = 48; // 冷启动灌进 alive 的节点数
 
 const ALIVE_MAX = 800; // 长期运行 alive 上限：池子换代不会永久累积（800 节点 ≈ 1 MB 统计 + candsFor 0.9ms）
 
-// 灾备种子：seed 被清空时用它兜底，避免"池子有 2000 条但一个能用的都没有"。
-// 这些是历史上实测可用的中转，会被正常探活/熔断覆盖，不是永久白名单。
-export const BOOT = [
-  "45.147.250.39:443",
-  "45.136.117.194:443",
-  "185.253.117.147:443",
-  "91.215.154.80:443",
-  "91.215.153.143:443",
-  "45.151.183.22:443",
-  "193.181.211.185:443",
-  "89.22.227.132:443",
-];
+// 冷启动不再写死历史中转：那些地址一旦失效，alive 会长期只有几个死节点，
+// 反而把「中转」变成一次必赔的拨号。起步候选直接从候选池头部取（见 pxGet），
+// 由本机房自己的探活决定谁留谁走。
 
 
 /** 候选项池：内存 → KV(poolGen) → 空；空时由 cronScan 触发重建 */
@@ -113,10 +94,12 @@ export async function pxGet(env: Env) {
       const hit = (Object.values(S.seed.byColo || {}) as SeedBucket[]).find((b) => (b.nodes || []).length);
       if (hit) src = hit.nodes || [];
     }
-    if (!src.length) {
-      for (const kk of BOOT) {
-        const i = kk.lastIndexOf(":");
-        S.alive.set(kk, { h: kk.slice(0, i), p: Number(kk.slice(i + 1)) || 443, cc: "", ms: SC.P_TCP, src: "boot" });
+    if (!src.length && S.pool.length) {
+      // 没有任何名单可用时，用候选池头部当起步：只写名字、延迟先验，
+      // 由本机房的探活与失败学习决定留谁（池子是 CF 优选 IP，对非 CF 目标才有中转价值）。
+      for (const c of S.pool.slice(0, 32)) {
+        const k = c.h + ":" + c.p;
+        if (!S.alive.has(k)) S.alive.set(k, { h: c.h, p: c.p, cc: "", ms: SC.P_TCP, src: "pool" });
       }
     }
     for (const n of src.slice(0, SEED_COLD_N)) {
@@ -231,7 +214,7 @@ export async function aliveList(env: Env) {
   return [...S.alive.values()];
 }
 
-export async function cronScan(env: Env) {
+export async function cronScan(env: Env, adm = 0) {
   await pxGet(env);
   let pool = await ensurePool(env);
   if (!pool.length || Date.now() - S.poolBuilt > POOL_TTL_MS) {
@@ -268,7 +251,7 @@ export async function cronScan(env: Env) {
   // ① 探新候选
   // 每轮扫多少：默认按"4 轮覆盖全池"，管理员的 ?scan= 只能往上抬，天花板 SCAN_MAX。
   // 120/轮时 1600 池要 6.7 小时才轮完，冷启动期（isolate 寿命短）等于永远只认识前 120 个。
-  const want = Math.max(S.scanN || 12, Math.ceil(pool.length / 4));
+  const want = adm > 0 ? adm : Math.max(S.scanN || 12, Math.ceil(pool.length / 4));
   // 子请求是硬上限：免费计划 50/次调用，每次探活 = 1 个 connect()。默认压在 48，
   // 付费计划或提高配额后用 env.scanSub 抬（仍不超过 SCAN_MAX）。
   const sub = Number(env.scanSub) > 0 ? Math.max(12, Number(env.scanSub)) : SC.SCAN_SUB;
@@ -338,6 +321,10 @@ export async function cronScan(env: Env) {
     });
     nsLatency(k, x.ms);
     nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
+    // 出口是否在 CF 网段：中转时优先用「不在 CF 网段」的节点，
+    // 否则 CF→CF 会把客户端 IP 透传给目标站，封禁策略照旧命中。
+    if (isCfIp(x.h)) S.relayOff.delete(k);
+    else S.relayOff.add(k);
   }
 
   // ② 重测当前 + 分数前 3 名（失败即进冷却）
@@ -459,6 +446,25 @@ export async function cronScan(env: Env) {
         if (S.nstat.size <= ALIVE_MAX * 0.75) break;
         S.nstat.delete(k);
       }
+    }
+  }
+
+  // ④c 中转实测：拿「实际失败过的站点」当目标，由池子自己判断哪个节点能替它出网。
+  //     Worker 看不到 HTTP 状态码，但能看「这个节点有没有把该 SNI 的握手转出去」。
+  const tNow = Date.now();
+  const tgt: string[] = [];
+  for (const [h, t] of S.needPx) if (t > tNow && tgt.length < 2) tgt.push(h);
+  if (tgt.length) {
+    const pool4 = (await aliveList(env))
+      .filter((x) => !isBlack(keyOf(x)) && !isFrozen(keyOf(x)))
+      .slice(0, 4);
+    for (const h of tgt) {
+      const res = (await Promise.all(
+        pool4.map((x) => probeSni(x.h, x.p, h, 2200).catch(() => ({ err: "tcp" }) as { hs?: number })),
+      )) as { hs?: number }[];
+      res.forEach((x, i) => {
+        if (HOOK.relayProbe) HOOK.relayProbe(h, pool4[i].h, !!x.hs, x.hs || 0);
+      });
     }
   }
 

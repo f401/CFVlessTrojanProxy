@@ -30,6 +30,7 @@ export default {
       const host = url.hostname || request.headers.get("Host") || "";
       const cf = request.cf || {};
       S.colo = (cf && cf.colo) || S.colo || "??"; // 本 isolate 的机房：所有统计按它分桶
+    S.site = host;
 
       if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
         return await handleUpgrade(request, env, ctx);
@@ -121,5 +122,6 @@ export default {
 };
 
 /* 供单测导出（Workers 运行时忽略额外导出） */
+import "./route/policy";
 
 export { Meter } from "./store/meter";

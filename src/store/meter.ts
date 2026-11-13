@@ -10,6 +10,9 @@ export class Meter {
   e: ErrItem[];
   /** 连接记录环形：最近 60 条，离线标定用 */
   cl: ClRec[];
+  /** 键 `host|node` → 到期时间：这条中继对这个站点被按 IP 拒（403）的判定，跨 isolate 共享 */
+  blk: Record<string, number>;
+  vt: Record<string, number>;
   /** 请求串行队列：/add 与 /set 交错会让内存和 storage 的顺序不一致 */
   q: Promise<unknown> = Promise.resolve();
   /**
@@ -25,6 +28,8 @@ export class Meter {
     this.s = Object.create(null) as Record<string, NodeSnap>;
     this.e = []; // 跨 isolate 的错误环形（最多 50 条）
     this.cl = []; // 连接记录环形（最多 60 条）：离线标定 ttfb/抖动用
+    this.blk = {};
+      this.vt = {};
     this.st.blockConcurrencyWhile(async () => {
       // 单键存储：每次 /add 只写 1 行。
       // 以前是 c/g/s/e 四个键 = 4 行，SQLite DO 的「行写入」额度（免费 10 万/天）
@@ -38,6 +43,8 @@ export class Meter {
           if (o.s && typeof o.s === "object") this.s = Object.assign(Object.create(null), o.s);
           if (Array.isArray(o.e)) this.e = o.e;
           if (Array.isArray(o.cl)) this.cl = o.cl as ClRec[];
+    if (o.blk && typeof o.blk === "object") this.blk = o.blk as Record<string, number>;
+    if (o.vt && typeof o.vt === "object") this.vt = o.vt as unknown as Record<string, number>;
         }
         return;
       }
@@ -90,7 +97,10 @@ export class Meter {
    */
   async save() {
     // 一次 put = 一行。四个字段塞进一个对象，行写入直接 ÷4。
-    await this.st.storage.put("a", await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e }));
+    await this.st.storage.put(
+      "a",
+      await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl, blk: this.blk }),
+    );
   }
 
   /**
@@ -168,6 +178,31 @@ export class Meter {
           } else this.cl.push({ k: x.k, n: x.n, ok: x.ok, p50: x.p50, p95: x.p95, dn: x.dn });
         }
         if (this.cl.length > 60) this.cl = this.cl.slice(-60);
+    // 中继 403 判定搭便车上来：只保留未过期的，最多 200 条
+    if (Array.isArray(d.vt) && d.vt.length) {
+      for (const r of d.vt) {
+        if (!r || typeof r.k !== "string" || typeof r.t !== "number") continue;
+        if (r.t <= Date.now()) continue;
+        this.vt[r.k] = r.t;
+      }
+      const ks = Object.keys(this.vt);
+      if (ks.length > 200) {
+        ks.sort((a, b) => this.vt[b] - this.vt[a]);
+        for (const k of ks.slice(200)) delete this.vt[k];
+      }
+    }
+    if (d.blk && typeof d.blk === "object") {
+      const nowB = Date.now();
+      for (const [bk, exp] of Object.entries(d.blk as Record<string, number>)) {
+        if (typeof exp !== "number" || exp <= nowB) continue;
+        this.blk[bk] = exp;
+      }
+      const ks = Object.keys(this.blk).filter((k) => this.blk[k] > nowB);
+      if (ks.length > 200) {
+        ks.sort((a, b) => this.blk[a] - this.blk[b]);
+        for (const k of ks.slice(0, ks.length - 200)) delete this.blk[k];
+      }
+    }
       }
       if (d.spd && typeof d.spd === "object") {
         for (const [k, v] of Object.entries(d.spd)) {
@@ -215,6 +250,18 @@ export class Meter {
     // 只在当前为 0 时回填，天然幂等，重建脚本后能自动恢复历史用量
     if (p.endsWith("/cl")) {
       return Response.json({ cl: this.cl });
+    }
+    if (p.endsWith("/vt")) {
+      const out: Array<{ k: string; s: number; t: number }> = [];
+      const now = Date.now();
+      for (const [k, t] of Object.entries(this.vt)) if (t > now) out.push({ k, s: 2, t });
+      return Response.json({ vt: out.slice(0, 120) });
+    }
+    if (p.endsWith("/blk")) {
+      const nowB = Date.now();
+      const out: Record<string, number> = {};
+      for (const [k, v] of Object.entries(this.blk)) if (v > nowB) out[k] = v;
+      return Response.json({ blk: out });
     }
     if (p.endsWith("/cnt")) {
       return Response.json({ g: this.g, c: this.c, s: this.s, e: this.e });
