@@ -128,8 +128,12 @@ HOOK.traffic = (e: TrafficEvt): void => {
   // 判据必须建立在「这个站点确实能出整页」的基线上：没有基线时，小响应可能只是
   // 一个返回自己默认页的中继（nginx 200），也可能是站点自身的业务 403 —— 两者都不可判。
   if (!big) {
-    queueVerify(e.host, chan); // 只排队（当前 PROBE_REQ=0，探测留给 cron）
-    return;
+    // CF 托管站点例外：直连被自家边缘按 IP 族拒时，响应恒为几百字节的错误页，
+    // 而这种站点正常浏览一定会出整页。没有基线也允许直连通道当场判封锁（1 次即可）。
+    if (!(e.cf && chan.kind === "d")) {
+      queueVerify(e.host, chan); // 只排队（当前 PROBE_REQ=0，探测留给 cron）
+      return;
+    }
   }
   S.smCnt.delete(ck);
   recordBlock({ target: e.host, chan, down: e.down, ok: false });

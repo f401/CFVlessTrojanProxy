@@ -36,6 +36,8 @@ export interface Hooks {
 }
 
 export interface TrafficEvt {
+  /** 目标是 CF 托管站点（这类站点直连被自家边缘按 IP 族拒的概率极高） */
+  cf?: boolean;
   host: string;
   via: "node" | "direct" | "v6";
   node: string; // 节点键 host:port（直连时为空）
