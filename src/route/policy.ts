@@ -104,6 +104,20 @@ HOOK.traffic = (e: TrafficEvt): void => {
     recordPass({ target: e.host, chan, down: e.down, ok: true });
     return;
   }
+  // 小到不可能是真实页面的「成功」：多半是中继把自己的默认页（nginx）当响应回了。
+  // 这类中继对任何站点都是废的，直接判该通道对这个站点不可用，避免一直吃假 200。
+  if (e.ok && e.via === "node" && e.down > 0 && e.down < 2000) {
+    recordBlock({ target: e.host, chan, down: e.down, ok: false });
+    S.needPx.set(e.host, now + 21600000);
+    return;
+  }
+  // 小到不可能是真实页面的「成功」：多半是中继把自己的默认页（nginx）当响应回了。
+  // 这类中继对任何站点都是废的，直接判该通道对这个站点不可用，避免一直吃假 200。
+  if (e.ok && e.via === "node" && e.down > 0 && e.down < 2000) {
+    recordBlock({ target: e.host, chan, down: e.down, ok: false });
+    S.needPx.set(e.host, now + 21600000);
+    return;
+  }
   if (e.down <= 0 || e.down >= 12000 || e.life > 8000 || e.up > 16384) return;
   // 差分判据：只有当「同一站点的别的通道刚拿到过大响应」时，小响应才说明是这条通道被封。
   // 业务层 403（鉴权/风控/HEAD）在任何通道上都小，bigByHost 不会成立 → 不会被误判。

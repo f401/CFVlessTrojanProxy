@@ -29,7 +29,7 @@ export class Meter {
     this.e = []; // 跨 isolate 的错误环形（最多 50 条）
     this.cl = []; // 连接记录环形（最多 60 条）：离线标定 ttfb/抖动用
     this.blk = {};
-      this.vt = {};
+    this.vt = {};
     this.st.blockConcurrencyWhile(async () => {
       // 单键存储：每次 /add 只写 1 行。
       // 以前是 c/g/s/e 四个键 = 4 行，SQLite DO 的「行写入」额度（免费 10 万/天）
@@ -99,7 +99,7 @@ export class Meter {
     // 一次 put = 一行。四个字段塞进一个对象，行写入直接 ÷4。
     await this.st.storage.put(
       "a",
-      await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl, blk: this.blk }),
+      await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl, blk: this.blk, vt: this.vt }),
     );
   }
 

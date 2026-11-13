@@ -8,6 +8,7 @@ import { nsGet } from "../nodes/score";
 import { cfHttpCode } from "../proxy/cfverdict";
 import { sweepHost } from "../route/sweep";
 import { vAll } from "../route/verdict";
+import { vtDelta, vtLoad } from "../route/verdictsync";
 import { planView } from "../route/budget";
 import { prefsJson } from "../route/prefs";
 import { verifyInfo } from "../route/verify";
@@ -28,6 +29,23 @@ export async function debug(c: UserCtx): Promise<Response> {
 
   /* ---------- 连接记录：本 isolate 最近 40 条 +（&do=1）DO 环形 60 条 ---------- */
   const vtHost = String(url.searchParams.get("vt") || "").slice(0, 80);
+  // &do=1：先把这个 isolate 学的强证据写回 DO，再把 DO 里的合并回来，
+  // 这样从任意边缘读都能看到「刚刚在别的 isolate 学到的封锁」。
+  if (url.searchParams.get("do") === "1" && env.METER) {
+    try {
+      const rows = vtDelta();
+      if (rows.length) {
+        await env.METER.get(env.METER.idFromName(String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase())).fetch("https://meter/add", {
+          method: "POST",
+          body: JSON.stringify({ vt: rows }),
+        });
+      }
+    } catch {
+      // 忽略
+    }
+    S.vtLoaded = false;
+    await vtLoad(env);
+  }
   if (vtHost) {
     // 默认只读表（TLS 探测在免费计划会 1102，只有显式 &probe=1 才做）
     const wantProbe = url.searchParams.get("probe") === "1";
