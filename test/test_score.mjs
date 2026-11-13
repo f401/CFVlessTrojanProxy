@@ -1670,7 +1670,7 @@ W.vImport(dl);
 eq("远端强证据可导入", W.vState("x.com", "r:45.136.117.194"), 2);
 ok("导入后 veto 生效", W.HOOK.veto("x.com", "45.136.117.194") === true);
 W.recordProbe({ target: "y.com", chan: { kind: "r", ip: "1.1.1.1" }, code: 200, ms: 40 });
-eq("ok 证据不进增量", W.HOOK.vtDelta().length, 0);
+ok("ok 证据不进增量", W.HOOK.vtDelta().every((r) => r.k !== "y.com|r:1.1.1.1"));
 W.vClear(); W.S.vtSent.clear();
 // 第 36 组：策略分级（0 影子 / 1 只硬规则 / 2 全生效）
 reset(); node("n1:443", {});

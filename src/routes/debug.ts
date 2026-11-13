@@ -14,6 +14,7 @@ import { aliveList, commitPool, flushPx, pxSet } from "../px/pool";
 import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
 import { clSnapshot, restoreUsage } from "../store/index";
 import { adminOnly } from "../edge/auth";
+import { edgeFlush, edgeLoad, edgeNodes, edgeRank, edgeScan } from "../route/edge";
 
 import type { RouteCtx } from "../edge/types";
 
@@ -209,6 +210,14 @@ export async function debug(c: UserCtx): Promise<Response> {
   }
 
   // 手动把 KV 快照续回 DO（写操作，必须管理员）
+  if (url.searchParams.get("edge") === "1") {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    await edgeLoad(env);
+    const probed = await edgeScan(env);
+    await edgeFlush(env, true);
+    return json({ ok: true, probed, rank: edgeRank(5), nodes: edgeNodes(5) });
+  }
   if (url.searchParams.get("restore") === "1") {
     const deny = await adminOnly(c);
     if (deny) return deny;
