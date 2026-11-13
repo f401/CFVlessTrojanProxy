@@ -8,6 +8,7 @@ import { DecisionIn, DecisionOut, HOOK, TrafficEvt } from "../core/hook";
 import { recordTraffic } from "./observe";
 import { vAll, vBad, vOk, vSet } from "./verdict";
 import { vtDelta, vtLoad } from "./verdictsync";
+import { chanPref } from "./prefs";
 
 export interface Ctx {
   host: string;
@@ -85,6 +86,8 @@ HOOK.relayProbe = (host: string, ip: string, ok: boolean, ms: number): void => {
 
 /** 该站点 × 该中继被判 ok（probe 或端到端）→ 选路时优先 */
 HOOK.prefer = (host: string, ip: string): boolean => !!host && !!ip && vOk(host, "r:" + ip);
+/** 通道偏好表（判定表的「能通 / 打不通」两栏）：选路时避开被实测判死的通道 */
+HOOK.chanPref = (ip: string): number => chanPref(ip);
 
 HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
 HOOK.vtLoad = (env: Env): Promise<void> => vtLoad(env);

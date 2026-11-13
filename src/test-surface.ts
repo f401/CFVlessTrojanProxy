@@ -87,3 +87,4 @@ export { decide, shadow, policyOn } from "./route/policy";
 export { pxDecision } from "./proxy/pxhook";
 export { HOOK } from "./core/hook";
 export { planRound, planView } from "./route/budget";
+export { chanPref, prefsOf, prefsJson } from "./route/prefs";

@@ -1715,5 +1715,19 @@ W.vClear();
   eq("?e=0 时不发边缘条目", (y0.match(/name: "e-/g) || []).length, 0);
   eq("?e=0 时不发 x 组", y0.includes("🛰 x 优选"), false);
 }
+
+// 第 39 组：节点偏好表（站点 × 通道的「能通 / 打不通」两栏）
+{
+  W.vClear();
+  eq("没测过的通道不降权（未知 = 1）", W.chanPref("9.9.9.1"), 1);
+  W.vSetState("*", "r:9.9.9.2", 1, 1);
+  eq("实测能打通的通道 = 0", W.chanPref("9.9.9.2"), 0);
+  W.vSetState("*", "r:9.9.9.3", 2, 1);
+  eq("实测打不通的通道 = 2", W.chanPref("9.9.9.3"), 2);
+  const pf = W.prefsJson(20);
+  eq("偏好表能打通一栏含该通道", pf.ok.some((x) => x.c === "r:9.9.9.2"), true);
+  eq("偏好表打不通一栏含该通道", pf.bad.some((x) => x.c === "r:9.9.9.3"), true);
+  W.vClear();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

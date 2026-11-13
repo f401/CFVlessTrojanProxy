@@ -386,7 +386,21 @@ export class Selector {
     // CF 托管目标：优先非 CF 出口，但没有时必须允许 CF 边缘中继 ——
     // 直连经常被自家边缘丢掉，只有绕一次才拿得到响应（哪怕是 403）。
     const first = this.pick(env, m, st);
-    return first || "";
+    // 站点偏好：该通道对当前站点已被实测判死（403/不可达）就换一条没被判死的，
+    // 打得通（0）与没测过（1）都不降权 —— 未知不等于坏，否则新中继永远上不了场。
+    const cp = HOOK.chanPref;
+    if (!first || !cp || !host) return first || "";
+    const ipOf = (k: string): string => k.slice(0, k.lastIndexOf(":"));
+    if (cp(ipOf(first)) < 2) return first;
+    let best = "";
+    let bv = Infinity;
+    for (const x of candsFor(m)) {
+      if (isBlack(x.k) || isFrozen(x.k)) continue;
+      if (cp(ipOf(x.k)) >= 2) continue;
+      if (x.v < bv) { bv = x.v; best = x.k; }
+    }
+    if (best) { if (st) st.node = best; return best; }
+    return first;
   }
 
   /** cron 扫描收尾：重算两个模式的游标，再做定时轮换 */
