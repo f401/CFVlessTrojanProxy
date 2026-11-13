@@ -7,6 +7,7 @@ import { Chan, DIRECT, chanKey } from "./channel";
 import { DecisionIn, DecisionOut, HOOK, TrafficEvt } from "../core/hook";
 import { recordBlock, recordPass, recordTraffic } from "./observe";
 import { vAll, vBad, vOk, vSet } from "./verdict";
+import { cnt } from "../core/counter";
 import { cfHttpCode } from "../proxy/cfverdict";
 import { vtDelta, vtLoad } from "./verdictsync";
 import { chanPref } from "./prefs";
@@ -92,6 +93,7 @@ HOOK.veto = (host: string, ip: string): boolean => !!host && !!ip && vBad(host, 
 
 /** 连接收尾的弱证据：成功就记 ok；小响应只学「下次优先中转」，不判死（判死只有 probe 能下） */
 HOOK.traffic = (e: TrafficEvt): void => {
+  cnt("trHit");
   const ip = e.node ? e.node.slice(0, e.node.lastIndexOf(":")) : "";
   const chan: Chan = e.via === "node" && ip ? { kind: "r", ip } : DIRECT;
   const ck = e.host + "|" + chanKey(chan);
@@ -106,6 +108,7 @@ HOOK.traffic = (e: TrafficEvt): void => {
   }
   // 小到不可能是真实页面的「成功」：多半是中继把自己的默认页（nginx）当响应回了。
   // 这类中继对任何站点都是废的，直接判该通道对这个站点不可用，避免一直吃假 200。
+  cnt("trSmall");
   if (e.ok && e.via === "node" && e.down > 0 && e.down < 2000) {
     recordBlock({ target: e.host, chan, down: e.down, ok: false });
     S.needPx.set(e.host, now + 21600000);
@@ -128,12 +131,13 @@ HOOK.traffic = (e: TrafficEvt): void => {
   // 判据必须建立在「这个站点确实能出整页」的基线上：没有基线时，小响应可能只是
   // 一个返回自己默认页的中继（nginx 200），也可能是站点自身的业务 403 —— 两者都不可判。
   if (!big) {
-    // CF 托管站点例外：直连被自家边缘按 IP 族拒时，响应恒为几百字节的错误页，
-    // 而这种站点正常浏览一定会出整页。没有基线也允许直连通道当场判封锁（1 次即可）。
-    if (!(e.cf && chan.kind === "d")) {
+    // CF 托管站点例外：被按 IP 族拒时响应恒为几百字节错误页（含握手也只有几 KB），
+    // 正常浏览一定出整页。所以任何通道（直连/CF 中继）都允许当场判封锁，1 次即可。
+    if (!e.cf) {
       queueVerify(e.host, chan); // 只排队（当前 PROBE_REQ=0，探测留给 cron）
       return;
     }
+    cnt("vtSeen");
   }
   S.smCnt.delete(ck);
   recordBlock({ target: e.host, chan, down: e.down, ok: false });

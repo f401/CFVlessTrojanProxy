@@ -83,6 +83,11 @@ export class AppState {
     "noPayload",
     "noAuth",
     "wsFail",
+    "vtSeen",
+    "vtSent",
+    "vtDO",
+    "trHit",
+    "trSmall",
   ];
   cnt: Record<string, number> = {};
   cntDay = "";

@@ -202,18 +202,17 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
               let cfHost = (S.cfHost.get(r.host) || 0) > Date.now();
               // 只有 proxyip=auto（自动选池）才做托管识别：DoH 700ms 兜底，解析不出来就按直连走
               if (!learned && !onList && !cfHost && env.proxyip === "auto") {
-                try {
-                  cfHost = await withTimeout(isCfHost(r.host), 700);
-                } catch {
-                  cfHost = false;
+                // DoH 抖动会偶发失败，而这是判定层的关键输入：给两次机会（不负缓存）。
+                for (let k = 0; k < 2 && !cfHost; k++) {
+                  try { cfHost = await withTimeout(isCfHost(r.host), 1200); } catch { cfHost = false; }
                 }
                 if (cfHost) S.cfHost.set(r.host, Date.now() + 1800000);
               }
-              if (cfHost && !S.vtLoaded && HOOK.vtLoad) await HOOK.vtLoad(env);
-              const win = HOOK.win ? HOOK.win(r.host) : { d: false, r: false };
+              if (cfHost && !S.vtLoaded && HOOK.vtLoad) await HOOK.vtLoad(env);              const win = HOOK.win ? HOOK.win(r.host) : { d: false, r: false };
               const dirWin = win.d, relWin = win.r;
     const httpCode = cfHost ? cfHttpCode(r.host) : 0;
     if (cfHost) refreshCfHttp(r.host, ctx);
+    st.cf = cfHost; // 判定层要知道目标是 CF 托管：直连被自家边缘拒时一次即判，所以放在分支外
     const wantPx =
       pxForce > 0 ||
       (pxForce === 0 &&

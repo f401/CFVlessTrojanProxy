@@ -9,6 +9,7 @@ import { cfHttpCode } from "../proxy/cfverdict";
 import { sweepHost } from "../route/sweep";
 import { vAll } from "../route/verdict";
 import { vtDelta, vtLoad } from "../route/verdictsync";
+import { cntView } from "../core/counter";
 import { planView } from "../route/budget";
 import { prefsJson } from "../route/prefs";
 import { verifyInfo } from "../route/verify";
@@ -52,7 +53,7 @@ export async function debug(c: UserCtx): Promise<Response> {
     const sw = wantProbe ? await sweepHost(vtHost) : { ips: [], nodes: [], rows: [] };
     const plan = planView(S.pool.length, S.alive.size);
     const pol = { same: S.polSame, diff: S.polDiff, why: S.polWhy };
-    return json({ host: vtHost, ips: sw.ips, nodes: sw.nodes, rows: sw.rows, table: vAll(), pol, plan });
+    return json({ host: vtHost, ips: sw.ips, nodes: sw.nodes, rows: sw.rows, table: vAll(), pol, plan, counters: cntView() });
   }
   /* ---------- 站点偏好表：判定表按通道聚合后的「能打通 / 打不通」两栏 ---------- */
   if (url.searchParams.get("vtq") === "1") return json({ ...verifyInfo() });

@@ -2,6 +2,7 @@
 // 目标 isolate 冷启动时拉一次，之后靠本地的记录增量回传，避免每请求都读 DO。
 import { S } from "../core/state";
 import { vAll, vImport } from "./verdict";
+import { cnt } from "../core/counter";
 
 export interface VtRow {
   k: string; // `target|chan`
@@ -23,6 +24,7 @@ export function vtDelta(): VtRow[] {
     out.push({ k, s: v.state, t: exp });
     if (out.length >= 60) break;
   }
+  if (out.length) cnt("vtSent", out.length);
   return out;
 }
 
@@ -34,7 +36,10 @@ export async function vtLoad(env: Env): Promise<void> {
     const raw = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
     const rr = await env.METER.get(env.METER.idFromName(raw)).fetch("https://meter/vt");
     const jj = (await rr.json()) as { vt?: VtRow[] };
-    if (Array.isArray(jj.vt)) vImport(jj.vt);
+    if (Array.isArray(jj.vt)) {
+      vImport(jj.vt);
+      cnt("vtDO", jj.vt.length);
+    }
   } catch {
     // 读不到就当没有：不阻塞连接
   }
