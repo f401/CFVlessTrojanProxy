@@ -1696,5 +1696,22 @@ const vrow = W.vAll()[0]; vrow.at = Date.now() - 1200000;
 eq("过了 15 分钟的 blocked 要复核", W.pickHosts(3)[0], "api.x.com");
 eq("预算 8 只够扫 2 个站", Math.floor(8 / W.SWEEP_COST), 2);
 W.vClear();
+
+// 第 38 组：订阅侧入口条目与「按边缘实测 x」的组（客户端实测）
+{
+  const envS = { uuid: "u", nodes: "", proxyip: "auto" };
+  const y = W.renderClash(envS, new URL("https://example.com/x"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
+  const eCount = (y.match(/name: "e-/g) || []).length;
+  eq("边缘入口条目：8 个 IP × 2 模式", eCount, 16);
+  eq("边缘条目 server 是 IP", y.includes("server: 104.18.32.1"), true);
+  eq("边缘条目 servername 仍是域名", y.includes("servername: example.com"), true);
+  eq("入口优选组按 /health 实测", y.includes('name: "🌐 入口优选"') && y.includes("url: https://example.com/health"), true);
+  eq("x 组按 x.com 实测落点", y.includes('name: "🛰 x 优选"') && y.includes("url: https://x.com/"), true);
+  eq("x 规则指向 x 组", /DOMAIN-SUFFIX,x\.com,🛰 x 优选/.test(y), true);
+  eq("x 规则排在 GEOIP 之前", y.indexOf("🛰 x 优选") < y.indexOf("GEOIP,CN,DIRECT"), true);
+  const y0 = W.renderClash(envS, new URL("https://example.com/x?e=0"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
+  eq("?e=0 时不发边缘条目", (y0.match(/name: "e-/g) || []).length, 0);
+  eq("?e=0 时不发 x 组", y0.includes("🛰 x 优选"), false);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

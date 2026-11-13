@@ -47,8 +47,7 @@ export function renderClash(
   const G_TPUT = "\ud83d\ude80 \u541e\u5410\u4f18\u5148";
   const G_REG = "\ud83c\udf0d \u5730\u533a";
   const G_MAN = "\ud83c\udfaf \u624b\u52a8";
-  const G_X = "\ud83d\udef0 x \u4e13\u7ebf";
-  const xIps = url.searchParams.get("x") === "1" ? X_EDGE_IPS : [];
+  const G_X = "\ud83d\udef0 x \u4f18\u9009";
 
   const emit = (
     name: string,
@@ -121,18 +120,6 @@ export function renderClash(
     all.push(e.name);
   }
 
-  // ?x=1：额外发一批「钉在具体 CF 边缘 IP」的入口，配合 x 组做落地机房轮换。
-  const xNames: string[] = [];
-  for (const ip of xIps) {
-    for (const proto of protos) {
-      if (proto === "trojan" && !pass) continue;
-      const name = `x-${ip}-${proto === "trojan" ? "TJ" : "VL"}`;
-      emit(name, proto, ip, 443, `/?ed=2560&ip=xp&mode=lat`, true, "");
-      xNames.push(name);
-      all.push(name);
-    }
-  }
-
   const q = (arr: string[]) => `    proxies: [${arr.map((x) => `"${x}"`).join(", ")}]`;
   const pick = (arr: string[], n: number) => arr.slice(0, Math.max(1, Math.min(n, arr.length)));
 
@@ -170,21 +157,21 @@ export function renderClash(
     groups.push(q(regNames));
   }
 
-  if (xNames.length) {
+  if (edgeNames.length) {
     groups.push(`  - name: "${G_X}"`);
     groups.push("    type: url-test");
     groups.push("    url: https://x.com/");
     groups.push("    expected-status: 200");
-    groups.push("    interval: 120");
+    groups.push("    interval: 180");
     groups.push("    tolerance: 0");
     groups.push("    lazy: false");
-    groups.push(q([...xNames, G_TPUT]));
+    groups.push(q([...edgeNames, G_TPUT]));
   }
 
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
   groups.push(
-    `    proxies: ["${G_TPUT}", "${G_LAT}"${edgeNames.length ? `, "${G_EDGE}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
+    `    proxies: ["${G_TPUT}", "${G_LAT}"${edgeNames.length ? `, "${G_EDGE}"` : ""}${edgeNames.length ? `, "${G_X}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
   );
 
   return [
@@ -209,7 +196,7 @@ export function renderClash(
     ...groups,
     "",
     "rules:",
-    ...(xNames.length
+    ...(edgeNames.length
       ? X_RULES.map((d) => `  - DOMAIN-SUFFIX,${d},${G_X}`)
       : []),
     "  - GEOIP,CN,DIRECT",
