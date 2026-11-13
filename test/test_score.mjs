@@ -22,9 +22,6 @@ const ok = (n, c, info = "") => {
 };
 
 const S = W.S;
-W.SC.LAT_TS = 0; // 单测确定性：关闭 TS
-W.SC.ROUTE_T_LAT = 0; // 单测默认确定行为：关闭抽签，走粘滞游标
-W.SC.ROUTE_T_TPUT = 0;
 const reset = () => {
   S.alive.clear();
   S.nstat.clear();
@@ -35,6 +32,8 @@ const reset = () => {
   S.prev = { lat: "", tput: "" };
   S.lastSwitch = { lat: 0, tput: 0 };
   S.switchHits = { lat: [], tput: [] };
+  // 模拟「新 isolate」：排行表也一起清（生产里池子换代同样会清）
+  S.rankCache = { t: 0, at: {}, v: {}, step: {} };
 };
 const node = (k, patch = {}) => {
   const i = k.lastIndexOf(":");
@@ -159,37 +158,19 @@ ok(
   `${W.costOf("steady:443", "tput")} vs ${W.costOf("lucky:443", "tput")}`,
 );
 
-// seed 只作为先验：置信度封顶 0.25，过期即回落
+// v6.35：没有"seed 先验"这回事 —— 吞吐先验是固定常量，置信度只由本地直方图决定
 reset();
 node("seed:443", { tcp: 50 });
-const sSeed = W.S.nstat.get("seed:443");
-sSeed.seedBps = 20 * 1048576;
-sSeed.seedAt = Date.now();
-const pSeed = W.scoreParts("seed:443", "tput");
-eq("seed 先验来源", pSeed.priorSource, "seed");
-ok("seed 把先验拉到约 1.5s", pSeed.e10Ms > 1000 && pSeed.e10Ms < 2200, String(pSeed.e10Ms));
-sSeed.seedAt = Date.now() - 48 * 3600e3;
-eq("seed 过期回落默认先验", W.scoreParts("seed:443", "tput").priorSource, "prior");
-// 到期前后不能跳变：24h 整那一刻置信度应该已经衰减到 0，而不是 0.125 → 0
+eq("无本地样本时用固定先验", Math.round(W.scoreParts("seed:443", "tput").e10Ms), Math.round((10 * 1048576 / W.SC.PRIOR_BPS) * 1000));
 {
-  sSeed.seedAt = Date.now() - 23.9 * 3600e3;
-  const eA = W.scoreParts("seed:443", "tput").e10Ms;
-  sSeed.seedAt = Date.now() - 24.1 * 3600e3;
-  const eB = W.scoreParts("seed:443", "tput").e10Ms;
-  ok("seed 到期平滑回落（跳变 < 1s）", Math.abs(eA - eB) < 1000, `${Math.round(eA)} vs ${Math.round(eB)}`);
-  // 一条短样本不该抹掉 8MB/s 的 seed 先验；够 3 个有效窗口才作废
-  {
-    reset();
-    node("sp:443", {});
-    const sp = W.nsGet("sp:443");
-    sp.seedBps = 8 * 1048576;
-    sp.seedAt = Date.now();
-    W.nsSpeed("sp:443", 512 * 1024, 512 * 1024, {}, 1);
-    eq("单条本地样本保留 seed", sp.seedBps, 8 * 1048576);
-    W.nsSpeed("sp:443", 512 * 1024, 512 * 1024, {}, 1);
-    W.nsSpeed("sp:443", 512 * 1024, 512 * 1024, {}, 1);
-    eq("3 个有效窗口后 seed 作废", sp.seedBps, 0);
-  }
+  // 一条 512KB、1 秒的本地窗口：capBps 立刻由本地样本给出，confB 仍不够（要 3 个有效窗口 + 3MiB）
+  W.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
+  const p = W.scoreParts("seed:443", "tput");
+  ok("本地样本决定 capBps", p.capBps >= 400 * 1024, String(p.capBps));
+  eq("单条短样本不构成高置信度", p.confB, 0);
+  W.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
+  W.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
+  ok("3 个有效窗口后 nEff 达标", W.scoreParts("seed:443", "tput").nEff >= 3, String(W.scoreParts("seed:443", "tput").nEff));
 }
 
 /* ---------- 3. 门槛与过滤 ---------- */
@@ -568,10 +549,10 @@ reset();
 node("a:443", { tcp: 50 });
 node("b:443", { tcp: 80 });
 const st2 = { host: "brand-new.test" };
-const rnd0 = Math.random;
+const rndZ = Math.random;
 Math.random = () => 0; // 强制走探索分支
 const p2 = W.SEL.pick({ pxShadow: 0.05 }, "tput", st2);
-Math.random = rnd0;
+Math.random = rndZ;
 eq("新域名挑全局最优的未试节点", p2, "a:443");
 eq("标记为站点试探", st2.hostTrial, true);
 eq("试探节点写回 st.node", st2.node, "a:443");
@@ -589,7 +570,11 @@ reset();
 node("v1:443", { tcp: 50 });
 node("v2:443", { tcp: 80 });
 S.curs.lat = "gone:443";
-eq("游标失效 → 选当前最优", W.SEL.pick({ pxShadow: 0 }, "lat", null), "v1:443");
+const rndV = Math.random;
+Math.random = () => 0.5; // 抽样器带噪声：固定随机数只验"游标自愈 + 选到分更低的"
+const pv = W.SEL.pick({ pxShadow: 0 }, "lat", null);
+Math.random = rndV;
+eq("游标失效 → 选当前最优", pv, "v1:443");
 eq("游标自愈写回", S.curs.lat, "v1:443");
 
 // 一个候选都没有：返回空，并把游标清掉（不能一直显示已经不存在的节点）
@@ -605,7 +590,12 @@ node("q:443", { tcp: 300 });
 W.hostNodeMark("two.test", "p:443", { ok: true, bad: false, bytes: 100, ttfb: 80 });
 W.hostNodeMark("two.test", "q:443", { ok: true, bad: false, bytes: 100, ttfb: 600 });
 const st3 = { host: "two.test" };
-eq("两次样本就能比较出快慢", W.SEL.pick({ pxShadow: 0 }, "tput", st3), "p:443");
+// 抽样器带随机噪声：固定 Math.random 让这条只验"谁的分更低"
+const rndT = Math.random;
+Math.random = () => 0.5;
+const p3 = W.SEL.pick({ pxShadow: 0 }, "tput", st3);
+Math.random = rndT;
+eq("两次样本就能比较出快慢", p3, "p:443");
 
 /* ---------- 10. 站点族 / 保质期 / 缓存 ---------- */
 eq("api.x.com → x.com", W.hostKey("api.x.com"), "x.com");
@@ -721,19 +711,18 @@ eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1
   ok("入口标签做了 HTML 转义", !html3.includes("<img src=x"), html3.slice(0, 80));
 }
 
-/* ---------- 11. v2.1：风险先验 / seed 伪计数 / 自适应探索 ---------- */
+/* ---------- 11. v2.1：风险先验 / 不跨 isolate / 自适应探索 ---------- */
 reset();
 eq("无样本 pFailRisk = 0.1（不加不确定性溢价）", W.pFailOf(W.nsGet("fresh:443")), 0.1);
 
 {
+  // v6.35：seed 只传候选名单，没有可靠性伪计数 —— 失败率先验只由本地样本决定
   const s = W.nsGet("seedrel:443");
-  s.seedN = 10;
-  s.seedFail = 5;
-  s.seedAt = Date.now();
+  s.failW = 1;
   const p = W.pFailOf(s);
-  ok("seed 只修正先验均值（≈0.167）", p > 0.15 && p < 0.18, String(p));
-  s.seedAt = Date.now() - 48 * 3600e3;
-  eq("seed 过期回落到 0.1", W.pFailOf(s), 0.1);
+  ok("一次失败就把风险先验抬到 0.1 以上", p > 0.1, String(p));
+  s.failW = 0;
+  eq("清掉本地失败后回到 0.1", W.pFailOf(s), 0.1);
 }
 
 {
@@ -751,8 +740,10 @@ const stE = { host: "explore.test" };
 const rnd1 = Math.random;
 Math.random = () => 0.07; // 7%：样本不足(10%)会探索，样本够了(5%)不探索
 const picked1 = W.SEL.pick({ pxShadow: 0.05 }, "tput", stE);
-const explored1 = stE.trial === true || stE.hostTrial === true;
-ok("样本不足时 7% 也会探索", explored1, `picked=${picked1}`);
+const explored1 = stE.hostTrial === true;
+// 单层抽样器接管探索后，独立探索分支不再按"样本不足"放大到 10%：
+// 未测节点靠乐观面（score − βσ）自然被抽，不需要两层探索叠加。
+ok("探索率不再按样本数放大", explored1 === false, `picked=${picked1}`);
 
 reset();
 node("f1:443", { tcp: 50 });
@@ -767,8 +758,9 @@ S.curs.tput = "f1:443";
 const stF = { host: "steady.test" };
 const picked2 = W.SEL.pick({ pxShadow: 0.05 }, "tput", stF);
 Math.random = rnd1;
-eq("样本够了 7% 不再探索", picked2, "f1:443");
-eq("没有标记试探", stF.trial === true, false);
+// f1 有带宽样本（σ 小），f2 一条样本都没有：乐观面会把流量先给 f2 —— 这正是"没有探索率也能探索"
+ok("单层抽样器仍会去探未测节点", picked2 === "f2:443", picked2);
+eq("没有标记站点试探", stF.hostTrial === true, false);
 
 reset();
 node("c1:443", { tcp: 50 });
@@ -842,7 +834,8 @@ ok("站点 bps 记录下来了", hs.bps > 0, String(hs.bps));
 W.hostNodeMark("neutral.test", "n0:443", { ok: 0, bad: 0, bytes: 100, ttfb: 100 });
 eq("0 字节 0 失败不算站点样本", W.S.hostNode.get("neutral.test").get("n0:443").n, 0);
 
-// 站点倾向要能跨 isolate：hp 必须把 bps 一起写进 seed，否则换个实例只剩 ttfb
+// 跨 isolate 不再共享品质结论：seed 只留候选名单（k/h/p/cc），
+// 延迟/吞吐/成功率/站点偏好一律由本 isolate 自己估
 reset();
 node("hpb:443", { tcp: 50 });
 for (let i = 0; i < 3; i++) W.hostNodeMark("site-seed.test", "hpb:443", { ok: 1, bad: 0, bytes: 1024, ttfb: 80 });
@@ -861,15 +854,20 @@ W.hostNodeMark("site-seed.test", "hpb:443", { bps: 2 * 1048576 });
   W.S.seedAt = 0;
   await W.SEEDS.write(env, false, true);
   const doc = JSON.parse(box.get([...box.keys()][0]));
-  const row = doc.byColo.TST.hp.find((x) => x.h === "site-seed.test" && x.k === "hpb:443");
-  eq("seed 的站点偏好带上了 bps", Math.round((row && row.bps) || 0), 2 * 1048576);
-  // 模拟另一个 isolate 冷启动
+  const row = doc.byColo.TST.nodes.find((x) => x.k === "hpb:443");
+  eq("seed 只存候选名单的四个字段", row ? Object.keys(row).sort().join(",") : "", "cc,h,k,p");
+  eq("seed 不再写站点偏好", !!doc.byColo.TST.hp, false);
+  // 模拟另一个 isolate 冷启动：拿到名字，拿不到任何品质结论
+  W.S.alive.clear();
+  W.S.nstat.clear();
   W.S.hostNode.clear();
   W.S.seedAt = 0;
   W.S.seed = { v: 0, ts: 0, poolGen: 0, poolN: 0, builtAt: 0, byColo: {} };
   await W.SEEDS.read(env);
-  const back = W.S.hostNode.get("site-seed.test").get("hpb:443");
-  eq("别的 isolate 能读到站点级 bps", Math.round((back && back.bps) || 0), 2 * 1048576);
+  await W.pxGet(env);
+  eq("别的 isolate 只用名字起步（延迟=先验）", (W.S.alive.get("hpb:443") || {}).ms, 250);
+  eq("没有任何统计被灌进来", W.S.nstat.has("hpb:443"), false);
+  eq("站点偏好不跨 isolate", W.S.hostNode.has("site-seed.test"), false);
 }
 
 // 跨 isolate 快照按流量挑前 16 个，而不是 Map 的前 16 个
@@ -1406,22 +1404,170 @@ node("honest:443", { tcp: 60, tls: 40, okW: 5 });
 W.nsLatency("honest:443", 130);
 ok("真实首字节与探活接近 → 不触发", W.scoreParts("honest:443", "lat").latencyMs < 200, String(W.scoreParts("honest:443", "lat").latencyMs));
 
-// 加权抽签：T=0 退化成一个确定的最优；T>0 时按分数分布抽
+// —— 单层抽样：未测节点被抽到，测过且差的节点退场 ——
 reset();
-node("ra:443", { tcp: 60, okW: 20 });
-node("rb:443", { tcp: 80, okW: 20 });
-W.SC.ROUTE_T_LAT = 0;
-eq("T=0 走粘滞游标（等价选第一）", W.SEL.pick({ pxShadow: 0 }, "lat", { host: "" }), "ra:443");
-W.SC.ROUTE_T_LAT = 20;
-let na = 0, nb = 0;
-for (let i = 0; i < 600; i++) {
-  const k = W.SEL.pick({ pxShadow: 0 }, "lat", { host: "" });
-  if (k === "ra:443") na++;
-  else if (k === "rb:443") nb++;
+W.invalidateRank();
+node("k1:443", { tcp: 60, okW: 40 });
+node("k2:443", { tcp: 400, okW: 40 });
+node("k3:443", { tcp: 70 });
+{
+  const hit = {};
+  for (let i = 0; i < 400; i++) {
+    const k = W.SEL.pick({ pxShadow: 0 }, "lat", { host: "" });
+    hit[k] = (hit[k] || 0) + 1;
+    W.nsOk(k, 0, 0); // 真实连接成功 → 样本 +1，乐观面随之收缩
+  }
+  ok("未测节点拿到探索流量", (hit["k3:443"] || 0) > 0, JSON.stringify(hit));
+  ok("测过且慢的节点基本退场", (hit["k2:443"] || 0) <= 2, JSON.stringify(hit));
+  ok("王者仍拿大头", (hit["k1:443"] || 0) > 200, JSON.stringify(hit));
 }
-ok("T=20 两个候选都抽得到", na > 0 && nb > 0, `${na}/${nb}`);
-ok("T=20 更快的抽得更多", na > nb * 1.5, `${na}/${nb}`);
-W.SC.ROUTE_T_LAT = 0;
+
+// —— 回归：pStall 的分母必须是"全部连接的总时长" ——
+// 早先只在"这条连接卡过"时才累加 runMs：100 条 30 秒健康连接 + 1 条 5 秒连接卡 2 秒，
+// 算出来 pStall=0.34（真实占比 0.0007），单次卡顿白送 800+ ms，还会踩中 +400 的重罚档。
+reset();
+node("ps:443", { tcp: 100 });
+for (let i = 0; i < 100; i++) W.nsStall("ps:443", 0, 30000);
+W.nsStall("ps:443", 2000, 5000);
+const psV = W.scoreParts("ps:443", "lat").pStall;
+ok("pStall 按连接总时长稀释", psV < 0.01, psV.toFixed(5));
+ok("pStall 没被抹平（2 秒卡顿还在）", psV > 0.0001, psV.toFixed(5));
+
+// —— 回归：延迟模式的 xferMs 要按样本新鲜度混合先验 ——
+// 早先直读 s.capBps，而直方图衰减是等比缩放（分位不变）→ 一周前测到的 16MB/s 永久少算 70ms。
+reset();
+node("xf:443", { tcp: 100, okW: 20 });
+const xf = W.nsGet("xf:443");
+xf.hist[7] = 100;
+xf.sumW = 100;
+xf.sumW2 = 100;
+xf.capBps = 16 * 1024 * 1024;
+xf.recentBytesW = 100000;
+xf.lastSampleAt = Date.now() - 7 * 24 * 3600e3;
+const xfOld = W.scoreParts("xf:443", "lat").xferMs;
+ok("过期吞吐样本回退先验", xfOld > 70 && xfOld < 90, xfOld.toFixed(1));
+xf.lastSampleAt = Date.now();
+xf.recentBytesW = 4 * 1024 * 1024;
+const xfNew = W.scoreParts("xf:443", "lat").xferMs;
+ok("新鲜样本按实测带宽折算", xfNew < 12, xfNew.toFixed(1));
+
+// —— 回归：延迟模式的影子采样必须可达 ——
+// 早先探索排在 Thompson 之后，lat 模式只要有已测节点就 return：
+// pxShadow=0.5、10 个节点、1000 次 pick 仍然 100% 打同一个节点，池子里除王者外一个样本都没有。
+reset();
+W.invalidateRank();
+node("ex1:443", { tcp: 60, okW: 200 });
+node("ex2:443", { tcp: 70 });
+node("ex3:443", { tcp: 80 });
+const exHit = new Set();
+for (let i = 0; i < 400; i++) {
+  const k = W.SEL.pick({ pxShadow: 0.5 }, "lat", { host: "" });
+  exHit.add(k);
+  W.nsOk(k, 0, 0); // 真实连接成功 → 样本 +1，乐观面随样本收缩
+}
+ok("延迟模式影子采样可达", exHit.size > 1, [...exHit].join(","));
+ok("延迟模式大多数请求仍走王者", exHit.has("ex1:443"), [...exHit].join(","));
+
+// —— 回归：吞吐模式也走同一套抽样，不再"粘滞游标" ——
+reset();
+W.invalidateRank();
+node("tp1:443", { tcp: 60, okW: 20 });
+node("tp2:443", { tcp: 80, okW: 20 });
+const tpHit = new Set();
+for (let i = 0; i < 400; i++) tpHit.add(W.SEL.pick({ pxShadow: 0 }, "tput", { host: "" }));
+ok("吞吐模式两个候选都抽得到", tpHit.size > 1, [...tpHit].join(","));
+
+
+// —— CUSUM 变点：一条怪样本不动，连续两条大跳立刻冻结 ——
+reset();
+node("cu1:443", { tcp: 100, pSum: 100, msLocal: 100 });
+W.nsLatency("cu1:443", 400);
+ok("延迟变点：单条慢样本不冻结", !W.nsGet("cu1:443").freeUntil, String(W.nsGet("cu1:443").freeUntil || 0));
+W.nsLatency("cu1:443", 400);
+ok("延迟变点：连续两条大跳立刻冻结", W.nsGet("cu1:443").freeUntil > Date.now(), String(W.nsGet("cu1:443").freeUntil - Date.now()));
+
+// —— CUSUM 吞吐：带宽崩塌后 cap 立刻掉下来，老直方图不再拖一周 ——
+reset();
+node("cb1:443", { tcp: 60 });
+for (let i = 0; i < 3; i++) W.nsSpeed("cb1:443", 8 * 1048576, 512 * 1024, {});
+const capBoom = W.nsGet("cb1:443").capBps;
+W.nsSpeed("cb1:443", 512 * 1024, 512 * 1024, {});
+const capBust = W.nsGet("cb1:443").capBps;
+ok("吞吐变点：崩塌样本立刻改写 capBps", capBoom > 4 * 1048576 && capBust < 1048576, `${capBoom} -> ${capBust}`);
+
+// —— 稳健抖动：一条 5 秒的怪连接不该把抖动抬到秒级（MAD，不是方差）——
+reset();
+node("jt1:443", { tcp: 100 });
+for (let i = 0; i < 5; i++) W.nsLatency("jt1:443", 100);
+const jit0 = W.scoreParts("jt1:443", "lat").jitMs;
+W.nsLatency("jt1:443", 5000);
+const jit1 = W.scoreParts("jt1:443", "lat").jitMs;
+ok("抖动对单条离群连接不敏感", jit1 < 400, `${jit0.toFixed(1)} -> ${jit1.toFixed(1)}`);
+
+// —— S 参数化：小对象看延迟，批量看带宽 ——
+reset();
+W.invalidateRank();
+const now0 = Date.now();
+node("za:443", { tcp: 60, pSum: 60, msLocal: 60, okW: 20, capBps: 4 * 1048576, lastSampleAt: now0 });
+node("zb:443", { tcp: 120, pSum: 120, msLocal: 120, okW: 20, capBps: 20 * 1048576, lastSampleAt: now0 });
+const szI = (k) => W.scoreParts(k, "lat", now0, false, W.SC.SZ_I).score;
+const szB = (k) => W.scoreParts(k, "lat", now0, false, W.SC.SZ_B).score;
+ok("S=64KB 时选低延迟节点", szI("za:443") < szI("zb:443"), `${szI("za:443").toFixed(0)} vs ${szI("zb:443").toFixed(0)}`);
+ok("S=16MB 时选大带宽节点", szB("zb:443") < szB("za:443"), `${szB("za:443").toFixed(0)} vs ${szB("zb:443").toFixed(0)}`);
+const rndSZ = Math.random;
+Math.random = () => 0.5;
+const envS = { pxShadow: 0 };
+const pickI = W.SEL.pick(envS, "lat", { host: "", sz: W.SC.SZ_I });
+const pickB = W.SEL.pick(envS, "lat", { host: "", sz: W.SC.SZ_B });
+Math.random = rndSZ;
+ok("pick 会把 sz 传进打分", pickI === "za:443" && pickB === "zb:443", `${pickI} / ${pickB}`);
+
+// —— 兜底：全池都在冷却时也必须给出节点 ——
+// 返回空串会让 session 直接 cnt("dead")，哪怕池子里还有节点只是暂时被罚
+reset();
+W.invalidateRank();
+node("fb1:443", { tcp: 60, okW: 20, blackUntil: Date.now() + 600000 });
+node("fb2:443", { tcp: 80, okW: 20, blackUntil: Date.now() + 60000 });
+const fbPick = W.SEL.pick({ pxShadow: 0 }, "lat", { host: "" });
+ok("全池冷却时兜底选最早恢复的节点", fbPick === "fb2:443", fbPick);
+node("fb3:443", { tcp: 70, okW: 20, freeUntil: Date.now() + 1800000 });
+const fbPick2 = W.SEL.pick({ pxShadow: 0 }, "lat", { host: "" });
+ok("冻结节点排在冷却节点之后", fbPick2 === "fb2:443", fbPick2);
+
+
+// 失败阶梯跟池子大小走：小池子首档 10 s，大池子 60 s
+reset();
+for (let i = 0; i < 6; i++) node("sm" + i + ":443", { tcp: 100 });
+W.nsFail("sm0:443");
+const blSmall = W.nsGet("sm0:443").blackUntil - Date.now();
+ok("小池子失败首档 ≈10 秒", blSmall > 8000 && blSmall < 12000, blSmall);
+reset();
+for (let i = 0; i < 20; i++) node("bg" + i + ":443", { tcp: 100 });
+W.nsFail("bg0:443");
+const blBig = W.nsGet("bg0:443").blackUntil - Date.now();
+ok("大池子失败首档 ≈60 秒", blBig > 55000 && blBig < 65000, blBig);
+
+// 连接观测按节点聚合（n/ok/p50/p95），不再是一条连接一行
+reset();
+S.cagg.clear();
+S.cagg.set("x:443", { n: 3, ok: 2, dn: 4096, v: [100, 200, 300] });
+const cl = W.clSnapshot(10);
+ok("连接观测按节点聚合", cl.length === 1 && cl[0].k === "x:443" && cl[0].n === 3 && cl[0].ok === 2 && cl[0].p50 === 200, JSON.stringify(cl));
+ok("聚合后的下行字节累加", cl.length === 1 && cl[0].dn === 4096, cl.length ? cl[0].dn : -1);
+
+
+/* ---------- 28. 大池分片重建（2000 候选不再有 4 ms 尖峰） ---------- */
+reset();
+for (let i = 0; i < 1300; i++) node(`b${i}:443`, { tcp: 50 + i, okW: 10 });
+W.invalidateRank();
+const br1 = W.candsFor("lat");
+ok("大池分片：首片就能给出候选", br1.length > 0 && br1.length <= 128, String(br1.length));
+eq("大池分片：每片只推进 128 个", W.S.rankCache.step.lat.pos, 128);
+ok("大池分片：首片只覆盖前 128 个", !br1.some((r) => r.k === "b200:443"), String(br1.length));
+for (let i = 0; i < 12 && W.S.rankCache.step.lat; i++) W.candsFor("lat");
+eq("大池分片：一轮算完清掉进度", W.S.rankCache.step.lat, undefined);
+eq("大池分片：一轮之后全局最优在榜首", W.candsFor("lat")[0].k, "b0:443");
+ok("大池分片：表里仍有 CAND_KEEP 名", W.candsFor("lat").length >= 224, String(W.candsFor("lat").length));
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

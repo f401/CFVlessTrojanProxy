@@ -1,4 +1,4 @@
-import { HIST_BASE, HIST_N } from "./const";
+﻿import { HIST_BASE, HIST_N } from "./const";
 
 /* 直方图分位：纯函数，供 score / metrics / seed / 面板共用 */
 /**
@@ -38,10 +38,10 @@ export function p90Local(s: NodeStats) {
  * @returns {{p50:number,p90:number,cap:number}} 分位与能力值
  */
 export function pcts(s: NodeStats) {
-  if (!s || !s.hist) return { p50: 0, p90: 0, cap: s && s.seedBps ? s.seedBps : 0 };
+  if (!s || !s.hist) return { p50: 0, p90: 0, cap: 0 };
   let tot = 0;
   for (let i = 0; i < HIST_N; i++) tot += s.hist[i];
-  if (!(tot > 0)) return { p50: 0, p90: 0, cap: s.seedBps || 0 };
+  if (!(tot > 0)) return { p50: 0, p90: 0, cap: 0 };
   let acc = 0,
     p50 = 0,
     p90 = 0;
@@ -66,7 +66,7 @@ export function capOf(s: NodeStats) {
   if (!s) return 0;
   const p90 = pctOf(s, 0.9);
   const p50 = pctOf(s, 0.5);
-  if (!(p90 > 0)) return s.seedBps || 0;
+  if (!(p90 > 0)) return 0;
   if (!(p50 > 0)) return p90;
   return Math.min(p90, p50 * 2.5);
 }

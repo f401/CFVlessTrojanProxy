@@ -8,7 +8,7 @@ import { nsGet } from "../nodes/score";
 import { checkTarget, dohQuery, expandV6, resolveAAAA } from "../proxy/dial";
 import { aliveList, commitPool, flushPx, pxSet } from "../px/pool";
 import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
-import { restoreUsage } from "../store/index";
+import { clSnapshot, restoreUsage } from "../store/index";
 import { adminOnly } from "../edge/auth";
 
 import type { RouteCtx } from "../edge/types";
@@ -18,6 +18,22 @@ type UserCtx = RouteCtx & { id: string };
 /** /<uuid>/debug：站点诊断（?diag=<host>&probe=1 做一次 SNI 探测） */
 export async function debug(c: UserCtx): Promise<Response> {
   const { env, url, host: _host, id, first: _first, ctx: _ctx } = c;
+
+  /* ---------- 连接记录：本 isolate 最近 40 条 +（&do=1）DO 环形 60 条 ---------- */
+  if (url.searchParams.get("cl") === "1") {
+    const local = clSnapshot(40);
+    let ring: ClRec[] = [];
+    if (url.searchParams.get("do") === "1" && env.METER) {
+      try {
+        const r = await env.METER.get(env.METER.idFromName(id)).fetch("https://meter/cl");
+        const j = (await r.json()) as { cl?: ClRec[] };
+        if (Array.isArray(j.cl)) ring = j.cl;
+      } catch {
+        ring = [];
+      }
+    }
+    return json({ local, ring, now: Date.now() });
+  }
 
   /* ---------- 站点诊断：这个站该用哪个节点 / 为什么被拦 ---------- */
   const diagHost = String(url.searchParams.get("diag") || "")

@@ -104,23 +104,14 @@ export async function pxGet(env: Env) {
   await SEEDS.read(env);
   if (!S.alive.size) {
     let src = SEEDS.bucket().nodes || [];
-    const refMs: Record<string, number> = {};
-    for (const n of ((S.seed.byColo || {})[BUCKET_DEF] || {}).nodes || []) {
-      if (n && n.k && n.ms) refMs[n.k] = n.ms;
-    }
-    let foreign = false;
     if (!src.length) {
-      const nb = (S.seed.byColo || {})[BUCKET_DEF] || {};
-      src = nb.nodes || [];
-      foreign = true;
+      // 本机房还没数据：借名单桶（cron 写的全局候选），只取名字
+      src = ((S.seed.byColo || {})[BUCKET_DEF] || {}).nodes || [];
     }
     if (!src.length) {
-      // 连名单桶都没有：借用任意一个有数据的机房，只取名字，不取延迟（避免跨机房污染）
+      // 连名单桶都没有：借用任意一个有数据的机房，同样只取名字
       const hit = (Object.values(S.seed.byColo || {}) as SeedBucket[]).find((b) => (b.nodes || []).length);
-      if (hit) {
-        src = hit.nodes || [];
-        foreign = true;
-      }
+      if (hit) src = hit.nodes || [];
     }
     if (!src.length) {
       for (const kk of BOOT) {
@@ -131,13 +122,12 @@ export async function pxGet(env: Env) {
     for (const n of src.slice(0, SEED_COLD_N)) {
       if (!n || !n.k) continue;
       const i = n.k.lastIndexOf(":");
-      // 跨机房桶只借名字：n.ms 是别的机房的延迟，直接用会污染本地评分
-      const ms = foreign ? refMs[n.k] || SC.P_TCP : n.ms && n.ms !== SC.P_TCP ? n.ms : refMs[n.k] || n.ms || SC.P_TCP;
+      // 名单只有"连得上"，没有延迟：统一按先验起步，由本 isolate 自己的样本收敛
       S.alive.set(n.k, {
         h: n.h || n.k.slice(0, i),
         p: n.p || Number(n.k.slice(i + 1)) || 443,
         cc: n.cc || "",
-        ms,
+        ms: SC.P_TCP,
         src: "seed",
       });
     }
@@ -191,7 +181,7 @@ export function nsOf(keys: string[], limit = 64) {
       ok: s.ok || 0,
       fail: s.fail || 0,
       at: s.at || 0,
-      bps: Math.round(p90Of(s) || s.seedBps || 0),
+      bps: Math.round(p90Of(s) || 0),
       bpsMed: Math.round(pctOf(s, 0.5) || 0),
       bpsCap: Math.round(capOf(s) || 0),
       n: Math.round(n),
@@ -276,17 +266,39 @@ export async function cronScan(env: Env) {
   }
 
   // ① 探新候选
-  const scanN = Math.max(12, Math.min(120, S.scanN || 12)); // 每轮最多探 120 个：1600 候选约 6.7 小时轮完
-  const idx = S.poolIdx % Math.max(pool.length, 1);
-  const batch = pool.slice(idx, idx + scanN);
+  // 每轮扫多少：默认按"4 轮覆盖全池"，管理员的 ?scan= 只能往上抬，天花板 SCAN_MAX。
+  // 120/轮时 1600 池要 6.7 小时才轮完，冷启动期（isolate 寿命短）等于永远只认识前 120 个。
+  const want = Math.max(S.scanN || 12, Math.ceil(pool.length / 4));
+  // 子请求是硬上限：免费计划 50/次调用，每次探活 = 1 个 connect()。默认压在 48，
+  // 付费计划或提高配额后用 env.scanSub 抬（仍不超过 SCAN_MAX）。
+  const sub = Number(env.scanSub) > 0 ? Math.max(12, Number(env.scanSub)) : SC.SCAN_SUB;
+  const scanN = Math.max(12, Math.min(Math.min(SC.SCAN_MAX, sub), want));
+  // 只在"还没有结论"的候选里轮转：已经进池的（有流量样本，另有 ② 复测）和连续探活失败的
+  // 不再占名额。公开池里九成以上是死的，纯轮转时它们每轮都被重复探一遍，好候选永远排不上。
+  const open = pool.filter((c) => {
+    const k = c.h + ":" + c.p;
+    return !S.alive.has(k) && (S.probeBad.get(k) || 0) < SC.SCAN_BAD_MAX;
+  });
+  // 全都有结论时退回"没进池的候选"做低频复检（能在池里的靠 ② 复测 + 真实流量，不用再探活）
+  const live = pool.filter((c) => !S.alive.has(c.h + ":" + c.p));
+  const src = open.length ? open : live.length ? live : pool;
+  const idx = S.poolIdx % Math.max(src.length, 1);
+  const batch = src.slice(idx, idx + scanN);
   const hits = [];
   S.probeColo = S.colo || "cron";
   for (let i = 0; i < batch.length; i += 10) {
-    const part = await Promise.all(batch.slice(i, i + 10).map((c) => probeProxy(c.h, c.p)));
-    for (const x of part) noteProbe(x);
+    const seg = batch.slice(i, i + 10);
+    const part = await Promise.all(seg.map((c) => probeProxy(c.h, c.p)));
+    for (let j = 0; j < seg.length; j++) {
+      const x = part[j];
+      noteProbe(x);
+      const k = seg[j].h + ":" + seg[j].p;
+      if (x && !x.bad) S.probeBad.delete(k);
+      else S.probeBad.set(k, Math.min(9, (S.probeBad.get(k) || 0) + 1));
+    }
     hits.push(...part.filter((x) => x && !x.bad));
   }
-  S.poolIdx = (idx + scanN) % Math.max(pool.length, 1);
+  S.poolIdx = (idx + scanN) % Math.max(src.length, 1);
   S.probes += batch.length;
   S.hits += hits.length;
   // ①c 同批对照：同一个 /24 里其它节点都很快、只有它慢 3 倍以上 → 下一轮复测。
@@ -399,16 +411,21 @@ export async function cronScan(env: Env) {
   }
 
   // ③b alive 长期只增不减：池子换代后旧节点会一直留着，最终拖慢每次评分。
-  //     优先保留当前池和两个游标，其余按延迟从差到好裁掉。
+  //     优先保留当前池和两个游标，其余按「实测延迟」从差到好裁掉。
+  //     不能用探活 ms 裁：探活测的是 TLS 握手，和首字节差一大截（仿真里按探活裁 800 个反而更差）。
   if (S.alive.size > ALIVE_MAX) {
     const inPool = new Set(pool.map((x) => x.h + ":" + x.p));
     const keep = new Set([S.curs.tput, S.curs.lat]);
+    const latOf = (k: string, a: { ms?: number }) => {
+      const s = S.nstat.get(k);
+      return (s && s.pSum ? s.pSum : 0) || a.ms || 9999;
+    };
     const rows = [...S.alive.entries()].filter(([k]) => !keep.has(k));
     rows.sort((a, b) => {
       const ap = inPool.has(a[0]) ? 0 : 1;
       const bp = inPool.has(b[0]) ? 0 : 1;
       if (ap !== bp) return bp - ap; // 先删不在当前池里的
-      return (b[1].ms || 9999) - (a[1].ms || 9999); // 同一档先删最慢的
+      return latOf(b[0], b[1]) - latOf(a[0], a[1]); // 同一档先删最慢的
     });
     for (const [k] of rows) {
       if (S.alive.size <= ALIVE_MAX) break;

@@ -8,6 +8,8 @@ export class Meter {
   g: CounterDoc;
   s: Record<string, NodeSnap>;
   e: ErrItem[];
+  /** 连接记录环形：最近 60 条，离线标定用 */
+  cl: ClRec[];
   /** 请求串行队列：/add 与 /set 交错会让内存和 storage 的顺序不一致 */
   q: Promise<unknown> = Promise.resolve();
   /**
@@ -22,6 +24,7 @@ export class Meter {
     // 节点 key 来自 ?spd 的外部快照：用 null 原型，`__proto__` 当键也不能改原型
     this.s = Object.create(null) as Record<string, NodeSnap>;
     this.e = []; // 跨 isolate 的错误环形（最多 50 条）
+    this.cl = []; // 连接记录环形（最多 60 条）：离线标定 ttfb/抖动用
     this.st.blockConcurrencyWhile(async () => {
       // 单键存储：每次 /add 只写 1 行。
       // 以前是 c/g/s/e 四个键 = 4 行，SQLite DO 的「行写入」额度（免费 10 万/天）
@@ -34,6 +37,7 @@ export class Meter {
           if (o.g && typeof o.g === "object") this.g = o.g as CounterDoc;
           if (o.s && typeof o.s === "object") this.s = Object.assign(Object.create(null), o.s);
           if (Array.isArray(o.e)) this.e = o.e;
+          if (Array.isArray(o.cl)) this.cl = o.cl as ClRec[];
         }
         return;
       }
@@ -150,6 +154,21 @@ export class Meter {
         this.e.sort((a, b) => a.t - b.t);
         if (this.e.length > 50) this.e = this.e.slice(-50);
       }
+            if (Array.isArray(d.cl) && d.cl.length) {
+        // 同节点合并（不同 isolate 各报一段）：计数相加，分位数取最新一段
+        for (const x of d.cl) {
+          if (!x || typeof x.n !== "number" || typeof x.k !== "string") continue;
+          const old = this.cl.find((r) => r.k === x.k);
+          if (old) {
+            old.n += x.n;
+            old.ok += x.ok;
+            old.dn += x.dn;
+            old.p50 = x.p50;
+            old.p95 = x.p95;
+          } else this.cl.push({ k: x.k, n: x.n, ok: x.ok, p50: x.p50, p95: x.p95, dn: x.dn });
+        }
+        if (this.cl.length > 60) this.cl = this.cl.slice(-60);
+      }
       if (d.spd && typeof d.spd === "object") {
         for (const [k, v] of Object.entries(d.spd)) {
           if (!v || typeof v !== "object") continue;
@@ -194,6 +213,9 @@ export class Meter {
     }
 
     // 只在当前为 0 时回填，天然幂等，重建脚本后能自动恢复历史用量
+    if (p.endsWith("/cl")) {
+      return Response.json({ cl: this.cl });
+    }
     if (p.endsWith("/cnt")) {
       return Response.json({ g: this.g, c: this.c, s: this.s, e: this.e });
     }

@@ -33,7 +33,7 @@ VLESS / Trojan over WebSocket，跑在 Cloudflare Workers 上。
 | | `kv` / `crypto` | KV 读写 / AES-GCM 封装 |
 | | `snapshot` / `metering` | 用量灾备快照 / PEND + DO 账本 |
 | | `meter` | `Meter` Durable Object（全局账本） |
-| `src/nodes/` | `score` | 评分纯函数（毫秒当量、可用性、吞吐直方图） |
+| `src/nodes/` | `stat` `score` `metrics` | 统计原语（衰减/窗口/EWMA/MAD/CUSUM）、评分与候选表、站点画像 |
 | | `selector` | 挑谁 / 何时换 / 失败处理 |
 | | `metrics` | RTT 学习、错误日志、按站点的节点画像 |
 | `src/px/` | `pool` | 中转池状态、`pxGet`、cron |
@@ -90,6 +90,16 @@ PUT    /accounts/{acct}/workers/scripts/{name}/schedules
 GET    /<uuid>/debug?restore=1               # 从 KV 快照续回用量
 ```
 
+### 调试与观测参数
+
+| 参数 | 作用 |
+|---|---|
+| `/<uuid>/debug?cl=1` | 最近 40 条连接记录（`t/k/ms/dn/up/ok`）；加 `&do=1` 连 DO 环形 60 条一起读 |
+| `/<uuid>/debug?diag=<host>` | 站点诊断：这个站该用哪个节点、为什么被拦，`&probe=1` 现场探一次 |
+| `/<uuid>/proxyip?why=1` | 选路分项（`latencyMs/jitMs/e10Ms/pFailRisk/pStall/confB/nEff`） |
+| `/<uuid>/debug?restore=1` | 从 KV 快照续回用量 |
+| `?sz=i` / `?sz=s` / `?sz=b`（节点链接参数） | 目标流量 64 KB / 1 MiB / 16 MiB；不写按模式默认（lat 160 KB、tput 10 MiB） |
+
 ---
 
 ## 配置（环境变量 / bindings）
@@ -106,7 +116,7 @@ GET    /<uuid>/debug?restore=1               # 从 KV 快照续回用量
 `quotaBytes` / `expireAt` | | 订阅头展示用 |
 `STATS` | ✓ | KV namespace |
 `METER` | ✓ | Durable Object（类名 `Meter`） |
-`pxShadow` | | 影子流量比例（默认 0.1） |
+`pxShadow` | | 冷启动探索比例（默认 0.05；抽样器自带探索，这个只影响站点画像补样本） |
 `defaultMode` | | `lat` / `tput`（默认 tput） |
 `pxSchedH` | | 定时轮换小时数（0 关闭） |
 

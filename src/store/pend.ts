@@ -74,6 +74,11 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
         body.c = { ...cd, d: today }; // 只挂一次，避免重复计
         body.spd = spdSnapshot(); // 节点快照：跨 isolate 可见
         body.e = S.errs.slice(-8); // 错误也带上去：/logs 才能跨 isolate
+        const cl = clSnapshot(40);
+        if (cl.length) {
+          body.cl = cl; // 连接观测（按节点聚合）：同理，离线可标定
+          S.cagg.clear();
+        }
       }
       const r = await stub.fetch("https://meter/add", {
         method: "POST",
@@ -93,4 +98,17 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
   // 自适应退避：失败了就把间隔翻倍（最多 60s），成功了慢慢降回 30s
   if (bad) S.pendMs = Math.min(S.pendMs * 2, 60000);
   else S.pendMs = Math.max(30000, Math.round(S.pendMs / 2));
+}
+
+/** 连接观测快照：把本 isolate 的按节点聚合转成可上报的行（p50/p95 由最近 64 条首字节算） */
+export function clSnapshot(max = 40): ClRec[] {
+  const out: ClRec[] = [];
+  for (const [k, g] of S.cagg) {
+    if (!g.n) continue;
+    const v = g.v.slice().sort((a, b) => a - b);
+    const q = (p: number) => (v.length ? v[Math.min(v.length - 1, Math.floor(p * v.length))] : 0);
+    out.push({ k, n: g.n, ok: g.ok, p50: q(0.5), p95: q(0.95), dn: g.dn });
+  }
+  out.sort((a, b) => b.n - a.n);
+  return out.slice(0, max);
 }

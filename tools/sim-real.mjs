@@ -30,17 +30,10 @@ if (process.env.PRIOR_BPS) W.SC.PRIOR_BPS = Number(process.env.PRIOR_BPS);
 if (process.env.SEED_CONF) W.SC.SEED_CONF = Number(process.env.SEED_CONF);
 if (process.env.ACTIVE_LAT) W.SC.ACTIVE_LAT = Number(process.env.ACTIVE_LAT);
 if (process.env.ACTIVE_TPUT) W.SC.ACTIVE_TPUT = Number(process.env.ACTIVE_TPUT);
-if (process.env.LAT_TS !== undefined) W.SC.LAT_TS = Number(process.env.LAT_TS);
 if (process.env.TS_COLD_PASS !== undefined) W.SC.TS_COLD_PASS = Number(process.env.TS_COLD_PASS);
 if (process.env.TS_FB !== undefined) W.SC.TS_FB = Number(process.env.TS_FB);
 if (process.env.TS_CURSOR !== undefined) W.SC.TS_CURSOR = Number(process.env.TS_CURSOR);
 if (process.env.TS_TTL !== undefined) W.SC.TS_TTL = Number(process.env.TS_TTL);
-if (process.env.TRIAL_TPUT) W.SC.TRIAL_TPUT = Number(process.env.TRIAL_TPUT);
-if (process.env.ROUTE_T_LAT) W.SC.ROUTE_T_LAT = Number(process.env.ROUTE_T_LAT);
-if (process.env.ROUTE_T_TPUT) W.SC.ROUTE_T_TPUT = Number(process.env.ROUTE_T_TPUT);
-if (process.env.ROUTE_K) W.SC.ROUTE_K = Number(process.env.ROUTE_K);
-if (process.env.WATCH_N) W.SC.WATCH_N = Number(process.env.WATCH_N);
-if (process.env.TRIAL_LAT) W.SC.TRIAL_LAT = Number(process.env.TRIAL_LAT);
 
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
 if (process.env.PX_SHADOW !== undefined) ENV.pxShadow = Number(process.env.PX_SHADOW);
@@ -218,7 +211,7 @@ function reset() {
   S.lastSwitch = { lat: 0, tput: 0 };
   S.switchHits = { lat: [], tput: [] };
   S.inflight.clear();
-  S.rankCache = { t: 0, at: {}, v: {} };
+  S.rankCache = { t: 0, at: {}, v: {}, step: {} };
   S.candN = 0;
   S.pxFailMem = 0;
   S.pxFailSeen = 0;

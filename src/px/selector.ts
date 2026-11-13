@@ -2,22 +2,21 @@ interface PickState {
   host?: string;
   node?: string;
   hostTrial?: boolean;
-  trial?: boolean;
   retried?: boolean;
+  sz?: number;
 }
 
 import { SC } from "../core/const";
 import { shadowRate } from "../core/util";
 import { hostKey, hostRank, hostUntried, logErr } from "../nodes/metrics";
 import { MODES, keyOf } from "./const";
-import { pickTS } from "./ts";
+import { pickThom } from "./ts";
 import { aliveList, pxGet } from "./pool";
 import { cnt } from "../core/counter";
 import { pxPolicy } from "./probe";
 import {
   bestFor,
   candsFor,
-  rankedCands,
   costOf,
   freezeNode,
   isBlack,
@@ -25,9 +24,7 @@ import {
   nsFail,
   nsGet,
   scoreParts,
-  suspectOf,
   usable,
-  ZERO_STAT,
   nsSiteFail,
 } from "../nodes/score";
 import { S } from "../core/state";
@@ -88,7 +85,7 @@ export class Selector {
     let cur = S.curs[m];
     // 游标可能是上一代候选池里的节点：池子刷新后 alive 里已经没有它了。
     // 以前会一直把连接拨到这个死地址，直到 cron 的 maybeSwitch 才发现。
-    // 游标只做面板/健康展示：真正走谁由 pickByScore 抽签决定。
+    // 游标只做面板/健康展示：真正走谁由 ③ 的单层抽样器决定。
     // 这里仍然维护游标，是为了面板/health 不显示一个已经死掉或冷却的节点。
     if (!cur || !S.alive.has(cur) || isBlack(cur) || isFrozen(cur)) {
       cur = bestFor(m);
@@ -131,53 +128,27 @@ export class Selector {
       }
     }
 
-    // ②.5 延迟模式：Thompson 采样（失败率做门槛，只信已测节点）
-    if (m === "lat" && SC.LAT_TS > 0) {
-      const k = pickTS(m);
-      if (k) {
-        if (st) st.node = k;
-        return k;
+    // ② 冷启动：这个站还没攒够节点样本时，用影子流量补几条（只为站点画像，不参与选路）
+    //    抽样器本身就带探索（样本少 ⇒ 乐观面大 ⇒ 自然被抽），这里只解决"新域名前几条连接
+    //    全打同一个节点、画像建不起来"的问题，所以跟的是同一个 pxShadow 预算。
+    const base = shadowRate(env);
+    if (cur && base > 0 && !(st && st.retried) && host && fam && Math.random() < base) {
+      const hm = S.hostNode.get(fam);
+      if (!hm || hm.size < 3) {
+        const t0 = hostUntried(host, m);
+        if (t0) {
+          nsGet(t0).lastTry = Date.now();
+          if (st) {
+            st.hostTrial = true;
+            st.node = t0;
+          }
+          return t0;
+        }
       }
     }
 
-    // ③ 全局：粘滞游标 + 自适应探索
-    //   样本不足（nEff<3）→ 最多 10%，样本够了 → 回落到 pxShadow（默认 5%）
-    //   站点冷启动和全局影子共用这一次掷骰，避免两层探索叠加
-    const base = shadowRate(env);
-    const needRate = cur ? this.nEffOf(cur) < SC.N_EFF_MIN : true;
-    // pxShadow=0 视为"关闭探索"；否则样本不足时最高放到 EXPLORE_MAX
-    const exploreP = base <= 0 ? 0 : Math.min(1, needRate ? Math.max(base, SC.EXPLORE_MAX) : base);
-    const canTrial = !(st && st.retried);
-    if (cur && canTrial && exploreP > 0 && Math.random() < exploreP) {
-      // 这个站还没试够节点：先补站点样本（仍受同一个预算约束）
-      if (host && fam) {
-        const hm = S.hostNode.get(fam);
-        if (!hm || hm.size < 3) {
-          const t0 = hostUntried(host, m);
-          if (t0) {
-            nsGet(t0).lastTry = Date.now();
-            if (st) {
-              st.hostTrial = true;
-              st.node = t0;
-            }
-            return t0;
-          }
-        }
-      }
-      const t = this.trial(m);
-      if (t) {
-        const s = nsGet(t);
-        s.lastTry = Date.now();
-        if (st) {
-          st.trial = true;
-          st.node = t;
-        }
-        return t;
-      }
-    }
-    // ④ 延迟模式：加权抽签（前 K 名按 exp(-(v-v0)/T) 抽）
-    //    吞吐模式仍走粘滞游标 —— 抽签在"带宽崩塌"场景实测更差（2.68x → 4.22x）。
-    const pick = this.pickByScore(m);
+    // ③ 选路：单层抽样器（完整分数 ± 不确定性，两种模式共用同一套）
+    const pick = pickThom(m, (st && st.sz) || 0);
     if (pick) {
       let chosen = pick;
       // 负载感知：抽中的节点在途多时，换到分数接近、在途更少的候选
@@ -199,7 +170,7 @@ export class Selector {
       if (st) st.node = chosen;
       return chosen;
     }
-    // ⑤ 吞吐模式（或抽签关闭）：粘滞游标 + 负载溢出
+    // ⑤ 兜底：粘滞游标 + 负载溢出
     if (cur && (S.inflight.get(cur) || 0) >= 2) {
       const cv = costOf(cur, m);
       let alt = "",
@@ -216,113 +187,31 @@ export class Selector {
       if (alt) cur = alt;
     }
     if (st) st.node = cur;
-    return cur;
+    if (cur) return cur;
+    // ⑥ 全池都在冷却/冻结时的兜底：返回"最早能恢复、且代价最低"的那个，
+    // 不能返回空串——空串会让 session 直接放弃这条连接（cnt("dead")），
+    // 哪怕池子里还有一堆节点只是暂时被罚。宁可试一次再失败，也不要凭空判死。
+    const last = this.leastBad(m);
+    if (st) st.node = last;
+    return last;
   }
 
-  /**
-   * 加权抽签（softmax）：在候选前 K 名里按 exp(-(v-v0)/T) 抽。
-   * 单游标 + 滞回的毛病是"谁先拿到流量谁就永远赢"：游标拿 95% 流量 → 样本多 →
-   * pFail 趋近 0 → 分数更低 → 继续拿流量。抽签让每个候选按分数分到流量，
-   * 估计自然收敛；代价是"当前节点"不再是一个固定值（面板看 S.curs 的领先者）。
-   * @param {string} mode "lat" | "tput"
-   * @returns {string} 节点 key，没有候选返回 ""
-   */
-  pickByScore(mode: Mode): string {
-    const T = mode === "tput" ? SC.ROUTE_T_TPUT : SC.ROUTE_T_LAT;
-    if (!(T > 0)) return ""; // 关闭抽签：调用方退回粘滞游标
-    // 只取前 K 个可用候选：candsFor 会对全表做一次 filter（400 节点 ~60µs/次）
-    const list: { k: string; v: number }[] = [];
-    for (const x of rankedCands(mode)) {
-      if (list.length >= SC.ROUTE_K) break;
-      if (!S.alive.has(x.k) || isBlack(x.k) || isFrozen(x.k)) continue;
-      list.push(x);
-    }
-    if (!list.length) return "";
-    const v0 = list[0].v;
-    let tot = 0;
-    const w = new Array(list.length);
-    for (let i = 0; i < list.length; i++) {
-      const e = Math.exp(-(list[i].v - v0) / T);
-      w[i] = e;
-      tot += e;
-    }
-    let r = Math.random() * tot;
-    for (let i = 0; i < list.length; i++) {
-      r -= w[i];
-      if (r <= 0) return list[i].k;
-    }
-    return list[0].k;
-  }
-
-  /** 有效吞吐窗口数：sumW²/sumW2（样本不足就不值得长期驻留） */
-  nEffOf(k: string): number {
-    const s = S.nstat.get(k);
-    if (!s || !(s.sumW2 > 0)) return 0;
-    return (s.sumW * s.sumW) / s.sumW2;
-  }
-
-  /** 待测队列：样本不足的节点，最久没试的优先（单遍扫描，不排序） */
-  // watchlist 缓存：全表排序很贵（400 节点 ~1.5ms），60 秒重算一次就够
-  private watchAt: Record<Mode, number> = { lat: 0, tput: 0 };
-  private watch: Record<Mode, string[]> = { lat: [], tput: [] };
-  /** watchlist 里"探活高估"的那几个：不算它们的样本进度，免得抢占正常探索 */
-  private rehab: Record<Mode, Set<string>> = { lat: new Set(), tput: new Set() };
-
-  /** 重建 watchlist：探活快 + 样本少的 32 个候选 */
-  buildWatch(mode: Mode) {
-    const enough = mode === "tput" ? SC.TRIAL_TPUT : SC.TRIAL_LAT;
-    const cands: { k: string; v: number }[] = [];
-    const rehab: { k: string; v: number }[] = [];
+  /** 兜底：冷却期里挑最不坏的（先比恢复时间，再比代价） */
+  private leastBad(mode: Mode): string {
+    let best = "",
+      bk = Infinity,
+      bs = Infinity;
     for (const k of S.alive.keys()) {
-      if (k === S.curs[mode] || isBlack(k) || isFrozen(k)) continue;
-      const a = (S.alive.get(k) || {}) as NodeEntry;
-      const s = S.nstat.get(k) || ZERO_STAT;
-      if (suspectOf(s)) continue; // 连得上却传不出数据的节点，不值得占一次试探预算
-      const n = (s.okW || 0) + (s.failW || 0);
-      if (!a.ms) continue;
-      if (a.ms > 250) {
-        // 探活慢的节点一般不值得试；但"探活被瞬时拥塞抬到 400ms、实际 60ms"的节点
-        // 永远拿不到真实样本就永远翻不了身（真实样本只能证明更慢）。留两个名额给它，
-        // 按"最久没试过"轮转，样本进度按 +3 计，不抢占正常探索。
-        if (!S.alive.size || a.ms > SC.REHAB_MS || n > 0) continue;
-        rehab.push({ k, v: s.lastTry || 0 });
-        continue;
+      const s = S.nstat.get(k);
+      const until = Math.max(s ? s.blackUntil : 0, s ? s.freeUntil : 0);
+      const v = costOf(k, mode);
+      if (until < bk || (until === bk && v < bs)) {
+        best = k;
+        bk = until;
+        bs = v;
       }
-      if (n >= enough) continue; // 样本够了才毕业（3 个样本定生死＝把运气当能力）
-      cands.push({ k, v: (a.ms || 250) + SC.WATCH_BONUS / Math.sqrt(n + 1) });
     }
-    cands.sort((x, y) => x.v - y.v);
-    rehab.sort((x, y) => x.v - y.v);
-    const rh = rehab.slice(0, SC.REHAB_N);
-    this.rehab[mode] = new Set(rh.map((x) => x.k));
-    const room = Math.max(0, SC.WATCH_N - rh.length);
-    this.watch[mode] = [...cands.slice(0, room).map((x) => x.k), ...rh.map((x) => x.k)];
-    this.watchAt[mode] = Date.now();
-    return this.watch[mode];
-  }
-
-  /** 探索预算只花在 watchlist 里：5% 摊到 N 个节点等于没探索 */
-  trial(mode: Mode) {
-    const enough = mode === "tput" ? SC.TRIAL_TPUT : SC.TRIAL_LAT;
-    const pickIn = (list: string[]) => {
-      let best = "",
-        bestN = Infinity;
-      for (const k of list) {
-        if (k === S.curs[mode] || !S.alive.has(k) || isBlack(k) || isFrozen(k)) continue;
-        const s = S.nstat.get(k) || ZERO_STAT;
-        if (suspectOf(s)) continue;
-        const n = (s.okW || 0) + (s.failW || 0) + (this.rehab[mode].has(k) ? 3 : 0);
-        if (n >= enough) continue;
-        if (n < bestN - 0.5) {
-          best = k;
-          bestN = n;
-        }
-      }
-      return best;
-    };
-    let list = this.watch[mode];
-    if (!list.length || Date.now() - this.watchAt[mode] > 60000) list = this.buildWatch(mode);
-    return pickIn(list) || pickIn(this.buildWatch(mode));
+    return best;
   }
 
   /** 重新评估是否该换节点（cron 与失败路径共用） */

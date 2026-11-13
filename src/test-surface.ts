@@ -65,7 +65,7 @@ export {
 } from "./nodes/metrics";
 export { tlsHello, refillPool } from "./px/probe";
 export { regionListAsync } from "./px/regions";
-export { nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats } from "./store/index";
+export { clSnapshot, nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats } from "./store/index";
 export { runCron } from "./routes/cron";
 export { renderStatsHtml } from "./views/panel";
 export { statsNodeRows } from "./nodes/stats-rows";

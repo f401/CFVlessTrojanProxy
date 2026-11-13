@@ -79,6 +79,7 @@ export class Connection {
   // —— 观测 ——
   tAttach = 0; // 连上上游的时刻
   ttfb = 0; // 首字节耗时（ms），按站点的画像就靠它
+  sz = 0; // 目标流量（字节，0 = 按模式默认）：决定"传完一个请求"要算多少流量
   directFail = false; // 直连阶段 0 字节关闭过（用于"直连对照"）
 
   // —— 身份与上下文 ——
@@ -250,8 +251,36 @@ export class Connection {
           S.cnt.tput = (S.cnt.tput || 0) + 1;
         }
       }
-      if (this.node && this.stallMs) {
+      // 分母必须是"所有连接的总时长"：pStall = (stallMs + 50) / (runMs + 1000)。
+      // 原来只在"这条连接卡过"时才累加 runMs，等于把分母缩成"卡过的那几条连接的时长"：
+      // 一条 5 秒连接卡 2 秒 → pStall 0.34（真实占比 0.001），单次卡顿白送 800+ ms 分，
+      // 还会踩中 pStall>0.25 的 +400 重罚档，节点一晚上翻不了身。
+      if (this.node) {
         nsStall(this.node, this.stallMs, Math.max(1000, now - this.t0));
+      }
+      // 连接观测按节点聚合（n/ok/p50/p95）：40 条原始记录只能盖住 40 个节点，
+      // 聚合后同样载重能覆盖全池（2000 个节点也就 400 条聚合记录）。
+      if (this.node || this.host) {
+        const ck = this.node || "direct";
+        let g = S.cagg.get(ck);
+        if (!g) {
+          g = { n: 0, ok: 0, dn: 0, v: [] };
+          if (S.cagg.size >= 400) {
+            let worst = "";
+            let wn = Infinity;
+            for (const [k2, g2] of S.cagg) if (g2.n < wn) { wn = g2.n; worst = k2; }
+            if (worst) S.cagg.delete(worst);
+          }
+          S.cagg.set(ck, g);
+        }
+        g.n += 1;
+        if (!this.failed) g.ok += 1;
+        g.dn += this.down;
+        const ms = Math.round(this.ttfb);
+        if (ms > 0) {
+          g.v.push(ms);
+          if (g.v.length > 64) g.v.shift();
+        }
       }
       if (!this.counted) {
         this.counted = 1;

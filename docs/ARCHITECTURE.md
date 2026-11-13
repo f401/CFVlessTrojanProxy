@@ -10,7 +10,7 @@ core/     const util net state quota 无业务依赖：常量 / 工具 / 目标�
 store/    index kv crypto         适配器：KV / 加密 / 快照 / 计量 / Meter DO
           snapshot pend stats
           meter-client meter
-nodes/    score metrics            节点域：纯评分、画像、看板行组装
+nodes/    stat score metrics       节点域：统计原语、评分与候选表、画像与看板行
 px/       pool probe seed selector 中转域：候选池、探活、信誉表、选择器
           const regions              共享常量 / 地区列表（打破 pool 互引）
 proxy/    protocol dial session     数据面：协议、拨号、会话
@@ -34,7 +34,7 @@ index.ts                            组装根：分发 + ws 升级 + cron
 fetch(request)
  ├─ Upgrade: websocket ──► proxy/session.handleUpgrade
  │                          ├─ protocol.detect/parse      首包鉴权
- │                          ├─ nodes.selector.pick        选节点（站点偏好 → 全局游标 → 影子）
+ │                          ├─ nodes.selector.pick        选节点（站点偏好 → 单层抽样 → 游标兜底）
  │                          ├─ proxy.dial                 direct / node / v6 / proxyip 三级降级
  │                          ├─ proxy.tunnel.pipeBack      双向搬运 + 512KB tick 结算
  │                          └─ store.pendAdd               字节进内存账本
@@ -44,7 +44,7 @@ fetch(request)
      ├─ /<uuid>/{page,cl,sb,ty,...}  routes/subscription
      ├─ /<uuid>/{proxyip,debug}     routes/tools
      ├─ /<uuid>/logs                routes/logs
-     └─ scheduled                   routes/cron（30 分钟一轮）
+     └─ scheduled                   routes/cron（30 分钟一轮；探活默认 ceil(池/4)、上限 min(SCAN_MAX=400, SCAN_SUB=48)；死候选本地记忆后不再占名额）
 ```
 
 ## 3 状态归属
@@ -53,7 +53,7 @@ fetch(request)
 |---|---|---|
 | 节点统计 / 游标 / 站点画像 | `core/state` 的 `S`（按域分段） | isolate |
 | 选中结果缓存 | `S.curs` / `S.hostRankCache`（30s） | isolate |
-| 信誉表 | `px/seed` ↔ KV `px:seed` | 跨 isolate / 跨机房 |
+| 候选名单 | `px/seed` ↔ KV `px:seed` | 跨 isolate（只传名字，不传统计） |
 | 用量 | `store` PEND → `Meter` DO → KV 快照 | 全局唯一 |
 | 加密密钥 | `KEY_BOX`（模块级常量对象） | isolate |
 
@@ -114,23 +114,40 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
    累计 `bytesDown` 只用于展示，不能复活旧样本。
 3. **权重**：每个窗口 `w=min(1,bytes/512KiB)×min(1,dt/1s)`，单连接累计封顶 4，
    一条长连接刷不出"高置信度"。
-4. **seed 只是先验**：`cSeed=0.25×2^(−seedAge/24h)`，只影响 `priorBps`，不进本地 `nEff`、
-   也不混进 `okW/failW`；导入的可靠性样本不再伪装成本地观测。
+4. **seed 只是候选名单**（v6.35）：KV `px:seed` 只存 `{k,h,p,cc}`，没有任何统计；
+   每个 isolate 的最优节点可能不同，跨 isolate 的传统计会把别人的体感当成本机样本。
 5. **站点画像**：`hostKey(host)` 是唯一索引，读写都用它；`lat` 用 TTFB，`tput` 必须有站点级
-   `bps` 样本，没有就回退全局同模式分，不允许拿 TTFB 冒充吞吐。
+   `bps` 样本，没有就回退全局同模式分，不允许拿 TTFB 冒充吞吐。站点画像**不出本 isolate**。
 6. **门槛**：只有 `N≥8` 且 Wilson 下界 <0.4 才硬排除，其余靠 `pFailRisk` 软惩罚，
    避免小样本一两次失败就出局。
 7. **风险先验**：`pMean=α/(α+β)`，α=α0+failW、β=β0+okW；溢价 `0.5·√var·(1−e^(−N/4))`
    随样本量才打开 —— **无本地样本时 pFailRisk 恰为 0.1**，不把"未知"当"坏"。
-8. **seed 修正先验而非样本**：同 colo、24h 内的 seed 以 `seedW=min(2,0.25×seedN)×2^(−age/24h)`
-   个伪计数修正 α0/β0，不增加本地 N、不参与可用性门槛、不影响 confB。
-9. **自适应探索**：当前节点 `nEff<3` 时探索上限 10%，样本够了回落到 `pxShadow`（默认 5%）；
-   站点冷启动与全局影子共用同一次掷骰，`pxShadow=0` 视为关闭。候选数记录在 `S.candN`（`/health.candidates`）。
-10. **排行缓存**：`alive≥24` 时 `candsFor` 结果缓存 20 秒，且**只缓存排序、不缓存可用性**——
+8. **延迟主信号是 ttfb**：`pSum/pSumSq` 存 ttfb 的 EWMA 均值与 **MAD**，
+   与探活按 `REAL_W=8 / PROBE_W=2` 份加权；抖动 `MAD×1.4826` 乘 `JIT_W=0.5` 进 lat 分数。
+   探活只负责"能不能连上"，不再单独决定延迟。用 MAD 而不是方差：一条 5 秒的怪连接
+   只把 `jitMs` 抬到 ~240 ms，而不是秒级。
+8b. **变点检测**：`cus`（延迟，ms 当量）与 `cusB`（吞吐，log2 倍数）两条 CUSUM。
+   单条怪样本被 `CUSUM_K=30` 挡掉，连续两条 4 倍慢样本（`CUSUM_H=300`）立刻冻结 60 s；
+   吞吐掉到 60% 以下才累积，越线就把直方图按 0.2 缩放并改写 `capBps`。
+8c. **目标流量 S**：`?sz=i|s|b`（64 KB / 1 MiB / 16 MiB）把 S 带进 `scoreParts`。
+   低延迟窄带节点赢在小请求、高延迟宽带节点赢在批量；默认 160 KB（lat）/ 10 MiB（tput）。
+9. **探索**：`pxShadow`（默认 5%）只负责冷启动的第一批样本；之后的分流量由单层抽样器
+   （`pickThom`）按"均值 + 排队 − 0.8×σ"决定，两者不叠加。`pxShadow=0` 视为关闭。
+   **均值里的传输时间不用全局先验**（6.39）：有 `capBps` 测量就按测量算，没有则按候选表里最快的
+   `capMax` 算（`TS_HIER`）—— 16 MB 场景里 40 MB/s 的节点命中率因此从 54% 升到 86%；
+   失败代价也随 S 缩放（`failMs = clamp(1.6×base, 400, 20000)`），不再固定 5000 ms。
+   排队项 = `S.inflight(k) × 本请求的传输时间`，单连接时为 0；候选数记录在 `S.candN`（`/health.candidates`）。
+   抽样池宽度按池子分档（6.38）：`S.candN ≥ 1200` 取前 64，否则取前 32（`TS_K_SMALL`）——
+   300~800 池里前 64 名含大量明显更差的节点，收窄后 800 池 1.17x→1.13x；
+   2000 池前 64 只占 3%，收窄反而丢掉"可能变好"的候选（1.16x→1.20x）。
+10. **排行缓存**：`alive≥24` 时 `candsFor` 用 20 秒的候选表，且**只缓存排序、不缓存可用性**——
     黑名单/冻结每次返回前都会重新过滤；`nsFail`/`freezeNode`/候选池换代会把缓存打掉。
     200 候选实测 0.98ms → 0.15ms。
     **每个模式各记一个写入时间**（`at[lat]` / `at[tput]`）：两模式共用一个 `t` 时，
     后算的那个会给另一个"续命"，20 秒的实际有效期能拖到 40 秒（6.34 修）。
+    **池子 ≥1200 时分片重建**（`CAND_SLICE=128`）：每次 `pick` 只算 128 个节点、边算边维护前 224 名，
+    一轮算完才换表，2000 候选的 4.1ms 重建被摊成 0.26ms/片（6.38）。
+    `invalidateRank()` 只重置时间戳，**表和分片进度都留着**（否则失败密集时半张表 + 循环永远算不完）。
 11. **站点吞吐中途采样**：长连接每 60 秒补一个站点级 bps 窗口（≥256KB 才记），
     这类采样只带 `bps`，不计入 `n/ok/bad`，避免把一条长连接算成多条连接样本。
 12. **失败三态归因**：`node`（连不上节点）/ `site`（连上了但目标侧拒绝，只加 0.2 权重、不进冷却阶梯）/
@@ -142,7 +159,11 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 16. **站点偏好门槛**：至少 3 个节点有样本，且首选样本 ≤2 小时，才允许覆盖全局游标。
 
 `/<uuid>/debug?diag=<host>` 与 `/proxyip?why=1` 输出的是同一份分项：
-`latencyMs / e10Ms / pFailRisk / pStall / capBps / confB / nEff / sampleAgeMs / priorSource / gate`。
+`latencyMs / jitMs / e10Ms / pFailRisk / pStall / capBps / confB / nEff / sampleAgeMs / gate`。
+
+连接级观测：`/<uuid>/debug?cl=1`（本 isolate 按节点聚合，最多 400 个节点；p50/p95 取最近 64 条）与 `&do=1`（DO 环形 60 条聚合记录），
+每条含 `t / k / ms / dn / up / ok`；落盘走现有的 `/add` 批次（`body.cl`），不新增请求。
+目标流量：`?sz=i|s|b` 随连接声明 S，见 docs/评分机制_final.md §2.4。
 
 ## 7 代码风格
 

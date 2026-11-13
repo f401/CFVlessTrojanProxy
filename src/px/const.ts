@@ -2,8 +2,10 @@
 
 export const SEED_KEY = "px:seed";
 export const SEED_READ_MS = 30 * 60000; // 信誉表回读周期（注意与 SC.SEED_TTL「先验保质期」不是一回事）
-export const SEED_MAX = 800; // 每个机房最多记 800 个节点（110 B/节点，KV 单值约 88 KB）
+export const SEED_MAX = 800; // 每个机房最多记 800 个节点（现在只存名字 k/h/p/cc，约 30 B/节点）
 export const PX_TTL = 86400 * 30;
-export const SEED_VER = 6;
+// v7：信誉表降级成"候选名单"（不再存 ms/tcp/tls/n/f/b/sb/hp）——
+// 每个 isolate 的最优节点可能完全不同，跨 isolate 的品质结论只会把冷启动带偏
+export const SEED_VER = 7;
 export const MODES: Mode[] = ["lat", "tput"];
 export const keyOf = (x: NodeEntry) => x.h + ":" + x.p;

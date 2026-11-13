@@ -1,8 +1,11 @@
 // 节点选择的"地面真值"仿真：批量伪造节点（真实延迟/失败率/带宽/卡顿/探活撒谎），
 // 用真实的 pick / region / bumpFail / nsProbe / nsSpeed 跑，最后和上帝视角对比。
 //   用法：node test/mk_test.mjs && node tools/sim-select.mjs [小时数]
-//   环境变量：SEEDS=3、SEED0=1、ONLY=名字、FAIL/H_LAT_REL/TRIAL_LAT... 覆盖 SC
-import * as W from "../test/_bundle.mjs";
+//   环境变量：SEEDS=3、SEED0=1、ONLY=名字、BUNDLE=另一份 bundle 路径（A/B 用）、FAIL/H_LAT_REL/TRIAL_LAT... 覆盖 SC
+// 默认读 test/_bundle.mjs；BUNDLE 可指向 .tmp-sim/bundle-base.mjs 之类的旧构建，省得反复 stash + 重建。
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
+const W = await import(process.env.BUNDLE ? pathToFileURL(resolve(process.env.BUNDLE)).href : "../test/_bundle.mjs");
 
 const S = W.S;
 const MB = 1048576;
@@ -21,17 +24,21 @@ const rnd = () => {
 };
 Math.random = rnd;
 
-if (process.env.LAT_TS !== undefined) W.SC.LAT_TS = Number(process.env.LAT_TS);
-if (process.env.ROUTE_T_LAT) W.SC.ROUTE_T_LAT = Number(process.env.ROUTE_T_LAT);
-if (process.env.ROUTE_T_TPUT) W.SC.ROUTE_T_TPUT = Number(process.env.ROUTE_T_TPUT);
 if (process.env.FAIL) W.SC.FAIL = Number(process.env.FAIL);
 if (process.env.H_LAT_REL) W.SC.H_LAT_REL = Number(process.env.H_LAT_REL);
-if (process.env.TRIAL_LAT) W.SC.TRIAL_LAT = Number(process.env.TRIAL_LAT);
-if (process.env.TRIAL_TPUT) W.SC.TRIAL_TPUT = Number(process.env.TRIAL_TPUT);
 if (process.env.BETA_A) W.SC.BETA_A = Number(process.env.BETA_A);
 if (process.env.BETA_B) W.SC.BETA_B = Number(process.env.BETA_B);
+if (process.env.TS_BETA !== undefined) W.SC.TS_BETA = Number(process.env.TS_BETA);
+if (process.env.TS_BAND !== undefined) W.SC.TS_BAND = Number(process.env.TS_BAND);
+if (process.env.TS_SD_MIN !== undefined) W.SC.TS_SD_MIN = Number(process.env.TS_SD_MIN);
+if (process.env.TS_EXTRA !== undefined) W.SC.TS_EXTRA = Number(process.env.TS_EXTRA);
+if (process.env.TS_K !== undefined) W.SC.TS_K = Number(process.env.TS_K);
+if (process.env.JIT_W !== undefined) W.SC.JIT_W = Number(process.env.JIT_W);
+if (process.env.REAL_W !== undefined) W.SC.REAL_W = Number(process.env.REAL_W);
+if (process.env.FAILSCALE !== undefined) W.SC.FAIL_SCALE = Number(process.env.FAILSCALE);
+if (process.env.TSHIER !== undefined) W.SC.TS_HIER = Number(process.env.TSHIER);
 
-const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
+const ENV = { pxDwellMin: 0, pxShadow: process.env.PXSHADOW === undefined ? 0.05 : Number(process.env.PXSHADOW), pxSchedH: 6 };
 
 /* 备选：失败率只做门槛，排序只看可测量（延迟/吞吐） */
 if (process.env.RANK === "raw") {
@@ -143,6 +150,41 @@ function bigPool() {
   return [N("b0", 60, 0.005, 14), ...fillers(99, (i) => N("b" + (i + 1), 100 + ((i * 53) % 300), 0.02 + ((i * 29) % 4) * 0.01, 1 + ((i * 17) % 20)))];
 }
 
+// 真实规模的池子：一个明确的王者（60ms/0.5%）+ 大量平庸节点（100~400ms，失败率 2~5%，带宽 1~20MB/s）
+function poolOf(n) {
+  return [N("b0", 60, 0.005, 14), ...fillers(n - 1, (i) => N("b" + (i + 1), 100 + ((i * 53) % 300), 0.02 + ((i * 29) % 4) * 0.01, 1 + ((i * 17) % 20)))];
+}
+
+// 更贴近真的 IP 池：延迟挤在 60~200ms（大部分 90~130），失败率长尾（多数 1~6%，少数 0.2%），
+// 带宽 2~24MB/s。探活值和真实值一致（不撒谎），只有 1~2 个明确的赢家。
+function realPool(n) {
+  const out = [N("r0", 62, 0.004, 18), N("r1", 78, 0.006, 22), N("r2", 55, 0.012, 9)];
+  for (let i = 3; i < n; i++) {
+    const lat = 60 + ((i * 97) % 90) + ((i * 31) % 7) * 6;
+    const pf = i % 17 === 0 ? 0.002 + ((i * 7) % 40) / 10000 : 0.008 + ((i * 13) % 55) / 1000;
+    out.push(N("r" + i, lat, pf, 2 + ((i * 19) % 23)));
+  }
+  return out;
+}
+
+// 线上 cronScan 会把 alive 裁到 800：按探活延迟留最快的 800 个
+function trimmedPool(n, keep) {
+  return poolOf(n)
+    .sort((a, b) => a.tcp - b.tcp)
+    .slice(0, keep);
+}
+
+// 跨模式池：A 低延迟窄带、B 中等、C 均衡、D 高延迟宽带 —— lat 的 64KB 最优是 A，tput 的 16MB 最优是 D
+function crossPool() {
+  return [N("A", 60, 0.004, 2), N("B", 120, 0.004, 20), N("C", 90, 0.004, 8), N("D", 300, 0.004, 40)];
+}
+
+// 并发场景的池子：失败率压到 0.1%（高请求率下 2% 的池子会被失败阶梯拉黑），
+// 带宽从 2MB/s 到 40MB/s 分层，单节点吃不下需求，只有"按容量分摊"才是最优。
+function concPool() {
+  return [N("q1", 60, 0.001, 2), N("q2", 70, 0.001, 4), N("q3", 80, 0.001, 8), N("q4", 90, 0.001, 20), N("q5", 100, 0.001, 20), N("q6", 160, 0.001, 40)];
+}
+
 function regionPool() {
   const out = [];
   for (const cc of ["DE", "JP", "US"]) {
@@ -155,13 +197,39 @@ function regionPool() {
 }
 
 /* ---------- 场景 ---------- */
+const junkPool = (n, deadPct) => {
+  const arr = poolOf(n);
+  const deadN = Math.floor(n * deadPct);
+  for (let i = n - deadN; i < n; i++) {
+    arr[i].pFail = 1;
+    arr[i].dead = true;
+  }
+  return arr;
+};
+const shufflePool = (arr) => {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+};
 const scenarios = [
   /* 池子规模 */
   { group: "规模", name: "1 节点", pool: () => [N("s0", 60, 0.005, 12)], mode: "lat" },
   { group: "规模", name: "5 节点", pool: () => [N("s0", 60, 0.005, 12), ...fillers(4, (i) => N("s" + (i + 1), 120 + i * 40, 0.01 + i * 0.01, 6))], mode: "lat" },
   { group: "规模", name: "20 节点", pool: basePool, mode: "lat" },
   { group: "规模", name: "100 节点", pool: bigPool, mode: "lat", hours: 8 },
-  { group: "规模", name: "300 节点", pool: () => [N("b0", 60, 0.005, 14), ...fillers(299, (i) => N("b" + (i + 1), 100 + ((i * 53) % 300), 0.02 + ((i * 29) % 4) * 0.01, 1 + ((i * 17) % 20)))], mode: "lat", hours: 8, seeds: 1 },
+  { group: "规模", name: "300 节点", pool: () => [N("b0", 60, 0.005, 14), ...fillers(299, (i) => N("b" + (i + 1), 100 + ((i * 53) % 300), 0.02 + ((i * 29) % 4) * 0.01, 1 + ((i * 17) % 20)))], mode: "lat", hours: 8 },
+  // 线上真实规模：池子 1k~2k 条，但 cronScan 会把 alive 裁到 800。先看 800 的稳态，再看不裁的 2000。
+  { group: "规模", name: "800 节点", pool: () => poolOf(800), mode: "lat", hours: 8 },
+  { group: "规模", name: "2000 节点", pool: () => poolOf(2000), mode: "lat", hours: 8 },
+  { group: "规模", name: "3000 节点", pool: () => poolOf(3000), mode: "lat", hours: 8 },
+  { group: "规模", name: "2000 节点 12/s", pool: () => poolOf(2000), mode: "lat", hours: 6, rate: 12 },
+  { group: "规模", name: "3000 节点 12/s", pool: () => poolOf(3000), mode: "lat", hours: 6, rate: 12 },
+  { group: "规模", name: "3000 节点 60/s", pool: () => poolOf(3000), mode: "lat", hours: 4, rate: 60 },
+  { group: "规模", name: "3000 池留 800", pool: () => trimmedPool(3000, 800), mode: "lat", hours: 8 },
+  { group: "规模", name: "1000 真实画像", pool: () => realPool(1000), mode: "lat", hours: 8 },
+  { group: "规模", name: "2000 池留 800", pool: () => trimmedPool(2000, 800), mode: "lat", hours: 8 },
 
   /* 失败率分布 */
   { group: "失败分布", name: "全好池", pool: () => fillers(10, (i) => N("g" + i, 60 + i * 30, i * 0.0005, 4 + i)), mode: "lat" },
@@ -191,6 +259,14 @@ const scenarios = [
   { group: "流量", name: "1/分钟", pool: basePool, mode: "lat", hours: 24, rate: 1 / 60 },
   { group: "流量", name: "1/秒", pool: basePool, mode: "lat" },
   { group: "流量", name: "5/秒", pool: basePool, mode: "lat", rate: 5 },
+  // S 参数化：同一池子里"低延迟窄带"与"高延迟宽带"各有胜场，只有换了 sz 才该换节点
+  { group: "流量", name: "交互 64KB", pool: () => [N("lo", 60, 0.005, 2), N("hi", 120, 0.005, 20)], mode: "lat", sz: 65536, hours: 6 },
+  { group: "流量", name: "批量 16MB", pool: () => [N("lo", 60, 0.005, 2), N("hi", 120, 0.005, 20)], mode: "lat", sz: 16777216, hours: 6 },
+  // 并发场景：6 个节点、失败率 0.1%（否则 2 个节点在 8/s 下会被失败阶梯长期拉黑，
+  // 场景退化成"选不到节点"）。需求 12×2MB=24MB/s 已经超过单节点最大带宽，最优解是分摊。
+  { group: "并发", name: "12/s 2MB", pool: concPool, mode: "tput", sz: 2097152, rate: 12, conc: true },
+  { group: "并发", name: "12/s 256KB", pool: concPool, mode: "lat", sz: 262144, rate: 12, conc: true },
+  { group: "并发", name: "2/s 2MB", pool: concPool, mode: "tput", sz: 2097152, rate: 2, conc: true },
 
   /* 地区 */
   { group: "地区", name: "单节点", pool: () => [N("d0", 60, 0.005, 12, { cc: "DE" })], mode: "lat", region: "DE" },
@@ -209,11 +285,37 @@ const scenarios = [
 
   /* 长跑 */
   { group: "长跑", name: "24h", pool: basePool, mode: "lat", hours: 24, seeds: 1 },
+
+  /* 跨模式：低延迟节点（A）与大带宽节点（D）是两套最优，两种模式必须各选各的 */
+  { group: "跨模式", name: "lat 64KB 选低延迟", pool: crossPool, mode: "lat", sz: 65536, hours: 6 },
+  { group: "跨模式", name: "tput 16MB 选大带宽", pool: crossPool, mode: "tput", sz: 16777216, hours: 6 },
+
+  /* 覆盖速度：2000 个候选，冷启动只有 200 个在池里，其余靠 cron 每轮探到 scanMax 个 */
+  { group: "覆盖", name: "2000 冷启动 120/轮", pool: () => shufflePool(poolOf(2000)), mode: "lat", hours: 4, discover: { online: 200, scanMax: 120 } },
+  { group: "覆盖", name: "2000 冷启动 300/轮", pool: () => shufflePool(poolOf(2000)), mode: "lat", hours: 4, discover: { online: 200, scanMax: 300 } },
+  { group: "覆盖", name: "2000 冷启动 500/轮", pool: () => shufflePool(poolOf(2000)), mode: "lat", hours: 4, discover: { online: 200, scanMax: 500 } },
+  { group: "覆盖", name: "2000 冷启动 400/轮", pool: () => shufflePool(poolOf(2000)), mode: "lat", hours: 4, discover: { online: 200, scanMax: 400 } },
+  { group: "覆盖", name: "2000 冷启动 800/轮", pool: () => shufflePool(poolOf(2000)), mode: "lat", hours: 4, discover: { online: 200, scanMax: 800 } },
+  { group: "覆盖", name: "2000 冷启动 全量", pool: () => shufflePool(poolOf(2000)), mode: "lat", hours: 4, discover: { online: 200, scanMax: 2000 } },
+
+  /* 垃圾比例：95% 的候选探不通，看跳过死候选能不能把探测预算省给活候选 */
+  { group: "覆盖", name: "2000 冷启动 95%垃圾 不跳过", pool: () => shufflePool(junkPool(2000, 0.95)), mode: "lat", hours: 8, discover: { online: 100, scanMax: 400, junkSkip: false } },
+  { group: "覆盖", name: "2000 冷启动 95%垃圾 跳过", pool: () => shufflePool(junkPool(2000, 0.95)), mode: "lat", hours: 8, discover: { online: 100, scanMax: 400, junkSkip: true } },
+  { group: "覆盖", name: "2000 冷启动 48/轮", pool: () => shufflePool(poolOf(2000)), mode: "lat", hours: 8, discover: { online: 200, scanMax: 48 } },
+  { group: "覆盖", name: "2000 冷启动 48/轮 95%垃圾 跳过", pool: () => shufflePool(junkPool(2000, 0.95)), mode: "lat", hours: 8, discover: { online: 100, scanMax: 48, junkSkip: true } },
 ];
 
 /* ---------- 状态 ---------- */
 const byKey = new Map();
 let pool = [];
+/* 并发模型（只对 sc.conc 场景生效）：节点是一条带宽水管，忙到什么时刻 + 当前在途条数 */
+let CONC = false;
+let universe = [];
+let pending = [];
+let dcur = 0;
+let probeN = 0;
+const busyUntil = new Map();
+const qn = new Map();
 
 function reset() {
   NOW = T0;
@@ -227,7 +329,7 @@ function reset() {
   S.lastSwitch = { lat: 0, tput: 0 };
   S.switchHits = { lat: [], tput: [] };
   S.inflight.clear();
-  S.rankCache = { t: 0, at: {}, v: {} };
+  S.rankCache = { t: 0, at: {}, v: {}, step: {} };
   S.candN = 0;
   S.pxFailMem = 0;
   S.pxFailSeen = 0;
@@ -245,34 +347,72 @@ function addNode(n) {
 }
 
 const rttOf = (n) => n.tcp + n.tls * 1.2;
-function trueCost(n, mode) {
+function trueCost(n, mode, bytes = 0) {
   if (n.pFail >= 1) return Infinity;
-  const bytes = mode === "tput" ? 10 * MB : 0.2 * MB;
-  const work = (bytes / Math.max(1, n.bw * MB * (1 - n.stall))) * 1000;
+  const sz = bytes > 0 ? bytes : mode === "tput" ? 10 * MB : 0.2 * MB;
+  const work = (sz / Math.max(1, n.bw * MB * (1 - n.stall))) * 1000;
   return (rttOf(n) + work) / (1 - n.pFail);
 }
 
-async function request(n, mode, burst, jitter) {
+async function request(n, mode, burst, jitter, bytes = 0) {
   const pf = burst ? 1 : n.burstOnly ? 0 : n.pFail;
   if (rnd() < pf) {
     await W.SEL.bumpFail(ENV, mode, n.key, false);
-    return false;
+    return -1;
   }
   const rtt = rttOf(n) * (jitter ? 1 + (rnd() - 0.5) * jitter : 1);
-  const bytes = mode === "tput" ? 10 * MB : 0.2 * MB;
-  const dur = rtt + (bytes / Math.max(1, n.bw * MB * (1 - n.stall))) * 1000;
+  const szR = bytes > 0 ? bytes : mode === "tput" ? 10 * MB : 0.2 * MB;
+  const work = (szR / Math.max(1, n.bw * MB * (1 - n.stall))) * 1000;
+  const dur = rtt + work;
+  // CONC：把节点当成一条"带宽水管"排队。服务时间 = 传输时间，排队等待 = 前面还有几条请求。
+  // 只有开了 conc 的场景才记账，其余场景的基线与上一轮完全可比。
+  let wait = 0;
+  if (CONC) {
+    const start = Math.max(NOW, busyUntil.get(n.key) || 0);
+    wait = start - NOW;
+    busyUntil.set(n.key, start + work);
+    qn.set(n.key, (qn.get(n.key) || 0) + 1);
+    // 生产里 Connection 一连上就 syncInflight，同一 tick 内的后续请求能看到排队变化；
+    // 只在 tick 开始时重建会让 12/s 场景的 12 个请求全看到 q=0、全挤同一个节点。
+    if (CONC) S.inflight.set(n.key, qn.get(n.key) || 0); // 只有并发场景才有"在途"语义
+  }
   // STALLFIX：把背压时间从采样分母里扣掉（模拟"只算真正在传的时间"）
   const stallMs = process.env.STALLFIX ? n.stall * dur : 0;
-  const bps = bytes / (Math.max(dur * 0.4, dur - stallMs) / 1000);
-  const w = Math.min(1, bytes / (512 * 1024)) * Math.min(1, dur / 1000);
-  if (w > 0) W.nsSpeed(n.key, bps, bytes, ENV, Math.min(4, w));
-  if (n.stall > 0) W.nsStall(n.key, n.stall * dur, dur);
+  // 吞吐样本要按"纯传输窗口"算：生产的采样窗口是首字节之后每 512KB 一次，ttfb 不进分母。
+  // 早先把整个 dur（含 rtt）当分母，等于系统性低估高延迟节点的带宽（D: 40MB/s 被测成 21MB/s），
+  // 16MB 批量场景因此永远选不中真正的大带宽节点。
+  const tx = Math.max(dur * 0.4, dur - stallMs - rtt);
+  const bps = szR / (tx / 1000);
+  const w = Math.min(1, szR / (512 * 1024)) * Math.min(1, dur / 1000);
+  if (w > 0) W.nsSpeed(n.key, bps, szR, ENV, Math.min(4, w));
+  // 和生产一致：runMs 记"所有连接"的时长（早先只记卡过的那条，pStall 分母被缩成几百毫秒）
+  W.nsStall(n.key, n.stall > 0 ? n.stall * dur : 0, dur);
   W.nsOk(n.key, 0, 0);
-  W.nsLatency(n.key, rtt); // 真实首字节回流（对应 Connection.flush）
-  return true;
+  W.nsLatency(n.key, rtt + wait); // 真实首字节回流（排队时间也算进 ttfb）
+  return wait;
 }
 
 function cron(sc) {
+  if (pending.length) {
+    // 轮转游标 + 可选的"垃圾候选跳过"：死候选第一次探失败后从待发现列表删掉，不再占下一轮名额
+    // （对应生产的 S.probeBad 本地记忆 + SCAN_BAD_MAX）。
+    const skip = !!sc.discover.junkSkip;
+    let taken = 0;
+    while (taken < sc.discover.scanMax && pending.length) {
+      if (dcur >= pending.length) dcur = 0;
+      const n = pending[dcur];
+      taken++;
+      probeN++;
+      if (n.dead) {
+        if (skip) pending.splice(dcur, 1);
+        else dcur++;
+        continue;
+      }
+      pending.splice(dcur, 1);
+      pool.push(n);
+      addNode(n);
+    }
+  }
   for (const n of pool) {
     if (rnd() < n.pFail * 0.4) W.nsProbeFail(n.key);
     else {
@@ -288,11 +428,26 @@ function cron(sc) {
 async function run(sc, hours, seedVal) {
   seed = seedVal;
   reset();
+  CONC = !!sc.conc;
+  busyUntil.clear();
+  qn.clear();
+  S.inflight.clear();
   pool = sc.pool();
+  universe = pool;
+  pending = [];
+  if (sc.discover) {
+    // 冷启动覆盖：只有 online 个候选在池里，其余靠 cron 每轮"探到" scanMax 个。
+    const on = Math.min(sc.discover.online, pool.length);
+    pending = pool.slice(on);
+    dcur = 0;
+    probeN = 0;
+    pool = pool.slice(0, on);
+  }
   for (const n of pool) addNode(n);
   const mode = sc.mode;
+  const szB = sc.sz || 0; // 目标流量（字节）：验证 scoreParts 的 S 参数化
 
-  const scoped = () => (sc.region ? pool.filter((n) => n.cc === sc.region) : pool);
+  const scoped = () => (sc.region ? universe.filter((n) => n.cc === sc.region) : universe);
   let best = null;
   let oracle = Infinity;
   let reliable = Infinity;
@@ -300,20 +455,21 @@ async function run(sc, hours, seedVal) {
     oracle = Infinity;
     best = null;
     for (const n of scoped()) {
-      const c = trueCost(n, mode);
+      const c = trueCost(n, mode, szB);
       if (c < oracle) {
         oracle = c;
         best = n;
       }
     }
   };
-  for (const n of scoped()) if (n.pFail > 0 && n.pFail <= 0.05) reliable = Math.min(reliable, trueCost(n, mode));
+  for (const n of scoped()) if (n.pFail > 0 && n.pFail <= 0.05) reliable = Math.min(reliable, trueCost(n, mode, szB));
   recompute();
 
   const rate = sc.rate || 1;
   const ticks = hours * 3600;
-  let reqs = 0, fails = 0, direct = 0, costSum = 0, ratioSum = 0, bad = 0, top1 = 0;
+  let reqs = 0, fails = 0, direct = 0, costSum = 0, ratioSum = 0, bad = 0, top1 = 0, optHits = 0, nearHits = 0;
   let switches = 0, lastCurs = "", regionFail = 0;
+  const dscope = new Map();
   let firstBestAt = -1, leaveEventAt = -1, reuseAt = -1, fakeHits = 0, afterEvent = 0, onEvent = 0;
   const hits = new Map();
   const tailFrom = Math.floor(ticks * 0.75);
@@ -353,6 +509,12 @@ async function run(sc, hours, seedVal) {
     }
     if (sc.flap) byKey.get("flap:443").burst = Math.floor(t / 600) % 5 === 0;
 
+    // 并发场景：把"还在传的请求"折成 S.inflight，和生产的 Connection.syncInflight 同口径
+    if (CONC) {
+      for (const [k, t] of busyUntil) if (t <= NOW) { busyUntil.delete(k); qn.delete(k); }
+      S.inflight.clear();
+      for (const [k, cnt] of qn) if (cnt > 0) S.inflight.set(k, cnt);
+    }
     const nReq = Math.floor(rate) + (rnd() < rate - Math.floor(rate) ? 1 : 0);
     for (let q = 0; q < nReq; q++) {
       let key = "";
@@ -360,25 +522,39 @@ async function run(sc, hours, seedVal) {
         const x = await W.SEL.region(ENV, sc.region, mode);
         key = x ? x.h + ":" + x.p : "";
       } else {
-        key = W.SEL.pick(ENV, mode, { host: "" });
+        key = W.SEL.pick(ENV, mode, { host: "", sz: szB });
       }
       const cur = S.curs[mode];
       if (cur && cur !== lastCurs) {
         switches++;
         lastCurs = cur;
       }
+      if (process.env.TRACE && reqs < Number(process.env.TRACE)) {
+        const parts = [...byKey.values()].map((x) => {
+          const p = W.scoreParts(x.key, mode, Date.now(), false, szB);
+          return x.id + ": v=" + p.score.toFixed(0) + " e10=" + p.e10Ms.toFixed(0) + " L=" + p.latencyMs.toFixed(0) +
+            " cap=" + Math.round(p.capBps / 1024) + "KB confB=" + p.confB.toFixed(2) + " n=" + p.n.toFixed(0);
+        });
+        console.error("[trace t=" + t + "] picked=" + (key || "<empty>") + " | " + parts.join(" | "));
+      }
       const n = byKey.get(key);
       if (!n) {
+        if (process.env.DBG) {
+          const kk = key || "<empty>";
+          dscope.set(kk, (dscope.get(kk) || 0) + 1);
+        }
         if (sc.region) regionFail++;
         else direct++;
         continue;
       }
       reqs++;
-      const ok = await request(n, mode, n.burst, sc.jitter);
-      if (!ok) fails++;
-      const c = trueCost(n, mode);
+      const waited = await request(n, mode, n.burst, sc.jitter, szB);
+      if (waited < 0) fails++;
+      const c = trueCost(n, mode, szB) + (waited > 0 ? waited : 0);
       const ratio = Number.isFinite(oracle) && oracle > 0 && Number.isFinite(c) ? c / oracle : 1;
       costSum += Number.isFinite(c) ? c : Number.isFinite(oracle) ? oracle * 2 : 1e6;
+      if (Number.isFinite(oracle) && Math.abs(c - oracle) <= oracle * 1e-9) optHits++;
+      if (ratio <= 1.02) nearHits++;
       ratioSum += ratio;
       ratios.push(ratio);
       if (ratio > 1.5) bad++;
@@ -404,11 +580,14 @@ async function run(sc, hours, seedVal) {
     }
   }
 
-  if (process.env.DUMP && sc.name === "带宽崩塌" && mode === "tput") {
+  if (process.env.DUMP) {
     const rows = [...hits.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-    console.log("[dump]", rows.map(([k, v]) => `${k}:${v}(${Math.round(W.costOf(k, "tput"))}ms,n=${Math.round((W.nsGet(k).okW||0))})`).join(" "));
+    console.log("[dump]", sc.name, rows.map(([k, v]) => `${k}:${v}(cost=${Math.round(W.costOf(k, mode))},cap=${Math.round((W.nsGet(k).capBps||0)/1024)}KB,n=${Math.round(W.nsGet(k).okW||0)})`).join(" "));
   }
   ratios.sort((a, b) => a - b);
+  if (process.env.DBG && dscope.size) {
+    console.error("[dscope]", [...dscope].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k}:${v}`).join(" "), "alive=" + S.alive.size);
+  }
   return {
     name: sc.name,
     mode,
@@ -417,6 +596,8 @@ async function run(sc, hours, seedVal) {
     directPct: (direct / Math.max(1, reqs + direct)) * 100,
     regionFailPct: (regionFail / Math.max(1, reqs + regionFail + direct)) * 100,
     meanRatio: ratioSum / Math.max(1, reqs),
+    optPct: (optHits / Math.max(1, reqs)) * 100,
+    nearPct: (nearHits / Math.max(1, reqs)) * 100,
     p95: ratios[Math.min(ratios.length - 1, Math.floor(ratios.length * 0.95))] || 1,
     meanCost: costSum / Math.max(1, reqs),
     oracle,
@@ -430,6 +611,9 @@ async function run(sc, hours, seedVal) {
     reuse: reuseAt < 0 ? "" : fmt(reuseAt - (sc.eventAt || 0)),
     fakeShare: (fakeHits / Math.max(1, reqs)) * 100,
     onEventPct: sc.eventAt ? (onEvent / Math.max(1, afterEvent)) * 100 : 0,
+    covered: S.alive.size,
+    probes: probeN,
+    total: universe.length,
   };
 }
 
@@ -446,7 +630,12 @@ console.log(
     p("代价倍率", 18) + p("P95", 7) + p(">1.5x", 7) + p("末段", 7) + "切/小时",
 );
 
-const list = process.env.ONLY ? scenarios.filter((x) => x.name.includes(process.env.ONLY)) : scenarios;
+if (process.env.LIST) { scenarios.forEach((x, i) => console.log(i + "\t" + x.name)); process.exit(0); }
+const list = process.env.ONLY_AT
+  ? scenarios.filter((_, i) => String(i) === process.env.ONLY_AT)
+  : process.env.ONLY
+    ? scenarios.filter((x) => x.name.includes(process.env.ONLY))
+    : scenarios;
 const rows = [];
 let group = "";
 for (const sc of list) {
@@ -467,6 +656,8 @@ for (const sc of list) {
     directPct: mean(rs.map((r) => r.directPct)),
     regionFailPct: mean(rs.map((r) => r.regionFailPct)),
     meanRatio: mean(ratios),
+    optPct: mean(rs.map((r) => r.optPct)),
+    nearPct: mean(rs.map((r) => r.nearPct)),
     lo: Math.min(...ratios),
     hi: Math.max(...ratios),
     p95: mean(rs.map((r) => r.p95)),
@@ -480,14 +671,18 @@ for (const sc of list) {
     oracle: rs[0].oracle,
     reliable: rs[0].reliable,
     meanCost: mean(rs.map((r) => r.meanCost)),
+    covered: rs[0].covered,
+    probes: mean(rs.map((r) => r.probes || 0)),
+    total: rs[0].total,
   };
   rows.push(row);
+  const optTxt = row.optPct.toFixed(0) + "%/" + row.nearPct.toFixed(0) + "%";
   console.log(
     p(row.name, 14) + p(row.mode, 5) + p(Math.round(row.reqs), 8) + p(row.failPct.toFixed(1), 7) +
       p((row.regionFailPct > row.directPct ? row.regionFailPct : row.directPct).toFixed(0) + "%", 7) +
       p(`${row.meanRatio.toFixed(2)}x (${row.lo.toFixed(2)}-${row.hi.toFixed(2)})`, 18) +
       p(row.p95.toFixed(1) + "x", 7) + p(row.badPct.toFixed(0) + "%", 7) +
-      p(row.tailTopPct.toFixed(0) + "%", 7) + row.swPerH.toFixed(1),
+      p(row.tailTopPct.toFixed(0) + "%", 7) + p(optTxt, 6) + row.swPerH.toFixed(1),
   );
 }
 
@@ -498,6 +693,7 @@ for (const r of rows) {
   if (r.reuse) extra.push(`${r.reuse} 后重新用上`);
   if (r.regionFailPct > 0) extra.push(`1011 失败 ${r.regionFailPct.toFixed(0)}%`);
   if (r.name.includes("撒谎")) extra.push(`撒谎节点吃 ${r.fakeShare.toFixed(0)}%`);
+  if (r.total) extra.push(`覆盖 ${r.covered}/${r.total}，探活 ${r.probes}`);
   extra.push(`上帝 ${Number.isFinite(r.oracle) ? Math.round(r.oracle) : "∞"}ms / 本算法 ${Math.round(r.meanCost)}ms`);
   console.log(`- ${r.name}: ${extra.join("；")}`);
 }

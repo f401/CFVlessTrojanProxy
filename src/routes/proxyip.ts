@@ -209,7 +209,6 @@ export async function proxyip(c: UserCtx): Promise<Response> {
           nEff: Math.round(sp.nEff * 10) / 10,
           latN: Math.round(sp.latN * 10) / 10,
           sampleAgeMs: sp.sampleAgeMs < 0 ? -1 : Math.round(sp.sampleAgeMs),
-          priorSource: sp.priorSource,
           gate: sp.gate,
         },
         n: r.n,

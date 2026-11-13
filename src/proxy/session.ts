@@ -9,6 +9,7 @@ import { logErr, rttLearn, rttMark } from "../nodes/metrics";
 import { checkTarget, dial, expandV6, isV6Literal, parseProxyIp } from "./dial";
 import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./protocol";
 import { cnt } from "../core/counter";
+import { SC } from "../core/const";
 import { kickFlush } from "../store/index";
 import { nsEmptyClose, nsFail } from "../nodes/score";
 import { SEL } from "../px/selector";
@@ -47,6 +48,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
   let ipTag = null;
   let ipRegion = null;
   let mode: Mode = "tput";
+  let szBytes = 0;
   try {
     const q = new URL(request.url).searchParams;
     ipTag = q.get("ip");
@@ -55,6 +57,9 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
     const qm = q.get("mode");
     if (qm === "lat" || qm === "tput") mode = qm;
     else mode = String(env.defaultMode || "").toLowerCase() === "lat" ? "lat" : "tput";
+    // 目标流量 S：交互 i=64KB / 流媒体 s=1MB / 批量 b=16MB（不传就按模式默认：160KB / 10MB）
+    const qs = q.get("sz");
+    szBytes = qs === "i" ? SC.SZ_I : qs === "s" ? SC.SZ_S : qs === "b" ? SC.SZ_B : 0;
   } catch (e) {
     ipTag = null;
     ipRegion = null;
@@ -63,6 +68,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
   const stream = wsToStream(serverWS, early);
 
   const st = new Connection(env, ctx, mode, ipTag || "");
+  st.sz = szBytes;
   cnt("conn");
 
   stream

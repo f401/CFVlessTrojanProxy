@@ -1,10 +1,9 @@
 import { errMsg } from "../core/util";
 
-import { SC, SEED_WRITE_GAP } from "../core/const";
+import { SEED_WRITE_GAP } from "../core/const";
 import { PX_TTL, SEED_KEY, SEED_MAX, SEED_READ_MS, SEED_VER } from "./const";
 import { cntDelta, cntUnsend } from "../core/counter";
-import { p90Local } from "../core/hist";
-import { costOf, nsGet, ZERO_STAT } from "../nodes/score";
+import { costOf } from "../nodes/score";
 import { S } from "../core/state";
 import { kvGetStrict, kvSet } from "../store/index";
 
@@ -26,61 +25,15 @@ export class SeedStore {
     return m[this.coloKey()] || { nodes: [] };
   }
 
-  /** 把一条统计压成可存的形状 */
-  packNode(k: string) {
-    const s = S.nstat.get(k) || ZERO_STAT;
-    const a = (S.alive.get(k) || {}) as NodeEntry;
-    const i = k.lastIndexOf(":");
-    const n = (s.okW || 0) + (s.failW || 0);
-    return {
-      k,
-      h: a.h || k.slice(0, i),
-      p: a.p || Number(k.slice(i + 1)) || 443,
-      cc: a.cc || "",
-      ms: Math.round(a.ms || s.msLocal || SC.P_TCP),
-      tcp: Math.round(s.tcp || 0),
-      tls: Math.round(s.tls || 0),
-      n: Math.round(n),
-      f: Math.round((s.failW || 0) * 10) / 10,
-      b: Math.round(p90Local(s) || 0),
-      sb: Math.round(s.seedBps || 0),
-      at: s.at || 0,
-    };
-  }
-
-  /** 只存"名字"（cron 用：不知道自己在哪个机房，就不该写延迟） */
+  /**
+   * 只存"候选名单"：h/p/cc 是事实（这地址在这个机房连得上），不是"谁更好"。
+   * 不要再把 ms/tcp/tls/n/f/b/sb 写进来 —— 每个 isolate 的最优节点可能完全不同，
+   * 别的 isolate 的延迟/吞吐/成功率对本地没有可迁移价值，只会把冷启动带偏。
+   */
   packName(k: string) {
     const a = (S.alive.get(k) || {}) as NodeEntry;
     const i = k.lastIndexOf(":");
-    return {
-      k,
-      h: a.h || k.slice(0, i),
-      p: a.p || Number(k.slice(i + 1)) || 443,
-      cc: a.cc || "",
-      ms: Math.round(a.ms || 0) || undefined,
-    };
-  }
-
-  /** 把存下来的形状合并回本地统计（只增不减） */
-  unpackNode(o: SeedNode & { ok?: number; fail?: number }) {
-    if (!o || !o.k) return;
-    const s = nsGet(o.k);
-    if (!s.tcp && o.tcp) s.tcp = o.tcp;
-    if (!s.tls && o.tls) s.tls = o.tls;
-    // seed 是"别的 isolate 的观测"：不混进本地 okW/failW，只修正 Beta 先验。
-    const at = o.at || Date.now();
-    const sn = o.n || 0;
-    if (sn > 0 && !(s.seedN > 0)) {
-      s.seedN = sn;
-      s.seedFail = o.f || 0;
-      if (!s.seedAt) s.seedAt = at;
-    }
-    const sb = (o.sb || 0) > 0 ? o.sb! : o.b || 0;
-    if (sb > 0 && !(s.seedBps > 0) && !(s.lastSampleAt > 0)) {
-      s.seedBps = Math.min(sb, 8 * 1048576);
-      if (!s.seedAt) s.seedAt = at;
-    }
-    if (o.at && !s.at) s.at = o.at;
+    return { k, h: a.h || k.slice(0, i), p: a.p || Number(k.slice(i + 1)) || 443, cc: a.cc || "" };
   }
 
   /**
@@ -109,16 +62,6 @@ export class SeedStore {
         byColo: { [S.colo || "??"]: { nodes: v.nodes, ts: v.ts || 0 } },
       };
     }
-    if (v && v.byColo && (v.v || 2) < SEED_VER) {
-      // v<4：早期的 b 是用 1 秒窗口算的，会把突发缓冲当成带宽（实测虚高到 32 MB/s），全部作废
-      for (const b of Object.values(v.byColo) as SeedBucket[]) {
-        for (const n of b.nodes || []) {
-          delete n.b;
-          delete n.tcp;
-          delete n.tls;
-        }
-      }
-    }
     if (v && v.byColo) {
       S.seed = {
         v: SEED_VER,
@@ -131,40 +74,8 @@ export class SeedStore {
       };
       S.gcnt = (v.cnt || null) as CounterDoc | null;
       S.poolBuilt = Number(v.builtAt) || 0;
-      for (const n of this.bucket().nodes || []) this.unpackNode(n);
-      // 站点偏好：同机房的 isolate 共享一份，冷启动不用重新学
-      for (const e of (this.bucket() as SeedBucket).hp || []) {
-        if (!e || !e.h || !e.k) continue;
-        let hm = S.hostNode.get(e.h);
-        if (!hm) {
-          if (S.hostNode.size >= 120) continue;
-          hm = new Map<string, HNStat>();
-          S.hostNode.set(e.h, hm);
-        }
-        const cur = hm.get(e.k);
-        const freshBps = (e.bps || 0) > 0 && Date.now() - (e.bpsAt || 0) <= SC.SAMPLE_TTL;
-        if (!cur || (e.n || 0) > cur.n) {
-          hm.set(e.k, {
-            n: e.n || 0,
-            ok: Math.max(0, (e.n || 0) - (e.bad || 0)),
-            bad: e.bad || 0,
-            bytes: 0,
-            ttfb: e.ttfb || 0,
-            at: e.at || 0,
-            bps: freshBps ? e.bps : 0,
-            bpsN: freshBps ? e.bpsN || 0 : 0,
-            bpsAt: freshBps ? e.bpsAt || 0 : 0,
-          });
-        }
-        // 站点级吞吐单独合并：另一台 isolate 的窗口样本比本地新就采纳，
-        // 否则站点 tput 只能在本实例内生效，换个实例又退回全局分。
-        const tgt = hm.get(e.k);
-        if (tgt && freshBps && (e.bpsAt || 0) > (tgt.bpsAt || 0)) {
-          tgt.bps = e.bps;
-          tgt.bpsN = e.bpsN || 1;
-          tgt.bpsAt = e.bpsAt;
-        }
-      }
+      // 老版本把延迟/吞吐/成功率/站点偏好写了进来：一律不读（每个 isolate 各自估自己的），
+      // 下一轮 write 会用新结构整体覆盖，30 天 TTL 兜底。
     }
     // 读到空表时只缓存 1 分钟：否则一个刚部署的 isolate 会"空着"整整半小时，
     // 期间该机房所有连接都只能直连。
@@ -203,26 +114,7 @@ export class SeedStore {
     const rows: SeedNode[] = [];
     for (const k of keys) {
       if (!k || k.lastIndexOf(":") <= 0) continue;
-      if (listOnly) {
-        rows.push(this.packName(k));
-        continue;
-      }
-      const old = base.get(k) || {};
-      const packed = this.packNode(k);
-      packed.b = Math.min(packed.b || old.b || 0, 8 * 1048576); // 本地没样本时保留历史，但设上限
-      if (!packed.n && old.n) {
-        // 节点已经不在 alive/nstat 里时，packNode 只能给出先验值；
-        // 把旧条目的延迟/协议/国家/先验速率全部继承下来，别越写越空。
-        packed.n = old.n;
-        packed.f = old.f || 0;
-        packed.tcp = packed.tcp || old.tcp || 0;
-        packed.tls = packed.tls || old.tls || 0;
-        packed.ms = packed.ms && packed.ms !== SC.P_TCP ? packed.ms : old.ms || packed.ms;
-        packed.cc = packed.cc || old.cc;
-        packed.b = packed.b || old.b;
-        packed.sb = packed.sb || old.sb;
-      }
-      rows.push(packed);
+      rows.push(this.packName(k));   // 只存名字：两模式、两机房、任何 isolate 都一样
     }
     const scored = rows.map((n) => ({ n, v: listOnly ? 0 : costOf(n.k, "lat") }));
     scored.sort((a, b) => a.v - b.v);
@@ -258,71 +150,19 @@ export class SeedStore {
     for (const [k, n] of Object.entries(dlt)) gc[k] = (Number(gc[k]) || 0) + n;
 
     const byColo = { ...(S.seed.byColo || {}) };
-    // 站点偏好：只写"样本够"（族内 ≥3 次）的，按样本数取前 40 —— 约 2KB，
-    // 跟 seed 同一次写，不增加任何 KV 写入次数。
-    const hpAll: SeedHp[] = [];
-    for (const [h, hm] of S.hostNode) {
-      let tot = 0;
-      for (const s of hm.values()) tot += s.n;
-      if (tot < 3) continue;
-      for (const [k, s] of hm) {
-        if (!s.n) continue;
-        hpAll.push({
-          h,
-          k,
-          ttfb: s.ttfb || 0,
-          n: s.n,
-          bad: s.bad || 0,
-          at: s.at || 0,
-          bps: s.bps || 0,
-          bpsN: s.bpsN || 0,
-          bpsAt: s.bpsAt || 0,
-        });
-      }
-    }
-    hpAll.sort((a, b) => (b.n || 0) - (a.n || 0));
-    // 和桶里已有的合并：每个 isolate 只有自己看到的那部分，直接覆盖会把
-    // 别的 isolate 学到的条目冲掉。按 (族,节点) 去重，各字段取更新的那份。
-    const mergedHp = new Map<string, SeedHp>();
-    for (const e of (this.bucket() as SeedBucket).hp || []) {
-      if (e && e.h && e.k) mergedHp.set(e.h + "|" + e.k, { ...e });
-    }
-    for (const e of hpAll) {
-      const key = e.h + "|" + e.k;
-      const old = mergedHp.get(key);
-      if (!old) {
-        mergedHp.set(key, { ...e });
-        continue;
-      }
-      const row: SeedHp = { ...old };
-      if ((e.n || 0) >= (old.n || 0)) {
-        row.n = e.n;
-        row.bad = e.bad;
-        row.at = e.at || row.at;
-        if (e.ttfb) row.ttfb = e.ttfb;
-      }
-      if ((e.bpsAt || 0) > (old.bpsAt || 0)) {
-        row.bps = e.bps;
-        row.bpsN = e.bpsN;
-        row.bpsAt = e.bpsAt;
-      }
-      mergedHp.set(key, row);
-    }
-    const hpTop = [...mergedHp.values()].sort((a, b) => (b.n || 0) - (a.n || 0)).slice(0, 40);
+    // 站点偏好（hostNode）不再落盘：哪家 CDN 在这个机房里对哪个节点友好，
+    // 是这一台 isolate 的量，写进共享表只会互相污染。
     byColo[this.coloKey()] = {
       ts: Date.now(),
       lastSwitch: Math.max(S.lastSwitch.lat || 0, S.lastSwitch.tput || 0),
       nodes,
-      hp: hpTop,
     };
-    // 第一次落盘时顺手建一份"全局候选名单"（只有名字，没有统计），
+    // 全局候选名单：任何一次落盘都用当前名单刷新。只带 k/h/p/cc，
     // 让还没跑过 cron 的机房也能拿到节点，而不是干等 30 分钟。
-    // 名单桶：任何一次落盘都用"当轮实测 ms"刷新一次。它只是给还没测过的机房的参考值，
-    // 不带 tcp/tls/n 这类统计，所以不会造成跨机房污染。
     if (nodes.length) {
       byColo[BUCKET_DEF] = {
         ts: Date.now(),
-        nodes: nodes.map((n) => ({ k: n.k, h: n.h, p: n.p, cc: n.cc || "", ms: n.ms })),
+        nodes: nodes.map((n) => ({ k: n.k, h: n.h, p: n.p, cc: n.cc || "" })),
       };
     }
     if (Object.keys(byColo).length > 7) {

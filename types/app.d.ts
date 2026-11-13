@@ -93,6 +93,8 @@ interface NodeStats {
   pN: number;
   pSum: number;
   pSumSq: number;
+  cus: number;
+  cusB: number;
   pF: number;
   tcp: number;
   tls: number;
@@ -121,12 +123,6 @@ interface NodeStats {
   winAt: number;
   winOk: number;
   winFail: number;
-
-  /** seed 先验：速率、可靠性伪计数、采集时刻 */
-  seedBps: number;
-  seedN: number;
-  seedFail: number;
-  seedAt: number;
 
   /** 其它 */
   counted: number;
@@ -390,6 +386,7 @@ interface MeterBody {
   c?: Record<string, number | string>;
   spd?: Record<string, NodeSnap>;
   e?: ErrItem[];
+  cl?: ClRec[];
   /** 老快照：全局计数 / 节点快照 */
   g?: Record<string, number>;
   s?: Record<string, NodeSnap>;
@@ -400,6 +397,16 @@ interface ErrItem {
   t: number;
   m: string;
   tag?: string;
+}
+
+/** 连接观测按节点聚合：离线标定 ttfb/抖动权重的最小样本（40 条原始记录盖不住 2000 个节点） */
+interface ClRec {
+  k: string; // 节点 key，直连为 "direct"
+  n: number; // 连接数
+  ok: number; // 未失败数
+  p50: number; // 首字节中位数
+  p95: number; // 首字节 p95
+  dn: number; // 下行字节合计
 }
 
 /** 地址解析：成功 */

@@ -21,6 +21,8 @@ export class AppState {
   hits = 0;
   // 探活结果按原因分类：区分"连不上"（可能是地区/线路）和"连上了但不是 CF 反代"（节点事实）
   probeWhy: Record<string, number> = {};
+  // 候选池的本地探活结论（只在本 isolate 有效，不写 KV）：连续失败的候选不再占探测名额
+  probeBad: Map<string, number> = new Map();
   probeColo = "";
   /** 待复测：上一轮探活比同 /24 邻居慢一大截的节点（探活抖动一次不该定生死） */
   reProbe: string[] = [];
@@ -33,7 +35,13 @@ export class AppState {
   inflight: Map<string, number> = new Map(); // 节点在途连接数（负载均衡用）
   // 候选排行缓存：只在大规模（alive≥24）时启用，各模式各自 20 秒
   // t 是全局作废戳（0 = 作废），at[m] 是该模式真正写入的时间
-  rankCache: { t: number; at: Record<string, number>; v: Record<string, RankRow[]> } = { t: 0, at: {}, v: {} };
+  rankCache: {
+    t: number;
+    at: Record<string, number>;
+    v: Record<string, RankRow[]>;
+    // 分片重建：大池一次算不完，用每次 pick 顺带推进一片，期间继续用上一版排行
+    step: Record<string, { keys: string[]; pos: number; top: RankRow[]; extra: RankRow[]; ok: number }>;
+  } = { t: 0, at: {}, v: {}, step: {} };
   // Thompson 采样的成员表缓存（按延迟前 TS_K 个），20 秒重建一次
   tsMem: { at: number; keys: string[] } = { at: 0, keys: [] };
 
@@ -112,6 +120,7 @@ export class AppState {
   rtt: Map<string, Record<string, RttEntry>> = new Map();
   rttMiss: Map<string, number> = new Map(); // rtt:<id> 不存在时的负缓存（省 KV 读）
   errs: ErrItem[] = [];
+  cagg: Map<string, { n: number; ok: number; dn: number; v: number[] }> = new Map(); // 连接观测按节点聚合
 
   // —— DNS 缓存 ——
   dnsCache: Map<string, { ip: string; t: number }> = new Map();

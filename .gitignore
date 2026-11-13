@@ -11,6 +11,12 @@ _worker_v3.*.js
 
 # 依赖
 node_modules
+# npm 缓存（沙箱里只能用 workspace 内的缓存目录）
+.npm-cache/
+
+# 仿真/体检的临时输出
+.tmp-sim/
+.tmp-review/
 
 # 含密钥，绝不入库
 config/config.env

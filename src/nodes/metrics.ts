@@ -303,7 +303,7 @@ export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
   // 而节点全局分早就恢复了 —— 站点排行却再也不会给它机会。
   if (s.bad > 0 && s.at && Date.now() - s.at > 6 * 3600e3) {
     s.bad *= 0.5;
-    s.n = Math.max(s.ok, s.ok + s.bad);
+    s.n = s.ok + s.bad;
   }
   // 只带 bps 的调用是"中途采样"，0 字节 0 失败的收尾也不是有效站点样本
   const isConn = o.ok !== undefined || o.bad !== undefined;
