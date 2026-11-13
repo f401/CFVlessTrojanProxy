@@ -1,11 +1,13 @@
 // TLS 1.3 探测：经（可选）中继对目标做真实握手 + GET，拿到隧道里的 HTTP 状态行。
 // 用 vendored subtls（纯 JS + SubtleCrypto，只做 TLS 1.3），根证书精选 3 张（4.2KB）。
 import { connect } from "cloudflare:sockets";
-import { LazyReadFunctionReadQueue, startTls, TrustedCert } from "../vendor/subtls";
+import { LazyReadFunctionReadQueue, ReadMode, startTls, TrustedCert } from "../vendor/subtls";
 import ROOTS from "../vendor/roots";
 
 export interface TlsProbeResult {
   ok: boolean;
+  /** HTTP 状态码（0 = 没拿到状态行） */
+  code: number;
   status: string;
   server: string;
   head: string;
@@ -26,7 +28,7 @@ function db(): Promise<unknown> {
   return DB.p;
 }
 
-const EMPTY: TlsProbeResult = { ok: false, status: "", server: "", head: "", ms: 0, hsMs: 0, bytes: 0, err: "" };
+const EMPTY: TlsProbeResult = { ok: false, code: 0, status: "", server: "", head: "", ms: 0, hsMs: 0, bytes: 0, err: "" };
 
 export async function probeTls(host: string, path = "/", relay = ""): Promise<TlsProbeResult> {
   const t0 = Date.now();
@@ -71,15 +73,27 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
     },
   );
 
-  const nextChunk = async (): Promise<Uint8Array | undefined> => {
-    for (;;) {
-      const c = chunks.shift();
-      if (c) return c;
-      if (ended) return undefined;
-      await new Promise<void>((res) => {
-        notify = res;
-      });
+  // subtls 的读函数契约：必须返回「至少 bytes 个字节」，否则记录 EOF。
+  // 直接返回「刚到的那一块」会触发 Not enough data returned by read function。
+  const nextChunk = async (bytes: number): Promise<Uint8Array | undefined> => {
+    const out = new Uint8Array(bytes);
+    let got = 0;
+    while (got < bytes) {
+      const c = chunks[0];
+      if (!c) {
+        if (ended) return undefined;
+        await new Promise<void>((res) => {
+          notify = res;
+        });
+        continue;
+      }
+      const take = Math.min(c.length, bytes - got);
+      out.set(c.subarray(0, take), got);
+      got += take;
+      if (take === c.length) chunks.shift();
+      else chunks[0] = c.subarray(take);
     }
+    return out;
   };
 
   const q = new LazyReadFunctionReadQueue(nextChunk);
@@ -93,7 +107,8 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
   let tls: { read(bytes?: number): Promise<Uint8Array | undefined>; write(d: Uint8Array): Promise<void> };
   try {
     const rootDb = await db();
-    tls = await startTls(host, rootDb, (n) => q.read(n), writeNet, {});
+    // 必须把 mode 透传给读队列：mode=1 是 PEEK，吞掉一个字节会让 TLS 解析错位（Illegal TLS record type 0x3）
+  tls = await startTls(host, rootDb, (n: number, mode?: ReadMode) => q.read(n, mode), writeNet, {});
   } catch (e) {
     try {
       sock.close();
@@ -140,5 +155,7 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
   const server = ((text.match(/^server:\s*(.+)$/im) || [])[1] || "").trim().slice(0, 40);
   const bodyAt = text.indexOf("\r\n\r\n");
   const head = bodyAt >= 0 ? text.slice(bodyAt + 4, bodyAt + 24).replace(/\s+/g, " ") : "";
-  return { ok: /^HTTP\/1\.[01] 2\d\d/.test(status), status, server, head, ms: Date.now() - t0, hsMs, bytes: got.length, err: "" };
+  const cm = /^HTTP\/1\.[01] (\d{3})/.exec(status);
+  const code = cm ? Number(cm[1]) : 0;
+  return { ok: code >= 200 && code < 400, code, status, server, head, ms: Date.now() - t0, hsMs, bytes: got.length, err: "" };
 }

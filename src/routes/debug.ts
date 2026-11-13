@@ -10,6 +10,7 @@ import { sweepHost } from "../route/sweep";
 import { vAll } from "../route/verdict";
 import { planView } from "../route/budget";
 import { prefsJson } from "../route/prefs";
+import { verifyInfo } from "../route/verify";
 import { checkTarget, dohQuery, expandV6, httpProbe, isCfHost, resolveAAAA, resolveV4All } from "../proxy/dial";
 import { aliveList, commitPool, flushPx, pxSet } from "../px/pool";
 import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
@@ -34,6 +35,7 @@ export async function debug(c: UserCtx): Promise<Response> {
     return json({ host: vtHost, ips: sw.ips, nodes: sw.nodes, rows: sw.rows, table: vAll(), pol, plan });
   }
   /* ---------- 站点偏好表：判定表按通道聚合后的「能打通 / 打不通」两栏 ---------- */
+  if (url.searchParams.get("vtq") === "1") return json({ ...verifyInfo() });
   if (url.searchParams.get("prefs") === "1") {
     return json({ prefs: prefsJson(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });
   }

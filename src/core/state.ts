@@ -38,6 +38,14 @@ export class AppState {
   /** 复测累计次数：线上用它判断"探活抖动"到底有多频繁（=0 说明这条优化没触发过） */
   reProbeN = 0; // 这批探活是在哪个机房做的（cron 拿不到 colo，记 "cron"）
   needPx: Map<string, number> = new Map();
+  /** 站点最近一次「大响应」时间（用来做跨通道差分：别的通道能打通才算这条被封） */
+  bigByHost: Map<string, number> = new Map();
+  /** 每「站点|通道」的小响应连击数 */
+  smCnt: Map<string, number> = new Map();
+  /** 复核队列：流量发现「可疑」后排队做同站点两条通道的实测差分 */
+  vtQ: Array<{ host: string; ck: string; t: number }> = [];
+  /** 最近一次复核的结果（供 debug 展示） */
+  vtLast: { host: string; ck: string; a: number; b: number; v: string; at: number } | null = null;
   /** 出口不在 CF 网段的可用节点（中转时优先） */
   relayOff: Set<string> = new Set();
   colo = "";

@@ -1648,14 +1648,19 @@ W.recordProbe({ target: "*", chan: { kind: "r", ip: "89.22.227.132" }, code: 0, 
 ok("中继级（通配）判定对所有站点生效", W.HOOK.veto("y.com", "89.22.227.132") === true);
 W.vClear();
 ok("清空后不再 veto", W.HOOK.veto("x.com", "45.136.117.194") === false);
-// 第 34 组：连接证据钩子（traffic）
-W.vClear(); W.S.needPx.clear();
-W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false, life: 800 });
-ok("小响应把站点学成「优先中转」", (W.S.needPx.get("x.com") || 0) > Date.now());
-  eq("小响应当场判该通道被拒（不等 probe）", W.vState("x.com", "r:45.136.117.194"), 2);
-W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 90000, ok: true, life: 4000 });
-eq("成功下行记成 ok（弱证据）", W.vState("x.com", "r:45.136.117.194"), 1);
-eq("弱证据来源是 0（流量）", W.vAll().filter((v) => v.t === "x.com")[0].src, 0);
+// 第 34 组：连接证据钩子（traffic，差分判据）
+W.vClear(); W.S.needPx.clear(); W.S.smCnt.clear(); W.S.bigByHost.clear(); W.S.vtQ = [];
+W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false, life: 800, up: 0 });
+eq("只有小响应时不判死（可能只是业务层 403）", W.vState("x.com", "r:45.136.117.194"), 0);
+ok("小响应只入复核队列", W.queueLen() > 0);
+W.HOOK.traffic({ host: "x.com", via: "node", node: "89.22.227.132:443", down: 90000, ok: true, life: 4000, up: 900 });
+eq("同一站点别的通道能打通 → 记为 ok", W.vState("x.com", "r:89.22.227.132"), 1);
+W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false, life: 800, up: 0 });
+eq("有别的通道能打通 + 本通道两次小响应 → 判该通道被封", W.vState("x.com", "r:45.136.117.194"), 2);
+ok("判被封后设 needPx（下次优先中转）", (W.S.needPx.get("x.com") || 0) > Date.now());
+W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 90000, ok: true, life: 4000, up: 900 });
+eq("之后拿到大响应 → 解除误判", W.vState("x.com", "r:45.136.117.194"), 1);
+
 // 第 35 组：判定表跨 isolate 同步（只同步强证据）
 W.vClear(); W.S.vtSent.clear();
 W.recordProbe({ target: "x.com", chan: { kind: "r", ip: "45.136.117.194" }, code: 403, ms: 60 });
@@ -1746,5 +1751,19 @@ W.vClear();
   eq("probe 确认过能通的通道不被小响应当掉", W.chanPref("9.9.9.8", "x.com"), 0);
   W.vClear();
 }
+// 第 41 组：复核判定矩阵（同站点 × 两条通道的实测差分）
+W.vClear();
+eq("可疑通道 403 + 参照 200 → 通道级", W.judge(403, 200), "chan");
+eq("两条都 403 → 站点级（不冤枉中继）", W.judge(403, 403), "site");
+eq("可疑通道 200 → 是误判，记 ok", W.judge(200, 403), "ok");
+eq("可疑通道连握手都过不去 + 参照 200 → 通道级", W.judge(0, 200), "chan");
+eq("两边都连不上 → 不下结论", W.judge(0, 0), "unknown");
+eq("301 视为可通（不算被封）", W.judge(301, 200), "ok");
+W.S.vtQ = [];
+W.queueVerify("a.com", { kind: "r", ip: "1.1.1.1" });
+W.queueVerify("a.com", { kind: "r", ip: "1.1.1.1" });
+eq("同一组合重复入队只留一条", W.queueLen(), 1);
+await W.runVerify();
+eq("没有参照通道时不做判定（队列被取走、判定不变）", W.vState("a.com", "r:1.1.1.1"), 0);
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

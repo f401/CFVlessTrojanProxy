@@ -29,6 +29,8 @@ export interface Hooks {
   vtLoad: ((env: Env) => Promise<void>) | null;
   /** 通道偏好：0 实测能打通 / 1 未测 / 2 实测打不通（按中继或入口 IP） */
   chanPref: ((ip: string, host?: string) => number) | null;
+  /** 判定复核：对排队中的可疑组合做同站点双通道实测（由 ctx.waitUntil 触发） */
+  verify: (() => Promise<number>) | null;
   /** 该站点最近哪条通道成功过（弱证据来源）：直连 / 中继 */
   win: ((host: string) => { d: boolean; r: boolean }) | null;
 }
@@ -41,6 +43,9 @@ export interface TrafficEvt {
   ok: boolean;
   /** 连接存活毫秒：小响应 + 短寿命 = 大概率是被拒（403/风控） */
   life: number;
+  /** 客户端上传字节：上传得多说明是真实业务请求，别按「被拒」处理 */
+  up: number;
 }
 
-export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null, vtDelta: null, vtLoad: null, win: null };
+export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,
+  verify: null, vtDelta: null, vtLoad: null, win: null };

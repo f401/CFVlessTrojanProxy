@@ -3,12 +3,13 @@
 import { SC } from "../core/const";
 import { S } from "../core/state";
 import { isCfIp } from "../core/net";
-import { Chan, DIRECT } from "./channel";
+import { Chan, DIRECT, chanKey } from "./channel";
 import { DecisionIn, DecisionOut, HOOK, TrafficEvt } from "../core/hook";
 import { recordBlock, recordPass, recordTraffic } from "./observe";
 import { vAll, vBad, vOk, vSet } from "./verdict";
 import { vtDelta, vtLoad } from "./verdictsync";
 import { chanPref } from "./prefs";
+import { queueVerify, runVerify } from "./verify";
 
 export interface Ctx {
   host: string;
@@ -74,20 +75,31 @@ HOOK.veto = (host: string, ip: string): boolean => !!host && !!ip && vBad(host, 
 HOOK.traffic = (e: TrafficEvt): void => {
   const ip = e.node ? e.node.slice(0, e.node.lastIndexOf(":")) : "";
   const chan: Chan = e.via === "node" && ip ? { kind: "r", ip } : DIRECT;
+  const ck = e.host + "|" + chanKey(chan);
+  const now = Date.now();
   if (e.ok && e.down >= 20000) {
-    // 大响应 = 这条通道对这个站点真能打通：解除之前的小响应误判
+    // 大响应：这条通道对这个站点确实能打通
+    S.bigByHost.set(e.host, now);
+    S.smCnt.delete(ck);
     recordTraffic({ target: e.host, chan, down: e.down, ok: true });
     recordPass({ target: e.host, chan, down: e.down, ok: true });
     return;
   }
-  // 小响应 + 短寿命 = 大概率被拒（403 的 body 只有 4 字节，握手证书却有几 KB）。
-  // 当场把这条通道记成 bad，下一次连接立刻换道 —— 不再等 probe（每轮 cron 只有 48 个子请求）。
-  // 只在没有 probe 级 ok 时生效；之后任何大响应都会把它解除。
-  if (e.down > 0 && e.down < 12000 && e.life < 6000) {
-    recordBlock({ target: e.host, chan, down: e.down, ok: false });
-    S.needPx.set(e.host, Date.now() + 21600000);
+  if (e.down <= 0 || e.down >= 12000 || e.life > 8000 || e.up > 16384) return;
+  // 差分判据：只有当「同一站点的别的通道刚拿到过大响应」时，小响应才说明是这条通道被封。
+  // 业务层 403（鉴权/风控/HEAD）在任何通道上都小，bigByHost 不会成立 → 不会被误判。
+  const big = (S.bigByHost.get(e.host) || 0) > now - 600000;
+  const n = (S.smCnt.get(ck) || 0) + 1;
+  S.smCnt.set(ck, n);
+  if (!big || n < 2) {
+    queueVerify(e.host, chan); // 只排队（当前 PROBE_REQ=0，探测留给 cron）
+    return;
   }
+  S.smCnt.delete(ck);
+  recordBlock({ target: e.host, chan, down: e.down, ok: false });
+  S.needPx.set(e.host, now + 21600000);
 };
+HOOK.verify = (): Promise<number> => runVerify();
 /** 池子的中继实测 → 判定表：握手成功算 probe 级 ok（哪怕还没看到状态码） */
 HOOK.relayProbe = (host: string, ip: string, ok: boolean, ms: number): void => {
   if (ok) vSet(host, "r:" + ip, 200, ms, 1);

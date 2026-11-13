@@ -18,7 +18,8 @@ export class TrustedCert {
 export function startTls(
   host: string,
   rootCertsDatabase: unknown,
-  networkRead: (bytes: number) => Promise<Uint8Array | undefined>,
+  // 运行时会把 ReadMode 一起传进来（mode=1 为 PEEK），只是 .d.ts 没写全
+  networkRead: (bytes: number, mode?: ReadMode) => Promise<Uint8Array | undefined>,
   networkWrite: (data: Uint8Array) => void,
   opts?: {
     useSNI?: boolean;
