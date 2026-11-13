@@ -1776,5 +1776,35 @@ const d200 = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["
 eq("本出口 200 → 决策直连（少一跳）", d200.chan.kind, "d");
 W.S.cfHttp.clear();
 ok("没有状态码证据时不会强行推翻池子判断", W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: false }).chan.kind === "d");
+// 第 43 组：差分判据 —— 保护「正常的业务 403」
+W.vClear();
+W.S.needPx.clear();
+W.S.smCnt.clear();
+W.S.bigByHost.clear();
+W.S.bigChan.clear();
+// 1) 没有基线时，小响应不判死任何通道（业务 403 与封锁页在此不可区分）
+W.HOOK.traffic({ host: "api.biz.com", via: "node", node: "9.9.9.9:443", down: 4000, ok: false, life: 900, up: 300 });
+W.HOOK.traffic({ host: "api.biz.com", via: "node", node: "9.9.9.9:443", down: 4000, ok: false, life: 900, up: 300 });
+eq("无基线的小响应不写判定（两次也不判）", W.vBad("api.biz.com", "r:9.9.9.9"), false);
+ok("无基线时只学「下次优先中转」", (W.S.needPx.get("api.biz.com") || 0) > Date.now());
+// 2) A 通道拿到整页 → B 通道的小响应才判被封
+W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 60000, ok: true, life: 3000, up: 900 });
+eq("大响应建立基线", W.vState("x.com", "r:45.136.117.194"), 1);
+W.HOOK.traffic({ host: "x.com", via: "node", node: "185.253.117.147:443", down: 4200, ok: false, life: 900, up: 300 });
+eq("差分成立 → 判该中继被封", W.vBad("x.com", "r:185.253.117.147"), true);
+eq("拿到整页的通道不受牵连", W.vBad("x.com", "r:45.136.117.194"), false);
+// 3) 同一通道「先整页、后小响应」不算差分（可能是站点自身行为变化）
+W.vClear();
+W.S.smCnt.clear();
+W.S.bigByHost.clear();
+W.S.bigChan.clear();
+W.HOOK.traffic({ host: "y.com", via: "node", node: "7.7.7.7:443", down: 60000, ok: true, life: 3000, up: 900 });
+W.HOOK.traffic({ host: "y.com", via: "node", node: "7.7.7.7:443", down: 4000, ok: false, life: 900, up: 300 });
+eq("同通道先大后小不判死", W.vBad("y.com", "r:7.7.7.7"), false);
+// 4) 中继假 200（nginx 默认页）攒够 3 次才判
+W.vClear();
+W.S.smCnt.clear();
+for (let i = 0; i < 3; i++) W.HOOK.traffic({ host: "z.com", via: "node", node: "6.6.6.6:443", down: 4300, ok: true, life: 900, up: 200 });
+eq("假 200 攒 3 次判该中继不可用", W.vBad("z.com", "r:6.6.6.6"), true);
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

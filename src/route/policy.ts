@@ -91,53 +91,48 @@ HOOK.decide = (x: DecisionIn): DecisionOut => {
 /** 判定表里该站点 × 该中继被判死 → 选路时跳过（一次探测同时服务判定与选路） */
 HOOK.veto = (host: string, ip: string): boolean => !!host && !!ip && vBad(host, "r:" + ip);
 
-/** 连接收尾的弱证据：成功就记 ok；小响应只学「下次优先中转」，不判死（判死只有 probe 能下） */
+/** 连接收尾的弱证据：大响应 = 这条通道真能出整页；小响应要「差分」才判封锁 */
 HOOK.traffic = (e: TrafficEvt): void => {
-  cnt("trHit");
+  if (e.host === S.site) return; // 探自己的域名必 522（CF 自环），不构成任何通道证据
   const ip = e.node ? e.node.slice(0, e.node.lastIndexOf(":")) : "";
   const chan: Chan = e.via === "node" && ip ? { kind: "r", ip } : DIRECT;
   const ck = e.host + "|" + chanKey(chan);
   const now = Date.now();
   if (e.ok && e.down >= 20000) {
-    // 大响应：这条通道对这个站点确实能打通
+    cnt("trHit");
     S.bigByHost.set(e.host, now);
+    S.bigChan.set(e.host, ck);
     S.smCnt.delete(ck);
     recordTraffic({ target: e.host, chan, down: e.down, ok: true });
     recordPass({ target: e.host, chan, down: e.down, ok: true });
     return;
   }
-  // 小到不可能是真实页面的「成功」：多半是中继把自己的默认页（nginx）当响应回了。
-  // 这类中继对任何站点都是废的，直接判该通道对这个站点不可用，避免一直吃假 200。
-  cnt("trSmall");
-  if (e.ok && e.via === "node" && e.down > 0 && e.down < 2000) {
-    recordBlock({ target: e.host, chan, down: e.down, ok: false });
-    S.needPx.set(e.host, now + 21600000);
-    return;
-  }
-  // 小到不可能是真实页面的「成功」：多半是中继把自己的默认页（nginx）当响应回了。
-  // 这类中继对任何站点都是废的，直接判该通道对这个站点不可用，避免一直吃假 200。
-  if (e.ok && e.via === "node" && e.down > 0 && e.down < 2000) {
-    recordBlock({ target: e.host, chan, down: e.down, ok: false });
-    S.needPx.set(e.host, now + 21600000);
-    return;
-  }
   if (e.down <= 0 || e.down >= 12000 || e.life > 8000 || e.up > 16384) return;
-  // 差分判据：只有当「同一站点的别的通道刚拿到过大响应」时，小响应才说明是这条通道被封。
-  // 业务层 403（鉴权/风控/HEAD）在任何通道上都小，bigByHost 不会成立 → 不会被误判。
-  // 基线窗口 6 小时：这个站点在此前哪条通道上真的拿到过整页（≥20KB）
-  const big = (S.bigByHost.get(e.host) || 0) > now - 21600000;
+  cnt("trSmall");
+  if (e.cf) {
+    if (e.down < 900) cnt("sz1");
+    else if (e.down < 1500) cnt("sz2");
+    else if (e.down < 3000) cnt("sz3");
+    else cnt("sz4");
+  }
   const n = (S.smCnt.get(ck) || 0) + 1;
   S.smCnt.set(ck, n);
-  // 判据必须建立在「这个站点确实能出整页」的基线上：没有基线时，小响应可能只是
-  // 一个返回自己默认页的中继（nginx 200），也可能是站点自身的业务 403 —— 两者都不可判。
-  if (!big) {
-    // CF 托管站点例外：被按 IP 族拒时响应恒为几百字节错误页（含握手也只有几 KB），
-    // 正常浏览一定出整页。所以任何通道（直连/CF 中继）都允许当场判封锁，1 次即可。
-    if (!e.cf) {
-      queueVerify(e.host, chan); // 只排队（当前 PROBE_REQ=0，探测留给 cron）
-      return;
-    }
-    cnt("vtSeen");
+  // 差分判据（不误伤业务 403）：只有当**同一站点的另一条通道在 30 分钟内拿到过整页**时，
+  // 这次的小响应才说明「是这条通道被封」。业务层 403（鉴权/风控/HEAD）在所有通道上都小，
+  // 永远凑不出这个差分，因此不会被判死。
+  const bigAt = S.bigByHost.get(e.host) || 0;
+  const bigCk = S.bigChan.get(e.host) || "";
+  const diff = bigAt > now - 1800000 && !!bigCk && bigCk !== ck;
+  // 中继把自家默认页（nginx）当响应回的假 200：通道永久无效，但要攒够 3 次（避免误伤极小的真响应）
+  if (e.ok && e.via === "node" && e.down < 6000 && n >= 3) {
+    recordBlock({ target: e.host, chan, down: e.down, ok: false });
+    S.needPx.set(e.host, now + 21600000);
+    return;
+  }
+  if (!diff) {
+    queueVerify(e.host, chan); // 复核队列（PROBE_REQ=0 时只排队，不烧 CPU）
+    if (n >= 2 || e.cf) S.needPx.set(e.host, now + 21600000); // 只学「下次优先中转」，不下判定
+    return;
   }
   S.smCnt.delete(ck);
   recordBlock({ target: e.host, chan, down: e.down, ok: false });

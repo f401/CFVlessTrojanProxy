@@ -40,6 +40,8 @@ export class AppState {
   needPx: Map<string, number> = new Map();
   /** 站点最近一次「大响应」时间（用来做跨通道差分：别的通道能打通才算这条被封） */
   bigByHost: Map<string, number> = new Map();
+  /** 最近一次大响应来自哪条通道（用于「差分」判封锁：同站点不同通道对比） */
+  bigChan: Map<string, string> = new Map();
   /** 每「站点|通道」的小响应连击数 */
   smCnt: Map<string, number> = new Map();
   /** 复核队列：流量发现「可疑」后排队做同站点两条通道的实测差分 */
@@ -88,6 +90,11 @@ export class AppState {
     "vtDO",
     "trHit",
     "trSmall",
+    "sz1",
+    "sz2",
+    "sz3",
+    "sz4",
+    "szBig",
   ];
   cnt: Record<string, number> = {};
   cntDay = "";
