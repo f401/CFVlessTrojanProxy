@@ -1,5 +1,5 @@
 import { X_EDGE_IPS, X_RULES, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
-import { edgeNodes } from "../route/edge";
+import { edgeRank } from "../route/edge";
 
 export * from "./sub-common";
 export { renderSingbox } from "./sub-singbox";
@@ -31,8 +31,13 @@ export function renderClash(
   auth?: Auth,
 ) {
   const manual = String(env.nodes || "").trim();
-  const extra = manual || url.searchParams.get("e") === "0" ? [] : edgeNodes(5);
-  const nodes = orderNodes([...loadNodes(env, host), ...extra], learned);
+  // 服务端测不到「客户端 → 边缘」这条路径（Worker 访问自己的域名是 522 回环），
+  // 所以入口偏好交给客户端的 url-test 组实测：这里只提供候选 CF 边缘 IP，
+  // 有实测排名（edge:pref）时用它排序，否则用内置的 8 个种子 IP。
+  const noEdge = Boolean(manual) || url.searchParams.get("e") === "0";
+  const ranked = noEdge ? [] : edgeRank(8);
+  const edgeIps: string[] = noEdge ? [] : ranked.length ? ranked : X_EDGE_IPS.slice(0, 8);
+  const nodes = orderNodes(loadNodes(env, host), learned);
   const pass = trojanPasswordOf(env, id, auth);
   const protos = pickProtos(env, url, Boolean(pass));
   const out: string[] = [];
@@ -93,6 +98,21 @@ export function renderClash(
     }
   }
 
+  // 钉在具体 CF 边缘 IP 上的入口条目（客户端用它们做「哪个边缘最快」的实测）
+  const edgeNames: string[] = [];
+  for (const mode of ["tput", "lat"]) {
+    const suffix = mode === "lat" ? "L" : "T";
+    for (const proto of protos) {
+      if (proto === "trojan" && !pass) continue;
+      for (const ip of edgeIps) {
+        const name = `e-${ip}-${proto === "trojan" ? "TJ" : "VL"}${suffix}`;
+        emit(name, proto, ip, 443, `/?ed=2560&ip=edge&mode=${mode}`, true, "");
+        edgeNames.push(name);
+        all.push(name);
+      }
+    }
+  }
+
   // 地区出口节点（强制走该国的中转），不分模式
   const regNames = [];
   for (const e of regionEntries(regions, host, pass, protos, url)) {
@@ -116,14 +136,25 @@ export function renderClash(
   const q = (arr: string[]) => `    proxies: [${arr.map((x) => `"${x}"`).join(", ")}]`;
   const pick = (arr: string[], n: number) => arr.slice(0, Math.max(1, Math.min(n, arr.length)));
 
+  const G_EDGE = "\ud83c\udf10 \u5165\u53e3\u4f18\u9009";
   const groups = [];
+  if (edgeNames.length) {
+    groups.push(`  - name: "${G_EDGE}"`);
+    groups.push(`    type: url-test`);
+    groups.push(`    url: https://${host}/health`);
+    groups.push(`    expected-status: 200`);
+    groups.push(`    interval: 300`);
+    groups.push(`    tolerance: 50`);
+    groups.push(`    lazy: false`);
+    groups.push(q(edgeNames));
+  }
   groups.push(`  - name: "${G_TPUT}"`);
   groups.push(`    type: url-test`);
   groups.push(`    url: http://www.gstatic.com/generate_204`);
   groups.push(`    interval: 300`);
   groups.push(`    tolerance: 30`);
   groups.push(`    lazy: false`);
-  groups.push(q(pick(byMode.tput, 5)));
+  groups.push(q(edgeNames.length ? [G_EDGE, ...pick(byMode.tput, 5)] : pick(byMode.tput, 5)));
 
   groups.push(`  - name: "${G_LAT}"`);
   groups.push(`    type: url-test`);
@@ -131,7 +162,7 @@ export function renderClash(
   groups.push(`    interval: 300`);
   groups.push(`    tolerance: 30`);
   groups.push(`    lazy: false`);
-  groups.push(q(pick(byMode.lat, 5)));
+  groups.push(q(edgeNames.length ? [G_EDGE, ...pick(byMode.lat, 5)] : pick(byMode.lat, 5)));
 
   if (regNames.length) {
     groups.push(`  - name: "${G_REG}"`);
@@ -153,7 +184,7 @@ export function renderClash(
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
   groups.push(
-    `    proxies: ["${G_TPUT}", "${G_LAT}"${regNames.length ? `, "${G_REG}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
+    `    proxies: ["${G_TPUT}", "${G_LAT}"${edgeNames.length ? `, "${G_EDGE}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
   );
 
   return [
