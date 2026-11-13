@@ -6,6 +6,7 @@ import { eachLimit, errMsg } from "../core/util";
 import type { Plan } from "./budget";
 import { sweepHost } from "./sweep";
 import { vAll } from "./verdict";
+import { SC } from "../core/const";
 
 /** 一次 sweepHost 的固定成本（2 个目标 IP × 2 条通道） */
 export const SWEEP_COST = 4;
@@ -41,6 +42,9 @@ export function pickHosts(n: number): string[] {
 
 /** 按预算扫，返回本轮实际扫过的站点 */
 export async function runRound(plan: Plan): Promise<RoundOut> {
+  // 免费计划单次 TLS 握手就超 10ms CPU（实测 1102），所以默认不探测；
+  // 想要状态码级证据时把 SC.PROBE_RND 设为 1（付费计划可用）。
+  if (SC.PROBE_RND <= 0) return { hosts: [], swept: 0 };
   const budget = plan.vt;
   const n = Math.max(0, Math.floor(budget / SWEEP_COST));
   const hosts = pickHosts(n);

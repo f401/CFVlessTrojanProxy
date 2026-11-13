@@ -29,7 +29,9 @@ export async function debug(c: UserCtx): Promise<Response> {
   /* ---------- 连接记录：本 isolate 最近 40 条 +（&do=1）DO 环形 60 条 ---------- */
   const vtHost = String(url.searchParams.get("vt") || "").slice(0, 80);
   if (vtHost) {
-    const sw = await sweepHost(vtHost);
+    // 默认只读表（TLS 探测在免费计划会 1102，只有显式 &probe=1 才做）
+    const wantProbe = url.searchParams.get("probe") === "1";
+    const sw = wantProbe ? await sweepHost(vtHost) : { ips: [], nodes: [], rows: [] };
     const plan = planView(S.pool.length, S.alive.size);
     const pol = { same: S.polSame, diff: S.polDiff, why: S.polWhy };
     return json({ host: vtHost, ips: sw.ips, nodes: sw.nodes, rows: sw.rows, table: vAll(), pol, plan });

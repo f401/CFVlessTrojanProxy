@@ -1683,7 +1683,8 @@ const reqV6 = new Request("https://x/", { headers: { "cf-connecting-ip": "2001:d
 const reqV4 = new Request("https://x/", { headers: { "cf-connecting-ip": "1.2.3.4" } });
 ok("level 0 只影子：不改原判断", W.pxDecision(reqV6, "x.com", true, false, 0) === false);
 ok("level 1 硬规则生效：v6+CF 走中转", W.pxDecision(reqV6, "x.com", true, false, 1) === true);
-ok("level 1 软规则不生效：v4 保持原判断", W.pxDecision(reqV4, "x.com", true, false, 1) === false);
+ok("level 1 CF 托管目标直接走中继（不需要学习）", W.pxDecision(reqV4, "x.com", true, false, 1) === true);
+ok("level 0 时 CF 托管目标也不改（只影子）", W.pxDecision(reqV4, "x.com", true, false, 0) === false);
 ok("level 1 不改写「本来就要中转」的判断", W.pxDecision(reqV6, "x.com", false, true, 1) === true);
 ok("level 2 全生效：v4+CF 也走判定", W.pxDecision(reqV4, "x.com", true, false, 2) === true);
 ok("level 2 无候选时回落原判断", W.pxDecision(reqV4, "y.com", false, false, 2) === false);
@@ -1765,5 +1766,15 @@ W.queueVerify("a.com", { kind: "r", ip: "1.1.1.1" });
 eq("同一组合重复入队只留一条", W.queueLen(), 1);
 await W.runVerify();
 eq("没有参照通道时不做判定（队列被取走、判定不变）", W.vState("a.com", "r:1.1.1.1"), 0);
+// 第 42 组：HTTP 状态码判据接进决策（状态码级证据，1 个请求即可学会）
+W.vClear(); W.S.cfHttp.clear();
+W.S.cfHttp.set("x.com", { code: 403, colo: "SOF", t: Date.now() });
+const d403 = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5"], legacyWantsRelay: false });
+ok("本出口 403 → 决策绕中继", d403.chan.kind === "r" && d403.why === "http403");
+W.S.cfHttp.set("x.com", { code: 200, colo: "VIE", t: Date.now() });
+const d200 = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5"], legacyWantsRelay: true });
+eq("本出口 200 → 决策直连（少一跳）", d200.chan.kind, "d");
+W.S.cfHttp.clear();
+ok("没有状态码证据时不会强行推翻池子判断", W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: false }).chan.kind === "d");
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
