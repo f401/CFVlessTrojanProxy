@@ -33,6 +33,19 @@ export function recordTraffic(e: TrafficEvt): void {
   if (e.ok && e.down > 0 && vState(e.target, ck) === 0) vSetState(e.target, ck, 1, 0);
 }
 
+/** 用户侧判据：上游只回几百~几千字节就结束 = 这条通道对该站点被拒（403/风控）。
+ *  只在没有 probe 级 ok 时生效，所以被探测确认过能打通的中继不会被一次小响应当掉。 */
+export function recordBlock(e: TrafficEvt): void {
+  const ck = chanKey(e.chan);
+  if (vState(e.target, ck) === 1) return;
+  vSetState(e.target, ck, 2, 0);
+}
+
+/** 反向证据：大响应回来 = 这条通道对这个站点能打通，顺手解除之前的小响应误判 */
+export function recordPass(e: TrafficEvt): void {
+  vSetState(e.target, chanKey(e.chan), 1, 0);
+}
+
 export interface ClientEvt {
   target: string;
   chan: Chan;

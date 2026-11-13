@@ -88,3 +88,4 @@ export { pxDecision } from "./proxy/pxhook";
 export { HOOK } from "./core/hook";
 export { planRound, planView } from "./route/budget";
 export { chanPref, prefsOf, prefsJson } from "./route/prefs";
+export { recordBlock, recordPass } from "./route/observe";

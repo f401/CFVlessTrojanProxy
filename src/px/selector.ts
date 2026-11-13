@@ -391,12 +391,12 @@ export class Selector {
     const cp = HOOK.chanPref;
     if (!first || !cp || !host) return first || "";
     const ipOf = (k: string): string => k.slice(0, k.lastIndexOf(":"));
-    if (cp(ipOf(first)) < 2) return first;
+    if (cp(ipOf(first), host) < 2) return first;
     let best = "";
     let bv = Infinity;
     for (const x of candsFor(m)) {
       if (isBlack(x.k) || isFrozen(x.k)) continue;
-      if (cp(ipOf(x.k)) >= 2) continue;
+      if (cp(ipOf(x.k), host) >= 2) continue;
       if (x.v < bv) { bv = x.v; best = x.k; }
     }
     if (best) { if (st) st.node = best; return best; }

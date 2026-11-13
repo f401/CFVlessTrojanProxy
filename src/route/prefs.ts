@@ -31,10 +31,18 @@ export function prefsOf(host = "", limit = 40): { ok: PrefRow[]; bad: PrefRow[] 
 }
 
 /** 通道偏好：0 = 实测能打通，2 = 实测打不通，1 = 还没测过（未知不惩罚） */
-export function chanPref(ip: string): 0 | 1 | 2 {
+export function chanPref(ip: string, host = ""): 0 | 1 | 2 {
   if (!ip) return 1;
-  const s = Math.max(vState("*", "r:" + ip), vState("*", "e:" + ip));
-  return s === 1 ? 0 : s >= 2 ? 2 : 1;
+  const keys = ["r:" + ip, "e:" + ip];
+  let bad = 0;
+  for (const c of keys) {
+    const ss = host ? [vState(host, c), vState("*", c)] : [vState("*", c)];
+    for (const s of ss) {
+      if (s === 1) return 0; // 有「能打通」的证据就直接放行
+      if (s >= 2) bad = 1;
+    }
+  }
+  return bad ? 2 : 1;
 }
 
 /** 调试：整张偏好表（按通道聚合后的两栏） */

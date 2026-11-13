@@ -295,7 +295,7 @@ export class Connection {
         if (this.node && !this.failed && this.down > 0) nsOk(this.node, 0, 0);
       // 通道证据：交给决策层（弱证据只可能把 unknown 提成 ok；判死只有 probe 能下）
       if (this.host && HOOK.traffic) {
-        HOOK.traffic({ host: this.host, via: this.via as "node" | "direct" | "v6", node: this.node || "", down: this.down, ok: !this.failed && this.down > 0 });
+        HOOK.traffic({ host: this.host, via: this.via as "node" | "direct" | "v6", node: this.node || "", down: this.down, ok: !this.failed && this.down > 0, life: Date.now() - this.t0 });
       }
       // 真实首字节回流：探活只能证明连得上，转发快不快只有这条路径知道
       if (this.node && this.ttfb > 0) nsLatency(this.node, this.ttfb);

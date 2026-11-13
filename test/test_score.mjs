@@ -1650,10 +1650,10 @@ W.vClear();
 ok("清空后不再 veto", W.HOOK.veto("x.com", "45.136.117.194") === false);
 // 第 34 组：连接证据钩子（traffic）
 W.vClear(); W.S.needPx.clear();
-W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false });
+W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false, life: 800 });
 ok("小响应把站点学成「优先中转」", (W.S.needPx.get("x.com") || 0) > Date.now());
-eq("小响应不判死中继", W.vState("x.com", "r:45.136.117.194"), 0);
-W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 90000, ok: true });
+  eq("小响应当场判该通道被拒（不等 probe）", W.vState("x.com", "r:45.136.117.194"), 2);
+W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 90000, ok: true, life: 4000 });
 eq("成功下行记成 ok（弱证据）", W.vState("x.com", "r:45.136.117.194"), 1);
 eq("弱证据来源是 0（流量）", W.vAll().filter((v) => v.t === "x.com")[0].src, 0);
 // 第 35 组：判定表跨 isolate 同步（只同步强证据）
@@ -1727,6 +1727,23 @@ W.vClear();
   const pf = W.prefsJson(20);
   eq("偏好表能打通一栏含该通道", pf.ok.some((x) => x.c === "r:9.9.9.2"), true);
   eq("偏好表打不通一栏含该通道", pf.bad.some((x) => x.c === "r:9.9.9.3"), true);
+  W.vClear();
+}
+
+// 第 40 组：拿到 403 就学（不等 probe 确认）
+{
+  W.vClear();
+  const ch = { kind: "r", ip: "9.9.9.7" };
+  W.recordBlock({ target: "x.com", chan: ch, down: 700, ok: false });
+  eq("小响应立刻判该通道被拒", W.chanPref("9.9.9.7", "x.com"), 2);
+  eq("别的站点不受牵连", W.chanPref("9.9.9.7", "y.com"), 1);
+  W.recordPass({ target: "x.com", chan: ch, down: 40000, ok: true });
+  eq("大响应回来就解除", W.chanPref("9.9.9.7", "x.com"), 0);
+  W.vClear();
+  const ch2 = { kind: "r", ip: "9.9.9.8" };
+  W.vSet("x.com", "r:9.9.9.8", 200, 40, 1);
+  W.recordBlock({ target: "x.com", chan: ch2, down: 700, ok: false });
+  eq("probe 确认过能通的通道不被小响应当掉", W.chanPref("9.9.9.8", "x.com"), 0);
   W.vClear();
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

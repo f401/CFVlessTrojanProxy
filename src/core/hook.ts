@@ -28,7 +28,7 @@ export interface Hooks {
   /** 冷启动拉一次远端强证据 */
   vtLoad: ((env: Env) => Promise<void>) | null;
   /** 通道偏好：0 实测能打通 / 1 未测 / 2 实测打不通（按中继或入口 IP） */
-  chanPref: ((ip: string) => number) | null;
+  chanPref: ((ip: string, host?: string) => number) | null;
   /** 该站点最近哪条通道成功过（弱证据来源）：直连 / 中继 */
   win: ((host: string) => { d: boolean; r: boolean }) | null;
 }
@@ -39,6 +39,8 @@ export interface TrafficEvt {
   node: string; // 节点键 host:port（直连时为空）
   down: number;
   ok: boolean;
+  /** 连接存活毫秒：小响应 + 短寿命 = 大概率是被拒（403/风控） */
+  life: number;
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null, vtDelta: null, vtLoad: null, win: null };
