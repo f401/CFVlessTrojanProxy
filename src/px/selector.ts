@@ -370,12 +370,14 @@ export class Selector {
     }
     // 非 CF 出口优先，但只在分数可比时（1.5x + 50ms 带内）：CF 托管站点的
     // 判定依据是出口 IP，非 CF 中继才可能改变结果；分数差太多则不值得。
-    if (host && S.relayOff.size) {
+    // 非 CF 出口优先，但只在分数可比时（1.5x + 50ms 带内）：CF 托管站点的
+    // 判定依据是出口 IP 族，非 CF 中继才可能改变结果。偏好开关由判定层（Policy）给。
+    if (host && HOOK.nonCfFirst && HOOK.nonCfFirst()) {
       const now = Date.now();
       let nk = "";
       let nv = Infinity;
-      for (const rk of S.relayOff) {
-        if (!S.alive.has(rk) || isBlack(rk) || isFrozen(rk) || bad(rk)) continue;
+      for (const [rk, a] of S.alive) {
+        if (isCfIp(a.h) || isBlack(rk) || isFrozen(rk) || bad(rk)) continue;
         const v = costOf(rk, m, now);
         if (v < nv) { nv = v; nk = rk; }
       }

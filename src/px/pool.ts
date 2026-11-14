@@ -1,5 +1,4 @@
 import { errMsg } from "../core/util";
-import { isCfIp } from "../core/net";
 
 import { SEED_WRITE_GAP } from "../core/const";
 import { SC } from "../core/const";
@@ -321,10 +320,6 @@ export async function cronScan(env: Env, adm = 0) {
     });
     nsLatency(k, x.ms);
     nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
-    // 出口是否在 CF 网段：中转时优先用「不在 CF 网段」的节点，
-    // 否则 CF→CF 会把客户端 IP 透传给目标站，封禁策略照旧命中。
-    if (isCfIp(x.h)) S.relayOff.delete(k);
-    else S.relayOff.add(k);
   }
 
   // ② 重测当前 + 分数前 3 名（失败即进冷却）

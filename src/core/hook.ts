@@ -33,6 +33,8 @@ export interface Hooks {
   verify: (() => Promise<number>) | null;
   /** 该站点最近哪条通道成功过（弱证据来源）：直连 / 中继 */
   win: ((host: string) => { d: boolean; r: boolean }) | null;
+  /** 是否该优先非 CF 出口（原来由池子的 relayOff 集合表达，现由判定层决定） */
+  nonCfFirst: (() => boolean) | null;
 }
 
 export interface TrafficEvt {
@@ -50,4 +52,4 @@ export interface TrafficEvt {
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,
-  verify: null, vtDelta: null, vtLoad: null, win: null };
+  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null };

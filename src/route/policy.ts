@@ -10,6 +10,7 @@ import { cfHttpCode } from "../proxy/cfverdict";
 import { vtDelta, vtLoad } from "./verdictsync";
 import { chanPref } from "./prefs";
 import { runVerify } from "./verify";
+import { HEALTH, ipOf } from "./relay-health";
 import { JUDGE } from "./judge";
 
 export interface Ctx {
@@ -82,9 +83,10 @@ export class Policy {
 
   /** 中继候选：先看本 isolate 已探活的节点，冷启动退到池子名单（否则「403 但没有中继」会继续直连） */
   relays(): string[] {
-    const alive = Array.from(S.alive.keys()).slice(0, 16).map((k) => k.slice(0, k.lastIndexOf(":")));
+    // 存活表按健康度排序：整页多、无响应少的中继排前面（废中继不再滞留）
+    const alive = HEALTH.rank(Array.from(S.alive.keys()).map(ipOf)).slice(0, 16);
     if (alive.length) return alive;
-    return S.pool.filter((x) => !isCfIp(x.h)).slice(0, 8).map((x) => x.h);
+    return HEALTH.rank(S.pool.filter((x) => !isCfIp(x.h)).map((x) => x.h)).slice(0, 8);
   }
 
   /** 该站点 × 该中继是否被实测判 ok（probe 或端到端） */
@@ -115,8 +117,15 @@ export class Policy {
       return { via: d.chan.kind === "d" ? "d" : "r", ip: d.chan.ip, why: d.why };
     };
     HOOK.traffic = (e: TrafficEvt): void => JUDGE.onTraffic(e);
+    // 「有非 CF 出口就优先用它」：CF→CF 会把客户端 IP 原样透传，封禁策略照旧命中
+    HOOK.nonCfFirst = (): boolean => true;
     HOOK.verify = (): Promise<number> => runVerify();
-    HOOK.veto = (host: string, ip: string): boolean => !!host && !!ip && vBad(host, "r:" + ip);
+    HOOK.veto = (host: string, ip: string): boolean => {
+      if (!ip) return false;
+      if (host && vBad(host, "r:" + ip)) return true;
+      // 中继本身快死了（连上就断/零字节）也换掉：这类中继会把 403 变成 timeout
+      return HEALTH.score(ip) < 0.3;
+    };
     HOOK.relayProbe = (host: string, ip: string, ok: boolean, ms: number): void => {
       if (ok) vSet(host, "r:" + ip, 200, ms, 1);
     };

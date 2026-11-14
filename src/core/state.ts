@@ -48,8 +48,6 @@ export class AppState {
   vtQ: Array<{ host: string; ck: string; t: number }> = [];
   /** 最近一次复核的结果（供 debug 展示） */
   vtLast: { host: string; ck: string; a: number; b: number; v: string; at: number } | null = null;
-  /** 出口不在 CF 网段的可用节点（中转时优先） */
-  relayOff: Set<string> = new Set();
   colo = "";
   funnel: Record<string, number> = { direct: 0, node: 0, v6: 0 };
   candN = 0; // 最近一次 candsFor 的候选数（观测用）
