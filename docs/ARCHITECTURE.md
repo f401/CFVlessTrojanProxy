@@ -236,11 +236,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 
 | 文档 | 用途 |
 |---|---|
-| [docs/v8.md](v8.md) | **v8 设计（当前正稿，352 行）**：事实层 / 判定 / 选路 / 预算 / 迁移 / 证据分级 |
+| [docs/v8.md](v8.md) | **v8 设计（当前正稿，439 行）**：事实层 / 判定 / 选路 / 预算 / 迁移 / 证据分级 / 业务 403 安全证明 |
 | [docs/v8实现清单.md](v8实现清单.md) | 一页可勾选的硬规则，每条带数字与 § 出处 |
 | [docs/评分机制_final.md](评分机制_final.md) | 打分与抽样（线上 7.x 的实际算法） |
 | [docs/判定模块设计.md](判定模块设计.md) | 判定层（verdict / judge / policy）的设计与取舍 |
 | [docs/吞吐诊断.md](吞吐诊断.md) | 三层链路测量与中继容量实测 |
 | [docs/LIMITS.md](LIMITS.md) | 免费计划额度与平台限制实测 |
 | [docs/本地验证.md](本地验证.md) | 哪些能本地验、哪些必须真 CF |
-| [docs/archive/架构重设计_v8_长版.md](archive/架构重设计_v8_长版.md) | v8 的 2307 行过程版（含全部实验日志与缺陷清单，历史存档） |
