@@ -1875,5 +1875,8 @@ ok("RegionPicker 可构造", typeof W.RegionPicker === "function", "RegionPicker
 // ═══ 第 50 组：Attacher（P5-4）═══
 ok("Attacher 是类实例且可 run()", typeof W.ATTACHER === "object" && typeof W.ATTACHER.run === "function", "ATTACHER");
 ok("Attacher 可构造", typeof W.Attacher === "function", "Attacher");
+// ═══ 第 51 组：SubscriptionView（P6-1）═══
+ok("SubscriptionView 是类实例且可 render()", typeof W.SUBVIEW === "object" && typeof W.SUBVIEW.render === "function", "SUBVIEW");
+ok("SubscriptionView 可构造", typeof W.SubscriptionView === "function", "SubscriptionView");
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -16,6 +16,7 @@ export {
   COLO_CITY,
   trojanPasswordOf,
 } from "./views/sub";
+export { SUBVIEW, SubscriptionView } from "./views/subview";
 export { loadRtt, rttLearn, rttMark } from "./nodes/metrics";
 export { subHeaders, effectiveQuota } from "./core/quota";
 export { S } from "./core/state";
@@ -101,3 +102,4 @@ export { recordBlock, recordPass } from "./route/observe";
 
 export { handleDns, trojanUdpFrame } from "./proxy/dns";
 export { handleUpgrade } from "./proxy/session";
+

@@ -5,7 +5,8 @@ import { SC } from "../core/const";
 import { renderStatsHtml, renderHtml } from "../views/panel";
 import { fmtBytes } from "../views/html";
 import { effectiveQuota, subHeaders } from "../core/quota";
-import { renderClash, renderSingbox, renderLinks, trojanPasswordOf } from "../views/sub";
+import { trojanPasswordOf } from "../views/sub";
+import { SUBVIEW } from "../views/subview";
 import { readStatsCached, nodeSnapGet } from "../store/index";
 import { statsNodeRows } from "../nodes/stats-rows";
 import { aliveList, nsOf, pxGet } from "../px/pool";
@@ -54,19 +55,19 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
     case "cl":
     case "pcl": {
       const s = await readStatsCached(env, id);
-      return text(renderClash(env, url, id, host, learned, regions, c.auth), subHeaders(env, s));
+      return text(SUBVIEW.render({ env, url, id, host, learned, regions, auth: c.auth }, "clash"), subHeaders(env, s));
     }
 
     case "sb":
     case "psb": {
       const s = await readStatsCached(env, id);
-      return json(renderSingbox(env, url, id, host, learned, regions, c.auth), subHeaders(env, s));
+      return json(SUBVIEW.render({ env, url, id, host, learned, regions, auth: c.auth }, "singbox"), subHeaders(env, s));
     }
 
     case "ty":
     case "pty": {
       const s = await readStatsCached(env, id);
-      return text(renderLinks(env, url, id, host, learned, regions, c.auth), subHeaders(env, s));
+      return text(SUBVIEW.render({ env, url, id, host, learned, regions, auth: c.auth }, "links"), subHeaders(env, s));
     }
 
     case "stats": {
