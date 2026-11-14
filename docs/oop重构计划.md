@@ -74,4 +74,17 @@
 
 等价性证据：`test_score` 386 / `test_v3` 186 / `smoke` 30 / `sim` 22 / golden 8 全部一致；仿真 2000 节点 **1.14x (1.12–1.15)、命中 66%**，与重构前逐位相同；行数 stat.ts 395 / score.ts 308。
 
+## 7. P3 实施记录（7.03，提交 `06b0bd5`）
+
+| 项 | 改法 |
+| --- | --- |
+| Store 门面 | 新增 `src/store/store.ts`：`class Store`（KV / 用量 / 快照 / 统计 / 观测 共 18 个方法）+ `STORE`；`store/index.ts` 导出 |
+| 存活度跨 isolate | `MeterBody.hl` 增量搭 `/add`；DO 单键多存 `hl` 表（加性合并、上限 200）；`/hl` 端点；`/vt` 响应顺带返回 `hl` |
+| 冷启动 | 复用 `vtLoad`：一次 `/vt` 同时拉回判定表与存活度（`HEALTH.merge`） |
+| 分层修正 | store 不能 import route → 改 `core/hook.ts` 的 `HOOK.healthDelta`，由 `Policy.install()` 注册 |
+| 观测 | `/<uuid>/debug?hl=1[&do=1]`：本地视图 + DO 环形 |
+
+验收：`test_score` 393（+7）；arch **77 文件**通过（分层方向无环）；线上 `?hl=1&do=1` 能看到同一 IP 的 `local` 与 `ring`。
+
+
 
