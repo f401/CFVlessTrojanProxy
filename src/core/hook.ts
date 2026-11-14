@@ -70,6 +70,8 @@ export interface TrafficEvt {
   life: number;
   /** 客户端上传字节：上传得多说明是真实业务请求，别按「被拒」处理 */
   up: number;
+  /** 事件时间（毫秒）。缺省按处理时刻算；回放/聚合时必须显式传，否则三批会被压成一批 */
+  at?: number;
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,

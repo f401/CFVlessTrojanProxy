@@ -100,23 +100,26 @@ export class Judge {
   /** 连接收尾的观测 */
   onTraffic(e: TrafficEvt): void {
     if (e.host === S.site) return; // 探自己域名必 522（CF 自环），不构成任何通道证据
+    // 事件自己的时间戳：回放/聚合的事件必须按发生时间归批，否则三批会被压成一批
+    const ty = (e as { at?: number }).at ?? Date.now();
     HEALTH.note(e.node, e.down, e.ok); // 中继存活度：与站点无关的那一半证据
     // 影子：用 v8 的写入规则算一遍「本会写什么」，只统计不落库（接线第 1 步）
     try {
-      FACT.observe(e);
+      FACT.observe(e, ty);
     } catch {
       /* 影子统计绝不影响真实判定 */
     }
     const chan = this.chanOf(e);
     const ck = e.host + "|" + chanKey(chan);
-    const now = Date.now();
+    const now = ty;
+    // 事件自己的时间戳：回放/聚合的事件必须按发生时间归批，否则三批会被压成一批
     // v8 的 blk：只有「本通道 tiny + 同窗口另一通道出过整页」才投票（三批独立确认后才写行）。
     // 这里只喂证据，不决定顺序 —— 后果是代价 ×6（policy 里乘），候选永远不会被移出。
     if (e.via === "node" && e.node && e.host) {
       const nip = e.node.slice(0, e.node.lastIndexOf(":"));
       const row = S.peers.get(e.host);
       const peerBig = !!row && row.some((x) => x.down >= 20000 && Date.now() - x.at <= 120000);
-      if (nip && e.down > 0 && e.down <= 2048 && peerBig) BLK.note({ host: e.host, ip: nip, down: e.down, peerBig: true, at: now });
+      if (nip && e.down > 0 && e.down <= 2048 && peerBig) BLK.note({ host: e.host, ip: nip, down: e.down, peerBig: true, at: ty });
       else if (nip && e.down >= 20000) BLK.contra(e.host, nip);
     }
 

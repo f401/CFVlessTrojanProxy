@@ -7,6 +7,7 @@ import { FACT } from "../route/factshadow";
 import { json, forbidden } from "../edge/respond";
 import type { RouteCtx } from "../edge/types";
 import { PS } from "../route/psfacts";
+import { EG } from "../route/egfacts";
 import { DEAD } from "../route/deadfacts";
 import { FO } from "../core/firstobs";
 import { BLK } from "../route/blkfacts";
@@ -28,6 +29,7 @@ export function health(c: RouteCtx): Response {
     errsByKind: errHist(),
     errsDup: errDup(),
 cf: FACT.snap(),
+    eg: EG.snap(),
     ps: PS.snap(),
     dead: DEAD.snap(),
     first: FO.snap(),

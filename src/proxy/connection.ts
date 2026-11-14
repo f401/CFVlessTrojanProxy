@@ -326,7 +326,7 @@ HOOK.relPerf?.(this.host, ip, t0, kbs);
         }
       // 通道证据：交给决策层（弱证据只可能把 unknown 提成 ok；判死只有 probe 能下）
       if (this.host && HOOK.traffic) {
-        HOOK.traffic({ cf: this.cf, host: this.host, via: this.via as "node" | "direct" | "v6", node: this.node || "", down: this.down, ok: !this.failed && this.down > 0, life: Date.now() - this.t0, up: this.up });
+        HOOK.traffic({ cf: this.cf, host: this.host, via: this.via as "node" | "direct" | "v6", node: this.node || "", down: this.down, ok: !this.failed && this.down > 0, life: Date.now() - this.t0, up: this.up, at: Date.now() });
       const vf = HOOK.verify;
       if (vf && S.vtQ.length && SC.PROBE_REQ > 0) this.ctx.waitUntil(vf().catch(() => 0));
       }
