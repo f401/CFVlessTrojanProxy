@@ -146,9 +146,12 @@ export class Policy {
       // 为什么：中继容量实测差 3–4 倍（1103 vs 300 KB/s），钉住一条时其余中继永远没有样本，
       // 「按站点 × 中继挑最快」就永远学不出来；轮换几条后样本足够，再交给下面的排序去利用。
       const coldSite = !stick.some((ip) => vAt(c.host, "r:" + ip) > 0) && !stick.some((ip) => JUDGE.posOn(c.host, ip));
-      if (c.mode !== "lat" && coldSite && relSnap(c.host).length === 0 && stick.length > 1) {
-        const pool = (nonCf.length ? nonCf : stick).filter((ip) => !JUDGE.negOn(c.host, ip));
-        const list = pool.length ? pool : stick;
+      const fresh = relSnap(c.host).length;
+      if (c.mode !== "lat" && coldSite && fresh < 2 && stick.length > 1) {
+        // 只在前 3 名里轮换：实测「吞吐最快的两条中继」对 CF 托管站点恰好 0/4 与 2/4 全 403
+        // （出口地址族不同），在整池上轮换等于拿用户的请求去试坏机器；3 条足够量出容量差异。
+        const top = (nonCf.length ? nonCf : stick).slice(0, 3);
+        const list = top.length ? top : stick.slice(0, 3);
         const ip = list[this.rot++ % list.length] as string;
         return { chan: { kind: "r", ip }, why: "rel-rot" };
       }
