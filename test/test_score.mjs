@@ -1936,7 +1936,8 @@ ok("PageView 可构造", typeof W.PageView === "function", "PageView");
   ok("全通道 4xx → 只换出口，不写封禁", W.tfEscalate("site") === "rotate");
   ok("CF 托管站点全 403 → 判为出口族被封，改换一批出口（不写封禁）", W.tfEscalate("site") === "rotate");
   ok("混采仍走 chan，不会被误升级", W.tfEscalate("chan") === "none");
-  ok("ok / unknown 不做处置", W.tfEscalate("ok") === "none" && W.tfEscalate("unknown") === "none");
+  ok("只有 ok 不处置", W.tfEscalate("ok") === "none");
+  ok("unknown（RST/TCP 拒绝）也继续换出口，不卡死", W.tfEscalate("unknown") === "rotate");
 
   
   // 第 58 组：全 4xx 的细分 —— 近零字节是 IP 族拒绝，带内容体是业务拒绝

@@ -37,12 +37,18 @@ export async function runCron(env: Env, ctx: ExecutionContext): Promise<void> {
 /** 站点 → 上次 IP 级探测时间（每站点 10 分钟最多一次）。 */
 const TFB_AT: Map<string, number> = new Map();
 
+/** 站点 → 已轮换批次；30 分钟后重置，最多 3 批（≈6 条通道）。 */
+const TFB_N: Map<string, number> = new Map();
+
 /** 每轮最多挑一个「最近被怀疑」的站点做 2 条中继的实测（1 DO 请求 + 2 子请求）。 */
 async function tfbRound(env: Env): Promise<void> {
   const now = Date.now();
   for (const [host, until] of S.needPx) {
     if (until <= now) continue;
     if (now - (TFB_AT.get(host) || 0) < 600000) continue;
+    if (now - (TFB_AT.get(host) || 0) > 1800000) TFB_N.set(host, 0);
+    if ((TFB_N.get(host) || 0) >= 3) continue;
+    TFB_N.set(host, (TFB_N.get(host) || 0) + 1);
     TFB_AT.set(host, now);
     cnt("tfb");
     await runTfb({ env } as unknown as Parameters<typeof runTfb>[0], host, 2);

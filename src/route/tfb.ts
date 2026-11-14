@@ -28,7 +28,9 @@ export function tfVerdict(rows: Array<{ ok: boolean; status?: number; bytes?: nu
  * 改为「换一批出口继续探」（rotate）。业务 4xx（非 CF 目标）保持 none。
  */
 export function tfEscalate(verdict: string): "rotate" | "none" {
-  return verdict === "site" || verdict === "ipfam" ? "rotate" : "none";
+  // 行为只由「有没有通道拿到 2xx」决定：ok/chan 有定论，其余一律继续换出口采样。
+  // site / ipfam 只是诊断标签（body 特征不普适，不能拿来决定行为）。
+  return verdict === "ok" || verdict === "chan" ? "none" : "rotate";
 }
 
 /**
