@@ -137,6 +137,8 @@ export class Judge {
       else if (nip && e.down >= 20000) BLK.contra(e.host, nip);
     }
 
+    // 整页是出口族的硬证据，必须在下面「整页直接 return」之前提取，否则永远走不到那条分支。
+    if (e.via === "node" && e.node) egDerive(e.node.slice(0, e.node.lastIndexOf(":")), e.down, false, now);
     if (e.ok && e.down >= BIG) {
       cnt("trHit");
       S.bigByHost.set(e.host, now);
