@@ -2513,5 +2513,33 @@ console.log("\n81) 中继「连不上」（dead）：唯一允许挪到队尾的
   W.S.bigTyp.clear();
 }
 
+
+console.log("\n82) 冷启动口径：firstTry / firstPage / 灰带");
+{
+  W.FO.clear();
+  const s0 = W.FO.snap();
+  eq("没有样本时比率是 0", s0.firstTry, 0);
+  eq("没有样本时 n 是 0", s0.n, 0);
+  W.FO.note(0);
+  eq("零字节不算连上", W.FO.snap().firstTry, 0);
+  W.FO.note(737);
+  eq("封锁页（737B）算连通但不算整页", W.FO.snap().first, 1);
+  eq("737B 不在整页里", W.FO.snap().page, 0);
+  W.FO.note(4096);
+  eq("4096 刚好算整页", W.FO.snap().page, 1);
+  eq("三条到上限", W.FO.snap().n, 3);
+  eq("firstTry = 2/3", W.FO.snap().firstTry, 0.667);
+  eq("firstPage = 1/3", W.FO.snap().firstPage, 0.333);
+  W.FO.note(3000);
+  eq("超过上限只记 skip，不改比率", W.FO.snap().firstTry, 0.667);
+  eq("skip 计数了多余的一条", W.FO.snap().skip, 1);
+  W.FO.clear();
+  W.FO.note(2048);
+  eq("2048 落在灰带", W.FO.snap().gray, 1);
+  eq("灰带不算整页", W.FO.snap().page, 0);
+  eq("灰带算连通", W.FO.snap().first, 1);
+  W.FO.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

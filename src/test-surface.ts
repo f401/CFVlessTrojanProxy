@@ -111,6 +111,7 @@ export { RELPERF, REL_TTL, relCost, relCostFor, relCostMode, relNote, relSnap } 
 export { EG, EG_TTL, EgFacts } from "./route/egfacts";
 export { PS, psFactor, psNote, psPrior, psSnap } from "./route/psfacts";
 export { DEAD, DEAD_N, deadNote, isDead } from "./route/deadfacts";
+export { FO, FirstObs, FO_GRAY, FO_LIMIT, FO_PAGE } from "./core/firstobs";
 export { BLK_TTL, CONFIRM_GAP, DEAD_TTL, BIG_PEER, TINY_ABS, WRITE_GAP, commitFact, factKey, isTiny } from "./route/commitfact";
 export { FACT, FactShadow, shadowCtx, shadowObs } from "./route/factshadow";
 

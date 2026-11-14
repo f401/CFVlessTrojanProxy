@@ -8,6 +8,7 @@ import { json, forbidden } from "../edge/respond";
 import type { RouteCtx } from "../edge/types";
 import { PS } from "../route/psfacts";
 import { DEAD } from "../route/deadfacts";
+import { FO } from "../core/firstobs";
 
 /** /health：进程自述。带 pageKey 时要求 ?k= */
 export function health(c: RouteCtx): Response {
@@ -28,6 +29,7 @@ export function health(c: RouteCtx): Response {
 cf: FACT.snap(),
     ps: PS.snap(),
     dead: DEAD.snap(),
+    first: FO.snap(),
     edge: { seen: S.edge.size, ranked: edgeRank(8).length, err: EDGE_ERR.s },
     colo: (c.cf && c.cf.colo) || "",
     cnt: cntView(),
