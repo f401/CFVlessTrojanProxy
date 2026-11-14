@@ -46,7 +46,10 @@ export function tfClass(rows: Array<{ ok: boolean; status?: number; bytes?: numb
   const hasCode = rows.some((x) => Number(x.status || 0) > 0);
   if (!hasCode) return "unknown";
   if (base !== "site") return base;
-  const tiny = rows.every((x) => (x.status || 0) >= 400 && Number(x.bytes || 0) <= 32);
+  // 字节数未知（/meter/tf 没回 bytes 时全是 0）不能冒充 ipfam，只能叫 site
+  const sized = rows.every((x) => (x.status || 0) >= 400 && Number(x.bytes || 0) > 0);
+  if (!sized) return "site";
+  const tiny = rows.every((x) => Number(x.bytes || 0) <= 32);
   return tiny ? "ipfam" : "site";
 }
 

@@ -1983,5 +1983,21 @@ ok("PageView 可构造", typeof W.PageView === "function", "PageView");
     ok("ok 不触发换出口", escOnOk === 0);
     ok("没有任何 2xx 时一律继续换出口（不写封禁）", noEscOnFail === 0);
   }
-  console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
+  
+// ---- 第 62 组：tfClass 的标签诚实性（行为分支只看有没有 2xx，这里只校验标签） ----
+ok("tfClass 字节未知 → site（不冒充 ipfam）", W.tfClass([
+  { ok: false, status: 403, bytes: 0 },
+  { ok: false, status: 403 },
+  { ok: false, status: 403, bytes: 0 },
+]) === "site");
+eq("tfClass 微体 → ipfam", W.tfClass([
+  { ok: false, status: 403, bytes: 4 },
+  { ok: false, status: 403, bytes: 4 },
+]) , "ipfam");
+eq("tfClass 带内容体 → site", W.tfClass([
+  { ok: false, status: 403, bytes: 265 },
+  { ok: false, status: 403, bytes: 4 },
+]), "site");
+
+console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
