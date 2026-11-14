@@ -1,4 +1,5 @@
-import type { RouteCtx } from "../edge/types";
+﻿/** 只用到 env（DO 存根），不引 edge 层类型，避免 route -> edge 反向依赖。 */
+type RouteCtx = { env: Env };
 import { S } from "../core/state";
 import { withTimeout } from "../core/util";
 import { vSet, vSetState } from "./verdict";
@@ -19,6 +20,15 @@ export function tfVerdict(rows: Array<{ ok: boolean; status?: number }>): "ok" |
   const okN = rows.filter((x) => x.ok && x.status === 200).length;
   const badN = rows.filter((x) => (x.status || 0) >= 400).length;
   return okN > 0 && badN > 0 ? "chan" : okN > 0 ? "ok" : badN > 0 ? "site" : "unknown";
+}
+
+/**
+ * 「全通道 4xx」的处置：CF 托管站点上的全 403 往往不是站点级拒绝，
+ * 而是我们采样到的每条出口都落在被封的 IP 族里 —— 这时**不写封禁**，
+ * 改为「换一批出口继续探」（rotate）。业务 4xx（非 CF 目标）保持 none。
+ */
+export function tfEscalate(verdict: string): "rotate" | "none" {
+  return verdict === "site" ? "rotate" : "none";
 }
 
 export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): Promise<Response> {
@@ -48,5 +58,6 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
     if (verdict === "chan" && row.status === 403) vSetState(host, ip === "direct" ? "d" : "r:" + ip, 2, 1);
     else if (row.ok && row.status === 200) vSet(host, ip === "direct" ? "d" : "r:" + ip, 200, Number(row.ms || 0), 1);
   }
-  return Response.json({ host, probed: rows.length, okN, badN, verdict, rows });
+  const escalate = tfEscalate(verdict);
+  return Response.json({ host, probed: rows.length, okN, badN, verdict, escalate, rows });
 }

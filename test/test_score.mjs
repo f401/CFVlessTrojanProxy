@@ -1931,5 +1931,12 @@ ok("PageView 可构造", typeof W.PageView === "function", "PageView");
   ok("200 与 403 并存 → chan（这才是 IP 级证据）", W.tfVerdict([{ ok: true, status: 200 }, { ok: false, status: 403 }]) === "chan");
   ok("全失败 → unknown", W.tfVerdict([{ ok: false }, { ok: false }]) === "unknown");
 
+  
+  // 第 57 组：全通道 4xx 的处置 —— 业务 4xx 绝不写封禁
+  ok("全通道 4xx → 只换出口，不写封禁", W.tfEscalate("site") === "rotate");
+  ok("CF 托管站点全 403 → 判为出口族被封，改换一批出口（不写封禁）", W.tfEscalate("site") === "rotate");
+  ok("混采仍走 chan，不会被误升级", W.tfEscalate("chan") === "none");
+  ok("ok / unknown 不做处置", W.tfEscalate("ok") === "none" && W.tfEscalate("unknown") === "none");
+
   console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
