@@ -64,30 +64,39 @@ export class Dialer {
     if (cfHost) refreshCfHttp(host, st.ctx);
     // 判定层要知道目标是 CF 托管：直连被自家边缘拒时一次即判，所以放在分支外
     st.cf = cfHost;
+    // 客户端出口地址族：v6 客户端打 CF 托管目标必被 4 字节 `IPv6` 页拒（F6），
+    // 而 v4 客户端直连往往就是好的——同时段对照实测「直连 6/8、中继 5/8」，
+    // 中继那一跳只多加两段 RTT（TTFB +0.4~1.3s），并不提升命中率。
+    const clientV6 = (request.headers.get("cf-connecting-ip") || "").includes(":");
     const wantPx =
       pxForce > 0 ||
-      (pxForce === 0 && !!env.proxyip && (learned || onList || relWin || (cfHost && !dirWin && httpCode !== 200)));
+      (pxForce === 0 && !!env.proxyip && (learned || onList || relWin || (cfHost && clientV6 && !dirWin && httpCode !== 200)));
 
     if (pxDecision(request, host, cfHost, wantPx, SC.POLICY, mode)) {
-      // ?rx= 钉住中继（只给诊断脚本用）：跳过选择器直接用它，用来给每条中继量吞吐
-      const p = parseProxyIp(st.rx || (await SEL.current(env, mode, st, host, cfHost)));
-      if (p && !checkTarget(p.host, p.port)) {
+      // ?rx= 钉住中继（只给诊断脚本用）：跳过选择器直接用它，用来给每条中继量吞吐。
+      // 最多试两条：公共中继里有一类是「TCP 能连、但一直不回字节」或「回自己的证书」，
+      // 单次尝试失败就退回直连，而 CF 托管目标直连大概率 4 字节 403 —— 等于白丢这次请求。
+      for (let tries = 0; tries < 2 && !sock; tries++) {
+        const p = parseProxyIp(st.rx || (await SEL.current(env, mode, st, host, cfHost)));
+        if (!p || checkTarget(p.host, p.port)) break;
         const key = p.host + ":" + p.port;
         // 池子里的「优选 IP」本身就是 CF 边缘：拿它中转到 CF 托管目标，等于从同一边缘再撞一次。
         if (cfHost && isCfIp(p.host)) {
           logErr(`skip cf-edge relay ${p.host}`, host);
-        } else {
-          try {
-            sock = await connect({ hostname: p.host, port: p.port });
-            st.node = key;
-            st.via = "node";
-            st.retried = true;
-            st.pxTries = 1;
-            cnt("pxf");
-            logErr(`forced proxyip ${p.host}`, host);
-          } catch {
-            nsFail(key); // 中转本身连不上：冷却它，回落到直连（宁可慢也别整站不可用）
-          }
+          continue;
+        }
+        try {
+          // 拨号必须有上限：connect() 自己没有超时，挂死的中继会把整个请求拖到客户端放弃为止。
+          sock = await withTimeout(Promise.resolve(connect({ hostname: p.host, port: p.port })), 2500);
+          st.node = key;
+          st.via = "node";
+          st.retried = true;
+          st.pxTries = tries + 1;
+          cnt("pxf");
+          break;
+        } catch {
+          sock = null;
+          nsFail(key); // 中转本身连不上：冷却它，下一条换个候选试
         }
       }
     }
