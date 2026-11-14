@@ -173,6 +173,14 @@ export interface PoolRefill {
 const SRC_BAD = new Map<string, { n: number; until: number }>();
 
 /** 允许 env.poolSrc 覆盖源列表（逗号或空白分隔），默认用内置表 */
+/** 把数组切成每段不超过 n 个：用于「同时打开的连接数」受限的场景。 */
+export function chunks<T>(arr: T[], n: number): T[][] {
+  const lim = Math.max(1, Math.floor(n) || 1);
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += lim) out.push(arr.slice(i, i + lim));
+  return out;
+}
+
 export function poolSources(env: Env): string[] {
   const custom = String(env.poolSrc || "").trim();
   if (!custom) return POOL_SOURCES;

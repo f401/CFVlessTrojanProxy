@@ -1,4 +1,4 @@
-﻿// 测试专用出口：只在 dist/_test.js 里存在，生产包不含此文件
+// 测试专用出口：只在 dist/_test.js 里存在，生产包不含此文件
 export { sha224Bytes, toHex, VERSION, shadowRate, eachLimit, withTimeout } from "./core/util";
 export { detectProtocol, parseVLESS, parseTrojan, loadUsers } from "./proxy/protocol";
 export { checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
@@ -76,7 +76,7 @@ export {
   errCount,
   errHist,
 } from "./nodes/metrics";
-export { tlsHello, refillPool, srcNote, srcRank, srcHealth, poolSources, POOL_SOURCES } from "./px/probe";
+export { tlsHello, refillPool, chunks, srcNote, srcRank, srcHealth, poolSources, POOL_SOURCES } from "./px/probe";
 export { regionListAsync } from "./px/regions";
 export { clSnapshot, nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats } from "./store/index";
 export { runCron } from "./routes/cron";

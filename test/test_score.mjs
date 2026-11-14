@@ -1,4 +1,4 @@
-﻿import * as W from "./_bundle.mjs";
+import * as W from "./_bundle.mjs";
 import { webcrypto } from "node:crypto";
 
 // Node 18 没有全局 crypto（Workers 有），补一个给 tlsHello() 用
@@ -2083,5 +2083,18 @@ console.log("\n67) 探测全关时的预算");
   ok("准入拿到 48 上限附近", big.adm >= 44 && big.adm <= big.cap, String(big.adm));
 }
 
+// 68) 探活并发上限
+console.log("\n68) 探活分段");
+{
+  ok("并发上限是 6", W.SC.PROBE_CONC === 6, String(W.SC.PROBE_CONC));
+  const c1 = W.chunks([...Array(13).keys()], W.SC.PROBE_CONC);
+  eq("13 个切成 3 段", String(c1.length), "3");
+  eq("段大小 6/6/1", c1.map((x) => x.length).join(","), "6,6,1");
+  const total = c1.reduce((a, x) => a + x.length, 0);
+  eq("切完不丢不多", String(total), "13");
+  ok("每段都不超上限", c1.every((x) => x.length <= W.SC.PROBE_CONC), String(Math.max(...c1.map((x) => x.length))));
+  eq("空数组不产生段", String(W.chunks([], 6).length), "0");
+  eq("非法 n 退化成 1", String(W.chunks([1, 2, 3], 0).map((x) => x.length).join(",")), "1,1,1");
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

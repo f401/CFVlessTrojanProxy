@@ -4,7 +4,7 @@ import { SEED_WRITE_GAP } from "../core/const";
 import { SC } from "../core/const";
 import { HOOK } from "../core/hook";
 import { logErr } from "../nodes/metrics";
-import { POOL_MAX, POOL_TTL_MS, geoLabel, probeProxy, probeSni, refillPool } from "./probe";
+import { POOL_MAX, POOL_TTL_MS, chunks, geoLabel, probeProxy, probeSni, refillPool } from "./probe";
 import { candsFor, capOf, invalidateRank, scoreParts, nsLatency, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, isBlack, isFrozen } from "../nodes/score";
 import { BUCKET_DEF, SEEDS } from "./seed";
 import { PX_TTL, MODES, keyOf } from "./const";
@@ -268,8 +268,7 @@ export async function cronScan(env: Env, adm = 0) {
   const batch = src.slice(idx, idx + scanN);
   const hits = [];
   S.probeColo = S.colo || "cron";
-  for (let i = 0; i < batch.length; i += 10) {
-    const seg = batch.slice(i, i + 10);
+  for (const seg of chunks(batch, SC.PROBE_CONC)) {
     const part = await Promise.all(seg.map((c) => probeProxy(c.h, c.p)));
     for (let j = 0; j < seg.length; j++) {
       const x = part[j];
@@ -354,9 +353,9 @@ export async function cronScan(env: Env, adm = 0) {
   const allRest = [...S.alive.keys()].filter((k) => !recheck.includes(k));
   const start = allRest.length ? S.poolIdx % allRest.length : 0;
   const rest = [...allRest.slice(start), ...allRest.slice(0, start)].slice(0, 12);
-  if (rest.length) {
+  for (const seg of chunks(rest, SC.PROBE_CONC)) {
     const rres2 = await Promise.all(
-      rest.map(async (k) => {
+      seg.map(async (k) => {
         const i = k.lastIndexOf(":");
         return { k, r: await probeProxy(k.slice(0, i), Number(k.slice(i + 1)) || 443) };
       }),

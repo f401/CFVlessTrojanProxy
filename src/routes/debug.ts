@@ -127,7 +127,7 @@ export async function debug(c: UserCtx): Promise<Response> {
     let probe: Array<{ node: string; cc: string } & SniProbe> | null = null;
     if (url.searchParams.get("probe") === "1") {
       probe = await Promise.all(
-        alive.slice(0, 8).map(async (a) => {
+        alive.slice(0, 6).map(async (a) => {
           // 第 4 个参数是探测超时（ms），不是目标端口；以前把 port 传进去，
           // 默认 443 会把超时压到 443ms，正常的慢站全被判死。
           const r = await probeSni(a.h, a.p, diagHost);

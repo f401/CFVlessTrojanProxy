@@ -1,1 +1,1 @@
-diag(debug): ?tlsnow= 同时跑 subtls 与 tunnelfetch，用于核对两套 TLS 栈结论是否一致
+fix(px): 探活并发按免费计划的 6 连接上限切段，避免被拒的节点被记成坏节点
