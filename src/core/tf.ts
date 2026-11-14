@@ -1,4 +1,4 @@
-import { connect } from "cloudflare:sockets";
+﻿import { connect } from "cloudflare:sockets";
 import { Client } from "tunnelfetch";
 
 /** tunnelfetch 探测（实验）：userland TLS 1.3，可把 TCP 落到中继上。
@@ -13,7 +13,7 @@ export async function probeTf(host: string, relay = "", path = "/"): Promise<Rec
     : (o: { hostname: string; port: number }) => connect(o);
   const opts = {
     connect: dial,
-    trust: { mode: "none", insecureAcceptAnyCertificate: true },
+
   } as unknown as ConstructorParameters<typeof Client>[0];
   const c = new Client(opts);
   try {
