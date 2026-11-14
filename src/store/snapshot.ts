@@ -94,10 +94,13 @@ export async function usageSnapWrite(env: Env, users?: UserRec[]) {
  */
 export async function restoreUsage(env: Env, id: string, snap?: UsageSnap) {
   if (!env || !env.METER) return null;
+  // 允许调用方把已读到的快照传进来，避免同一请求里二次读 KV
   const s = snap || (await usageSnapGet(env));
   const u = s && s.users && s.users[id];
   if (!u) return null;
   try {
+    // 把历史用量推回 DO：DO 可能被回收过，内存计数已经丢了；
+    // 推失败就返回 null（调用方按「无记录」处理），绝不能编造用量
     const stub = env.METER.get(env.METER.idFromName(id));
     const r = await stub.fetch("https://meter/set", { method: "POST", body: JSON.stringify(u) });
     if (!r.ok) return null;

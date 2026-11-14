@@ -200,6 +200,7 @@ export class Selector {
 
   /** 兜底：冷却期里挑最不坏的（先比恢复时间，再比代价） */
   private leastBad(mode: Mode): string {
+    // 冷却期兜底：先比谁最早恢复（until 小者优先），再比代价；两个都取不到就回空串
     let best = "",
       bk = Infinity,
       bs = Infinity;

@@ -39,6 +39,8 @@ export async function nodeSnapGet(env: Env, id: string): Promise<Record<string, 
  */
 export function statBump(id: string, up: number, down: number, isNewConn?: boolean) {
   if (!id) return;
+  // 先记账本：本地 S.stats 只是面板用的即时视图，真正计费在 DO 侧，
+  // 顺序反了会出现「面板有量、账单没有」
   pendAdd(id, up, down, isNewConn); // 全局帐本（DO）
   let s = S.stats.get(id);
   if (!s) {
@@ -47,6 +49,7 @@ export function statBump(id: string, up: number, down: number, isNewConn?: boole
   }
   s.up += up || 0;
   s.down += down || 0;
+  // snapBytes 是「自上次快照以来」的增量，落盘后清零，用来判断何时该写快照
   S.snapBytes += (up || 0) + (down || 0);
   if (isNewConn) s.conns += 1;
   s.last = Date.now();

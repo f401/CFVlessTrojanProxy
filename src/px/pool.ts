@@ -35,13 +35,17 @@ const ALIVE_MAX = 800; // 长期运行 alive 上限：池子换代不会永久�
 
 /** 候选项池：内存 → KV(poolGen) → 空；空时由 cronScan 触发重建 */
 export async function ensurePool(env: Env) {
+  // 内存空 → 读种子表拿当前代际号，再按代际键取池子；
+  // 代际号是两阶段提交的锚点，读一个键比扫 px:pool:* 前缀便宜得多
   if (S.pool.length) return S.pool;
   await SEEDS.read(env);
   const gen = S.seed.poolGen || 0;
+  // 没有代际号说明从没成功提交过池子：返回空，交给 cronScan 去拉源重建
   if (!gen) return [];
   try {
     const v = await kvGet<PoolEntry[]>(env, "px:pool:" + gen);
     if (Array.isArray(v) && v.length) {
+      // 截断到当前上限：KV 里的池子可能比配置的 POOL_MAX 大（上限被调小过）
       S.pool = v.slice(0, POOL_MAX);
       S.poolGen = gen;
       invalidateRank();

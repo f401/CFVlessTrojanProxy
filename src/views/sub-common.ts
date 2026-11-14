@@ -241,9 +241,11 @@ export function nodePath(n: RankedNode) {
  */
 export function regionEntries(regions: string[], host: string, pass: string, protos: string[], url?: URL): RegionEntry[] {
   const out: RegionEntry[] = [];
+  // 监听端口按订阅自身的 URL 推断（https=443 / http=80，显式端口优先）：客户端连的就是这个入口
   const listen = Number(url && url.port) || (url && url.protocol === "http:" ? 80 : 443);
   for (const cc of regions) {
     for (const proto of protos) {
+      // Trojan 必须有密码，没配就跳过这条协议，别发一条注定连不上的条目
       if (proto === "trojan" && !pass) continue;
       out.push({
         cc,
@@ -251,6 +253,7 @@ export function regionEntries(regions: string[], host: string, pass: string, pro
         name: `${proto}-region-${cc}`,
         server: host,
         port: listen,
+        // rg 让服务端把这条连接归到指定地区；ip=region-xx 只用于日志区分，不参与选路
         path: `/?ed=2560&ip=region-${cc}&rg=${cc.toLowerCase()}`,
       });
     }

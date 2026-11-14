@@ -64,6 +64,8 @@ export class NodeStatsTable {
  */
   nsGet(k: string): NodeStats {
   let s: NodeStats | undefined = S.nstat.get(k);
+  // 懒初始化：节点第一次被记样本时才建对象。字段分四组——可用性、探活样本、真实流量、
+  // 字节直方图（hist 是 32 档对数刻度，pcts 在上面插值）
   if (!s) {
     s = {
       ok: 0, fail: 0, at: 0, msLocal: 0,
@@ -77,6 +79,7 @@ export class NodeStatsTable {
       counted: 0,
       winAt: 0, winOk: 0, winFail: 0,
     };
+    // 只在这里 set：别处一律拿引用改字段——换对象会让正在跑的连接持有的旧引用失效
     S.nstat.set(k, s);
   }
   return s;

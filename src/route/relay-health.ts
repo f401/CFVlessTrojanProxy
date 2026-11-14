@@ -162,6 +162,7 @@ export class RelayHealth {
    * 只靠第一遍时 drop() 一个都删不掉，Map 会无限长下去。
    */
   private drop(): void {
+    // 按最近使用时间升序排，先丢最老的；列表只算一次，两遍删除共用
     const rows = [...this.m.entries()].sort((a, b) => a[1].at - b[1].at);
     for (const [k, s] of rows) {
       if (s.dead > 0) continue;
@@ -169,6 +170,7 @@ export class RelayHealth {
       this.sent.delete(k);
       if (this.m.size <= MAX_IP) return;
     }
+    // 第二遍硬兜底：不跳过 dead，从最老开始删到容量以内
     for (const [k] of rows) {
       this.m.delete(k);
       this.sent.delete(k);

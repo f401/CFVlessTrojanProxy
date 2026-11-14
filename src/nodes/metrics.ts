@@ -27,15 +27,18 @@ function trimRtt(bucket: Record<string, RttEntry>) {
  */
 export function rttMark(id: string | null, tag: string | null, ok: boolean) {
   if (!id || !tag) return;
+  // 每个用户一张「入口标签 → 计数」小表，第一次见到这个用户才建
   let bucket = S.rtt.get(id);
   if (!bucket) {
     bucket = Object.create(null) as Record<string, RttEntry>; // 防 ?ip=__proto__ 污染原型
     S.rtt.set(id, bucket);
   }
+  // 新标签建空记录；ts 供 trimRtt 按时间淘汰，ok/fail 是这台入口的成败计数
   const e = bucket[tag] || { rtt: 0, colo: "", bw: 0, hits: 0, ok: 0, fail: 0, ts: Date.now() };
   if (ok) e.ok = (e.ok || 0) + 1;
   else e.fail = (e.fail || 0) + 1;
   e.ts = Date.now();
+  // 单用户标签数有上限：?ip= 是用户可传的，不裁剪会被灌爆内存
   bucket[tag] = e;
   trimRtt(bucket);
 }

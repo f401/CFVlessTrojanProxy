@@ -45,12 +45,15 @@ export const PX_LINE = /^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?(?:[#,:]|\s|$)/
 export function takePoolLine(line: string, src: string, seen: Map<string, PoolEntry>) {
   const m = PX_LINE.exec(line.trim());
   if (!m) return false;
+  // 源里的行三种写法：ip、ip:port、ip:port#国家码；端口缺省 443，越界也回 443（源数据脏是常态）
   const ip = m[1];
   let port = m[2] ? Number(m[2]) : 443;
   if (!(port >= 1 && port <= 65535)) port = 443;
   if (checkTarget(ip, port)) return false;
+  // 只接受 IPv4 字面量：域名会带来 DNS 依赖，而候选池要的是能直接 connect 的地址
   const oct = ip.split(".").map(Number);
   if (oct.some((x) => !(x >= 0 && x <= 255))) return false;
+  // 去重键是 ip:port——同一 IP 不同端口是两条不同的出口，不能合并
   const key = ip + ":" + port;
   if (seen.size >= POOL_MAX) return false; // 上游源可能大到离谱，硬上限防内存/ KV 值爆掉
   if (!seen.has(key)) seen.set(key, { h: ip, p: port, src });

@@ -96,6 +96,8 @@ export class VerifyQueue {
   private pickRef(host: string, skip: string): string {
     let okOne = "";
     let freeOne = "";
+    // 优先找同站点「有成功记录」的中继当参照（state=1）；没有就退回一条既非 blocked 也非 dead 的——
+    // 它不证明站点可达，只证明「请求能出去」，够用来做差分
     for (const [k] of S.alive) {
       const ip = k.slice(0, k.lastIndexOf(":"));
       const ck = "r:" + ip;
@@ -107,6 +109,7 @@ export class VerifyQueue {
       }
       if (st !== 2 && st !== 3 && !freeOne) freeOne = ip;
     }
+    // 一个参照都没有时返回空串：judge 会当成「无法差分」，这一轮不写任何封禁
     return okOne || freeOne;
   }
 

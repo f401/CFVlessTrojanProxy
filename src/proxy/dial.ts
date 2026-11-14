@@ -189,23 +189,6 @@ export async function dial(host: string, port: number) {
   return await connect({ hostname: nat64FromV4(v4), port });
 }
 
-/**
- * 只走 IPv4 的直连：先用 DoH 取 A 记录，再连 IPv4 字面量。
- *
- * 为什么需要：`connect({ hostname })` 走 A 还是 AAAA 由运行时决定，落点不可控；
- * 而部分站点（X / Twitter 这类）会直接拒绝 IPv6 出口（响应 403，body 就是 "IPv6"）。
- * 先解析 A 记录再连字面量，等于把出口钉死在 IPv4 上。
- * @param {string} host 目标主机
- * @param {number} port 目标端口
- * @returns {Promise<Socket|null>} 连不上时返回 null，由调用方决定回落
- */
-/**
- * 这个目标是否托管在 Cloudflare 上（或本身就是 CF 的 IP）。
- * CF 托管的站点从 Worker 直连会撞自家边缘，属于「一开始就该走中转」的通用判据，
- * 比写死域名名单可靠：任何接进 CF 的新站都自动被覆盖。
- * @param {string} host 目标域名/IP
- * @returns {Promise<boolean>} 命中 CF 网段返回 true
- */
 /** 用一次 HTTP 请求判定「本 isolate 的出口」访问该站点会被怎么对待。
  *  返回 {code, colo}：code 0 表示连 HTTP 都没拿到（当作未知）。
  *  只在 CF 托管目标上用：这些站点会把我们的出口 IP 透传给源站，403 就是被按 IP 拒。 */
@@ -219,8 +202,10 @@ export async function httpProbe(host: string, ms = 2500): Promise<{ code: number
       }),
       ms,
     );
+    // cf-ray 尾部是机房码（HKG 之类），只作诊断；403 表示本出口被该站按 IP 拒了
     const ray = (r.headers.get("cf-ray") || "").split("-").pop() || "";
     return { code: r.status, colo: ray };
+  // 连不上 / DNS 失败一律返回 0：调用方把 0 当「未知」，不会据此封任何通道
   } catch (e) {
     return { code: 0, colo: "" };
   }
