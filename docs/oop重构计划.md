@@ -119,3 +119,12 @@
 
 验收：tsc 0 error；`check-arch` **79 文件**；bundle 333.7/336.8 KB；test_v3 186 / smoke 30 / test_score **401** / sim_v3 22 / golden 8；
 线上 7.06：`x.com` 200（MXP）、`api.x.com` 403（业务透传）、`www.google.com` 200。
+## P5-3（7.07）：DNS/UDP 处理独立成模块（session.ts 463 → 356 行）
+
+| 项 | 改法 | 位置 |
+| --- | --- | --- |
+| dns.ts | `trojanUdpFrame` + `handleDns`（DoH 转发、Trojan/VLESS 两种分帧、32 查询上限、下行计入 `st.down`）整段搬到独立模块并导出 | `src/proxy/dns.ts`（新） |
+| session 瘦身 | 删掉末段 109 行，改为 `import { handleDns } from "./dns"`；`test-surface` 的 `handleDns`/`trojanUdpFrame` 改由 dns 导出（`handleUpgrade` 仍从 session 导出） | `src/proxy/session.ts` |
+| 回归 | test_v3 的 UDP/DNS 用例全过（186），smoke 30 / sim 22 / test_score 401 / golden 8 | 同上 |
+
+验收：tsc 0 error；`check-arch` **80 文件**；bundle 333.7/336.8 KB；线上 7.07：`x.com` 200（MXP）、`api.x.com` 404（业务响应透传）、`/health` 7.07。

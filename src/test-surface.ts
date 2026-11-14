@@ -81,7 +81,6 @@ export { renderAdmin } from "./views/panel";
 export { adminAuthed, sessionToken } from "./edge/auth";
 export { html, CSP_STATIC } from "./edge/respond";
 export { wsToStream } from "./proxy/ws-in";
-export { handleDns, handleUpgrade } from "./proxy/session";
 export { pickHosts, SWEEP_COST } from "./route/round";
 export { vSet, vSetState, vState, vOk, vBad, vDead, vAll, vClear, vImport } from "./route/verdict";
 export { recordProbe, recordTraffic, recordClient } from "./route/observe";
@@ -98,3 +97,6 @@ export { JUDGE, Judge } from "./route/judge";
 export { POLICY, Policy } from "./route/policy";
 export { judge, queueVerify, runVerify, verifyInfo, queueLen } from "./route/verify";
 export { recordBlock, recordPass } from "./route/observe";
+
+export { handleDns, trojanUdpFrame } from "./proxy/dns";
+export { handleUpgrade } from "./proxy/session";
