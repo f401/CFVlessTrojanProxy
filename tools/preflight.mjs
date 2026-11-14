@@ -22,6 +22,7 @@ const steps = [
   ["混淆-预处理", ["obf/pre.js"]],
   ["混淆-主体", ["obf/obf_mid.js"]],
   ["混淆自检", ["tools/check-obf.js", "_worker_v3.mid.js"]],
+  ["接线扫描", ["tools/check-wire.mjs"]],
   ["v8 链路验收", ["tools/exp-v8chain.mjs"]],
   ["本地路由模拟", ["tools/simrun.mjs"]],
 ];

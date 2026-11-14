@@ -8,6 +8,8 @@ import { planRound } from "../route/budget";
 import { runRound } from "../route/round";
 import { edgeScan } from "../route/edge";
 import { runTfb } from "../route/tfb";
+import { EG, probeEg } from "../route/egfacts";
+import { aliveList } from "../px/pool";
 import { SEL } from "../px/selector";
 import { flushSnap, pendFlush, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
 import { loadUsers } from "../proxy/protocol";
@@ -65,6 +67,28 @@ async function tfbRound(env: Env): Promise<void> {
   }
 }
 
+
+/**
+ * 功能：出口族探测 —— 每轮最多 2 条中继，把「这条中继走 v4 还是 v6」写进 `eg` 事实。
+ * 为什么必须单独探：`eg` 是 v8 里唯一能把首请求成功率从 40% 抬到 90%+ 的事实，而它只能靠
+ * 回显服务回答（`icanhazip.com` 回一个 IP 字面量）。只探还没测过的中继，避免重复烧 connect 名额。
+ * @returns {Promise<void>}
+ */
+async function egRound(env: Env): Promise<void> {
+  try {
+    const list = await aliveList(env);
+    // aliveList 返回的是条目；eg 的键是出口 IP 字面量，取 h
+    const todo = list
+      .map((x) => String(x.h || ""))
+      .filter((ip) => ip && !EG.famOf(ip, Date.now()))
+      .slice(0, 2);
+    if (!todo.length) return;
+    cnt("egProbe", todo.length);
+    await probeEg(todo, 2);
+  } catch {
+    /* 探测失败不影响 cron 其它环节 */
+  }
+}
 /**
  * 功能：cron 主流程：算预算 → 准入复测 → 站点探测 → 入口扫描 → 快照。
  * @param env 环境变量
@@ -78,6 +102,7 @@ async function cronOnce(env: Env): Promise<void> {
     await runRound(plan);
     await edgeScan(env, plan.edge);
     await tfbRound(env);
+    await egRound(env);
     SEL.afterScan(env);
   } catch (e) {
     logErr(`cron: ${errMsg(e)}`);
