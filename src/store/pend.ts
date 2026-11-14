@@ -65,6 +65,8 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
   const cd = hasPrimary ? cntDelta() : {};
   const today = new Date().toISOString().slice(0, 10);
   let attached = false;
+  let carried = false; // 这一批是否挂了 vt/hl/cl 增量
+  let carriedCl = false;
   await eachLimit(batch, 8, async ([id, d]) => {
     const mine = !primary || String(id).toLowerCase() === primary;
     try {
@@ -82,16 +84,20 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
           if (hl.length) body.hl = hl;
         }
         const cl = clSnapshot(40);
-        if (cl.length) {
-          body.cl = cl; // 连接观测（按节点聚合）：同理，离线可标定
-          S.cagg.clear();
-        }
+        if (cl.length) body.cl = cl; // 连接观测（按节点聚合）：同理，离线可标定
+        // 三样增量都只是「登记进请求体」，真正的提交要等 DO 回 200：
+        // 这里以前顺手 S.cagg.clear()，一旦 POST 失败这 40 条观测就永久蒸发。
+        carried = true;
+        carriedCl = cl.length > 0;
       }
       const r = await stub.fetch("https://meter/add", {
         method: "POST",
         body: JSON.stringify(body),
       });
       if (!r.ok) throw new Error("do " + r.status);
+      // 确认送达：判定/中继增量正式生效，连接观测这时才清
+      if (carried && HOOK.syncAck) HOOK.syncAck();
+      if (carriedCl) S.cagg.clear();
       S.doCalls += 1;
       S.meterCache.delete(id); // 刚推过增量，缓存立即失效，避免读数倒退
     } catch (e) {
@@ -100,6 +106,7 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
       S.pend.set(id, { up: cur.up + d.up, down: cur.down + d.down, conns: cur.conns + d.conns });
       S.pendBytes += (d.up || 0) + (d.down || 0); // 回滚失败批次：健康页与立即刷新的判断要准
       if (mine) cntUnsend(cd); // 日计数搭车主批次失败 → 基线退回，下轮重发
+      if (carried && HOOK.syncNack) HOOK.syncNack(); // 判定/中继增量退回，下轮重发
     }
   });
   // 自适应退避：失败了就把间隔翻倍（最多 60s），成功了慢慢降回 30s

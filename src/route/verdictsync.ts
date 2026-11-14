@@ -15,13 +15,21 @@ export interface VtRow {
 export function vtDelta(): VtRow[] {
   const out: VtRow[] = [];
   const now = Date.now();
+  // 上次交出去、还没 ack 的强证据：原样再带上（DO 可能没收到）
+  for (const [k, t] of S.vtPend) {
+    const bar = k.indexOf("|");
+    if (bar <= 0 || t <= now) continue;
+    out.push({ k, s: 2, t });
+  }
   for (const v of vAll()) {
     if (v.state < 2) continue;
     const k = v.t + "|" + v.c;
     const exp = v.at + 1800000;
     if (exp <= now) continue;
     if ((S.vtSent.get(k) || 0) >= exp) continue;
-    S.vtSent.set(k, exp);
+    if ((S.vtPend.get(k) || 0) >= exp) continue;
+    // 只登记 pending：DO 没收到时由调用方 nack，下轮还能再发一次
+    S.vtPend.set(k, exp);
     out.push({ k, s: v.state, t: exp });
     if (out.length >= 60) break;
   }
@@ -29,6 +37,17 @@ export function vtDelta(): VtRow[] {
   return out;
 }
 
+
+/** 上报成功：pending 正式生效 */
+export function vtAck(): void {
+  for (const [k, exp] of S.vtPend) S.vtSent.set(k, exp);
+  S.vtPend.clear();
+}
+
+/** 上报失败：丢掉 pending，下一轮重新登记 */
+export function vtNack(): void {
+  S.vtPend.clear();
+}
 /** 冷启动拉一次远端强证据（失败静默：判定表本来就是「本 isolate 先信自己」） */
 export async function vtLoad(env: Env): Promise<void> {
   if (S.vtLoaded) return;

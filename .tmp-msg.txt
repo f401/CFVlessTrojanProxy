@@ -1,1 +1,1 @@
-fix(relay): 全是死中继时健康表也能被裁剪，键改用 ipOf 解析
+fix(sync): 增量上报改成 ack/nack 语义，POST 失败不再丢判定证据与连接观测

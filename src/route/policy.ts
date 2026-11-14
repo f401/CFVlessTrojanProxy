@@ -7,7 +7,7 @@ import { Chan, DIRECT } from "./channel";
 import { DecisionIn, DecisionOut, HOOK, TrafficEvt } from "../core/hook";
 import { vAll, vAt, vBad, vClearHost, vOk, vSet, vSetState } from "./verdict";
 import { cfHttpCode } from "../proxy/cfverdict";
-import { vtDelta, vtLoad } from "./verdictsync";
+import { vtAck, vtDelta, vtLoad, vtNack } from "./verdictsync";
 import { chanPref } from "./prefs";
 import { runVerify } from "./verify";
 import { HEALTH, ipOf } from "./relay-health";
@@ -135,6 +135,16 @@ export class Policy {
     // 「有非 CF 出口就优先用它」：CF→CF 会把客户端 IP 原样透传，封禁策略照旧命中
     HOOK.nonCfFirst = (): boolean => true;
     HOOK.healthDelta = (): Array<{ i: string; o: number; b: number; d: number }> => HEALTH.delta();
+
+// 上报成功才让增量生效；失败则退回，下一轮重新发（否则一次 1102 就永久少一段证据）
+HOOK.syncAck = (): void => {
+  HEALTH.ack();
+  vtAck();
+};
+HOOK.syncNack = (): void => {
+  HEALTH.nack();
+  vtNack();
+};
     HOOK.verify = (): Promise<number> => runVerify();
     HOOK.veto = (host: string, ip: string): boolean => {
       if (!ip) return false;

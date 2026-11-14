@@ -85,6 +85,7 @@ export class AppState {
     "noAuth",
     "wsFail",
     "vtSeen",
+    "vtPend",
     "vtSent",
     "vtDO",
     "trHit",
@@ -108,6 +109,8 @@ export class AppState {
   seedReadFail = false;
   pool: PoolEntry[] = [];
   /** 已上报到 DO 的判定（键 `target|chan`，值 = 到期时间） */
+  /** 已交给上报、等待 ack 的强证据（k → 到期时间） */
+  vtPend: Map<string, number> = new Map();
   vtSent: Map<string, number> = new Map();
   vtLoaded = false;
   scanN = 12;

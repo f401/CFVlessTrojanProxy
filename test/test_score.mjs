@@ -1668,7 +1668,8 @@ const dl = W.HOOK.vtDelta();
 eq("强证据进增量", dl.length, 1);
 eq("增量键是 target|chan", dl[0].k, "x.com|r:45.136.117.194");
 eq("增量里是 blocked", dl[0].s, 2);
-eq("同一证据不重复上报", W.HOOK.vtDelta().length, 0);
+W.vtAck();
+eq("ack 之后同一证据不重复上报", W.HOOK.vtDelta().length, 0);
 W.vClear();
 eq("清空后本地为空", W.vAll().length, 0);
 W.vImport(dl);
@@ -1854,7 +1855,8 @@ W.HEALTH.note("1.1.1.1:443", 30000, true);
 const hd1 = W.HEALTH.delta();
 eq("delta 首次带上未上报的行", hd1.length, 1);
 eq("delta 行里是 IP 与整页计数", hd1[0].i + ":" + hd1[0].o, "1.1.1.1:1");
-eq("没有新证据时 delta 为空（不重复上报）", W.HEALTH.delta().length, 0);
+W.HEALTH.ack();
+eq("ack 之后没有新证据时 delta 为空", W.HEALTH.delta().length, 0);
 W.HEALTH.merge([{ i: "2.2.2.2", o: 0, b: 0, d: 3 }]);
 ok("merge 进来的零字节中继被算成快死", W.HEALTH.score("2.2.2.2") < 0.3, W.HEALTH.score("2.2.2.2"));
 eq("merge 的行不再重复上报", W.HEALTH.delta().filter((x) => x.i === "2.2.2.2").length, 0);
@@ -2110,6 +2112,39 @@ console.log("\n69) 中继健康表");
   eq("裸 IP 也按原样记键", h3.json(3)[0].ip, "1.2.3.4");
   h3.note("2606:4700::1:443", 30000, true);
   eq("IPv6:port 切出裸地址", h3.json(3).map((r) => r.ip).join(",").includes("2606:4700::1"), true);
+}
+
+// 70) 增量上报的 ack/nack 语义
+console.log("\n70) 增量上报");
+{
+  const h = new W.RelayHealth();
+  h.note(`10.9.9.9:443`, 30000, true);
+  const a1 = h.delta();
+  eq("第一次 delta 带 1 行", String(a1.length), "1");
+  const a2 = h.delta();
+  eq("没 ack 就再问一次，仍是那 1 行（不再丢）", String(a2.length), "1");
+  eq("两次内容一致", JSON.stringify(a2[0]), JSON.stringify(a1[0]));
+  h.ack();
+  eq("ack 之后没有增量", String(h.delta().length), "0");
+  h.note(`10.9.9.9:443`, 0, false);
+  eq("新证据重新产生增量", String(h.delta().length), "1");
+  h.nack();
+  eq("nack 之后同一份证据还能再报", String(h.delta().length), "1");
+  const v = new W.RelayHealth();
+  v.note(`10.9.9.8:443`, 0, false);
+  const b1 = v.delta();
+  v.nack();
+  const b2 = v.delta();
+  eq("计数形增量不会因 nack 而改写", JSON.stringify(b2[0]), JSON.stringify(b1[0]));
+  // 判定表的强证据同样走 pending
+  W.vSet("ack.example.com", "r:203.0.113.7", 403, 120);
+  W.vSetState("ack.example.com", "r:203.0.113.7", 2, 1);
+  const vd1 = W.vtDelta().filter((x) => x.k.includes("ack.example.com"));
+  ok("强证据进入增量", vd1.length === 1, String(vd1.length));
+  const vd2 = W.vtDelta().filter((x) => x.k.includes("ack.example.com"));
+  eq("未 ack 前重复调用仍在增量里", String(vd2.length), "1");
+  W.vtAck();
+  eq("vtAck 之后不再重复上报", String(W.vtDelta().filter((x) => x.k.includes("ack.example.com")).length), "0");
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

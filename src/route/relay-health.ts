@@ -27,6 +27,8 @@ export class RelayHealth {
   private m = new Map<string, RelayStat>();
   /** 上次上报时的计数快照（决定 delta 里带哪些行） */
   private sent = new Map<string, { o: number; b: number; d: number }>();
+  /** 已交给调用方、还没确认送达的行 */
+  private pending = new Map<string, HlRow>();
   private loaded = false;
 
   /** 记一次收尾结果；node 是 host:port，直连时为空 */
@@ -68,17 +70,35 @@ export class RelayHealth {
       .map((x) => x.ip);
   }
 
-  /** 未上报的增量（每次 /add 最多 40 行） */
+  /**
+   * 未上报的增量（每次 /add 最多 40 行）。
+   * 只登记到 pending，不推进 sent：DO 那边可能根本没收到（超时/1102/断网），
+   * 由调用方在收到成功响应后 ack()、失败后 nack()。以前在这里直接写 sent，
+   * 等于把「已发出」当成「已送达」，一次失败就永久少一段证据。
+   */
   delta(): HlRow[] {
-    const out: HlRow[] = [];
+    // 上次已经交出去、还没 ack 的行，原样再给一次（调用方重试时能带上）
+    const out: HlRow[] = [...this.pending.values()];
     for (const [i, s] of this.m) {
       const p = this.sent.get(i);
       if (p && p.o === s.ok && p.b === s.bad && p.d === s.dead) continue;
+      if (this.pending.has(i)) continue;
       out.push({ i, o: s.ok, b: s.bad, d: s.dead });
-      this.sent.set(i, { o: s.ok, b: s.bad, d: s.dead });
+      this.pending.set(i, { i, o: s.ok, b: s.bad, d: s.dead });
       if (out.length >= 40) break;
     }
     return out;
+  }
+
+  /** 上报成功：把 pending 里的快照正式提交为 sent */
+  ack(): void {
+    for (const r of this.pending.values()) this.sent.set(r.i, { o: r.o, b: r.b, d: r.d });
+    this.pending.clear();
+  }
+
+  /** 上报失败：丢掉 pending，下次 delta 会从当前状态重新算一遍 */
+  nack(): void {
+    this.pending.clear();
   }
 
   /** 冷启动合并别处的计数（加性合并，不覆盖本地更强的结论） */
@@ -106,6 +126,7 @@ export class RelayHealth {
   clear(): void {
     this.m.clear();
     this.sent.clear();
+    this.pending.clear();
     this.loaded = false;
   }
 
