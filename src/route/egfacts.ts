@@ -83,7 +83,7 @@ export class EgFacts {
     const f = this.famOf(ip, now);
     if (f === 4) return cf ? 1 : 0.95;
     if (f === 6) return cf ? 40 : 1.05;
-    return cf ? 8 : 1;
+    return cf ? 40 : 1;
   }
 
   /**
