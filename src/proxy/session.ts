@@ -7,11 +7,12 @@ import { pipeBack } from "./tunnel";
 import { logErr, rttLearn, rttMark } from "../nodes/metrics";
 import { checkTarget, expandV6, isV6Literal, parseProxyIp } from "./dial";
 import { DIALER } from "./dialer";
+import { REGION } from "./region";
 import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./protocol";
 import { cnt } from "../core/counter";
 import { SC } from "../core/const";
 import { kickFlush } from "../store/index";
-import { nsEmptyClose, nsFail } from "../nodes/score";
+import { nsEmptyClose } from "../nodes/score";
 import { SEL } from "../px/selector";
 import { S } from "../core/state";
 import { flushSnap, pendFlush, statBump } from "../store/index";
@@ -143,8 +144,6 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
           let sock: Socket | null = null;
 
           if (ipRegion) {
-            // 地区是硬要求：只允许该国家的节点。找不到 / 连不上就明确失败，
-            // 绝不回落到直连（CF 出口）或全球节点，否则用户拿到的不是该国 IP。
             const failRegion = (msg: string) => {
               st.dead = true;
               st.failed = true;
@@ -155,38 +154,9 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
                 serverWS.close(1011, msg);
               } catch (e) {}
             };
-            const p = await SEL.region(env, ipRegion, mode);
-            if (!p) {
-              failRegion(`地区 ${ipRegion} 暂无可用节点`);
-              return;
-            }
-            st.node = p.h + ":" + p.p;
-            if (checkTarget(p.h, p.p)) {
-              failRegion(`地区 ${ipRegion} 节点地址被策略禁止`);
-              return;
-            }
-            try {
-              sock = await connect({ hostname: p.h, port: p.p });
-              st.via = "node";
-              st.retried = true;
-            } catch (e) {
-              // 同国家再试一个，仍然失败就结束（不跨地区）
-              nsFail(st.node); // 冷却坏节点，否则下一条连接还会撞同一个
-              const alt = await SEL.region(env, ipRegion, mode, st.node);
-              if (alt && !checkTarget(alt.h, alt.p)) {
-                st.node = alt.h + ":" + alt.p;
-                try {
-                  sock = await connect({ hostname: alt.h, port: alt.p });
-                  st.via = "node";
-                  st.retried = true;
-                } catch (e2) {}
-              }
-              if (!sock) {
-                nsFail(st.node);
-                failRegion(`地区 ${ipRegion} 节点连接失败`);
-                return;
-              }
-            }
+            const picked = await REGION.open({ env, mode, region: ipRegion, st, onFail: failRegion });
+            if (!picked) return;
+            sock = picked;
           } else {
             try {
               // 拨号策略整体在 Dialer 里：判难直连 → 选中继 → 退 IPv4 拨号 → 退直连（P5）

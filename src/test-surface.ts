@@ -56,6 +56,7 @@ export {
 export { nsOf, pxGet, flushPx, noteProbe } from "./px/pool";
 export { POOL, Pool } from "./px/pool";
 export { DIALER, Dialer } from "./proxy/dialer";
+export { REGION, RegionPicker } from "./proxy/region";
 export { spdSnapshot } from "./core/node-snapshot";
 export { cntDelta, cntUnsend, cntView } from "./core/counter";
 export {

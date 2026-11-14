@@ -1869,5 +1869,8 @@ eq("nsOf 空列表返回空表", Object.keys(W.POOL.nsOf([], 5)).length, 0);
 // ═══ 第 48 组：Dialer（P5）═══
 ok("Dialer 是类实例且有 open()", typeof W.DIALER === "object" && typeof W.DIALER.open === "function", "DIALER");
 ok("Dialer 与 Connection 解耦（不持有 session 状态）", typeof W.Dialer === "function", "Dialer");
+// ═══ 第 49 组：RegionPicker（P5-2）═══
+ok("RegionPicker 是类实例且可 open()", typeof W.REGION === "object" && typeof W.REGION.open === "function", "REGION");
+ok("RegionPicker 可构造", typeof W.RegionPicker === "function", "RegionPicker");
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

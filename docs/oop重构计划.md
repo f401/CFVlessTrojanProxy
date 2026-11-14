@@ -109,3 +109,13 @@
 
 验收：tsc 0 error；`check-arch` **78 文件**；bundle 333.4/336.4 KB；test_v3 186 / smoke 30 / test_score **399** / sim_v3 22 / golden 8；
 线上 7.05：`x.com` 2/2 200（MXP，`cloudflare envoy`）、`api.x.com` 3/3 **403 原样透传**（业务响应不受影响）、`www.google.com` 200。
+## P5-2（7.06）：地区分流收成 RegionPicker（session.ts 494 → 463 行）
+
+| 项 | 改法 | 位置 |
+| --- | --- | --- |
+| RegionPicker | `export class RegionPicker { async open(o): Promise<Socket | null> }` + `REGION`；把 `?rg=xx` 的「同国再试一个、绝不跨地区回落」整段收进方法，失败只回调 `onFail(msg)`，关连接/计数留在 session | `src/proxy/region.ts`（新） |
+| session 瘦身 | 45 行地区分支 → `const picked = await REGION.open({ env, mode, region: ipRegion, st, onFail: failRegion }); if (!picked) return; sock = picked;` | `src/proxy/session.ts` |
+| 测试 | 第 49 组 2 条（REGION 实例与 open()、RegionPicker 可构造） | `test/test_score.mjs` |
+
+验收：tsc 0 error；`check-arch` **79 文件**；bundle 333.7/336.8 KB；test_v3 186 / smoke 30 / test_score **401** / sim_v3 22 / golden 8；
+线上 7.06：`x.com` 200（MXP）、`api.x.com` 403（业务透传）、`www.google.com` 200。
