@@ -56,3 +56,4 @@ export async function logs(c: UserCtx): Promise<Response> {
   const out = kept.slice(-50);
   return json({ count: out.length, persisted: stored.length, fromDo: fromDo.length, items: out });
 }
+

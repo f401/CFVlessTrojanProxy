@@ -65,6 +65,7 @@ export function rlTake(ip: string, limit: number) {
   return true;
 }
 
+/** 功能：rlReset 是薄包装，直接委托 RL_MEM.delete。@param ip string。@returns 无（RL_MEM.delete 无返回值） */
 export function rlReset(ip: string) {
   RL_MEM.delete(ip);
 }
@@ -98,3 +99,4 @@ export async function adminOnly(c: RouteCtx): Promise<Response | null> {
     headers: { "content-type": "application/json;charset=utf-8" },
   });
 }
+

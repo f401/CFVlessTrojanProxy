@@ -133,3 +133,4 @@ export async function admin(c: RouteCtx): Promise<Response> {
 
   return new Response("Not Found", { status: 404 });
 }
+

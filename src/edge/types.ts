@@ -21,3 +21,4 @@ export interface UserCtx extends RouteCtx {
   /** 地区列表 */
   regions: string[];
 }
+

@@ -216,3 +216,4 @@ export async function chRead(id: string, waitMs: number): Promise<Record<string,
   c.chunks = [];
   return { id, ok: true, age: Date.now() - c.t, bytes: bytes.length, head: Array.from(bytes.slice(0, 8)) };
 }
+

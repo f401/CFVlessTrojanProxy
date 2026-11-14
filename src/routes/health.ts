@@ -32,3 +32,4 @@ export function health(c: RouteCtx): Response {
     version: VERSION,
   });
 }
+

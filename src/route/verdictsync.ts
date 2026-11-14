@@ -65,3 +65,4 @@ export async function vtLoad(env: Env): Promise<void> {
     // 读不到就当没有：不阻塞连接
   }
 }
+

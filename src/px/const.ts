@@ -9,3 +9,4 @@ export const PX_TTL = 86400 * 30;
 export const SEED_VER = 7;
 export const MODES: Mode[] = ["lat", "tput"];
 export const keyOf = (x: NodeEntry) => x.h + ":" + x.p;
+

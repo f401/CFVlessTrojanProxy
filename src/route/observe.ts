@@ -58,3 +58,4 @@ export interface ClientEvt {
 export function recordClient(e: ClientEvt): void {
   vSet(e.target, chanKey(e.chan), e.ok ? 200 : 403, e.ms, 2);
 }
+

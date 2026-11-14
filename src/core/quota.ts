@@ -32,3 +32,4 @@ export function subHeaders(env: Env, stats: { up?: number; down?: number }) {
     "Access-Control-Allow-Origin": "*",
   };
 }
+

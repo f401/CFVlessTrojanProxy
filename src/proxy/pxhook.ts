@@ -23,3 +23,4 @@ export function pxDecision(request: Request, host: string, cfHost: boolean, want
   const on = level >= 2 || (level >= 1 && hard);
   return on ? out.via === "r" : wantPx;
 }
+

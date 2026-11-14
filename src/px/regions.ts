@@ -24,3 +24,4 @@ export async function regionListAsync(env: Env) {
   }
   return set.slice(0, 6);
 }
+

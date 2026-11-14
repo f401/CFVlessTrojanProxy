@@ -47,3 +47,4 @@ export function html(body: string, status = 200, extra?: Record<string, string>)
 export function forbidden(): Response {
   return new Response("Forbidden", { status: 403, headers: SAFE_HEADERS });
 }
+

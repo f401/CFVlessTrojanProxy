@@ -112,6 +112,8 @@ export function verifyInfo(): { q: number; last: typeof S.vtLast } {
   return { q: S.vtQ.length, last: S.vtLast };
 }
 
+/** 功能：lastVerifyAt 是薄包装，直接委托 vAt。@param host string。@param ck string。@returns 转发 vAt 的返回值（number） */
 export function lastVerifyAt(host: string, ck: string): number {
   return vAt(host, ck);
 }
+

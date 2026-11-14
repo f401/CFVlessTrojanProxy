@@ -171,9 +171,11 @@ POLICY.install();
 export function decide(c: Ctx): Choice {
   return POLICY.decide(c);
 }
+/** 功能：shadow 是薄包装，直接委托 POLICY.shadow。@param c Ctx。@returns 转发 POLICY.shadow 的返回值（Choice） */
 export function shadow(c: Ctx): Choice {
   return POLICY.shadow(c);
 }
 export function policyOn(): boolean {
   return SC.POLICY > 0;
 }
+

@@ -289,22 +289,27 @@ export function costOf(k: string, mode: Mode, now = Date.now()): number {
   return SCORER.costOf(k, mode, now);
 }
 
+/** 功能：isBlack 是薄包装，直接委托 SCORER.isBlack。@param k string。@returns 转发 SCORER.isBlack 的返回值（boolean） */
 export function isBlack(k: string): boolean {
   return SCORER.isBlack(k);
 }
 
+/** 功能：isFrozen 是薄包装，直接委托 SCORER.isFrozen。@param k string。@returns 转发 SCORER.isFrozen 的返回值（boolean） */
 export function isFrozen(k: string): boolean {
   return SCORER.isFrozen(k);
 }
 
+/** 功能：freezeNode 是薄包装，直接委托 SCORER.freezeNode。@param k string。@returns 无（SCORER.freezeNode 无返回值） */
 export function freezeNode(k: string): void {
   SCORER.freezeNode(k);
 }
 
+/** 功能：suspectOf 是薄包装，直接委托 SCORER.suspectOf。@param s NodeStats | undefined。@returns 转发 SCORER.suspectOf 的返回值（boolean） */
 export function suspectOf(s: NodeStats | undefined): boolean {
   return SCORER.suspectOf(s);
 }
 
+/** 功能：emptyCloseSuspect 是薄包装，直接委托 SCORER.emptyCloseSuspect。@param k string。@returns 转发 SCORER.emptyCloseSuspect 的返回值（boolean） */
 export function emptyCloseSuspect(k: string): boolean {
   return SCORER.emptyCloseSuspect(k);
 }
@@ -313,18 +318,23 @@ export function usable(k: string, now = Date.now()): boolean {
   return SCORER.usable(k, now);
 }
 
+/** 功能：rankedCands 是薄包装，直接委托 SCORER.rankedCands。@param mode Mode。@returns 转发 SCORER.rankedCands 的返回值（RankRow[]） */
 export function rankedCands(mode: Mode): RankRow[] {
   return SCORER.rankedCands(mode);
 }
 
+/** 功能：candsFor 是薄包装，直接委托 SCORER.candsFor。@param mode Mode。@returns 转发 SCORER.candsFor 的返回值（RankRow[]） */
 export function candsFor(mode: Mode): RankRow[] {
   return SCORER.candsFor(mode);
 }
 
+/** 功能：nextNode 是薄包装，直接委托 SCORER.nextNode。@param mode Mode。@param avoid string。@param cc? string | null。@returns 转发 SCORER.nextNode 的返回值（string） */
 export function nextNode(mode: Mode, avoid: string, cc?: string | null): string {
   return SCORER.nextNode(mode, avoid, cc);
 }
 
+/** 功能：bestFor 是薄包装，直接委托 SCORER.bestFor。@param mode Mode。@returns 转发 SCORER.bestFor 的返回值（string） */
 export function bestFor(mode: Mode): string {
   return SCORER.bestFor(mode);
 }
+

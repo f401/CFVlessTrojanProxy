@@ -96,3 +96,4 @@ export const RTT_MAX = 24; // 每个用户最多记 24 个入口标签（防 ?ip
 
 /** 信誉表落盘的最小间隔（全局闸门，防多 isolate 叠加写 KV） */
 export const SEED_WRITE_GAP = 90 * 60000;
+

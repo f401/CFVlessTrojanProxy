@@ -101,3 +101,4 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
   if (!same) logErr(`tfb ${host} ${verdict} ok=${okN} bad=${badN} esc=${escalate} n=${rows.length}`);
   return Response.json({ host, probed: rows.length, okN, badN, verdict, escalate, rows });
 }
+

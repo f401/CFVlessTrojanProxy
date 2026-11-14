@@ -31,6 +31,7 @@ export async function kvGetStrict<T = unknown>(env: Env, key: string): Promise<T
   return val;
 }
 
+/** 功能：kvSet 是薄包装，直接委托 kvPut。@param env Env。@param key string。@param obj unknown。@param opts? { expirationTtl?: number }。@returns 转发 kvPut 的返回值（Promise<void>） */
 export async function kvSet(env: Env, key: string, obj: unknown, opts?: { expirationTtl?: number }): Promise<void> {
   return kvPut(env.STATS, key, await seal(env, obj), opts);
 }
@@ -64,3 +65,4 @@ export async function kvPut(kv: KVNamespace, key: string, val: string, opts?: { 
     throw e;
   }
 }
+

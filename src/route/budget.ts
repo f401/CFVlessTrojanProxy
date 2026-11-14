@@ -60,3 +60,4 @@ export function planView(poolN: number, aliveN: number): Plan & { verds: number;
   const p = planRound(poolN, aliveN);
   return { ...p, verds: vAll().length, site: S.site || "" };
 }
+

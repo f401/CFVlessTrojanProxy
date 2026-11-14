@@ -19,12 +19,20 @@ export interface EffView {
 
 /* 节点统计原语：衰减、滑动窗口、EWMA/MAD、CUSUM、概率与可用性。 */
 
-/** 时间衰减因子：2^(-age/HL)。读到旧样本时用它折算，不改存储状态。 */
+// 半衰期换算用的常数：2^(-age/HL) = exp(-age/HL * ln2)
 const LN2 = Math.LN2;
 
 // 快速失败窗口用指数衰减，而不是"10 分钟内计数、到点清零"：
 // 旧写法里 9 分钟前的 4 次成功会把刚刚的 4 次失败稀释成 50%，
 // 而第 10 分钟一到，同一批失败又整段消失，风险曲线是断崖。
+/**
+ * 功能：把快速失败窗口的计数按半衰期折算后，再累加一次成功/失败。
+ * 与「N 分钟内计数、到点清零」相比，指数衰减不会在到点时把风险曲线拉成断崖。
+ * @param s 节点统计行
+ * @param now 当前时间戳（毫秒）
+ * @param ok 本次是成功（true）还是失败（false）
+ * @returns 无
+ */
 function bumpWin(s: NodeStats, now: number, ok: boolean) {
   const k = s.winAt ? Math.pow(0.5, Math.max(0, now - s.winAt) / SC.WIN_HL) : 0;
   s.winOk *= k;
@@ -34,12 +42,7 @@ function bumpWin(s: NodeStats, now: number, ok: boolean) {
   else s.winFail += 1;
 }
 
-/**
- * 节点代价（毫秒当量，越小越好）。lat=速率优先，tput=吞吐优先。
- * @param {string} k "host:port"
- * @param {string} mode "lat" | "tput"
- * @returns {number} 代价
- */
+/** 全零统计行：新建节点、单测与「没有任何样本」的兜底，字段必须与 NodeStats 一致 */
 export const ZERO_STAT: NodeStats = {
   ok: 0, fail: 0, at: 0, msLocal: 0, streak: 0, blackUntil: 0, freeUntil: 0, lastTry: 0,
   pN: 0, pSum: 0, pSumSq: 0, pF: 0, cus: 0, cusB: 0, tcp: 0, tls: 0, tS: 0, tF: 0, okW: 0, failW: 0, eCloseP: 0, eCloseD: 0,
@@ -99,6 +102,11 @@ export class NodeStatsTable {
   if (s.hist) for (let i = 0; i < HIST_N; i++) s.hist[i] *= k;
   s.at = now;
 }
+  /**
+   * 功能：把「距样本时间已过 ms 毫秒」折算成权重系数 2^(-ms/HALF_LIFE)。
+   * @param ms 已过去的毫秒数（<=0 视为不过期）
+   * @returns 权重系数，1 表示不衰减
+   */
   ageFactor(ms: number): number {
   if (!(ms > 0)) return 1;
   return Math.exp((-ms / SC.HL) * LN2);
@@ -367,74 +375,93 @@ export class NodeStatsTable {
 /** 进程内唯一实例 */
 export const STATS = new NodeStatsTable();
 
+/** 功能：取节点统计行，不存在时按 ZERO_STAT 建一行。@param k 节点键 host:port。@returns 统计行 */
 export function nsGet(k: string): NodeStats {
   return STATS.nsGet(k);
 }
 
+/** 功能：按半衰期衰减一行统计（写入前必做）。@param s 统计行。@param now 当前时间戳。@returns 无 */
 export function nsDecay(s: NodeStats, now: number) {
   STATS.nsDecay(s, now);
 }
 
+/** 功能：把已过去毫秒折算成衰减系数。@param ms 已过去的毫秒。@returns 2^(-ms/HL) */
 export function ageFactor(ms: number): number {
   return STATS.ageFactor(ms);
 }
 
+/** 功能：读时投影（权重按已过时间折算，不改存储）。@param s 统计行。@param now 当前时间。@returns 只读视图 */
 export function effView(s: NodeStats, now = Date.now()): EffView {
   return STATS.effView(s, now);
 }
 
+/** 功能：记一次「空关闭」（连接建立后立刻关闭）。@param k 节点键。@param viaP true=经中转。@returns 无 */
 export function nsEmptyClose(k: string, viaP: boolean) {
   STATS.nsEmptyClose(k, viaP);
 }
 
+/** 功能：快速失败窗口的失败概率。@param s 统计行。@param now 当前时间。@returns 0~1，样本少时偏乐观 */
 export function pFailFast(s: NodeStats, now = Date.now()): number {
   return STATS.pFailFast(s, now);
 }
 
+/** 功能：记一次真实流量成功（清失败计数、累加可用性权重）。@param k 节点键。@param tcp 连接毫秒。@param tls TLS 毫秒。@returns 无 */
 export function nsOk(k: string, tcp: number, tls: number) {
   STATS.nsOk(k, tcp, tls);
 }
 
+/** 功能：记一次探活成功（首字节入 EWMA 矩，不触碰真实流量权重）。@param k 节点键。@param ms 首字节毫秒。@param tcp 连接毫秒。@param tls TLS 毫秒。@returns 无 */
 export function nsProbe(k: string, ms: number, tcp: number, tls: number) {
   STATS.nsProbe(k, ms, tcp, tls);
 }
 
+/** 功能：记一次探活失败（只动探活概率，不影响真实可用性）。@param k 节点键。@returns 无 */
 export function nsProbeFail(k: string) {
   STATS.nsProbeFail(k);
 }
 
+/** 功能：记一次真实流量失败（加重失败权重、进入退避阶梯）。@param k 节点键。@returns 无 */
 export function nsFail(k: string) {
   STATS.nsFail(k);
 }
 
+/** 功能：记一次「站点级失败」（不归咎节点，只让该目标少走这条通道）。@param k 节点键。@returns 无 */
 export function nsSiteFail(k: string) {
   STATS.nsSiteFail(k);
 }
 
+/** 功能：记一次吞吐样本（按字节加权，w 为样本权重）。@param k 节点键。@param bps 字节/秒。@param bytes 本次字节数。@param _env 环境（保留位）。@param w 权重。@returns 无 */
 export function nsSpeed(k: string, bps: number, bytes: number, _env: Env, w = 1) {
   STATS.nsSpeed(k, bps, bytes, _env, w);
 }
 
+/** 功能：记一次卡顿时长与运行时长（供卡顿占比用）。@param k 节点键。@param stallMs 卡顿毫秒。@param runMs 运行毫秒。@returns 无 */
 export function nsStall(k: string, stallMs: number, runMs: number) {
   STATS.nsStall(k, stallMs, runMs);
 }
 
+/** 功能：记一次真实首字节延迟（更新 EWMA 一二阶矩与 CUSUM）。@param k 节点键。@param ms 首字节毫秒。@returns 无 */
 export function nsLatency(k: string, ms: number) {
   STATS.nsLatency(k, ms);
 }
 
+/** 功能：失败概率（Beta 后验，只用本地样本）。@param s 统计行。@param now 当前时间。@param e0 预算好的视图。@returns 0~1 */
 export function pFailOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
   return STATS.pFailOf(s, now, e0);
 }
 
+/** 功能：可用性（小样本用 Laplace 平滑，样本多时用 Wilson 下界）。@param s 统计行。@param now 当前时间。@param e0 预算好的视图。@returns 0~1 */
 export function availOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
   return STATS.availOf(s, now, e0);
 }
 
+/** 功能：卡顿占比（无数据时给 0.05 的先验）。@param s 统计行。@param now 当前时间。@param e0 预算好的视图。@returns 0~1 */
 export function pStallOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
   return STATS.pStallOf(s, now, e0);
 }
 
+/** 功能：作废排行缓存（节点状态一变就调用），只重置时间戳与进度。@returns 无 */
 export function invalidateRank() {
   STATS.invalidateRank();
 }
+

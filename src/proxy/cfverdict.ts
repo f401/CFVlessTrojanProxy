@@ -22,3 +22,4 @@ export function refreshCfHttp(host: string, ctx: { waitUntil(p: Promise<unknown>
       .catch(() => {}),
   );
 }
+

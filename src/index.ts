@@ -103,6 +103,7 @@ export default {
     }
   },
 
+  /** 功能：scheduled 是薄包装，直接委托 runCron。@param _event ScheduledEvent。@param env Env。@param ctx ExecutionContext。@returns 无（runCron 无返回值） */
   scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     return runCron(env, ctx);
   },
@@ -112,3 +113,4 @@ export default {
 import "./route/policy";
 
 export { Meter } from "./store/meter";
+

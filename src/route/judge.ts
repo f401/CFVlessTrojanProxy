@@ -98,3 +98,4 @@ export function markProbeOk(host: string, ip: string, ms: number): void {
   vSetState(host, "r:" + ip, 1, 1);
   if (ms > 0) vSetState("*", "r:" + ip, 1, 1);
 }
+

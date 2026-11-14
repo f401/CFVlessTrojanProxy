@@ -103,3 +103,4 @@ export function pickThom(mode: Mode, bytes = 0): string {
   }
   return best;
 }
+

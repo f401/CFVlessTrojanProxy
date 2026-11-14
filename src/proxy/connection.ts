@@ -339,3 +339,4 @@ export class Connection {
     releaseAll(this);
   }
 }
+

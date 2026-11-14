@@ -158,3 +158,4 @@ export function checkTarget(host: string, port: number) {
   if (isPrivateHost(host)) return `目标 ${host} 属于内网/保留地址`;
   return null;
 }
+

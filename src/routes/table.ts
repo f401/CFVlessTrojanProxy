@@ -56,3 +56,4 @@ export class RouteTable {
 
 /** 进程内唯一实例 */
 export const ROUTES = new RouteTable();
+

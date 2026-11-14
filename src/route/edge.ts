@@ -132,3 +132,4 @@ export async function edgeScan(env: Env, budget = PER_SCAN): Promise<number> {
 export function edgeNodes(max = 5): { host: string; port: number; tls: boolean; name: string }[] {
   return edgeRank(max).map((ip) => ({ host: ip, port: 443, tls: true, name: "edge" }));
 }
+

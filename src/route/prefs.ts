@@ -52,3 +52,4 @@ export const PREFS = new Prefs();
 export const prefsOf = (host = "", limit = 40) => PREFS.of(host, limit);
 export const chanPref = (ip: string, host = "") => PREFS.chan(ip, host);
 export const prefsJson = (limit = 40) => PREFS.json(limit);
+

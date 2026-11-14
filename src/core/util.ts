@@ -289,3 +289,4 @@ export function errMsg(e: unknown, max = 200): string {
   }
   return out.slice(0, max);
 }
+

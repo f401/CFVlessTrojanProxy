@@ -15,3 +15,4 @@ export function escapeHtml(s: unknown) {
   const MAP: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   return String(s).replace(/[&<>"']/g, (c) => MAP[c]);
 }
+

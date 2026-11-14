@@ -97,3 +97,4 @@ async function cronOnce(env: Env): Promise<void> {
     await flushSnap(env);
   } catch (e) {}
 }
+

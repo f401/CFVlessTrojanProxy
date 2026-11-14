@@ -80,3 +80,4 @@ ${total ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
 <table><tr><th>时间</th><th>内容</th></tr>${errRows || "<tr><td colspan=2>无</td></tr>"}</table>
 </body>`;
 }
+

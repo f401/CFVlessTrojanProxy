@@ -75,3 +75,4 @@ export function capOf(s: NodeStats) {
 export function p90Of(s: NodeStats) {
   return pctOf(s, 0.9);
 }
+

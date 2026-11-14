@@ -179,3 +179,4 @@ export function healthyRelays(limit = 16): string[] {
   const ips = Array.from(S.alive.keys()).map(ipOf);
   return HEALTH.rank(ips).slice(0, limit);
 }
+

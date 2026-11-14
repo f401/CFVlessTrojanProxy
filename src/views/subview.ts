@@ -37,3 +37,4 @@ export class SubscriptionView {
 
 /** 进程内唯一实例 */
 export const SUBVIEW = new SubscriptionView();
+

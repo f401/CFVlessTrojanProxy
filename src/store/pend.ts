@@ -127,3 +127,4 @@ export function clSnapshot(max = 40): ClRec[] {
   out.sort((a, b) => b.n - a.n);
   return out.slice(0, max);
 }
+

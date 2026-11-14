@@ -40,3 +40,4 @@ export function relayChans(max = 8): Chan[] {
   }
   return out;
 }
+

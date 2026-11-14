@@ -29,3 +29,4 @@ export async function meterGet(env: Env, id: string) {
   S.meterCache.set(id, { v: hit ? hit.v : null, t: Date.now() });
   return hit ? hit.v : null;
 }
+

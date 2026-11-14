@@ -102,3 +102,4 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
   }
   return new Response("Not Found", { status: 404 });
 }
+

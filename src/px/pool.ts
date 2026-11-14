@@ -496,30 +496,39 @@ export async function cronScan(env: Env, adm = 0) {
  * Store 门面同一形态；之后要真正内联，可逐方法替换实现，调用方无需改动。
  */
 export class Pool {
+  /** 功能：noteProbe 是薄包装，直接委托 noteProbe。@param r { bad?: string } | null。@returns 无（noteProbe 无返回值） */
   noteProbe(r: { bad?: string } | null) {
     return noteProbe(r);
   }
+  /** 功能：ensurePool 是薄包装，直接委托 ensurePool。@param env Env。@returns 无（ensurePool 无返回值） */
   async ensurePool(env: Env) {
     return ensurePool(env);
   }
+  /** 功能：commitPool 是薄包装，直接委托 commitPool。@param env Env。@param fresh PoolEntry[]。@param allowShrink。@returns 无（commitPool 无返回值） */
   async commitPool(env: Env, fresh: PoolEntry[], allowShrink = false) {
     return commitPool(env, fresh, allowShrink);
   }
+  /** 功能：pxGet 是薄包装，直接委托 pxGet。@param env Env。@returns 无（pxGet 无返回值） */
   async pxGet(env: Env) {
     return pxGet(env);
   }
+  /** 功能：nsOf 是薄包装，直接委托 nsOf。@param keys string[]。@param limit。@returns 无（nsOf 无返回值） */
   nsOf(keys: string[], limit = 64) {
     return nsOf(keys, limit);
   }
+  /** 功能：pxSet 是薄包装，直接委托 pxSet。@param env Env。@param patch { cur?: string | null; alive?: NodeEntry[] }。@returns 无（pxSet 无返回值） */
   async pxSet(env: Env, patch: { cur?: string | null; alive?: NodeEntry[] }) {
     return pxSet(env, patch);
   }
+  /** 功能：flushPx 是薄包装，直接委托 flushPx。@param env Env。@param force? boolean。@returns 无（flushPx 无返回值） */
   async flushPx(env: Env, force?: boolean) {
     return flushPx(env, force);
   }
+  /** 功能：aliveList 是薄包装，直接委托 aliveList。@param env Env。@returns 无（aliveList 无返回值） */
   async aliveList(env: Env) {
     return aliveList(env);
   }
+  /** 功能：cronScan 是薄包装，直接委托 cronScan。@param env Env。@param adm。@returns 无（cronScan 无返回值） */
   async cronScan(env: Env, adm = 0) {
     return cronScan(env, adm);
   }
@@ -527,3 +536,4 @@ export class Pool {
 
 /** 进程内唯一实例 */
 export const POOL = new Pool();
+
