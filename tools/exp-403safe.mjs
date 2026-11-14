@@ -25,8 +25,9 @@ const rnd = () => {
 };
 
 class V8 {
-  constructor(relays) {
+  constructor(relays, opts = {}) {
     this.relays = relays;
+    this.hardBlk = Boolean(opts.hardBlk); // true = 旧设计（blk 硬排除），只用于对照实验
     this.p = new Map(relays.map((r) => [r.id, 0.95]));
     this.ok = new Map(relays.map((r) => [r.id, 0]));
     this.bad = new Map(relays.map((r) => [r.id, 0]));
@@ -96,7 +97,9 @@ class V8 {
   }
 
   rank(t) {
-    const alive = this.relays.filter((r) => (this.deadAt.get(r.id) || 0) <= t);
+    const alive = this.relays.filter(
+      (r) => (this.deadAt.get(r.id) || 0) <= t && !(this.hardBlk && (this.blkAt.get(r.id) || 0) > t),
+    );
     this.minCandidates = Math.min(this.minCandidates, Math.max(1, alive.length));
     return alive
       .map((r) => {
@@ -139,9 +142,9 @@ function maxRun(arr) {
 }
 
 /** blocked(relayIndex) 返回该条连接的观测。 */
-function run(name, host, n, blocked) {
+function run(name, host, n, blocked, hard = false) {
   const relays = Array.from({ length: 8 }, (_, i) => ({ id: `10.0.0.${i + 1}`, cost: 100 + i }));
-  const v8 = new V8(relays);
+  const v8 = new V8(relays, { hardBlk: hard });
   let t = 1_700_000_000_000;
   let responses = 0;
   let firstPage = 0;
@@ -213,6 +216,22 @@ cases.push(
   ),
 );
 
+// S4h 同一场景、旧设计（blk 硬排除）—— 只用来量「软化让出多少成功率」
+cases.push(
+  run(
+    "S4h 同场景（blk 硬排除，仅对照）",
+    "x.example",
+    400,
+    (idx, i) =>
+      i === 0
+        ? { down: 45_000, status: 200, hasBigPeer: true }
+        : idx < 3
+          ? { down: 737, status: 403, hasBigPeer: true }
+          : { down: 45_000, status: 200, hasBigPeer: true },
+    true,
+  ),
+);
+
 // S5 连接层失败混合（唯一合法的 dead 来源）
 cases.push(
   run("S5 连接失败 + 业务 403 混合", "api.example.com", 400, (_idx, i) =>
@@ -250,7 +269,8 @@ for (const c of cases) {
 
 const fails = [];
 const check = (label, cond) => cond || fails.push(label);
-const [s1, s2, s3, s4, s5] = cases;
+const [s1, s2, s3, s4, , s5] = cases; // cases[4] 是对照组 S4h
+const s4h = cases[4];
 
 // A1 永不返回空候选
 for (const c of cases) check(`A1 候选数 >=1（${c.name}: ${c.minCandidates}）`, c.minCandidates >= 1);
@@ -271,6 +291,14 @@ check(`A7 局部封锁写了 blk 且没被误清（S4 ${s4.blkRowsLeft} 行）`,
 // A9 全池被写 = 站点级：自愈清空 + 该 host 静默，不再写 blk
 check(`A9 全池被写触发自愈（S1 sweeps=${s1.bizSweeps} 残留=${s1.blkRowsLeft} / S3 sweeps=${s3.bizSweeps}）`,
   s1.bizSweeps >= 1 && s1.blkRowsLeft === 0 && s3.bizSweeps >= 1);
+// A11 软化的代价有上限：仍 >=90%，且比硬排除多让出不超过 6 个点
+
+check(`A11 软化后 firstPage >= 90%（${(s4.firstPageRate * 100).toFixed(1)}%）`, s4.firstPageRate >= 0.9);
+check(
+  `A11 软化的代价 <= 6 点（软 ${(s4.firstPageRate * 100).toFixed(1)}% vs 硬 ${(s4h.firstPageRate * 100).toFixed(1)}%）`,
+  s4h.firstPageRate >= s4.firstPageRate && s4h.firstPageRate - s4.firstPageRate <= 0.06,
+);
+
 // A10 自愈不能误伤「真的只有少数几条被封」的场景
 check(`A10 3/8 封锁不触发自愈（S4 sweeps=${s4.bizSweeps}）`, s4.bizSweeps === 0);
 // A8 leastBad 只由 dead 触发
