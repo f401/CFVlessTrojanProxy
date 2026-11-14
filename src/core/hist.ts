@@ -14,6 +14,7 @@ export function pctOf(s: NodeStats, q: number) {
   let tot = 0;
   for (let i = 0; i < HIST_N; i++) tot += s.hist[i];
   if (!(tot > 0)) return 0;
+  // 目标计数 = 总量 × q；累加跨过它时在本桶内线性插值，把桶号换算成 2 的幂次刻度上的连续值
   const target = tot * q;
   let acc = 0;
   for (let i = 0; i < HIST_N; i++) {
@@ -24,6 +25,7 @@ export function pctOf(s: NodeStats, q: number) {
       return HIST_BASE * Math.pow(2, i - 0.5 + f);
     }
   }
+  // 累加不到（直方图有空洞）就退化成最大值桶，宁可报高也不报 0——0 会被当成「没网」
   return HIST_BASE * Math.pow(2, HIST_N - 0.5);
 }
 
@@ -45,6 +47,7 @@ export function pcts(s: NodeStats) {
   let acc = 0,
     p50 = 0,
     p90 = 0;
+  // 单遍扫描同时取 p50 与 p90：acc 是累计计数、prev 是本桶之前的累计；插值公式与 pctOf 必须一致，否则面板对不上
   const at = (i: number, prev: number, target: number) =>
     HIST_BASE * Math.pow(2, i - 0.5 + (s.hist[i] > 0 ? Math.max(0, Math.min(1, (target - prev) / s.hist[i])) : 1));
   for (let i = 0; i < HIST_N; i++) {
@@ -57,6 +60,7 @@ export function pcts(s: NodeStats) {
     }
   }
   if (!p90) p90 = HIST_BASE * Math.pow(2, HIST_N - 0.5);
+  // cap 是「能力值」：p90 容易被一次突发拉高，用 p50×2.5 封顶，避免按峰值给节点定价
   const cap = p50 > 0 ? Math.min(p90, p50 * 2.5) : p90;
   return { p50, p90, cap };
 }

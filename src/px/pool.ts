@@ -156,13 +156,16 @@ export function nsOf(keys: string[], limit = 64) {
     if (++i > limit) break;
     const s = S.nstat.get(k);
     if (!s) continue;
+    // 有效样本数用衰减后的权重和，不是原始计数——面板上要跟「还有多少信息量」对齐
     const n = (s.okW || 0) + (s.failW || 0);
+    // 两种模式各算一次分：面板把「同一节点在延迟/吞吐下分别值多少分」并排摆出来
     const lat = scoreParts(k, "lat"),
       tp = scoreParts(k, "tput");
     m[k] = {
       ok: s.ok || 0,
       fail: s.fail || 0,
       at: s.at || 0,
+      // bps 取 p90（乐观上界，抽样剪枝靠它），bpsMed 取中位（人看着更像实际）
       bps: Math.round(p90Of(s) || 0),
       bpsMed: Math.round(pctOf(s, 0.5) || 0),
       bpsCap: Math.round(capOf(s) || 0),

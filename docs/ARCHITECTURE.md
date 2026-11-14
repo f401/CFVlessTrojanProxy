@@ -221,3 +221,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
 
 自由函数集中在 `src/core/{util,net,hist,quota,hosts}.ts`、`src/proxy/protocol.ts`、`src/views/{html,sub-links,sub-singbox,sub.ts}`：它们要么是纯计算，要么是字符串渲染，没有状态可装。
+
+## 注释约定
+
+- **函数级**：每个函数体上方必须有 `/** 功能 / @param / @returns */`，由 `tools/doc-audit.mjs --max 0` 在 preflight 里强制性把关。
+- **体内**：只在「这一步在干什么」「为什么这么写」时才写，不逐行复述代码；分支、边界条件、协议字段偏移、临时绕过的原因属于必须写的。
+- **HTML 模板不写体内注释**：模板字面量里的 `//` 会原样发给浏览器。`tools/body-audit.mjs` 自动跳过这类函数（body 只有一条 `return \`…\`;`）。
+- 体检：`node tools/body-audit.mjs [--min 12] [--top 30]` 列出「体内零注释的长函数」，靠它维持存量不回流。

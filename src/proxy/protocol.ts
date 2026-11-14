@@ -196,6 +196,8 @@ export function normAtyp(proto: string, atyp: number): string | null {
  * @returns {{host: string, port: number, next: number}|null} 目标地址、端口与下一字段偏移
  */
 export function readAddr(u8: Uint8Array, off: number, kind: string): AddrOk | AddrErr {
+  // 三种 atyp：v4 定长 4 字节、域名 1 字节长度 + n 字节、v6 定长 16 字节；
+  // 任何越界都只回「地址截断」，上层据此直接拒掉，不做部分解析
   if (kind === "v4") {
     if (u8.length < off + 4) return { err: "地址截断" };
     return {
@@ -211,6 +213,7 @@ export function readAddr(u8: Uint8Array, off: number, kind: string): AddrOk | Ad
   }
   if (kind === "v6") {
     if (u8.length < off + 16) return { err: "地址截断" };
+    // v6 展开成 8 组十六进制（不压缩 ::）：下游只把它当字符串键/SNI 用，不需要标准写法
     const p = [];
     for (let i = 0; i < 8; i++) p.push(((u8[off + i * 2] << 8) | u8[off + i * 2 + 1]).toString(16));
     return { host: p.join(":"), next: off + 16 };
@@ -228,13 +231,16 @@ export function parseVLESS(u8: Uint8Array, auth: Auth): ParseResult {
   if (u8.length < 24) return { ok: false, err: "VLESS 头部过短" };
 
   const ver = u8[0];
+  // 头部布局：1 字节版本 + 16 字节 UUID + 1 字节选项长度 + 选项，之后才是命令/端口/地址
   const uuid = uuidFromBytes(u8.subarray(1, 17));
   if (!auth.uuids.has(uuid)) return { ok: false, err: "鉴权失败", id: uuid };
 
+  // 选项区只按长度跳过：里面是 flow/encryption 之类的协商字段，本代理不解释
   const optLen = u8[17];
   let off = 18 + optLen;
   if (u8.length < off + 1) return { ok: false, err: "VLESS 选项截断" };
 
+  // 命令 1=TCP、2=UDP；随后 2 字节大端端口 + 1 字节 atyp
   const cmd = u8[off++];
   if (u8.length < off + 3) return { ok: false, err: "VLESS 头部不完整" };
 
@@ -242,6 +248,7 @@ export function parseVLESS(u8: Uint8Array, auth: Auth): ParseResult {
   off += 2;
   const atyp = u8[off++];
 
+  // atyp 先归一化再解析：VLESS 与 Trojan 对同一含义用了不同的数字（尤其域名是 2/3），交给 normAtyp 统一
   const kind = normAtyp("vless", atyp);
   if (!kind) return { ok: false, err: "不支持的地址类型" };
   const a = readAddr(u8, off, kind);
@@ -271,10 +278,12 @@ export function parseVLESS(u8: Uint8Array, auth: Auth): ParseResult {
 export function parseTrojan(u8: Uint8Array, auth: Auth): ParseResult {
   if (u8.length < 61) return { ok: false, err: "Trojan 头部过短" };
 
+  // 头部布局：56 字节密码摘要（SHA-224 的十六进制）+ CRLF，之后是命令/地址/端口/CRLF
   const hash = dec.decode(u8.subarray(0, 56)).toLowerCase();
   const id = auth.trojan.get(hash);
   if (!id) return { ok: false, err: "鉴权失败" };
 
+  // 58 = 56 字节摘要 + 2 字节 CRLF；从这里开始读命令字节
   let off = 58;
   const cmd = u8[off++];
   const atyp = u8[off++];
@@ -289,11 +298,13 @@ export function parseTrojan(u8: Uint8Array, auth: Auth): ParseResult {
   const port = (u8[off] << 8) | u8[off + 1];
   off += 2;
 
+  // Trojan 用尾部 CRLF 标记头部结束；缺了说明客户端协议不对，直接拒，别把后面的数据当头部继续读
   if (u8.length < off + 2 || u8[off] !== 0x0d || u8[off + 1] !== 0x0a) {
     return { ok: false, err: "Trojan 缺少结尾 CRLF" };
   }
   off += 2;
 
+  // 命令：1=CONNECT(TCP)、3=UDP ASSOCIATE
   const udp = cmd === 3;
   if (cmd !== 1 && cmd !== 3) return { ok: false, err: "不支持的命令" };
 

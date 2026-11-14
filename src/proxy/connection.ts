@@ -167,7 +167,10 @@ export class Connection {
     if (buffered <= WS_BUFFER_LIMIT) return true;
 
     const t0 = Date.now();
+    // 超限之后不立刻断：客户端可能只是瞬时抖动，给它 60 秒的恢复窗口
     const deadline = t0 + WS_STALL_MS;
+    // 每 10ms 看一次：ws 关了说明客户端彻底走了（cut）；
+    // 缓冲涨到 16MB 上限或等满 60 秒则判定真卡死（stall）——两种情况都主动断，别让一个连接拖住整个 isolate
     while ((ws.bufferedAmount || 0) > WS_BUFFER_LIMIT) {
       if (ws.readyState !== WS_OPEN) {
         cnt("cut");

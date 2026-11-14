@@ -9,15 +9,18 @@ export function trojanUdpFrame(buf: Uint8Array): { head: Uint8Array; msg: Uint8A
   if (buf.length < 1) return null;
   const atyp = buf[0];
   let alen = 0;
+  // ATYP：1=IPv4(4 字节)、4=IPv6(16 字节)、3=域名(1 字节长度 + 内容)；其他值直接判非法
   if (atyp === 1) alen = 4;
   else if (atyp === 4) alen = 16;
   else if (atyp === 3) {
     if (buf.length < 2) return null;
     alen = 1 + buf[1];
   } else return null;
+  // 头部 = ATYP(1) + 地址(alen) + 端口(2)，紧跟 2 字节负载长度
   const hlen = 1 + alen + 2;
   if (buf.length < hlen + 2) return null;
   const n = (buf[hlen] << 8) | buf[hlen + 1];
+  // 4096 是 DNS over UDP 的实践上限（不切分）；小于 12 字节说明多半是流量事件而不是应答
   if (n < 12 || n > 4096) return null;
   if (buf.length < hlen + 2 + n) return null;
   return {

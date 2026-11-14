@@ -270,8 +270,11 @@ export class Selector {
    * @returns {void}
    */
   onFail(_env: Env, mode: Mode, k: string, trial: boolean) {
+  // 失败分三档：影子连接失败只冻结它自己；
+  // 真连接失败先记全局（pFail 立刻上升），再决定「回滚到上一个」还是「重新排第一」
     if (!k) return;
     nsFail(k);
+    // 影子连接只贡献一个样本，失败就冻结，别让它继续占探索名额
     if (trial) {
       freezeNode(k);
       return;
@@ -294,6 +297,8 @@ export class Selector {
       logErr(`rollback(${m}) ${k} -> ${prev}`, "60s");
       return;
     }
+    // 回滚不成（prev 已坏 / 超出 ROLL_WIN）就重排第一：bestFor 会跳过黑名单与冻结，
+    // 失败的节点交给 nsFail 的退避阶梯，不是在这里硬判死
     if (k === S.curs[m]) {
       const b = bestFor(m);
       if (b && b !== k) {
