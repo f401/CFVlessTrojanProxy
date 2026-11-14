@@ -125,30 +125,11 @@ export function hostKey(host: string): string {
   if (!h) return "";
   if (/^[\d.]+$/.test(h) || h.includes(":")) return h; // IP 字面量原样
 
-  // 手工归并（同一套基础设施，物理路径通常一致）
+  // 站点族键统一由 siteKey 推导：同一套基础设施的域名会自然落到同一个 eTLD+1 上
   return siteKey(h);
-  if (/(^|\.)(google|youtube|ytimg|googlevideo|gstatic|googleapis|ggpht)\.com$/.test(h)) return "google.com";
-  if (/(^|\.)(facebook|instagram|fbcdn|cdninstagram)\.(com|net)$/.test(h)) return "meta.com";
-  if (/(^|\.)(github|githubusercontent|githubassets)\.com$/.test(h)) return "github.com";
-  if (/(^|\.)(cloudflare|cloudflareinsights|cfimages)\.com$/.test(h)) return "cloudflare.com";
-  if (/(^|\.)(openai|oaistatic|oaiusercontent)\.com$/.test(h)) return "openai.com";
-
-  const p = h.split(".");
-  if (p.length <= 2) return h;
-  // 形如 example.co.uk / xxx.com.cn 的，保留三段
-  if (/^(co|com|net|org|gov|edu|ac|ne|or)\.(uk|cn|jp|kr|tw|hk|sg|au|nz|br|in|za|mx|tr)$/.test(p.slice(-2).join("."))) {
-    return p.slice(-3).join(".");
-  }
-  return p.slice(-2).join(".");
+  // 归并规则已统一到 siteKey（eTLD+1 近似），这里不再维护第二套表
 }
 
-/**
- * 站点样本的分数（毫秒当量，越小越好）。
- * 纯算术，不调 costOf —— 稳态下 8 个节点加起来不到 1µs。
- * @param {object} s HNStat
- * @param {number} now 当前时间
- * @returns {number} 分数
- */
 /**
  * 站点画像打分。返回 -1 表示"这个模式没有站点级样本"，调用方回退全局分。
  *   lat  → 首字节 + 失败风险
@@ -167,207 +148,218 @@ export function hostScore(s: HNStat, mode: Mode, now: number): number {
 }
 
 /**
- * 某个站点上的节点排行（跳过黑名单/冻结），30 秒缓存。
- * @param {string} host 目标域名（内部转成族）
- * @param {string} mode "lat" | "tput"
- * @returns {Array<{k:string,v:number}>} 升序
- */
-export function hostRank(host: string, mode: Mode) {
-  const fam = hostKey(host);
-  if (!fam) return [];
-  const mkey = fam + "|" + (mode === "lat" ? "lat" : "tput");
-  const now = Date.now();
-  const hit = S.hostRankCache.get(mkey);
-  if (hit && now - hit.t < 30000) return hit.v;
-
-  const m = S.hostNode.get(fam);
-  const out: RankRow[] = [];
-  if (m) {
-    for (const [k, s] of m) {
-      if (!S.alive.has(k) || isBlack(k) || isFrozen(k)) continue;
-      const hs = hostScore(s, mode, now);
-      // 站点级没有该模式的样本：回退全局同模式分数，别用另一种模式冒充
-      out.push({ k, v: hs >= 0 ? hs : costOf(k, mode) });
-    }
-  }
-  // 只有样本少于 2 个时才把"没试过的节点"按全局分补进来（冷启动用）
-  if (out.length < 2) {
-    for (const r of candsFor(mode)) {
-      if (m && m.has(r.k)) continue;
-      out.push({ k: r.k, v: r.v + 300 });
-    }
-  }
-  out.sort((a, b) => a.v - b.v);
-  if (S.hostRankCache.size > 80) S.hostRankCache.clear();
-  S.hostRankCache.set(mkey, { t: now, v: out });
-  return out;
-}
-
-/**
- * 这个站还没试过、且全局分最好的节点（冷启动用）。
- * @param {string} host 目标域名
- * @param {string} mode 模式
- * @returns {string} 节点 key，没有返回 ""
- */
-export function hostUntried(host: string, mode: Mode) {
-  const m = S.hostNode.get(hostKey(host));
-  // 直接用全局排行（20 秒缓存）：它就是按 costOf 升序排好的，
-  // 取第一个没在这个站试过的即可。以前这里对每个节点现算 costOf，
-  // 200 个候选时单次 pick 要 1 ms，全花在重复计算上。
-  for (const r of candsFor(mode)) {
-    if (!m || !m.has(r.k)) return r.k;
-  }
-  return "";
-}
-
-/**
- * 功能：错误账本（每个 isolate 一份）：5 秒去重表 + 10 分钟分类直方图 + 限流丢弃计数。
+ * 功能：站点画像表：每个站点族在一台节点上的成败/字节/首字节/带宽样本，以及直连对照。
  *
- * 三张表各有明确分工，缺一个就对不上账：
- * - seen：msg|tag → 上次记录时间，5 秒内的重复消息直接丢弃（节点抖动时每条连接都会刷）；
- * - bucket：消息前两个词 → 本 10 分钟窗口的条数，给 /health 的 errsByKind；
- * - dup：被 5 秒限流丢掉的条数，给 /health 的 errsDup，与 50 条环相加才是真实总量。
+ * 它与全局节点分的区别：全局分回答「这台节点好不好」，站点画像回答「这台节点打这个站好不好」。
+ * 有些节点整体很快，但某个站一直被它挡（IP 级封锁），只有站点级样本能看出来。
+ * 内存表都在 S.hostNode / S.hostDirect 里，本类只负责读写与淘汰，不跨 isolate 共享。
  */
-export class ErrRing {
-  /** 错误日志去重表：msg|tag → 上次记录时间（5 秒窗口） */
-  readonly seen = new Map<string, number>();
-
-  /** 每类的近 10 分钟计数（每 isolate 独立；不写 KV，供 /health 观察） */
-  private bucket = new Map<string, { win: number; n: number }>();
-
-  /** 本窗口内被 5 秒限流丢掉的条数（window → 条数），让直方图与环能对账 */
-  private dup = new Map<number, number>();
-
+export class HostProfile {
   /**
-   * 功能：记录一次分类计数：窗口跨过 10 分钟就把该类清零，避免无限增长。
-   * @param msg 错误消息
+   * 功能：记一次（站点, 节点）的连接结果，必要时淘汰最久未更新的域名/节点。
+   * @param host 目标域名（内部转成站点族）
+   * @param node 节点 key（"host:port"）
+   * @param o 本次结果（ok/bad/bytes/ttfb/bps 都是可选）
    * @returns 无
    */
-  count(msg: unknown): void {
-    const k = errKind(msg);
-    const win = Math.floor(Date.now() / 600000);
-    const cur = this.bucket.get(k);
-    if (!cur || cur.win !== win) this.bucket.set(k, { win, n: 1 });
-    else cur.n++;
-    // 表本身有界：只保留当前窗口的键，历史窗口直接淘汰（不写 KV，不跨 isolate）
-    if (this.bucket.size > 64) {
-      for (const [kk, v] of this.bucket) if (v.win !== win) this.bucket.delete(kk);
+  markNode(host: string, node: string, o: Partial<HNStat>): void {
+    if (!host || !node) return;
+    const fam = hostKey(host);
+    if (!fam) return;
+    let m = S.hostNode.get(fam);
+    if (!m) {
+      if (S.hostNode.size >= HN_MAX_HOSTS) {
+        // 淘汰最久没更新过的域名（120 条，线性扫可接受）
+        let oldK = "",
+          oldT = Infinity;
+        for (const [k, v] of S.hostNode) {
+          let t = 0;
+          for (const s of v.values()) if (s.at > t) t = s.at;
+          if (t < oldT) {
+            oldT = t;
+            oldK = k;
+          }
+        }
+        if (oldK) S.hostNode.delete(oldK);
+      }
+      m = new Map<string, HNStat>();
+      S.hostNode.set(fam, m);
     }
+    let s = m.get(node);
+    if (!s) {
+      if (m.size >= HN_MAX_NODES) {
+        let oldN = "",
+          oldT = Infinity;
+        for (const [k, v] of m)
+          if (v.at < oldT) {
+            oldT = v.at;
+            oldN = k;
+          }
+        if (oldN) m.delete(oldN);
+      }
+      s = { n: 0, ok: 0, bad: 0, bytes: 0, ttfb: 0, at: 0 };
+      m.set(node, s);
+    }
+    // 站点封禁是"临时事实"而不是判决书：6 小时没再更新过的坏样本减半。
+    // 以前 bad 只增不减，一个站偶尔封过一次，这条 (站,节点) 记录就被永久钉在下面，
+    // 而节点全局分早就恢复了 —— 站点排行却再也不会给它机会。
+    if (s.bad > 0 && s.at && Date.now() - s.at > 6 * 3600e3) {
+      s.bad *= 0.5;
+      s.n = s.ok + s.bad;
+    }
+    // 只带 bps 的调用是"中途采样"，0 字节 0 失败的收尾也不是有效站点样本
+    const isConn = o.ok !== undefined || o.bad !== undefined;
+    if (isConn && (o.ok || o.bad)) {
+      s.n += 1;
+      if (o.ok) s.ok += 1;
+      if (o.bad) s.bad += 1;
+      // 缓存失效（两个模式各一份）。中途 bps 采样不失效：
+      // 一次视频播放每 60 秒就刷一次，排行 30 秒本来也会过期。
+      S.hostRankCache.delete(fam + "|lat");
+      S.hostRankCache.delete(fam + "|tput");
+    }
+    s.bytes += o.bytes || 0;
+    const ttfb = o.ttfb || 0;
+    if (ttfb > 0) s.ttfb = s.ttfb ? Math.round(s.ttfb * 0.6 + ttfb * 0.4) : Math.round(ttfb);
+    const bps = o.bps || 0;
+    if (bps > 0) {
+      s.bps = s.bps ? Math.round(s.bps * 0.6 + bps * 0.4) : bps;
+      s.bpsN = (s.bpsN || 0) + 1;
+      s.bpsAt = Date.now();
+    }
+    s.at = Date.now();
   }
 
   /**
-   * 功能：当前 10 分钟窗口里被限流丢掉的错误条数（与环里留下的条数对账）。
-   * @returns 条数
-   */
-  dropped(): number {
-    const win = Math.floor(Date.now() / 600000);
-    return this.dup.get(win) || 0;
-  }
-
-  /**
-   * 功能：当前窗口的错误直方图（按消息前两个词分类，降序取前 8）。
-   * @returns [{k 分类, n 次数}]
-   */
-  hist(): Array<{ k: string; n: number }> {
-    const win = Math.floor(Date.now() / 600000);
-    const out: Array<{ k: string; n: number }> = [];
-    for (const [k, v] of this.bucket) if (v.win === win) out.push({ k, n: v.n });
-    out.sort((a, b) => b.n - a.n);
-    return out.slice(0, 8);
-  }
-
-  /**
-   * 功能：记一条错误日志：先计数（限流前就计，保证账目不丢），再按「消息+tag」5 秒去重后写入 50 条环。
-   * @param msg 消息（会被截断到 200 字符）
-   * @param tag 关联键（一般是目标主机名）
+   * 功能：记一次直连结果（判断「是节点的锅还是站点/指纹的锅」）。
+   * @param host 目标域名（与 markNode 用同一个族键）
+   * @param ok 直连是否成功拿到数据
    * @returns 无
    */
-  log(msg: unknown, tag?: string | null): void {
-    const m = String(msg).slice(0, 200);
-    // 先计数再限流：环可能把这条丢掉，但直方图必须看到它
-    try {
-      this.count(m);
-    } catch (e) {}
-    // 同一个错误 5 秒内只记一次：节点大面积抖动时，每条连接都刷一行，
-    // console.error 既费 CPU 又把真正有用的日志冲掉（面板也只留 50 条）。
-    const now0 = Date.now();
-    const key = tag ? m + "|" + tag : m;
-    const last = this.seen.get(key) || 0;
-    if (now0 - last < 5000) {
-      // 被限流丢掉的那部分也要有账：否则直方图（全量）和环（被限流）两个数没法对照
-      const win = Math.floor(now0 / 600000);
-      this.dup.set(win, (this.dup.get(win) || 0) + 1);
-      if (this.dup.size > 8) for (const k of this.dup.keys()) if (k < win - 1) this.dup.delete(k);
-      return;
+  markDirect(host: string, ok: boolean): void {
+    if (!host) return;
+    // 和 hostNodeMark 用同一个族键：写 www.x.com、读 x.com 时不能对不上
+    const fam = hostKey(host);
+    if (!fam) return;
+    if (S.hostDirect.size >= HN_MAX_HOSTS) {
+      let oldK = "",
+        oldT = Infinity;
+      for (const [k, v] of S.hostDirect)
+        if (v.at < oldT) {
+          oldT = v.at;
+          oldK = k;
+        }
+      if (oldK) S.hostDirect.delete(oldK);
     }
-    // 满了就按时间剪掉 5 秒前的键；以前是整体 clear()，
-    // 一清表所有 host 立刻重新刷一遍，正好在最吵的时候放大日志量。
-    if (this.seen.size > 200) {
-      for (const [k, v] of this.seen) if (now0 - v >= 5000) this.seen.delete(k);
-      if (this.seen.size > 260) {
-        const keep = [...this.seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, 130);
-        this.seen.clear();
-        for (const [k, v] of keep) this.seen.set(k, v);
+    const e = S.hostDirect.get(fam) || { ok: 0, bad: 0, at: 0 };
+    if (ok) e.ok += 1;
+    else e.bad += 1;
+    e.at = Date.now();
+    S.hostDirect.set(fam, e);
+  }
+
+  /**
+   * 功能：某个站点上的节点排行（跳过黑名单/冻结），30 秒缓存，升序。
+   * @param host 目标域名（内部转成族）
+   * @param mode "lat" | "tput"
+   * @returns 按分数升序的 { k, v } 列表
+   */
+  rank(host: string, mode: Mode): RankRow[] {
+    const fam = hostKey(host);
+    if (!fam) return [];
+    const mkey = fam + "|" + (mode === "lat" ? "lat" : "tput");
+    const now = Date.now();
+    const hit = S.hostRankCache.get(mkey);
+    if (hit && now - hit.t < 30000) return hit.v;
+
+    const m = S.hostNode.get(fam);
+    const out: RankRow[] = [];
+    if (m) {
+      for (const [k, s] of m) {
+        if (!S.alive.has(k) || isBlack(k) || isFrozen(k)) continue;
+        const hs = hostScore(s, mode, now);
+        // 站点级没有该模式的样本：回退全局同模式分数，别用另一种模式冒充
+        out.push({ k, v: hs >= 0 ? hs : costOf(k, mode) });
       }
     }
-    this.seen.set(key, now0);
+    // 只有样本少于 2 个时才把"没试过的节点"按全局分补进来（冷启动用）
+    if (out.length < 2) {
+      for (const r of candsFor(mode)) {
+        if (m && m.has(r.k)) continue;
+        out.push({ k: r.k, v: r.v + 300 });
+      }
+    }
+    out.sort((a, b) => a.v - b.v);
+    if (S.hostRankCache.size > 80) S.hostRankCache.clear();
+    S.hostRankCache.set(mkey, { t: now, v: out });
+    return out;
+  }
 
-    try {
-      S.errs.push({ t: now0, m, tag: tag || "" });
-      while (S.errs.length > 50) S.errs.shift();
-    } catch (e) {}
-    try {
-      console.error("[err]", msg);
-    } catch (e) {}
+  /**
+   * 功能：这个站还没试过、且全局分最好的节点（冷启动用）。
+   * @param host 目标域名
+   * @param mode 模式
+   * @returns 节点 key；没有候选时返回空串
+   */
+  untried(host: string, mode: Mode): string {
+    const m = S.hostNode.get(hostKey(host));
+    // 直接用全局排行（20 秒缓存）：它就是按 costOf 升序排好的，
+    // 取第一个没在这个站试过的即可。以前这里对每个节点现算 costOf，
+    // 200 个候选时单次 pick 要 1 ms，全花在重复计算上。
+    for (const r of candsFor(mode)) {
+      if (!m || !m.has(r.k)) return r.k;
+    }
+    return "";
   }
 }
 
-/** 进程内单例：错误账本（每个 isolate 各自一份） */
-export const ERRS = new ErrRing();
+/** 进程内单例：站点画像表（每个 isolate 各自维护） */
+export const HOSTS = new HostProfile();
 
 /**
- * 功能：错误分类：取消息前两个词，例如 "tfb x.com" / "forced _Rd" / "cron:"。
- * @param msg 错误消息
- * @returns 分类键（最长 40 字符；空消息返回 "?"）
- */
-export function errKind(msg: unknown): string {
-  return String(msg).split(/\s+/).filter(Boolean).slice(0, 2).join(" ").slice(0, 40) || "?";
-}
-
-/**
- * 功能：记录一次分类计数（薄包装，委托 ERRS.count）。
- * @param msg 错误消息
+ * 功能：记一次（站点, 节点）连接结果（薄包装，委托 HOSTS.markNode）。
+ * @param host 目标域名
+ * @param node 节点 key
+ * @param o 本次结果
  * @returns 无
  */
-export function errCount(msg: unknown): void {
-  ERRS.count(msg);
+export function hostNodeMark(host: string, node: string, o: Partial<HNStat>): void {
+  HOSTS.markNode(host, node, o);
 }
 
 /**
- * 功能：当前窗口被限流丢掉的条数（薄包装，委托 ERRS.dropped）。
- * @returns 条数
- */
-export function errDup(): number {
-  return ERRS.dropped();
-}
-
-/**
- * 功能：当前窗口的错误直方图（薄包装，委托 ERRS.hist）。
- * @returns [{k, n}] 最多 8 条，按次数降序
- */
-export function errHist(): Array<{ k: string; n: number }> {
-  return ERRS.hist();
-}
-
-/**
- * 功能：记一条错误日志（薄包装，委托 ERRS.log）。
- * @param msg 消息（截断到 200 字符）
- * @param tag 关联键
+ * 功能：记一次直连结果（薄包装，委托 HOSTS.markDirect）。
+ * @param host 目标域名
+ * @param ok 是否成功
  * @returns 无
  */
-export function logErr(msg: unknown, tag?: string | null): void {
-  ERRS.log(msg, tag);
+export function hostDirectMark(host: string, ok: boolean): void {
+  HOSTS.markDirect(host, ok);
 }
+
+/**
+ * 功能：站点上的节点排行（薄包装，委托 HOSTS.rank）。
+ * @param host 目标域名
+ * @param mode 模式
+ * @returns 按分数升序的 { k, v } 列表
+ */
+export function hostRank(host: string, mode: Mode): RankRow[] {
+  return HOSTS.rank(host, mode);
+}
+
+/**
+ * 功能：该站没试过且全局分最好的节点（薄包装，委托 HOSTS.untried）。
+ * @param host 目标域名
+ * @param mode 模式
+ * @returns 节点 key；没有时返回空串
+ */
+export function hostUntried(host: string, mode: Mode): string {
+  return HOSTS.untried(host, mode);
+}
+
+
+/** 错误账本已迁到 ./errlog：这里只做转出，保持 src/nodes/metrics 的导出面不变。 */
+export { ERRS, ErrRing, errKind, errCount, errDup, errHist, logErr } from "./errlog";
 
 /* ==================================================================
  * 按站点的节点画像（诊断：某个站到底该用哪个节点 / 为什么被拦）
@@ -376,108 +368,7 @@ export function logErr(msg: unknown, tag?: string | null): void {
 export const HN_MAX_HOSTS = 120; // 最多记 120 个域名
 export const HN_MAX_NODES = 12; // 每个域名最多记 12 个节点
 
-/**
- * 记一次 (站点, 节点) 的连接结果。
- * @param {string} host 目标域名
- * @param {string} node "host:port" 节点
- * @param {{ok:boolean, bad:boolean, bytes:number, ttfb:number}} o 本次结果
- * @returns {void}
- */
-export function hostNodeMark(host: string, node: string, o: Partial<HNStat>) {
-  if (!host || !node) return;
-  const fam = hostKey(host);
-  if (!fam) return;
-  let m = S.hostNode.get(fam);
-  if (!m) {
-    if (S.hostNode.size >= HN_MAX_HOSTS) {
-      // 淘汰最久没更新过的域名（120 条，线性扫可接受）
-      let oldK = "",
-        oldT = Infinity;
-      for (const [k, v] of S.hostNode) {
-        let t = 0;
-        for (const s of v.values()) if (s.at > t) t = s.at;
-        if (t < oldT) {
-          oldT = t;
-          oldK = k;
-        }
-      }
-      if (oldK) S.hostNode.delete(oldK);
-    }
-    m = new Map<string, HNStat>();
-    S.hostNode.set(fam, m);
-  }
-  let s = m.get(node);
-  if (!s) {
-    if (m.size >= HN_MAX_NODES) {
-      let oldN = "",
-        oldT = Infinity;
-      for (const [k, v] of m)
-        if (v.at < oldT) {
-          oldT = v.at;
-          oldN = k;
-        }
-      if (oldN) m.delete(oldN);
-    }
-    s = { n: 0, ok: 0, bad: 0, bytes: 0, ttfb: 0, at: 0 };
-    m.set(node, s);
-  }
-  // 站点封禁是"临时事实"而不是判决书：6 小时没再更新过的坏样本减半。
-  // 以前 bad 只增不减，一个站偶尔封过一次，这条 (站,节点) 记录就被永久钉在下面，
-  // 而节点全局分早就恢复了 —— 站点排行却再也不会给它机会。
-  if (s.bad > 0 && s.at && Date.now() - s.at > 6 * 3600e3) {
-    s.bad *= 0.5;
-    s.n = s.ok + s.bad;
-  }
-  // 只带 bps 的调用是"中途采样"，0 字节 0 失败的收尾也不是有效站点样本
-  const isConn = o.ok !== undefined || o.bad !== undefined;
-  if (isConn && (o.ok || o.bad)) {
-    s.n += 1;
-    if (o.ok) s.ok += 1;
-    if (o.bad) s.bad += 1;
-    // 缓存失效（两个模式各一份）。中途 bps 采样不失效：
-    // 一次视频播放每 60 秒就刷一次，排行 30 秒本来也会过期。
-    S.hostRankCache.delete(fam + "|lat");
-    S.hostRankCache.delete(fam + "|tput");
-  }
-  s.bytes += o.bytes || 0;
-  const ttfb = o.ttfb || 0;
-  if (ttfb > 0) s.ttfb = s.ttfb ? Math.round(s.ttfb * 0.6 + ttfb * 0.4) : Math.round(ttfb);
-  const bps = o.bps || 0;
-  if (bps > 0) {
-    s.bps = s.bps ? Math.round(s.bps * 0.6 + bps * 0.4) : bps;
-    s.bpsN = (s.bpsN || 0) + 1;
-    s.bpsAt = Date.now();
-  }
-  s.at = Date.now();
-}
 
-/**
- * 记一次直连结果（用来判断"是节点的锅还是站点/指纹的锅"）。
- * @param {string} host 目标域名
- * @param {boolean} ok 直连是否成功拿到数据
- * @returns {void}
- */
-export function hostDirectMark(host: string, ok: boolean) {
-  if (!host) return;
-  // 和 hostNodeMark 用同一个族键：写 www.x.com、读 x.com 时不能对不上
-  const fam = hostKey(host);
-  if (!fam) return;
-  if (S.hostDirect.size >= HN_MAX_HOSTS) {
-    let oldK = "",
-      oldT = Infinity;
-    for (const [k, v] of S.hostDirect)
-      if (v.at < oldT) {
-        oldT = v.at;
-        oldK = k;
-      }
-    if (oldK) S.hostDirect.delete(oldK);
-  }
-  const e = S.hostDirect.get(fam) || { ok: 0, bad: 0, at: 0 };
-  if (ok) e.ok += 1;
-  else e.bad += 1;
-  e.at = Date.now();
-  S.hostDirect.set(fam, e);
-}
 
 /**
  * 由样本推出结论（纯函数，便于单测）。
