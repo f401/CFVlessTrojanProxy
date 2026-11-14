@@ -26,15 +26,19 @@ export function planRound(poolN: number, aliveN: number): Plan {
   for (const v of all) if (now - v.at > SC.VT_TTL / 2) stale++;
   const staleR = all.length ? stale / all.length : 1;
 
+  // 判定扫描/差分复核都要真的花 TLS 探测；两项都关时不该再给它们留额度
+  // （PROBE_RND=0 让 runRound 直接返回、PROBE_REQ=0 让复核只入队），
+  // 否则每轮白扣 4 个准入额度，冷启动就更慢。
+  const vtOn = SC.PROBE_RND > 0 || SC.PROBE_REQ > 0;
   // 保底：池子最饿的时候也别把额度全给判定
   const admMin = aliveN < 64 ? 6 : 4;
-  const vtMin = 4;
+  const vtMin = vtOn ? 4 : 0;
   const edgeMin = SC.EDGE_AUTO ? 1 : 0;
   let rest = cap - admMin - vtMin - edgeMin;
   if (rest < 0) rest = 0;
 
   const wAdm = cover * 2 + 0.3;
-  const wVt = staleR * 2 + 0.3;
+  const wVt = vtOn ? staleR * 2 + 0.3 : 0;
   const wEdge = SC.EDGE_AUTO ? 0.2 : 0;
   const wSum = wAdm + wVt + wEdge;
   let adm = admMin + Math.round((rest * wAdm) / wSum);
@@ -48,7 +52,7 @@ export function planRound(poolN: number, aliveN: number): Plan {
     else break;
   }
   const edge = cap - adm - vt;
-  return { adm: Math.min(adm, SC.SCAN_MAX), vt, edge: SC.EDGE_AUTO ? Math.min(edge, 4) : 0, cap };
+  return { adm: Math.min(adm, SC.SCAN_MAX), vt: vtOn ? vt : 0, edge: SC.EDGE_AUTO ? Math.min(edge, 4) : 0, cap };
 }
 
 /** 供调试端点与日志用的快照（不参与决策） */

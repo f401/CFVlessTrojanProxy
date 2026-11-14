@@ -2069,5 +2069,19 @@ console.log("\n66) 入口探测默认关闭");
   ok("省下来的额度分给准入/判定", big.adm + big.vt >= 40, `${big.adm} + ${big.vt}`);
 }
 
+// 67) 探测全关时，判定扫描不占额度
+console.log("\n67) 探测全关时的预算");
+{
+  ok("两项探测都关（当前配置）", W.SC.PROBE_RND === 0 && W.SC.PROBE_REQ === 0, `${W.SC.PROBE_RND}/${W.SC.PROBE_REQ}`);
+  for (const poolN of [0, 64, 400, 1600, 3000]) {
+    const q = W.planRound(poolN, 0);
+    eq(`判定额度为 0（pool ${poolN}）`, q.vt, 0);
+    ok(`准入吃满（pool ${poolN}）`, q.adm >= 40, String(q.adm));
+    ok(`不超额（pool ${poolN}）`, q.adm + q.vt + q.edge <= q.cap, String(q.adm + q.vt + q.edge));
+  }
+  const big = W.planRound(3000, 0);
+  ok("准入拿到 48 上限附近", big.adm >= 44 && big.adm <= big.cap, String(big.adm));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

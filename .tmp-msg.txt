@@ -1,1 +1,1 @@
-perf(cron): 入口探测默认关闭（SC.EDGE_AUTO=0），额度转给准入/判定；?edge=1 仍可手动探
+diag(debug): ?tlsnow= 同时跑 subtls 与 tunnelfetch，用于核对两套 TLS 栈结论是否一致
