@@ -1,0 +1,271 @@
+// 「站点 × 中继」的成功率事实（v8 §5 的 `ps`）：唯一会从真实流量里学到的软证据。
+//
+// 为什么需要它：出口族（`eg`）只能说明「这条中继的出口是 v4 还是 v6」，而实测里同一个
+// 出口族内部差别同样巨大 —— `193.181.211.185` 的出口始终是 `2a0f:f01:208:3ba::`，
+// 同一分钟里 x.com 有时 200 有时 403（2/5）。所以「这一对（站点, 中继）能不能过」
+// 只能靠真实请求的成败一点点累积，不能从族先验推出来。
+//
+// 三条纪律（违反任意一条都会重演线上事故）：
+// 1) 只折价、不过滤：本模块的输出只能乘进代价，永远不能把候选从集合里删掉。
+//    7.57 的通配硬封锁把可用池从 8 条打剩 2 条，成功率 97% → 2/20。
+// 2) 折价相对**自己的先验**：没有样本时因子恒为 1，冷启动行为与接入前逐位相同；
+//    否则新版本上线当天就会把所有「还没量过」的中继整体降权。
+// 3) 有界 + 会衰减：表上限 512 行，45 分钟没再被观测就当作没有样本。
+import { cnt } from "../core/counter";
+import { EG } from "./egfacts";
+
+/** 事实键：`站点|中继 IP`（`eg` 用 IP、`blk` 用同一个键，方便互相印证） */
+export type PsKey = string;
+
+/** 一行成功率统计：`q` 是 0..255 的成功率分位，`n` 是有效样本数 */
+export interface PsRow {
+  /** 0..255 的成功率（255 = 全成功） */
+  q: number;
+  /** 有效样本数（上限 32，衰减由乘 0.98 完成） */
+  n: number;
+  /** 最后一次观测时间 */
+  at: number;
+}
+
+/** 一行待上报/已上报的传输形态 */
+export interface PsWire {
+  /** 事实键 `站点|中继 IP` */
+  k: string;
+  /** 0..255 成功率 */
+  q: number;
+  /** 有效样本数 */
+  n: number;
+  /** 最后观测时间 */
+  at: number;
+}
+
+/** 样本过期时间：45 分钟没再被观测就当没有样本（v8 §3 表） */
+export const PS_TTL = 45 * 60000;
+/** 表上限：满了按 `at` 淘汰最旧的 */
+export const PS_MAX = 512;
+/** 平滑强度：先验相当于 4 个样本（Beta(4·p, 4·(1-p)) 的等效） */
+const PS_K = 4;
+/** 折价因子的上下界：1/2 ～ 2，防止单次观测把代价翻十倍 */
+const FACTOR_LO = 0.5;
+const FACTOR_HI = 2;
+/** 样本数上限：越老的历史越不该压住当前（配合 0.98 衰减） */
+const N_CAP = 32;
+
+/**
+ * 功能：把一条观测合成的成功率（0..1）转成 0..255 的分位。
+ * @param {number} p 成功率（会被裁剪到 0..1）
+ * @returns {number} 0..255
+ */
+function toQ(p: number): number {
+  const x = Math.max(0, Math.min(1, p));
+  return Math.round(x * 255);
+}
+
+/**
+ * 功能：本站点该通道的先验成功率 —— 由出口族事实回答（v4 0.9 / v6 0.45 / 未知 0.83）。
+ *
+ * 未知取 0.83 而不是 0.5：没量过不等于坏，否则新中继一进池就被整体降权，
+ * 而「新中继」恰恰是补货链（v8 §40）唯一的增量来源。
+ * @param {string} ip 中继 IP
+ * @param {number} now 当前时间
+ * @returns {number} 0..1 的先验
+ */
+export function psPrior(ip: string, now = Date.now()): number {
+  const fam = EG.famOf(ip, now);
+  if (fam === 4) return 0.9;
+  if (fam === 6) return 0.45;
+  return 0.83;
+}
+
+/**
+ * 功能：「站点 × 中继」成功率表。只在本 isolate 内存里累积，随上报管道同步给 Meter。
+ *
+ * 与 `relperf` 的区别：那里记的是**性能**（首字节 / 吞吐），这里记的是**能不能过**。
+ * 两者都按 `站点|中继` 存，但寿命与用法不同：性能 10 分钟、成功率 45 分钟；
+ * 性能进代价的加数，成功率进代价的**乘数**。
+ */
+export class PsFacts {
+  private rows = new Map<PsKey, PsRow>();
+  /** 待上报行（未 ack 前重发等于重试，不是重复） */
+  private pend = new Map<PsKey, PsRow>();
+  /** 已上报行（只在内存里留作对比，不再发） */
+  private sent = new Map<PsKey, PsRow>();
+
+  /**
+   * 功能：记录一次真实观测（EWMA：乘 0.98 衰减，新样本权重 1）。
+   * @param {string} host 目标站点
+   * @param {string} ip 中继 IP
+   * @param {boolean} ok 是否拿到完整响应（`down > 64`）
+   * @param {number} now 观测时间
+   * @returns {void}
+   */
+  note(host: string, ip: string, ok: boolean, now = Date.now()): void {
+    if (!host || !ip) return;
+    const k = host + "|" + ip;
+    const cur = this.rows.get(k);
+    const n0 = cur ? Math.min(N_CAP, cur.n * 0.98) : 0;
+    const q0 = cur ? cur.q : toQ(psPrior(ip, now));
+    const n = Math.min(N_CAP, n0 + 1);
+    const q = (q0 * n0 + 255 * (ok ? 1 : 0)) / Math.max(1e-9, n0 + 1);
+    const row: PsRow = { q: Math.round(q), n, at: now };
+    this.rows.set(k, row);
+    this.pend.set(k, row);
+    cnt("psNote");
+    if (this.rows.size > PS_MAX) this.drop(now);
+  }
+
+  /**
+   * 功能：读取原始成功率（0..1）；没有样本或已过期返回 NaN。
+   * @param {string} host 目标站点
+   * @param {string} ip 中继 IP
+   * @param {number} now 当前时间
+   * @returns {number} 0..1 或 NaN
+   */
+  pOf(host: string, ip: string, now = Date.now()): number {
+    const r = this.rows.get(host + "|" + ip);
+    if (!r || now - r.at > PS_TTL) return NaN;
+    // 样本越少越靠近先验：`n` 个样本 + K 个先验样本的加权平均
+    const prior = psPrior(ip, now);
+    return (r.q / 255) * r.n / (r.n + PS_K) + prior * PS_K / (r.n + PS_K);
+  }
+
+  /**
+   * 功能：折价因子 —— 代价要乘的那个数。没有样本时恒为 1（接入前后逐位相同）。
+   * @param {string} host 目标站点
+   * @param {string} ip 中继 IP
+   * @param {number} now 当前时间
+   * @returns {number} 0.5..2（>1 表示比先验更差，要更贵）
+   */
+  factor(host: string, ip: string, now = Date.now()): number {
+    const p = this.pOf(host, ip, now);
+    if (!Number.isFinite(p)) return 1;
+    const prior = psPrior(ip, now);
+    // 因子 > 1 表示「比先验更差，要更贵」：所以是 prior / p，不是 p / prior
+    // （第一版写反了，单测立刻抓到：两次失败反而变便宜）
+    const f = prior / Math.max(0.05, p);
+    return Math.max(FACTOR_LO, Math.min(FACTOR_HI, f));
+  }
+
+  /**
+   * 功能：导出待上报增量（未 ack 的行会被重复给出 —— 重发即重试）。
+   * @returns {PsWire[]} 最多 60 行
+   */
+  delta(): PsWire[] {
+    const out: PsWire[] = [];
+    for (const [k, r] of this.pend) {
+      out.push({ k, q: r.q, n: r.n, at: r.at });
+      if (out.length >= 60) break;
+    }
+    return out;
+  }
+
+  /** 功能：上报成功 —— 待发转已发。@returns {void} */
+  ack(): void {
+    for (const [k, r] of this.pend) this.sent.set(k, r);
+    this.pend.clear();
+  }
+
+  /** 功能：上报失败 —— 丢弃待发，下轮重算（不把失败当已送达）。@returns {void} */
+  nack(): void {
+    this.pend.clear();
+  }
+
+  /**
+   * 功能：合并远端事实（冷启动一次灌入）。只认更新的观测，绝不用旧值覆盖新值。
+   *
+   * 不做时间过期判断（只做容量淘汰）：回放或测试里带旧 `at` 的行不该被当成「过期」丢掉，
+   * 否则「合并」这件事在单测里不可测（踩过：`trim(now)` 让合并后的族恒为空）。
+   * @param {PsWire[]} rows 远端行
+   * @returns {number} 真正合并的条数
+   */
+  load(rows: PsWire[]): number {
+    let n = 0;
+    for (const r of rows) {
+      if (!r || typeof r.k !== "string" || !r.k.includes("|")) continue;
+      const q = Number(r.q);
+      const cntN = Number(r.n);
+      const at = Number(r.at);
+      if (!Number.isFinite(q) || !Number.isFinite(cntN) || !Number.isFinite(at)) continue;
+      const cur = this.rows.get(r.k);
+      if (cur && cur.at >= at) continue;
+      this.rows.set(r.k, { q: Math.max(0, Math.min(255, Math.round(q))), n: Math.max(0, Math.min(N_CAP, cntN)), at });
+      n += 1;
+    }
+    if (this.rows.size > PS_MAX) this.drop(0);
+    return n;
+  }
+
+  /**
+   * 功能：给 `/health` 与单测看的快照（按样本数降序，最多 12 行）。
+   * @param {string} host 只看某个站点时传它的名字，空串表示全部
+   * @returns {Array<{ k: string; q: number; n: number; at: number }>} 快照
+   */
+  snap(host = ""): Array<{ k: string; q: number; n: number; at: number }> {
+    const out: Array<{ k: string; q: number; n: number; at: number }> = [];
+    for (const [k, r] of this.rows) {
+      if (host && !k.startsWith(host + "|")) continue;
+      out.push({ k, q: r.q, n: r.n, at: r.at });
+    }
+    out.sort((a, b) => b.n - a.n || b.at - a.at);
+    return out.slice(0, 12);
+  }
+
+  /** 功能：清空（单测用）。@returns {void} */
+  clear(): void {
+    this.rows.clear();
+    this.pend.clear();
+    this.sent.clear();
+  }
+
+  /**
+   * 功能：容量淘汰 —— 先扔过期行，再按 `at` 升序扔最旧的，直到回到上限。
+   * @param {number} now 当前时间（0 表示只做容量淘汰，不过期）
+   * @returns {void}
+   */
+  private drop(now: number): void {
+    if (now > 0) {
+      for (const [k, r] of this.rows) if (now - r.at > PS_TTL) this.rows.delete(k);
+    }
+    if (this.rows.size <= PS_MAX) return;
+    const keys = [...this.rows.entries()].sort((a, b) => a[1].at - b[1].at);
+    for (const [k] of keys) {
+      if (this.rows.size <= PS_MAX) break;
+      this.rows.delete(k);
+    }
+  }
+}
+
+/** 进程内唯一的成功率事实表 */
+export const PS = new PsFacts();
+
+/**
+ * 功能：薄包装 —— 记一次观测（供 `HOOK.psNote` 使用）。
+ * @param {string} host 目标站点
+ * @param {string} ip 中继 IP
+ * @param {boolean} ok 是否拿到完整响应
+ * @param {number} now 观测时间
+ * @returns {void}
+ */
+export function psNote(host: string, ip: string, ok: boolean, now = Date.now()): void {
+  PS.note(host, ip, ok, now);
+}
+
+/**
+ * 功能：薄包装 —— 折价因子（供选路层调用）。
+ * @param {string} host 目标站点
+ * @param {string} ip 中继 IP
+ * @param {number} now 当前时间
+ * @returns {number} 0.5..2
+ */
+export function psFactor(host: string, ip: string, now = Date.now()): number {
+  return PS.factor(host, ip, now);
+}
+
+/**
+ * 功能：薄包装 —— 快照（供调试端点使用）。
+ * @param {string} host 只看某个站点时传它的名字
+ * @returns {Array<{ k: string; q: number; n: number; at: number }>} 快照
+ */
+export function psSnap(host = ""): Array<{ k: string; q: number; n: number; at: number }> {
+  return PS.snap(host);
+}

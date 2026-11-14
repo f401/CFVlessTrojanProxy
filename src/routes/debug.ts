@@ -15,6 +15,7 @@ import { planView } from "../route/budget";
 import { prefsJson } from "../route/prefs";
 import { REL_TTL, relSnap } from "../route/relperf";
 import { EG, probeEg } from "../route/egfacts";
+import { psSnap } from "../route/psfacts";
 import { DIRECT, chanKey } from "../route/channel";
 import { HEALTH } from "../route/relay-health";
 import { verifyInfo } from "../route/verify";
@@ -52,7 +53,8 @@ export async function debug(c: UserCtx): Promise<Response> {
     S.vtLoaded = false;
     await vtLoad(env);
   }
-  // 站点 × 中继 的实测性能（本 isolate 内）：只列出已经量过的中继，代价越低越该选
+  // 站点 × 中继的成功率事实（本 isolate）：样本越多越可信，因子越靠近 1
+  if (url.searchParams.get("pss")) return json({ host: String(url.searchParams.get("pss")), rows: psSnap(String(url.searchParams.get("pss"))) });
   if (url.searchParams.get("eg")) return json({ rows: EG.snap(), probe: await probeEg(String(url.searchParams.get("eg") || "").split(",").map((x) => x.trim()).filter(Boolean)) });
   if (url.searchParams.get("rt")) return json({ host: String(url.searchParams.get("rt") || "").slice(0, 80), rows: relSnap(String(url.searchParams.get("rt") || "").slice(0, 80)), alive: S.alive.size, ttl: REL_TTL });
   if (vtHost) {
@@ -155,7 +157,6 @@ export async function debug(c: UserCtx): Promise<Response> {
       err,
     });
   }
-
   /* ---------- 站点诊断：这个站该用哪个节点 / 为什么被拦 ---------- */
   const diagHost = String(url.searchParams.get("diag") || "")
     .trim()
@@ -168,7 +169,6 @@ export async function debug(c: UserCtx): Promise<Response> {
     const alive = await aliveList(env);
     const ccOf: Record<string, string> = {};
     for (const a of alive) ccOf[a.h + ":" + a.p] = a.cc || "";
-
     const fam = hostKey(diagHost);
     const rows: DiagRow[] = [];
     const m = S.hostNode.get(fam);
@@ -178,7 +178,6 @@ export async function debug(c: UserCtx): Promise<Response> {
       }
     }
     rows.sort((a, b) => b.n - a.n);
-
     const direct = S.hostDirect.get(fam) || { ok: 0, bad: 0, at: 0 };
 
     // 主动探测：不信历史样本时，直接拿每个节点试一次
@@ -556,4 +555,3 @@ export async function debug(c: UserCtx): Promise<Response> {
   }
   return json(out);
 }
-

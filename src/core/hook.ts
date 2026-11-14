@@ -39,6 +39,10 @@ export interface Hooks {
   healthDelta: (() => Array<{ i: string; o: number; b: number; d: number }>) | null;
   /** 出口族事实的未上报增量（v8 §3 的 eg），由 route 注册、store 随 /add 车身带上 */
   egDelta: (() => Array<{ i: string; f: number; at: number }>) | null;
+  /** 「站点 × 中继」成功率增量（v8 §5 的 ps）；未 ack 前重发等于重试 */
+  psDelta: (() => Array<{ k: string; q: number; n: number; at: number }>) | null;
+  /** 「站点 × 中继」真实观测（拿到完整响应=成功） */
+  psNote: ((host: string, ip: string, ok: boolean) => void) | null;
   /** 判定/中继增量确认送达（成功）或退回（失败） */
   syncAck: (() => void) | null;
   syncNack: (() => void) | null;
@@ -63,5 +67,5 @@ export interface TrafficEvt {
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,
-  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, egDelta: null, syncAck: null, syncNack: null, relPerf: null };
+  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, egDelta: null, psDelta: null, psNote: null, syncAck: null, syncNack: null, relPerf: null };
 

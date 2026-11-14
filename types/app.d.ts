@@ -394,6 +394,7 @@ interface MeterBody {
   hl?: Array<{ i: string; o: number; b: number; d: number }>;
   /** 出口族事实增量：中继 IP + 族（4/6）+ 观测时间（v8 §3 的 eg） */
   eg?: Array<{ i: string; f: number; at: number }>;
+  ps?: Array<{ k: string; q: number; n: number; at: number }>;
   /** 老快照：全局计数 / 节点快照 */
   g?: Record<string, number>;
   s?: Record<string, NodeSnap>;

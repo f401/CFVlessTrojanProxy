@@ -14,6 +14,7 @@ import { HEALTH, ipOf } from "./relay-health";
 import { CF_NEG, JUDGE } from "./judge";
 import { relCostMode, relNote, relSnap } from "./relperf";
 import { EG } from "./egfacts";
+import { PS, psFactor, psNote } from "./psfacts";
 
 export interface Ctx {
   host: string;
@@ -118,7 +119,9 @@ export class Policy {
       const base = r < 1e6 ? r : 1e6 + hOf(ip) * 1000;
       // 出口族偏置（v8 §5）：v4 出口通过率明显更高，但这里只乘系数、不改候选集合——
       // v6 出口照样有机会被选中，只是要明显更便宜才会排到前面。
-      return base * EG.bias(ip);
+      // 再叠「站点 × 中继」成功率折价：没有样本时因子恒为 1（接入前后逐位相同）；
+      // 有样本时把实测过不了的通道乘贵 —— 仍然只是乘数，绝不剔候选（v8 §15 I2）。
+      return base * EG.bias(ip) * psFactor(c.host, ip);
     };
     const stick = usable
       .slice()
@@ -239,11 +242,13 @@ HOOK.syncAck = (): void => {
   HEALTH.ack();
   vtAck();
   EG.ack();
+  PS.ack();
 };
 HOOK.syncNack = (): void => {
   HEALTH.nack();
   vtNack();
   EG.nack();
+  PS.nack();
 };
     HOOK.verify = (): Promise<number> => runVerify();
     HOOK.veto = (host: string, ip: string): boolean => {
@@ -259,7 +264,9 @@ HOOK.syncNack = (): void => {
     HOOK.chanPref = (ip: string, host = ""): number => chanPref(ip, host);
     HOOK.win = (host: string): { d: boolean; r: boolean } => this.win(host);
 HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => relNote(host, ip, ttfb, kbs);
-    HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
+HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
+    HOOK.psDelta = (): Array<{ k: string; q: number; n: number; at: number }> => PS.delta();
+    HOOK.psNote = (host: string, ip: string, ok: boolean): void => psNote(host, ip, ok);
     HOOK.egDelta = (): Array<{ i: string; f: number; at: number }> => EG.delta();
     HOOK.vtLoad = (env: Env): Promise<void> => vtLoad(env);
   }

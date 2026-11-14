@@ -2417,5 +2417,54 @@ console.log("\n79) 同窗口对照与 bigTypical（影子从此能算出「本�
   W.S.bigByHost.delete(C);
 }
 
+
+console.log("\n80) 站点 × 中继成功率（ps）：只折价、不剔候选");
+{
+  const H = "ps.example";
+  // 用真实时间：ps 表的读取按 Date.now() 判过期，注入过去的固定时间戳会让行立刻过期
+  const t0 = Date.now();
+  W.PS.clear();
+  eq("没有样本时因子恒为 1", W.psFactor(H, "203.0.113.9", t0), 1);
+  eq("没有样本时 pOf 是 NaN", Number.isNaN(W.PS.pOf(H, "203.0.113.9", t0)), true);
+  W.psNote(H, "203.0.113.9", false, t0);
+  W.psNote(H, "203.0.113.9", false, t0 + 1000);
+  eq("两次失败后变贵（因子 > 1）", W.psFactor(H, "203.0.113.9", t0 + 1000) > 1, true);
+  W.psNote(H, "203.0.113.7", true, t0);
+  W.psNote(H, "203.0.113.7", true, t0 + 1000);
+  eq("两次成功后变便宜（因子 < 1）", W.psFactor(H, "203.0.113.7", t0 + 1000) < 1, true);
+  eq("按站点分开：别的站点没有样本", W.psFactor("other.example", "203.0.113.9", t0 + 1000), 1);
+  eq("45 分钟后当作没有样本", W.psFactor(H, "203.0.113.9", t0 + 46 * 60000), 1);
+  for (let i = 0; i < 40; i++) W.psNote(H, "203.0.113.11", false, t0 + i * 10);
+  const fw = W.psFactor(H, "203.0.113.11", t0 + 400);
+  eq("折价因子不低于 0.5", fw >= 0.5, true);
+  eq("折价因子不高于 2", fw <= 2, true);
+  W.PS.clear();
+  eq("首次合并 1 行", W.PS.load([{ k: H + "|203.0.113.20", q: 10, n: 4, at: t0 }]), 1);
+  eq("更旧的观测被忽略", W.PS.load([{ k: H + "|203.0.113.20", q: 250, n: 9, at: t0 - 5 }]), 0);
+  eq("更新的观测覆盖", W.PS.load([{ k: H + "|203.0.113.20", q: 250, n: 9, at: t0 + 5 }]), 1);
+  W.PS.clear();
+  W.psNote(H, "203.0.113.30", true, t0);
+  eq("增量里有 1 行", W.PS.delta().length, 1);
+  W.PS.ack();
+  eq("ack 后增量清空", W.PS.delta().length, 0);
+  W.PS.nack();
+  eq("nack 不会清掉已经记下的事实", Number.isFinite(W.PS.pOf(H, "203.0.113.30", t0)), true);
+  // 选路：同样的实测代价下，成功率历史更好的那条排前面（且坏的那条仍在候选里）
+  W.PS.clear();
+  W.relNote(H, "203.0.113.5", 100, 0, t0);
+  W.relNote(H, "203.0.113.6", 100, 0, t0);
+  W.psNote(H, "203.0.113.5", true, t0);
+  W.psNote(H, "203.0.113.5", true, t0 + 1);
+  W.psNote(H, "203.0.113.6", false, t0);
+  W.psNote(H, "203.0.113.6", false, t0 + 1);
+  const d = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.6", "203.0.113.5"], legacyWantsRelay: true, mode: "tput" });
+  eq("按站点的成功率历史选更靠前的那条", d.chan.ip, "203.0.113.5");
+  const d2 = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.11"], legacyWantsRelay: true, mode: "tput" });
+  eq("历史很差的通道仍然是候选（只折价不剔除）", d2.chan.ip, "203.0.113.11");
+  W.PS.clear();
+  W.S.peers.clear();
+  W.S.bigTyp.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
