@@ -37,6 +37,8 @@ export interface Hooks {
   win: ((host: string) => { d: boolean; r: boolean }) | null;
   /** 中继存活度的未上报增量（由 route 注册，store 在上报批次里取用） */
   healthDelta: (() => Array<{ i: string; o: number; b: number; d: number }>) | null;
+  /** 出口族事实的未上报增量（v8 §3 的 eg），由 route 注册、store 随 /add 车身带上 */
+  egDelta: (() => Array<{ i: string; f: number; at: number }>) | null;
   /** 判定/中继增量确认送达（成功）或退回（失败） */
   syncAck: (() => void) | null;
   syncNack: (() => void) | null;
@@ -61,5 +63,5 @@ export interface TrafficEvt {
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,
-  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, syncAck: null, syncNack: null, relPerf: null };
+  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, egDelta: null, syncAck: null, syncNack: null, relPerf: null };
 

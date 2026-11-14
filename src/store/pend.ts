@@ -120,6 +120,11 @@ export class PendingLedger {
             const hl = HOOK.healthDelta ? HOOK.healthDelta() : [];
             if (hl.length) body.hl = hl;
           }
+          // 出口族事实（v8 §3 的 eg）搭同一趟车：只登记，等 DO 回 200 才 ack
+          if (HOOK.egDelta) {
+            const eg = HOOK.egDelta();
+            if (eg.length) body.eg = eg;
+          }
           const cl = this.clSnap(40);
           if (cl.length) body.cl = cl; // 连接观测（按节点聚合）：同理，离线可标定
           // 三样增量都只是「登记进请求体」，真正的提交要等 DO 回 200：

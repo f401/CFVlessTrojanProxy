@@ -2302,5 +2302,33 @@ console.log("\n75) 正记忆优先复用");
   W.RELPERF.clear();
 }
 
+console.log("\n76) 出口族事实（v8 的 eg）");
+{
+  const T = new W.EgFacts();
+  const t0 = 1750000000000;
+  T.note("203.0.113.7", 4, t0);
+  eq("记下 v4 出口", T.famOf("203.0.113.7", t0 + 1000), 4);
+  eq("v4 出口的代价乘数是 0.8", T.bias("203.0.113.7", t0 + 1000), 0.8);
+  T.note("2001:db8::1", 6, t0);
+  eq("v6 出口的代价乘数是 1.15", T.bias("2001:db8::1", t0 + 1000), 1.15);
+  eq("没观测过的中继不做偏置", T.bias("198.51.100.9", t0 + 1000), 1);
+  eq("过了寿命就当作未知", T.famOf("203.0.113.7", t0 + W.EG_TTL + 1), 0);
+  eq("新学到的进待发队列", T.delta().length, 2);
+  T.nack();
+  eq("nack 只丢待发标记，事实还在", T.famOf("2001:db8::1", t0 + 1000), 6);
+  eq("nack 后不会重复登记", T.delta().length, 0);
+  eq("更旧的远端观测被忽略", T.load([{ i: "2001:db8::1", f: 4, at: t0 - 1 }]), 0);
+  eq("更新的远端观测被采纳", T.load([{ i: "2001:db8::1", f: 4, at: t0 + 5 }]), 1);
+  eq("合并后族跟着翻", T.famOf("2001:db8::1", t0 + 10), 4);
+  W.EG.clear();
+  W.EG.note("203.0.113.9", 6, Date.now());
+  W.EG.note("203.0.113.11", 4, Date.now());
+  W.relNote("eg.example", "203.0.113.9", 100, 500);
+  W.relNote("eg.example", "203.0.113.11", 100, 500);
+  const egPick = W.decide({ host: "eg.example", cfHost: true, clientV6: false, relays: ["203.0.113.9", "203.0.113.11"], legacyWantsRelay: true });
+  eq("实测代价相同时优先 v4 出口", egPick.chan && egPick.chan.ip, "203.0.113.11");
+  W.EG.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

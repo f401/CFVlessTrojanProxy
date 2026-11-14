@@ -13,6 +13,7 @@ import { runVerify } from "./verify";
 import { HEALTH, ipOf } from "./relay-health";
 import { CF_NEG, JUDGE } from "./judge";
 import { relCostMode, relNote, relSnap } from "./relperf";
+import { EG } from "./egfacts";
 
 export interface Ctx {
   host: string;
@@ -114,7 +115,10 @@ export class Policy {
     // 这样「量过且慢」不会被当成「没量过」重新插队，冷启动仍能靠健康度挑到合理的几条。
     const scoreOf = (ip: string): number => {
       const r = relCostMode(c.mode === "lat" ? "lat" : "tput", c.host, ip);
-      return r < 1e6 ? r : 1e6 + hOf(ip) * 1000;
+      const base = r < 1e6 ? r : 1e6 + hOf(ip) * 1000;
+      // 出口族偏置（v8 §5）：v4 出口通过率明显更高，但这里只乘系数、不改候选集合——
+      // v6 出口照样有机会被选中，只是要明显更便宜才会排到前面。
+      return base * EG.bias(ip);
     };
     const stick = usable
       .slice()
@@ -234,10 +238,12 @@ export class Policy {
 HOOK.syncAck = (): void => {
   HEALTH.ack();
   vtAck();
+  EG.ack();
 };
 HOOK.syncNack = (): void => {
   HEALTH.nack();
   vtNack();
+  EG.nack();
 };
     HOOK.verify = (): Promise<number> => runVerify();
     HOOK.veto = (host: string, ip: string): boolean => {
@@ -254,6 +260,7 @@ HOOK.syncNack = (): void => {
     HOOK.win = (host: string): { d: boolean; r: boolean } => this.win(host);
 HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => relNote(host, ip, ttfb, kbs);
     HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
+    HOOK.egDelta = (): Array<{ i: string; f: number; at: number }> => EG.delta();
     HOOK.vtLoad = (env: Env): Promise<void> => vtLoad(env);
   }
 }

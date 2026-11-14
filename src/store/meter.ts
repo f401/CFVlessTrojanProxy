@@ -18,6 +18,8 @@ export class Meter {
   vt: Record<string, number>;
   /** 中继存活度：ip → { o: ok, b: bad, d: dead } */
   hl: Record<string, { o: number; b: number; d: number }>;
+  /** 出口族事实：ip → { f: 4|6, at }。v8 §3 的 eg：只用于选路代价偏置，永不剔除候选 */
+  eg: Record<string, { f: number; at: number }>;
   /** 请求串行队列：/add 与 /set 交错会让内存和 storage 的顺序不一致 */
   q: Promise<unknown> = Promise.resolve();
   /**
@@ -36,6 +38,7 @@ export class Meter {
     this.blk = {};
     this.vt = {};
     this.hl = {};
+    this.eg = {};
     this.st.blockConcurrencyWhile(async () => {
       // 单键存储：每次 /add 只写 1 行。
       // 以前是 c/g/s/e 四个键 = 4 行，SQLite DO 的「行写入」额度（免费 10 万/天）
@@ -52,6 +55,7 @@ export class Meter {
     if (o.blk && typeof o.blk === "object") this.blk = o.blk as Record<string, number>;
     if (o.vt && typeof o.vt === "object") this.vt = o.vt as unknown as Record<string, number>;
     if (o.hl && typeof o.hl === "object") this.hl = o.hl as unknown as Record<string, { o: number; b: number; d: number }>;
+    if (o.eg && typeof o.eg === "object") this.eg = o.eg as unknown as Record<string, { f: number; at: number }>;
         }
         return;
       }
@@ -106,7 +110,7 @@ export class Meter {
     // 一次 put = 一行。四个字段塞进一个对象，行写入直接 ÷4。
     await this.st.storage.put(
       "a",
-      await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl, blk: this.blk, vt: this.vt, hl: this.hl }),
+      await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl, blk: this.blk, vt: this.vt, hl: this.hl, eg: this.eg }),
     );
   }
 
@@ -197,6 +201,22 @@ export class Meter {
       if (ks.length > 200) {
         ks.sort((a, b) => this.vt[b] - this.vt[a]);
         for (const k of ks.slice(200)) delete this.vt[k];
+      }
+    }
+    // 出口族事实搭便车：新观测覆盖旧观测（at 更大者胜），过期行直接丢；表上限 512 条
+    if (Array.isArray(d.eg) && d.eg.length) {
+      for (const r of d.eg as Array<{ i?: unknown; f?: unknown; at?: unknown }>) {
+        if (!r || typeof r.i !== "string" || typeof r.at !== "number") continue;
+        if (r.f !== 4 && r.f !== 6) continue;
+        if (r.at <= Date.now() - 21600000) continue;
+        const cur = this.eg[r.i];
+        if (cur && cur.at >= r.at) continue;
+        this.eg[r.i] = { f: r.f, at: r.at };
+      }
+      const ek = Object.keys(this.eg);
+      if (ek.length > 512) {
+        ek.sort((a, b) => this.eg[b].at - this.eg[a].at);
+        for (const k of ek.slice(512)) delete this.eg[k];
       }
     }
     // 中继存活度搭便车：加性合并（只增不减，避免别的 isolate 的旧数据把本地结论冲掉）
@@ -391,7 +411,9 @@ export class Meter {
       const now = Date.now();
       for (const [k, t] of Object.entries(this.vt)) if (t > now) out.push({ k, s: 2, t });
       const hl = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d }));
-      return Response.json({ vt: out.slice(0, 120), hl: hl.slice(0, 120) });
+      const eg = Object.entries(this.eg).map(([i, x]) => ({ i, f: x.f, at: x.at }));
+      eg.sort((a, b) => b.at - a.at);
+      return Response.json({ vt: out.slice(0, 120), hl: hl.slice(0, 120), eg: eg.slice(0, 160) });
     }
     if (p.endsWith("/blk")) {
       const nowB = Date.now();

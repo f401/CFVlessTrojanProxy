@@ -3,6 +3,7 @@
 import { S } from "../core/state";
 import { vAll, vImport } from "./verdict";
 import { HEALTH } from "./relay-health";
+import { EG, EgRow } from "./egfacts";
 import { cnt } from "../core/counter";
 
 export interface VtRow {
@@ -60,7 +61,11 @@ export async function vtLoad(env: Env): Promise<void> {
   try {
     const raw = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
     const rr = await env.METER.get(env.METER.idFromName(raw)).fetch("https://meter/vt");
-    const jj = (await rr.json()) as { vt?: VtRow[]; hl?: Array<{ i: string; o: number; b: number; d: number }> };
+    const jj = (await rr.json()) as {
+      vt?: VtRow[];
+      hl?: Array<{ i: string; o: number; b: number; d: number }>;
+      eg?: EgRow[];
+    };
     if (Array.isArray(jj.vt)) {
       // 过滤掉历史版本外发出去的通配封锁：它们已经在别的 isolate 里造成过大面积误封，重新导入只会复发。
       const rows = jj.vt.filter((r) => !r.k.startsWith("*|"));
@@ -68,6 +73,8 @@ export async function vtLoad(env: Env): Promise<void> {
       cnt("vtDO", rows.length);
     }
     if (Array.isArray(jj.hl)) HEALTH.merge(jj.hl);
+    // 出口族事实：冷启动一次灌进来，之后靠本地增量回传（与强证据同一条管道）
+    if (Array.isArray(jj.eg)) cnt("egDO", EG.load(jj.eg));
   } catch {
     // 读不到就当没有：不阻塞连接
   }

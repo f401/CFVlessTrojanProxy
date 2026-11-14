@@ -108,6 +108,7 @@ export { judge, queueVerify, runVerify, verifyInfo, queueLen } from "./route/ver
 export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, pickFresh } from "./route/tfb";
 export { RELPERF, REL_TTL, relCost, relCostFor, relCostMode, relNote, relSnap } from "./route/relperf";
+export { EG, EG_TTL, EgFacts } from "./route/egfacts";
 
 export { handleDns, trojanUdpFrame } from "./proxy/dns";
 export { handleUpgrade } from "./proxy/session";

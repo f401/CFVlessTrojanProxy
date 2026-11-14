@@ -392,6 +392,8 @@ interface MeterBody {
   vt?: Array<{ k: string; s: number; t: number }>;
   /** 中继存活度增量：ip + ok/bad/dead 计数 */
   hl?: Array<{ i: string; o: number; b: number; d: number }>;
+  /** 出口族事实增量：中继 IP + 族（4/6）+ 观测时间（v8 §3 的 eg） */
+  eg?: Array<{ i: string; f: number; at: number }>;
   /** 老快照：全局计数 / 节点快照 */
   g?: Record<string, number>;
   s?: Record<string, NodeSnap>;
