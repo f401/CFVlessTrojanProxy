@@ -1,5 +1,5 @@
 // 一条命令跑完全部门禁，默认**不部署**。
-//   node tools/preflight.mjs            # 类型/架构/包/四段测试/golden/混淆/关键字 + 本地路由模拟
+//   node tools/preflight.mjs            # 类型/架构/包/四段测试/golden/混淆/关键字 + v8 链路验收 + 本地路由模拟
 //   node tools/preflight.mjs --deploy   # 全绿后再真部署（等价手动跑 .tmp-sim/deploy-746.mjs）
 //   node tools/preflight.mjs --fast     # 跳过 golden 与 sim_v3（改文案/注释时用）
 import { spawnSync } from "node:child_process";
@@ -22,6 +22,7 @@ const steps = [
   ["混淆-预处理", ["obf/pre.js"]],
   ["混淆-主体", ["obf/obf_mid.js"]],
   ["混淆自检", ["tools/check-obf.js", "_worker_v3.mid.js"]],
+  ["v8 链路验收", ["tools/exp-v8chain.mjs"]],
   ["本地路由模拟", ["tools/simrun.mjs"]],
 ];
 
