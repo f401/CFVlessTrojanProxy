@@ -85,9 +85,10 @@ export class Dialer {
           logErr(`skip cf-edge relay ${p.host}`, host);
           continue;
         }
+        const pk = Promise.resolve(connect({ hostname: p.host, port: p.port }));
         try {
           // 拨号必须有上限：connect() 自己没有超时，挂死的中继会把整个请求拖到客户端放弃为止。
-          sock = await withTimeout(Promise.resolve(connect({ hostname: p.host, port: p.port })), 2500);
+          sock = await withTimeout(pk, 2500);
           st.node = key;
           st.via = "node";
           st.retried = true;
@@ -96,6 +97,9 @@ export class Dialer {
           break;
         } catch {
           sock = null;
+          // 超时之后 connect 仍可能迟到成功：必须把它关掉，否则免费计划 6 个并发 connect 名额
+          // 会被「已经超时、但真的连上了」的连接慢慢吃掉（现象是后面所有请求都失败）。
+          void pk.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 本来就没连上 */ });
           nsFail(key); // 中转本身连不上：冷却它，下一条换个候选试
         }
       }
