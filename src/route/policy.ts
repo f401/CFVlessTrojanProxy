@@ -13,12 +13,12 @@ import { runVerify } from "./verify";
 import { HEALTH, ipOf } from "./relay-health";
 import { CF_NEG, JUDGE } from "./judge";
 import { relCostMode, relNote, relSnap } from "./relperf";
-import { EG } from "./egfacts";
-import { PS, psOk } from "./psfacts";
-import { DEAD, deadNote, isDead } from "./deadfacts";
+import { psOk } from "./psfacts";
+import { deadNote, isDead } from "./deadfacts";
 import { BLK } from "./blkfacts";
 import { capNote } from "./capfacts";
 import { factMul } from "./factmul";
+import { FACTS, type FactsDelta } from "./factsstore";
 import { FACT_ALL } from "./factflags";
 
 /** 全开的默认集合：没有读到 `env.facts` 时用它，等价于「不裁剪」。 */
@@ -276,18 +276,12 @@ export class Policy {
 HOOK.syncAck = (): void => {
   HEALTH.ack();
   vtAck();
-  EG.ack();
-  PS.ack();
-  DEAD.ack();
-  BLK.ack();
+  FACTS.ack();
 };
 HOOK.syncNack = (): void => {
   HEALTH.nack();
   vtNack();
-  EG.nack();
-  PS.nack();
-  DEAD.nack();
-  BLK.nack();
+  FACTS.nack();
 };
     HOOK.verify = (): Promise<number> => runVerify();
     HOOK.veto = (host: string, ip: string): boolean => {
@@ -305,11 +299,8 @@ HOOK.syncNack = (): void => {
 HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => relNote(host, ip, ttfb, kbs);
 HOOK.capNote = (ip: string, kbs: number): void => { capNote(ip, kbs); };
 HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
-    HOOK.psDelta = (): Array<{ k: string; q: number; n: number; at: number }> => PS.delta();
     HOOK.deadNote = (ip: string, ok: boolean): void => deadNote(ip, ok);
-    HOOK.deadDelta = (): Array<{ i: string; n: number; at: number }> => DEAD.delta();
-    HOOK.blkDelta = (): Array<{ k: string; n: number; at: number }> => BLK.delta();
-    HOOK.egDelta = (): Array<{ i: string; f: number; at: number }> => EG.delta();
+    HOOK.factsDelta = (): FactsDelta => FACTS.delta();
     HOOK.vtLoad = (env: Env): Promise<void> => vtLoad(env);
   }
 }

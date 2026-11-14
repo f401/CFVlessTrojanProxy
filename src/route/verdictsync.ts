@@ -3,10 +3,8 @@
 import { S } from "../core/state";
 import { vAll, vImport } from "./verdict";
 import { HEALTH } from "./relay-health";
-import { EG, EgRow } from "./egfacts";
-import { PS } from "./psfacts";
-import { DEAD } from "./deadfacts";
-import { BLK } from "./blkfacts";
+import { FACTS } from "./factsstore";
+import type { EgRow } from "./egfacts";
 import { cnt } from "../core/counter";
 
 export interface VtRow {
@@ -124,10 +122,11 @@ async function vtFetch(env: Env): Promise<void> {
       cnt("vtDO", rows.length);
     }
     if (Array.isArray(jj.hl)) HEALTH.merge(jj.hl);
-    if (Array.isArray(jj.eg)) cnt("egDO", EG.load(jj.eg));
-    if (Array.isArray(jj.ps)) cnt("psDO", PS.load(jj.ps));
-    if (Array.isArray(jj.dead)) cnt("deadDO", DEAD.load(jj.dead));
-    if (Array.isArray(jj.blk2)) cnt("blkDO", BLK.load(jj.blk2));
+    const nf = FACTS.load(jj);
+    cnt("egDO", nf.eg);
+    cnt("psDO", nf.ps);
+    cnt("deadDO", nf.dead);
+    cnt("blkDO", nf.blk2);
   } catch {
     // 读不到就当没有：不阻塞连接
   } finally {

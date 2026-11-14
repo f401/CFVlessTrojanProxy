@@ -40,17 +40,17 @@ export interface Hooks {
   /** 中继存活度的未上报增量（由 route 注册，store 在上报批次里取用） */
   healthDelta: (() => Array<{ i: string; o: number; b: number; d: number }>) | null;
   /** 出口族事实的未上报增量（v8 §3 的 eg），由 route 注册、store 随 /add 车身带上 */
-  egDelta: (() => Array<{ i: string; f: number; at: number }>) | null;
-  /** 「站点 × 中继」成功率增量（v8 §5 的 ps）；未 ack 前重发等于重试 */
-  psDelta: (() => Array<{ k: string; q: number; n: number; at: number }>) | null;
+  /** 四类同步事实的增量（eg/ps/dead/blk2）；未 ack 前重发等于重试，不是重复计数 */
+  factsDelta: (() => {
+    eg?: Array<{ i: string; f: number; at: number }>;
+    ps?: Array<{ k: string; q: number; n: number; at: number }>;
+    dead?: Array<{ i: string; n: number; at: number }>;
+    blk2?: Array<{ k: string; n: number; at: number }>;
+  }) | null;
   /** 「站点 × 中继」真实观测（拿到完整响应=成功） */
   psNote: ((host: string, ip: string, ok: boolean) => void) | null;
   /** 中继连接层结果（连上=true 会清零失败计数） */
   deadNote: ((ip: string, ok: boolean) => void) | null;
-  /** 「连不上」事实增量（未 ack 前重发等于重试） */
-  deadDelta: (() => Array<{ i: string; n: number; at: number }>) | null;
-  /** 单 IP 封锁事实增量（键 `host|relay`） */
-  blkDelta: (() => Array<{ k: string; n: number; at: number }>) | null;
   /** 判定/中继增量确认送达（成功）或退回（失败） */
   syncAck: (() => void) | null;
   syncNack: (() => void) | null;
@@ -81,5 +81,5 @@ export interface TrafficEvt {
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,
-  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, egDelta: null, psDelta: null, psNote: null, deadNote: null, deadDelta: null, blkDelta: null, syncAck: null, syncNack: null, relPerf: null, capNote: null, facts: null };
+  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, factsDelta: null, psNote: null, deadNote: null, syncAck: null, syncNack: null, relPerf: null, capNote: null, facts: null };
 

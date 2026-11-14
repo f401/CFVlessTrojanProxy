@@ -2825,5 +2825,30 @@ console.log("\n93) 事实开关：五类乘数可单独回滚");
   W.EG.clear();
 }
 
+
+console.log("\n94) 四类事实门面：一次取齐增量，ack 后清空");
+{
+  const H = "gate.example.com";
+  const IP = "203.0.113.77";
+  W.FACTS.clear();
+  eq("清空后没有增量", Object.keys(W.FACTS.delta()).length, 0);
+  W.PS.note(H, IP, true);
+  W.EG.note(IP, 4);
+  W.DEAD.note("203.0.113.78", false);
+  W.DEAD.note("203.0.113.78", false);
+  const d1 = W.FACTS.delta();
+  eq("增量里 ps 有 1 行", (d1.ps || []).length, 1);
+  eq("增量里 eg 有 1 行", (d1.eg || []).length, 1);
+  eq("增量里 dead 有 1 行（连续两次失败）", (d1.dead || []).length, 1);
+  eq("未 ack 前再取仍然是同一批", (W.FACTS.delta().ps || []).length, 1);
+  W.FACTS.ack();
+  eq("ack 后增量清空", (W.FACTS.delta().ps || []).length, 0);
+  W.FACTS.clear();
+  const n = W.FACTS.load({ eg: [{ i: "203.0.113.9", f: 4, at: Date.now() }], ps: [{ k: H + "|203.0.113.9", q: 128, n: 8, at: Date.now() }], dead: [{ i: "203.0.113.10", n: 3, at: Date.now() }], blk2: [{ k: H + "|203.0.113.9", n: 3, at: Date.now() }] });
+  eq("load 四类都并入", [n.eg, n.ps, n.dead, n.blk2].join(","), "1,1,1,1");
+  eq("并入后 ps 能查到", W.PS.factor(H, "203.0.113.9") > 1, true);
+  W.FACTS.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

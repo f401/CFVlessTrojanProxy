@@ -120,13 +120,13 @@ export class PendingLedger {
             const hl = HOOK.healthDelta ? HOOK.healthDelta() : [];
             if (hl.length) body.hl = hl;
           }
-          // 出口族事实（v8 §3 的 eg）搭同一趟车：只登记，等 DO 回 200 才 ack
-          if (HOOK.blkDelta) { const bk = HOOK.blkDelta(); if (bk.length) body.blk2 = bk; }
-        if (HOOK.deadDelta) { const dd = HOOK.deadDelta(); if (dd.length) body.dead = dd; }
-        if (HOOK.psDelta) { const ps = HOOK.psDelta(); if (ps.length) body.ps = ps; }
-        if (HOOK.egDelta) {
-            const eg = HOOK.egDelta();
-            if (eg.length) body.eg = eg;
+          // 四类事实一次取齐：新增一类只需改 FactsStore，不必在这里加槽位
+          const fd = HOOK.factsDelta ? HOOK.factsDelta() : null;
+          if (fd) {
+            if (fd.blk2 && fd.blk2.length) body.blk2 = fd.blk2;
+            if (fd.dead && fd.dead.length) body.dead = fd.dead;
+            if (fd.ps && fd.ps.length) body.ps = fd.ps;
+            if (fd.eg && fd.eg.length) body.eg = fd.eg;
           }
           const cl = this.clSnap(40);
           if (cl.length) body.cl = cl; // 连接观测（按节点聚合）：同理，离线可标定
