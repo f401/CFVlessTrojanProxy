@@ -1,6 +1,6 @@
 import { S } from "../core/state";
-import { cntDelta, cntUnsend } from "../core/counter";
 import { HOOK } from "../core/hook";
+import { cntDelta, cntUnsend } from "../core/counter";
 import { eachLimit } from "../core/util";
 import { spdSnapshot } from "../core/node-snapshot";
 
@@ -78,6 +78,8 @@ export async function pendFlush(env: Env, force?: boolean): Promise<void> {
         if (HOOK.vtDelta) {
           const vt = HOOK.vtDelta();
           if (vt.length) body.vt = vt;
+          const hl = HOOK.healthDelta ? HOOK.healthDelta() : [];
+          if (hl.length) body.hl = hl;
         }
         const cl = clSnapshot(40);
         if (cl.length) {

@@ -390,6 +390,8 @@ interface MeterBody {
   /** `host|node` → 到期时间：中继对该站点被 403 的判定（跨 isolate 共享） */
   blk?: Record<string, number>;
   vt?: Array<{ k: string; s: number; t: number }>;
+  /** 中继存活度增量：ip + ok/bad/dead 计数 */
+  hl?: Array<{ i: string; o: number; b: number; d: number }>;
   /** 老快照：全局计数 / 节点快照 */
   g?: Record<string, number>;
   s?: Record<string, NodeSnap>;

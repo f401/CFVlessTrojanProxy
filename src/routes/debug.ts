@@ -12,6 +12,7 @@ import { vtDelta, vtLoad } from "../route/verdictsync";
 import { cntView } from "../core/counter";
 import { planView } from "../route/budget";
 import { prefsJson } from "../route/prefs";
+import { HEALTH } from "../route/relay-health";
 import { verifyInfo } from "../route/verify";
 import { checkTarget, dohQuery, expandV6, httpProbe, isCfHost, resolveAAAA, resolveV4All } from "../proxy/dial";
 import { aliveList, commitPool, flushPx, pxSet } from "../px/pool";
@@ -57,6 +58,19 @@ export async function debug(c: UserCtx): Promise<Response> {
   }
   /* ---------- 站点偏好表：判定表按通道聚合后的「能打通 / 打不通」两栏 ---------- */
   if (url.searchParams.get("vtq") === "1") return json({ ...verifyInfo() });
+  if (url.searchParams.get("hl") === "1") {
+    let ring: unknown = [];
+    if (url.searchParams.get("do") === "1") {
+      try {
+        const raw = String(c.env.uuid || c.env.uuids).split(",")[0].trim().toLowerCase();
+        const rr = await c.env.METER.get(c.env.METER.idFromName(raw)).fetch("https://meter/hl");
+        ring = ((await rr.json()) as { hl?: unknown }).hl || [];
+      } catch {
+        ring = [];
+      }
+    }
+    return json({ local: HEALTH.json(20), ring });
+  }
   if (url.searchParams.get("prefs") === "1") {
     return json({ prefs: prefsJson(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });
   }

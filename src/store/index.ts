@@ -5,3 +5,4 @@ export * from "./meter-client";
 export * from "./snapshot";
 export * from "./crypto";
 export * from "./kv";
+export * from "./store";

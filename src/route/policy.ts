@@ -119,6 +119,7 @@ export class Policy {
     HOOK.traffic = (e: TrafficEvt): void => JUDGE.onTraffic(e);
     // 「有非 CF 出口就优先用它」：CF→CF 会把客户端 IP 原样透传，封禁策略照旧命中
     HOOK.nonCfFirst = (): boolean => true;
+    HOOK.healthDelta = (): Array<{ i: string; o: number; b: number; d: number }> => HEALTH.delta();
     HOOK.verify = (): Promise<number> => runVerify();
     HOOK.veto = (host: string, ip: string): boolean => {
       if (!ip) return false;

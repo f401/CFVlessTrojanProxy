@@ -13,6 +13,8 @@ export class Meter {
   /** 键 `host|node` → 到期时间：这条中继对这个站点被按 IP 拒（403）的判定，跨 isolate 共享 */
   blk: Record<string, number>;
   vt: Record<string, number>;
+  /** 中继存活度：ip → { o: ok, b: bad, d: dead } */
+  hl: Record<string, { o: number; b: number; d: number }>;
   /** 请求串行队列：/add 与 /set 交错会让内存和 storage 的顺序不一致 */
   q: Promise<unknown> = Promise.resolve();
   /**
@@ -30,6 +32,7 @@ export class Meter {
     this.cl = []; // 连接记录环形（最多 60 条）：离线标定 ttfb/抖动用
     this.blk = {};
     this.vt = {};
+    this.hl = {};
     this.st.blockConcurrencyWhile(async () => {
       // 单键存储：每次 /add 只写 1 行。
       // 以前是 c/g/s/e 四个键 = 4 行，SQLite DO 的「行写入」额度（免费 10 万/天）
@@ -45,6 +48,7 @@ export class Meter {
           if (Array.isArray(o.cl)) this.cl = o.cl as ClRec[];
     if (o.blk && typeof o.blk === "object") this.blk = o.blk as Record<string, number>;
     if (o.vt && typeof o.vt === "object") this.vt = o.vt as unknown as Record<string, number>;
+    if (o.hl && typeof o.hl === "object") this.hl = o.hl as unknown as Record<string, { o: number; b: number; d: number }>;
         }
         return;
       }
@@ -99,7 +103,7 @@ export class Meter {
     // 一次 put = 一行。四个字段塞进一个对象，行写入直接 ÷4。
     await this.st.storage.put(
       "a",
-      await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl, blk: this.blk, vt: this.vt }),
+      await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl, blk: this.blk, vt: this.vt, hl: this.hl }),
     );
   }
 
@@ -191,6 +195,19 @@ export class Meter {
         for (const k of ks.slice(200)) delete this.vt[k];
       }
     }
+    // 中继存活度搭便车：加性合并（只增不减，避免别的 isolate 的旧数据把本地结论冲掉）
+    if (Array.isArray(d.hl) && d.hl.length) {
+      for (const r of d.hl) {
+        if (!r || typeof r.i !== "string") continue;
+        const cur = this.hl[r.i] || { o: 0, b: 0, d: 0 };
+        cur.o = Math.max(cur.o, Number(r.o) || 0);
+        cur.b = Math.max(cur.b, Number(r.b) || 0);
+        cur.d = Math.max(cur.d, Number(r.d) || 0);
+        this.hl[r.i] = cur;
+      }
+      const hk = Object.keys(this.hl);
+      if (hk.length > 200) for (const k of hk.slice(200)) delete this.hl[k];
+    }
     if (d.blk && typeof d.blk === "object") {
       const nowB = Date.now();
       for (const [bk, exp] of Object.entries(d.blk as Record<string, number>)) {
@@ -251,11 +268,17 @@ export class Meter {
     if (p.endsWith("/cl")) {
       return Response.json({ cl: this.cl });
     }
+    if (p.endsWith("/hl")) {
+      const rows = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d }));
+      rows.sort((a, b) => b.d + b.b - (a.d + a.b));
+      return Response.json({ hl: rows.slice(0, 120) });
+    }
     if (p.endsWith("/vt")) {
       const out: Array<{ k: string; s: number; t: number }> = [];
       const now = Date.now();
       for (const [k, t] of Object.entries(this.vt)) if (t > now) out.push({ k, s: 2, t });
-      return Response.json({ vt: out.slice(0, 120) });
+      const hl = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d }));
+      return Response.json({ vt: out.slice(0, 120), hl: hl.slice(0, 120) });
     }
     if (p.endsWith("/blk")) {
       const nowB = Date.now();

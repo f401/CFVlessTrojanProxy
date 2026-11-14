@@ -1848,5 +1848,18 @@ const pj = W.PREFS.json(10);
 ok("Prefs 类能给出两栏视图", Array.isArray(pj.ok) && Array.isArray(pj.bad) && pj.n >= 1, JSON.stringify(pj));
 eq("Prefs 能看到实测能打通的通道", W.PREFS.chan("5.5.5.5", "z.com"), 0);
 eq("Prefs 对完全没测过的通道返回 1（未知）", W.PREFS.chan("4.4.4.4", "z.com"), 1);
+// ═══ 第 46 组：中继存活度跨 isolate（P3）+ Store 门面 ═══
+W.HEALTH.clear();
+W.HEALTH.note("1.1.1.1:443", 30000, true);
+const hd1 = W.HEALTH.delta();
+eq("delta 首次带上未上报的行", hd1.length, 1);
+eq("delta 行里是 IP 与整页计数", hd1[0].i + ":" + hd1[0].o, "1.1.1.1:1");
+eq("没有新证据时 delta 为空（不重复上报）", W.HEALTH.delta().length, 0);
+W.HEALTH.merge([{ i: "2.2.2.2", o: 0, b: 0, d: 3 }]);
+ok("merge 进来的零字节中继被算成快死", W.HEALTH.score("2.2.2.2") < 0.3, W.HEALTH.score("2.2.2.2"));
+eq("merge 的行不再重复上报", W.HEALTH.delta().filter((x) => x.i === "2.2.2.2").length, 0);
+W.HEALTH.clear();
+eq("Store 门面能给出主 uuid（小写、取第一个）", W.STORE.primary({ uuid: "AA,BB" }), "aa");
+ok("Store 门面暴露观测快照", Array.isArray(W.STORE.conns(5)), "conns");
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

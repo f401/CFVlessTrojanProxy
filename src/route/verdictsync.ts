@@ -2,6 +2,7 @@
 // 目标 isolate 冷启动时拉一次，之后靠本地的记录增量回传，避免每请求都读 DO。
 import { S } from "../core/state";
 import { vAll, vImport } from "./verdict";
+import { HEALTH } from "./relay-health";
 import { cnt } from "../core/counter";
 
 export interface VtRow {
@@ -35,11 +36,12 @@ export async function vtLoad(env: Env): Promise<void> {
   try {
     const raw = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
     const rr = await env.METER.get(env.METER.idFromName(raw)).fetch("https://meter/vt");
-    const jj = (await rr.json()) as { vt?: VtRow[] };
+    const jj = (await rr.json()) as { vt?: VtRow[]; hl?: Array<{ i: string; o: number; b: number; d: number }> };
     if (Array.isArray(jj.vt)) {
       vImport(jj.vt);
       cnt("vtDO", jj.vt.length);
     }
+    if (Array.isArray(jj.hl)) HEALTH.merge(jj.hl);
   } catch {
     // 读不到就当没有：不阻塞连接
   }
