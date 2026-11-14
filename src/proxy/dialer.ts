@@ -62,7 +62,6 @@ export class Dialer {
       await Promise.race([HOOK.vtLoad(env), new Promise<void>((r) => setTimeout(r, 200))]);
     }
     const win = HOOK.win ? HOOK.win(host) : { d: false, r: false };
-    const dirWin = win.d;
     const relWin = win.r;
     if (cfHost) refreshCfHttp(host, st.ctx);
     // 判定层要知道目标是 CF 托管：直连被自家边缘拒时一次即判，所以放在分支外
@@ -73,10 +72,13 @@ export class Dialer {
     // 时 clientV6 恒为假 → 这条恒走直连 → 全线 403。所以这里只问「有没有新鲜直连成功证据」，
     // 有的情况交给 policy 的 direct-ok（5 分钟）判断，没有就优先中继。
     // 本出口 fetch 的 200 不代表隧道直连能成（fetch 走 CF 自己的出口）：7.60 起就用它挡过一次，
+    // 2026-11-15 06:5x 配对实测（同一条命令内交替，各 30 条）：强制直连 30/30、强制中继 26/30；
+    // 即「CF 托管站点默认绕中继」在当前链路下是负收益。改成只在**有证据**时才绕：
+    // 直连最近失败过（`learned`）、命中 proxyip 名单、或该站点中继最近成功过（`relWin`）。
     // 但实测 `httpCode === 200` 时隧道仍有大量 403 —— 继续用它会让「明明有 v4 中继」的请求退回直连。
     const wantPx =
       pxForce > 0 ||
-      (pxForce === 0 && !!env.proxyip && (learned || onList || relWin || (cfHost && !dirWin)));
+      (pxForce === 0 && !!env.proxyip && (learned || onList || relWin));
 
     if (pxDecision(request, host, cfHost, wantPx, SC.POLICY, mode)) {
       // ?rx= 钉住中继（只给诊断脚本用）：跳过选择器直接用它，用来给每条中继量吞吐。
