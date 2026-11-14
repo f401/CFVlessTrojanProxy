@@ -90,10 +90,14 @@ export function renderClash(
       for (const n of nodes) {
         if (proto === "trojan" && !pass) continue;
         const name = `${proto}-${nodeLabel(n)}-${suffix}`;
+        // 入口一律钉 IPv4：客户端在双栈网络上会把域名解析成 AAAA，
+        // 而 CF→CF 会把客户端出口原样透传给目标（X 会直接回 4 字节 `IPv6` 的 403）。
+        // 用 IP 字面量 + servername/Host 指回域名，TLS 与 WS 路由都不变。
+        const vip = edgeIps.length ? String(edgeIps[byMode[mode].length % edgeIps.length]) : n.host;
         emit(
           name,
           proto,
-          n.host,
+          vip,
           n.port,
           `${nodePath(n)}&mode=${mode}`,
           n.tls,
@@ -115,6 +119,22 @@ export function renderClash(
         const name = `e-${ip}-${proto === "trojan" ? "TJ" : "VL"}${suffix}`;
         emit(name, proto, ip, 443, `/?ed=2560&ip=edge&mode=${mode}`, true, "");
         edgeNames.push(name);
+        all.push(name);
+      }
+    }
+  }
+
+  // 域名入口（备用）：能解析到 AAAA 的网络上会走 IPv6，目标侧就是 403；
+  // 只在用户手动切换时使用，默认组一律走上面的 IPv4 字面量条目。
+  const domNames: string[] = [];
+  if (edgeIps.length) {
+    for (const mode of ["tput", "lat"]) {
+      const suffix = mode === "lat" ? "L" : "T";
+      for (const proto of protos) {
+        if (proto === "trojan" && !pass) continue;
+        const name = `d-${proto === "trojan" ? "TJ" : "VL"}${suffix}`;
+        emit(name, proto, host, 443, `/?ed=2560&mode=${mode}`, true, "");
+        domNames.push(name);
         all.push(name);
       }
     }
@@ -142,6 +162,12 @@ export function renderClash(
     groups.push(`    tolerance: 50`);
     groups.push(`    lazy: false`);
     groups.push(q(edgeNames));
+  }
+  const G_DOM = "📛 域名入口";
+  if (domNames.length) {
+    groups.push(`  - name: "${G_DOM}"`);
+    groups.push(`    type: select`);
+    groups.push(q(domNames));
   }
   groups.push(`  - name: "${G_TPUT}"`);
   groups.push(`    type: url-test`);
@@ -183,7 +209,7 @@ export function renderClash(
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
   groups.push(
-    `    proxies: ["${G_TPUT}", "${G_LAT}"${edgeNames.length ? `, "${G_EDGE}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && all.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
+    `    proxies: ["${G_TPUT}", "${G_LAT}"${domNames.length ? `, "${G_DOM}"` : ""}${edgeNames.length ? `, "${G_EDGE}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && all.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
   );
 
   return [
