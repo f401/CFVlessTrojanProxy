@@ -471,3 +471,41 @@ export async function cronScan(env: Env, adm = 0) {
     await SEEDS.write(env, S.colo ? undefined : true, true);
   }
 }
+
+/**
+ * Pool 门面（P4）：把「抓取 → 准入探活 → 写 alive → 淘汰」这条流程以对象形式暴露。
+ * 方法委托同名函数（实现留在原地，避免整文件搬家带来的回归风险），与 src/store/store.ts 的
+ * Store 门面同一形态；之后要真正内联，可逐方法替换实现，调用方无需改动。
+ */
+export class Pool {
+  noteProbe(r: { bad?: string } | null) {
+    return noteProbe(r);
+  }
+  async ensurePool(env: Env) {
+    return ensurePool(env);
+  }
+  async commitPool(env: Env, fresh: PoolEntry[], allowShrink = false) {
+    return commitPool(env, fresh, allowShrink);
+  }
+  async pxGet(env: Env) {
+    return pxGet(env);
+  }
+  nsOf(keys: string[], limit = 64) {
+    return nsOf(keys, limit);
+  }
+  async pxSet(env: Env, patch: { cur?: string | null; alive?: NodeEntry[] }) {
+    return pxSet(env, patch);
+  }
+  async flushPx(env: Env, force?: boolean) {
+    return flushPx(env, force);
+  }
+  async aliveList(env: Env) {
+    return aliveList(env);
+  }
+  async cronScan(env: Env, adm = 0) {
+    return cronScan(env, adm);
+  }
+}
+
+/** 进程内唯一实例 */
+export const POOL = new Pool();

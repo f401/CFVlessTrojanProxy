@@ -21,6 +21,7 @@ export interface HlRow {
 
 const BIG = 20000;
 const MAX_IP = 200;
+const HL_MS = 30 * 60_000; // 存活证据的半衰期：30 分钟不动就回到中性
 
 export class RelayHealth {
   private m = new Map<string, RelayStat>();
@@ -45,14 +46,16 @@ export class RelayHealth {
     else s.dead++;
   }
 
-  /** 0..1，越大越好：整页多、无响应少 */
+  /** 0..1，越大越好：整页多、无响应少；证据超过半衰期就回落到中性 0.5 */
   score(ip: string): number {
     const s = this.m.get(ip);
     if (!s) return 0.5; // 未测 = 中性，不能惩罚新中继
     const n = s.ok + s.bad + s.dead;
     const rate = (s.ok + 1) / (n + 2);
     const alive = (n - s.dead + 1) / (n + 1);
-    return Math.max(0, Math.min(1, 0.7 * rate + 0.3 * alive));
+    const raw = Math.max(0, Math.min(1, 0.7 * rate + 0.3 * alive));
+    const w = Math.pow(0.5, Math.max(0, Date.now() - s.at) / HL_MS);
+    return 0.5 + w * (raw - 0.5);
   }
 
   /** 按健康度排序（好在前，未测居中），同分保持原序 */

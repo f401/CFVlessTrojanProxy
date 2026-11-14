@@ -1861,5 +1861,10 @@ eq("merge 的行不再重复上报", W.HEALTH.delta().filter((x) => x.i === "2.2
 W.HEALTH.clear();
 eq("Store 门面能给出主 uuid（小写、取第一个）", W.STORE.primary({ uuid: "AA,BB" }), "aa");
 ok("Store 门面暴露观测快照", Array.isArray(W.STORE.conns(5)), "conns");
+// ═══ 第 47 组：Pool 类化（P4）═══
+ok("Pool 是类实例，抓取/探活/准入都在它身上", typeof W.POOL === "object" && typeof W.POOL.cronScan === "function", "POOL");
+ok("Pool 提供准入巡检", typeof W.POOL.ensurePool === "function" && typeof W.POOL.commitPool === "function", "ensure/commit");
+ok("Pool 提供读视图", typeof W.POOL.pxGet === "function" && typeof W.POOL.aliveList === "function", "pxGet/alive");
+eq("nsOf 空列表返回空表", Object.keys(W.POOL.nsOf([], 5)).length, 0);
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

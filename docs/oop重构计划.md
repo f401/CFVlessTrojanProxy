@@ -86,5 +86,15 @@
 
 验收：`test_score` 393（+7）；arch **77 文件**通过（分层方向无环）；线上 `?hl=1&do=1` 能看到同一 IP 的 `local` 与 `ring`。
 
+## P4（7.04，提交见 git log）：池子收成对象 + 存活度时间衰减
 
+| 项 | 改法 | 位置 |
+| --- | --- | --- |
+| Pool 门面 | `export class Pool` 把 noteProbe/ensurePool/commitPool/pxGet/nsOf/pxSet/flushPx/aliveList/cronScan 收成方法，`POOL` 单例；方法委托同名函数（实现留在原地，避免整文件搬家） | `src/px/pool.ts` |
+| 存活度衰减 | `RelayHealth.score()` 引入半衰期 30 分钟：`w = 0.5^((now-at)/HL)`，`score = 0.5 + w*(raw-0.5)` —— 证据越旧越回中性，废中继「好起来」能被重新发现 | `src/route/relay-health.ts` |
+| 门面形态统一 | Pool 与 Store 同为「类 + 单例 + 薄包装」，调用方无需改动 | — |
+| 测试 | 第 47 组 4 条（Pool 实例与方法存在、nsOf 空表） | `test/test_score.mjs` |
 
+验收：tsc 0 error；`check-arch` 77 文件；bundle 333.2/336.2 KB；test_v3 186 / smoke 30 / test_score **397** / sim_v3 22 / golden 8；
+仿真 2000 节点 **1.14x (1.12–1.15)、命中 66%**、20 节点 1.26x（与重构前逐位相同）；
+线上 7.04：`/health` 7.04，`x.com` 200（MXP）、`api.x.com` 403（业务响应原样透传、判定表不拦截）。
