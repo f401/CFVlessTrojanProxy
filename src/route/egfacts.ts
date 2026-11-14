@@ -147,6 +147,10 @@ export class EgFacts {
     return out.map((x) => x.i);
   }
 
+  /**
+   * 功能：导出当前有效的 `eg` 行（供 `/health` 与调试口展示）。
+   * @returns {EgRow[]} 出口族事实行
+   */
   snap(): EgRow[] {
     const now = Date.now();
     const out: EgRow[] = [];
