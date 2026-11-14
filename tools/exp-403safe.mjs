@@ -304,6 +304,38 @@ check(`A10 3/8 封锁不触发自愈（S4 sweeps=${s4.bizSweeps}）`, s4.bizSwee
 // A8 leastBad 只由 dead 触发
 check(`A8 leastBad 只由 dead 触发且真的被用到（S1 ${s1.leastBad} / S5 ${s5.leastBad}）`, s1.leastBad === 0 && s5.leastBad > 0);
 
+// A12 静默是「暂时」不是「永久」：期内不写、到期恢复写
+{
+  const relays = Array.from({ length: 8 }, (_, i) => ({ id: `10.0.0.${i + 1}`, cost: 100 + i }));
+  const v = new V8(relays);
+  const host = "mute.example";
+  const t0 = 1_700_000_000_000;
+  // 先喂一次整页，让 bigTypical 有基线（否则 tiny 判据不成立，什么都不会写）
+  v.commit({ host, ip: "10.0.0.1", t: t0, status: 200, down: 45000, hasBigPeer: false });
+  const batch = (t) => {
+    for (let i = 0; i < 8; i++) {
+      v.commit({ host, ip: `10.0.0.${i + 1}`, t, status: 403, down: 737, hasBigPeer: true });
+    }
+  };
+  // 三批 -> 全池被写 -> 自愈清空并进入静默
+  for (let b = 0; b < 3; b++) {
+    batch(t0 + b * 70_000);
+    v.maybeSweep(host, 8, t0 + b * 70_000);
+  }
+  const swept = v.bizSweeps;
+  const rowsAtSweep = (v.blkRows.get(host) || new Set()).size;
+  // 静默期内继续灌三批：不应有任何新行
+  for (let b = 0; b < 3; b++) batch(t0 + 240_000 + b * 70_000);
+  const rowsInMute = (v.blkRows.get(host) || new Set()).size;
+  // 静默到期后再灌一批：应当立刻恢复写入
+  const tExpire = (v.muteUntil.get(host) || 0) + 10_000;
+  batch(tExpire);
+  const rowsAfterExpire = (v.blkRows.get(host) || new Set()).size;
+  check(`A12 全池被写触发静默（sweeps=${swept} 清空后 ${rowsAtSweep} 行）`, swept >= 1 && rowsAtSweep === 0);
+  check(`A12 静默期内不写 blk（${rowsInMute} 行）`, rowsInMute === 0);
+  check(`A12 静默到期后恢复写入（${rowsAfterExpire} 行）`, rowsAfterExpire > 0);
+}
+
 console.log("\n断言：", fails.length ? "FAIL" : "全部通过");
 for (const f of fails) console.log("  ✗", f);
 process.exit(fails.length ? 1 : 0);
