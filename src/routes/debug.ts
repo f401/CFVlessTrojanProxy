@@ -16,6 +16,7 @@ import { prefsJson } from "../route/prefs";
 import { REL_TTL, relSnap } from "../route/relperf";
 import { EG, probeEg } from "../route/egfacts";
 import { psSnap } from "../route/psfacts";
+import { DEAD } from "../route/deadfacts";
 import { DIRECT, chanKey } from "../route/channel";
 import { HEALTH } from "../route/relay-health";
 import { verifyInfo } from "../route/verify";
@@ -53,6 +54,7 @@ export async function debug(c: UserCtx): Promise<Response> {
     S.vtLoaded = false;
     await vtLoad(env);
   }
+  if (url.searchParams.get("dd")) return json({ rows: DEAD.snap() }); // 判死的会挪到队尾，30 分钟复活
   // 站点 × 中继的成功率事实（本 isolate）：样本越多越可信，因子越靠近 1
   if (url.searchParams.get("pss")) return json({ host: String(url.searchParams.get("pss")), rows: psSnap(String(url.searchParams.get("pss"))) });
   if (url.searchParams.get("eg")) return json({ rows: EG.snap(), probe: await probeEg(String(url.searchParams.get("eg") || "").split(",").map((x) => x.trim()).filter(Boolean)) });

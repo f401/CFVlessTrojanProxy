@@ -95,6 +95,8 @@ export class Dialer {
           st.retried = true;
           st.pxTries = tries + 1;
           cnt("pxf");
+          // 连上了：把这条中继的「连不上」计数清零（复活只可能由真实连接触发）
+          HOOK.deadNote?.(p.host, true);
           break;
         } catch {
           sock = null;
@@ -102,6 +104,8 @@ export class Dialer {
           // 会被「已经超时、但真的连上了」的连接慢慢吃掉（现象是后面所有请求都失败）。
           void pk.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 本来就没连上 */ });
           nsFail(key); // 中转本身连不上：冷却它，下一条换个候选试
+          // 连接层事实（v8 §3 的 dead）：没有任何 HTTP 状态行，与业务 403 物理上不可混淆
+          HOOK.deadNote?.(p.host, false);
         }
       }
     }

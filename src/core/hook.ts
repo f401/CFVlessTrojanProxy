@@ -43,6 +43,10 @@ export interface Hooks {
   psDelta: (() => Array<{ k: string; q: number; n: number; at: number }>) | null;
   /** 「站点 × 中继」真实观测（拿到完整响应=成功） */
   psNote: ((host: string, ip: string, ok: boolean) => void) | null;
+  /** 中继连接层结果（连上=true 会清零失败计数） */
+  deadNote: ((ip: string, ok: boolean) => void) | null;
+  /** 「连不上」事实增量（未 ack 前重发等于重试） */
+  deadDelta: (() => Array<{ i: string; n: number; at: number }>) | null;
   /** 判定/中继增量确认送达（成功）或退回（失败） */
   syncAck: (() => void) | null;
   syncNack: (() => void) | null;
@@ -67,5 +71,5 @@ export interface TrafficEvt {
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,
-  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, egDelta: null, psDelta: null, psNote: null, syncAck: null, syncNack: null, relPerf: null };
+  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, egDelta: null, psDelta: null, psNote: null, deadNote: null, deadDelta: null, syncAck: null, syncNack: null, relPerf: null };
 

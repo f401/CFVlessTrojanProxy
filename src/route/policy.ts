@@ -15,6 +15,7 @@ import { CF_NEG, JUDGE } from "./judge";
 import { relCostMode, relNote, relSnap } from "./relperf";
 import { EG } from "./egfacts";
 import { PS, psFactor, psNote } from "./psfacts";
+import { DEAD, deadNote, isDead } from "./deadfacts";
 
 export interface Ctx {
   host: string;
@@ -123,7 +124,7 @@ export class Policy {
       // 有样本时把实测过不了的通道乘贵 —— 仍然只是乘数，绝不剔候选（v8 §15 I2）。
       return base * EG.bias(ip) * psFactor(c.host, ip);
     };
-    const stick = usable
+    const ranked = usable
       .slice()
       .sort(
         (a, b) =>
@@ -132,6 +133,10 @@ export class Policy {
           scoreOf(a) - scoreOf(b) ||
           vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a),
       );
+    // v8 §15 的 I1：dead 是唯一允许缩小候选的事实 —— 而且这里只把判死的中继挪到队尾，
+    // 不是删除：全池都判死时仍要发出请求（leastBad），否则用户看到的是「无候选」而不是业务页。
+    const live = ranked.filter((ip) => !isDead(ip));
+    const stick = live.length ? live : ranked;
     const nonCf = stick.filter((ip) => !isCfIp(ip));
     const okOnes = stick.filter((ip) => vOk(c.host, "r:" + ip) || vOk("*", "r:" + ip));
 
@@ -243,12 +248,14 @@ HOOK.syncAck = (): void => {
   vtAck();
   EG.ack();
   PS.ack();
+  DEAD.ack();
 };
 HOOK.syncNack = (): void => {
   HEALTH.nack();
   vtNack();
   EG.nack();
   PS.nack();
+  DEAD.nack();
 };
     HOOK.verify = (): Promise<number> => runVerify();
     HOOK.veto = (host: string, ip: string): boolean => {
@@ -267,6 +274,8 @@ HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => re
 HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
     HOOK.psDelta = (): Array<{ k: string; q: number; n: number; at: number }> => PS.delta();
     HOOK.psNote = (host: string, ip: string, ok: boolean): void => psNote(host, ip, ok);
+    HOOK.deadNote = (ip: string, ok: boolean): void => deadNote(ip, ok);
+    HOOK.deadDelta = (): Array<{ i: string; n: number; at: number }> => DEAD.delta();
     HOOK.egDelta = (): Array<{ i: string; f: number; at: number }> => EG.delta();
     HOOK.vtLoad = (env: Env): Promise<void> => vtLoad(env);
   }

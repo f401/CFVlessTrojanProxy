@@ -2466,5 +2466,52 @@ console.log("\n80) 站点 × 中继成功率（ps）：只折价、不剔候选"
   W.S.bigTyp.clear();
 }
 
+
+console.log("\n81) 中继「连不上」（dead）：唯一允许挪到队尾的事实");
+{
+  const now = Date.now();
+  W.DEAD.clear();
+  eq("一次失败不算死", W.isDead("203.0.113.61", now), false);
+  W.deadNote("203.0.113.61", false, now);
+  eq("一次失败后仍不算死", W.isDead("203.0.113.61", now), false);
+  W.deadNote("203.0.113.61", false, now + 1000);
+  eq("连续两次失败 → 判死", W.isDead("203.0.113.61", now + 1000), true);
+  eq("30 分钟后再给机会", W.isDead("203.0.113.61", now + 31 * 60000), false);
+  W.deadNote("203.0.113.62", false, now);
+  W.deadNote("203.0.113.62", false, now + 1000);
+  W.deadNote("203.0.113.62", true, now + 2000);
+  eq("连上一次就复活（清零）", W.isDead("203.0.113.62", now + 2000), false);
+  W.DEAD.clear();
+  eq("合并只收判死行（n<2 被丢）", W.DEAD.load([{ i: "203.0.113.63", n: 1, at: now }]), 1);
+  eq("合并后仍不算死（n=1）", W.isDead("203.0.113.63", now), false);
+  eq("更新的判死行会覆盖", W.DEAD.load([{ i: "203.0.113.63", n: 2, at: now + 5 }]), 1);
+  eq("合并后判死", W.isDead("203.0.113.63", now + 5), true);
+  eq("更旧的行被忽略", W.DEAD.load([{ i: "203.0.113.63", n: 9, at: now }]), 0);
+  W.DEAD.clear();
+  W.deadNote("203.0.113.64", false, now);
+  eq("增量里有 1 行", W.DEAD.delta().length, 1);
+  W.DEAD.ack();
+  eq("ack 后增量清空", W.DEAD.delta().length, 0);
+  // 选路：判死的中继挪到队尾，但全池判死时仍要选出东西
+  const H = "dead.example";
+  W.DEAD.clear();
+  W.PS.clear();
+  W.relNote(H, "203.0.113.71", 200, 0, now);
+  W.relNote(H, "203.0.113.72", 200, 0, now);
+  const d1 = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.72", "203.0.113.71"], legacyWantsRelay: true, mode: "tput" });
+  eq("两条都健康时按排序取第一条", d1.chan.ip, "203.0.113.72");
+  W.deadNote("203.0.113.72", false, now);
+  W.deadNote("203.0.113.72", false, now + 1);
+  const d2 = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.72", "203.0.113.71"], legacyWantsRelay: true, mode: "tput" });
+  eq("判死的挪到队尾，换另一条", d2.chan.ip, "203.0.113.71");
+  W.deadNote("203.0.113.71", false, now + 2);
+  W.deadNote("203.0.113.71", false, now + 3);
+  const d3 = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.72", "203.0.113.71"], legacyWantsRelay: true, mode: "tput" });
+  eq("全池判死时仍返回候选（不返回空）", ["203.0.113.71", "203.0.113.72"].includes(d3.chan.ip), true);
+  W.DEAD.clear();
+  W.S.peers.clear();
+  W.S.bigTyp.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

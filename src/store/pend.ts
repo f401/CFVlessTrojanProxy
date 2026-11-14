@@ -121,7 +121,8 @@ export class PendingLedger {
             if (hl.length) body.hl = hl;
           }
           // 出口族事实（v8 §3 的 eg）搭同一趟车：只登记，等 DO 回 200 才 ack
-          if (HOOK.psDelta) { const ps = HOOK.psDelta(); if (ps.length) body.ps = ps; }
+          if (HOOK.deadDelta) { const dd = HOOK.deadDelta(); if (dd.length) body.dead = dd; }
+        if (HOOK.psDelta) { const ps = HOOK.psDelta(); if (ps.length) body.ps = ps; }
         if (HOOK.egDelta) {
             const eg = HOOK.egDelta();
             if (eg.length) body.eg = eg;

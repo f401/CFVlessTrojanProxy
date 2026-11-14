@@ -5,6 +5,7 @@ import { vAll, vImport } from "./verdict";
 import { HEALTH } from "./relay-health";
 import { EG, EgRow } from "./egfacts";
 import { PS } from "./psfacts";
+import { DEAD } from "./deadfacts";
 import { cnt } from "../core/counter";
 
 export interface VtRow {
@@ -67,6 +68,7 @@ export async function vtLoad(env: Env): Promise<void> {
       hl?: Array<{ i: string; o: number; b: number; d: number }>;
       eg?: EgRow[];
       ps?: Array<{ k: string; q: number; n: number; at: number }>;
+      dead?: Array<{ i: string; n: number; at: number }>;
     };
     if (Array.isArray(jj.vt)) {
       // 过滤掉历史版本外发出去的通配封锁：它们已经在别的 isolate 里造成过大面积误封，重新导入只会复发。
@@ -79,6 +81,8 @@ export async function vtLoad(env: Env): Promise<void> {
     if (Array.isArray(jj.eg)) cnt("egDO", EG.load(jj.eg));
     // 成功率事实：冷启动一次灌入，之后靠本地增量回传
     if (Array.isArray(jj.ps)) cnt("psDO", PS.load(jj.ps));
+    // 「连不上」事实：只并已判死的行（失败一次不算事实）
+    if (Array.isArray(jj.dead)) cnt("deadDO", DEAD.load(jj.dead));
   } catch {
     // 读不到就当没有：不阻塞连接
   }
