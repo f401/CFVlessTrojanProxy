@@ -64,7 +64,6 @@ export class Dialer {
     const win = HOOK.win ? HOOK.win(host) : { d: false, r: false };
     const dirWin = win.d;
     const relWin = win.r;
-    const httpCode = cfHost ? cfHttpCode(host) : 0;
     if (cfHost) refreshCfHttp(host, st.ctx);
     // 判定层要知道目标是 CF 托管：直连被自家边缘拒时一次即判，所以放在分支外
     st.cf = cfHost;
