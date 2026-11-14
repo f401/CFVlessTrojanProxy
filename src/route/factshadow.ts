@@ -129,6 +129,17 @@ export class FactShadow {
    * @param {number} now 当前时间（默认取系统时间）
    * @returns {string} 决策理由码（`ok` 表示会写；便于单测直接断言）
    */
+  /**
+   * 功能：给外部（生产写入点）拼一份与影子完全相同的上下文，保证两边用同一套证据。
+   * @param e 连接事件
+   * @param now 事件时间
+   * @returns 裁决器上下文
+   */
+  ctxFor(e: TrafficEvt, now = Date.now()): FactCtx {
+    const prev = this.prevBlk as unknown as Record<string, { at: number }>;
+    const o: FactObs = { kind: e.via === "node" ? "relay" : "direct", host: e.host, relay: e.node ? e.node.slice(0, e.node.lastIndexOf(":")) : "", at: now, down: e.down, status: 0 };
+    return shadowCtx(o, now, prev);
+  }
   observe(e: TrafficEvt, now = Date.now()): string {
     const o = shadowObs(e, now);
     const ck = chanKey(o);

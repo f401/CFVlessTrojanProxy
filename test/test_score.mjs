@@ -2642,5 +2642,39 @@ console.log("\n85) 康复通道（v8 D12）");
   eq("康复不会永远抢第一（前 19 条不是 rehab）", hit && hit.i > 1, true);
 }
 
+
+console.log("\n86) commitFact 单一裁决：ps 由 judge 写入");
+{
+  W.PS.clear();
+  const host = "psw.example.com";
+  const ip = "198.51.100.77";
+  const c0 = W.cntView().cfDiff || 0;
+  W.JUDGE.onTraffic({
+    host,
+    via: "node",
+    node: ip + ":443",
+    down: 45210,
+    ok: true,
+    life: 1800,
+    up: 1200,
+    cf: false,
+    at: Date.now(),
+  });
+  eq("中继腿拿到整页 → 写入 ps", W.psOk(host, ip) > 0.6, true);
+  W.JUDGE.onTraffic({
+    host,
+    via: "direct",
+    node: "",
+    down: 45210,
+    ok: true,
+    life: 1800,
+    up: 1200,
+    cf: false,
+    at: Date.now(),
+  });
+  eq("直连腿不写站点×中继成功率", W.psOk(host, "d"), -1);
+  eq("影子与生产结论一致（无 cfDiff）", W.cntView().cfDiff || 0, c0);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

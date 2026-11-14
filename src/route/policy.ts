@@ -14,7 +14,7 @@ import { HEALTH, ipOf } from "./relay-health";
 import { CF_NEG, JUDGE } from "./judge";
 import { relCostMode, relNote, relSnap } from "./relperf";
 import { EG } from "./egfacts";
-import { PS, psFactor, psNote, psOk } from "./psfacts";
+import { PS, psFactor, psOk } from "./psfacts";
 import { DEAD, deadNote, isDead } from "./deadfacts";
 import { BLK, blkPen } from "./blkfacts";
 import { cnt } from "../core/counter";
@@ -296,7 +296,6 @@ HOOK.syncNack = (): void => {
 HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => relNote(host, ip, ttfb, kbs);
 HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
     HOOK.psDelta = (): Array<{ k: string; q: number; n: number; at: number }> => PS.delta();
-    HOOK.psNote = (host: string, ip: string, ok: boolean): void => psNote(host, ip, ok);
     HOOK.deadNote = (ip: string, ok: boolean): void => deadNote(ip, ok);
     HOOK.deadDelta = (): Array<{ i: string; n: number; at: number }> => DEAD.delta();
     HOOK.blkDelta = (): Array<{ k: string; n: number; at: number }> => BLK.delta();

@@ -12,7 +12,7 @@ import path from "node:path";
 /** 待检查的符号 → 允许的「自己人」文件（定义处，不算调用点） */
 const NEED = [
   { sym: "EG.bias", own: "src/route/egfacts.ts", why: "选路读取出口族" },
-  { sym: "PS.note", own: "src/route/psfacts.ts", why: "成功率事实的写入点（经薄包装）", allowOwn: false, via: "psNote" },
+  { sym: "PS.note", own: "src/route/psfacts.ts", why: "成功率事实的写入点（judge 按 commitFact 裁决）" },
   { sym: "EG.note", own: "src/route/egfacts.ts", why: "出口族写入点（在 probeEg 内）", via: "probeEg" },
   { sym: "psFactor", own: "src/route/psfacts.ts", why: "选路读取成功率" },
   { sym: "deadNote", own: "src/route/deadfacts.ts", why: "连不上事实的写入点" },

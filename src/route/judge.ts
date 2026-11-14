@@ -12,6 +12,8 @@ import { cnt } from "../core/counter";
 import { queueVerify } from "./verify";
 import { HEALTH } from "./relay-health";
 import { FACT } from "./factshadow";
+import { commitFact } from "./commitfact";
+import { PS } from "./psfacts";
 import { BLK } from "./blkfacts";
 
 const BIG = 20000; // 整页（含握手）的下限
@@ -103,11 +105,22 @@ export class Judge {
     // 事件自己的时间戳：回放/聚合的事件必须按发生时间归批，否则三批会被压成一批
     const ty = (e as { at?: number }).at ?? Date.now();
     HEALTH.note(e.node, e.down, e.ok); // 中继存活度：与站点无关的那一半证据
-    // 影子：用 v8 的写入规则算一遍「本会写什么」，只统计不落库（接线第 1 步）
+    // v8 的写入裁决只有一个入口：`commitFact`。影子算出「本会写什么」，生产侧再按同一裁决落库，
+    // 两者结论不同就记 `cfDiff` —— 它说明有人在别处绕过了裁决（这正是「同一件事只能有一份状态」的守卫）。
+    let verdict = "";
     try {
-      FACT.observe(e, ty);
+      verdict = FACT.observe(e, ty);
     } catch {
       /* 影子统计绝不影响真实判定 */
+    }
+    if (e.via === "node" && e.node && e.host) {
+      const pip = e.node.slice(0, e.node.lastIndexOf(":"));
+      if (pip) {
+        const out = commitFact({ kind: "relay", host: e.host, relay: pip, at: ty, down: e.down, status: 0 }, FACT.ctxFor(e, ty));
+        if (verdict && out.reason !== verdict) cnt("cfDiff");
+        // 只有「拿到完整响应」才记成功率；tiny 的负样本由 blk 的批次投票负责（§5.1 D14）
+        if (out.write && out.write.kind === "ps" && out.write.j.ok) PS.note(e.host, pip, true, ty);
+      }
     }
     const chan = this.chanOf(e);
     const ck = e.host + "|" + chanKey(chan);
