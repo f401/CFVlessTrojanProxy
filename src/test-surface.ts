@@ -124,6 +124,8 @@ export { BLK_TTL, CONFIRM_GAP, DEAD_TTL, BIG_PEER, TINY_ABS, WRITE_GAP, commitFa
 export { FACT, FactShadow, shadowCtx, shadowObs } from "./route/factshadow";
 /** 四类事实的门面（OOP 收口后唯一的上行/合并入口） */
 export { FACTS, FactsStore } from "./route/factsstore";
+/** tunnelfetch 探针（出口族对照实验用） */
+export { probeTf } from "./core/tf";
 
 export { handleDns, trojanUdpFrame } from "./proxy/dns";
 export { handleUpgrade } from "./proxy/session";
