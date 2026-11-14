@@ -9,6 +9,8 @@ import { runRound } from "../route/round";
 import { edgeScan } from "../route/edge";
 import { runTfb } from "../route/tfb";
 import { EG, probeEg } from "../route/egfacts";
+import { DNS } from "../route/dnsfacts";
+import { probeFam } from "../proxy/dial";
 import { aliveList } from "../px/pool";
 import { SEL } from "../px/selector";
 import { flushSnap, pendFlush, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
@@ -74,6 +76,7 @@ async function tfbRound(env: Env): Promise<void> {
  * 回显服务回答（`icanhazip.com` 回一个 IP 字面量）。只探还没测过的中继，避免重复烧 connect 名额。
  * @returns {Promise<void>}
  */
+
 async function egRound(env: Env): Promise<void> {
   try {
     const list = await aliveList(env);
@@ -87,6 +90,30 @@ async function egRound(env: Env): Promise<void> {
     await probeEg(todo, 2);
   } catch {
     /* 探测失败不影响 cron 其它环节 */
+  }
+}
+
+/**
+ * 功能：为待决策站点确证「有没有 AAAA」—— 纯 v4 站点在 v6 出口上结构性过不去，
+ * 提前知道就能少发一条注定失败的请求、也少浪费一次探索预算。
+ * 只处理 `needPx` 里尚未过期的站点、每轮最多 2 个（每个 1 次 DoH 子请求）。
+ * @returns {Promise<void>}
+ */
+async function dnsRound(): Promise<void> {
+  try {
+    const now = Date.now();
+    const hosts = [...S.needPx.entries()]
+      .filter(([, until]) => until > now)
+      .map(([h]) => h)
+      .filter((h) => DNS.v6Of(h, now) < 0)
+      .slice(0, 2);
+    for (const h of hosts) {
+      const r = await probeFam(h);
+      if (r.answered) DNS.note(h, r.v6, now);
+    }
+    if (hosts.length) cnt("dnsProbe", hosts.length);
+  } catch {
+    /* DoH 失败不影响其它环节 */
   }
 }
 /**
@@ -103,6 +130,7 @@ async function cronOnce(env: Env): Promise<void> {
     await edgeScan(env, plan.edge);
     await tfbRound(env);
     await egRound(env);
+    await dnsRound();
     SEL.afterScan(env);
   } catch (e) {
     logErr(`cron: ${errMsg(e)}`);

@@ -17,6 +17,7 @@ import { EG } from "./egfacts";
 import { PS, psFactor, psOk } from "./psfacts";
 import { DEAD, deadNote, isDead } from "./deadfacts";
 import { BLK, blkPen } from "./blkfacts";
+import { DNS } from "./dnsfacts";
 import { cnt } from "../core/counter";
 
 export interface Ctx {
@@ -128,7 +129,8 @@ export class Policy {
       // 再叠「站点 × 中继」成功率折价：没有样本时因子恒为 1（接入前后逐位相同）；
       // 有样本时把实测过不了的通道乘贵 —— 仍然只是乘数，绝不剔候选（v8 §15 I2）。
       // blk：判为「这个站点在这个出口上被封锁」时只乘 6 倍代价（v8 §15 的 I1：永不剔候选）
-      return base * EG.bias(ip) * psFactor(c.host, ip) * blkPen(c.host, ip);
+      // dns：确证「纯 v4 站点」时把 v6 出口乘 2 —— 结构性过不去，不是状态不好。
+      return base * EG.bias(ip) * DNS.penOf(c.host, EG.famOf(ip)) * psFactor(c.host, ip) * blkPen(c.host, ip);
     };
     // 站点级自愈：整池都被同一站点写满 ⇒ 判据失效/站点在拒绝所有人，清空并静默 30 分钟
     BLK.sweep(c.host, usable);

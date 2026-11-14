@@ -35,6 +35,31 @@ export async function dohQuery(domain: string, type: "A" | "AAAA") {
 }
 
 /**
+ * 功能：判断站点是否配了 AAAA 记录 —— 唯一能「确证纯 v4」的廉价手段。
+ * 与 `dohQuery` 的区别：它把「查到了但为空」与「一个 DoH 都没响应」分开，
+ * 因为前者是事实（站点确实没有 v6 地址），后者只是抖动（不能当事实写）。
+ * @param host 站点主机名
+ * @returns {Promise<{ v6: boolean, answered: boolean }>} v6=是否有 AAAA；answered=是否至少一个 DoH 正常应答
+ */
+export async function probeFam(host: string): Promise<{ v6: boolean; answered: boolean }> {
+  for (const base of DOH_ENDPOINTS) {
+    try {
+      const url = `${base}?name=${encodeURIComponent(host)}&type=AAAA`;
+      const r = await fetch(url, { signal: timeoutSignal(5000), headers: { accept: "application/dns-json" } });
+      if (!r.ok) continue;
+      const j = await r.json();
+      // Status: 0 = NOERROR（应答应可信）→ 此时「没有 AAAA 记录」是事实；
+      // 其他状态（NXDOMAIN / SERVFAIL）只说明这次查询没结论。
+      if (Number(j.Status ?? -1) !== 0) continue;
+      const rec = ((j.Answer || []) as DohAnswer[]).find((x) => x.type === 28 && !!x.data);
+      return { v6: !!rec, answered: true };
+    } catch (e) {
+      /* 换下一个 DoH */
+    }
+  }
+  return { v6: false, answered: false };
+}
+/**
  * 解析域名的 AAAA 记录（带 5 分钟内存缓存）。
  * @param {string} domain 域名
  * @returns {Promise<string|null>} IPv6 地址或 null

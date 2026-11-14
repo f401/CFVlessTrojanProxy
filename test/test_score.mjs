@@ -2692,5 +2692,25 @@ console.log("\n87) 延迟观测：p95all / p95ok / good3s");
   eq("清空后归零", W.LAT.snap().n, 0);
 }
 
+
+console.log("\n88) dns 事实：确证纯 v4 才降权 v6 出口");
+{
+  W.DNS.clear();
+  const host = "v4only.example.com";
+  eq("没观测时是不知道", W.DNS.v6Of(host), -1);
+  eq("不知道时不降权", W.DNS.penOf(host, 6), 1);
+  W.DNS.note(host, false);
+  eq("确证纯 v4", W.DNS.v6Of(host), 0);
+  eq("v6 出口乘 2", W.DNS.penOf(host, 6), 2);
+  eq("v4 出口不受影响", W.DNS.penOf(host, 4), 1);
+  W.DNS.note("has6.example.com", true);
+  eq("有 AAAA 不降权", W.DNS.penOf("has6.example.com", 6), 1);
+  // 时钟注入：24 小时后过期回「不知道」，不永久钉死
+  W.DNS.note(host, false, Date.now() - W.DNS_TTL - 1);
+  eq("过期即失效", W.DNS.v6Of(host), -1);
+  const c = W.DNS.snap();
+  eq("快照里有记录数", typeof c.n, "number");
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
