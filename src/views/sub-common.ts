@@ -230,6 +230,15 @@ export function nodePath(n: RankedNode) {
  * @returns {Array<object>} 地区节点数组
  */
 // prettier-ignore
+/**
+ * 功能：按地区生成订阅条目（每个地区 × 每个协议一条）。
+ * @param regions 地区列表
+ * @param host 入口域名
+ * @param pass 密码
+ * @param protos 协议列表
+ * @param url 当前 URL（可带参数）
+ * @returns 条目数组
+ */
 export function regionEntries(regions: string[], host: string, pass: string, protos: string[], url?: URL): RegionEntry[] {
   const out: RegionEntry[] = [];
   const listen = Number(url && url.port) || (url && url.protocol === "http:" ? 80 : 443);

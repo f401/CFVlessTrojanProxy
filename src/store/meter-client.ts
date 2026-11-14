@@ -4,6 +4,12 @@ import { S } from "../core/state";
 
 export const METER_TTL = 15000;
 
+/**
+ * 功能：从 DO 读某用户的累计用量。
+ * @param env 环境变量
+ * @param id 用户 id
+ * @returns 用量记录或 null
+ */
 export async function meterGet(env: Env, id: string) {
   if (!env || !env.METER || !id) return null;
   const hit = S.meterCache.get(id);

@@ -233,6 +233,12 @@ export function bumpProbeBad(k: string, ok: boolean, now = Date.now()): void {
   const n = cur && now - cur.at <= SC.PROBE_BAD_TTL ? cur.n + 1 : 1;
   S.probeBad.set(k, { n: Math.min(9, n), at: now });
 }
+/**
+ * 功能：跑一轮池子维护：准入复测（adm 是本次准入预算）→ 探活 → 出口/中继打标 → 游标重算。
+ * @param env 环境变量
+ * @param adm 本轮准入名额，0 表示按池子大小自动取
+ * @returns 无
+ */
 export async function cronScan(env: Env, adm = 0) {
   await pxGet(env);
   let pool = await ensurePool(env);

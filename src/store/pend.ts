@@ -8,6 +8,11 @@ import { spdSnapshot } from "../core/node-snapshot";
 
 export const PEND_FLUSH_BYTES = 16 * 1024 * 1024; // 大文件传输时别频繁打 DO：DO 调用会吃这条连接的 CPU
 
+/**
+ * 功能：取主用户 id（env.uuid/uuids 的第一个，去空白）。
+ * @param env 环境变量
+ * @returns 用户 id；没有时返回空串
+ */
 export function primaryId(env: Env): string {
   return String((env && (env.uuid || env.uuids)) || "")
     .split(",")[0]
@@ -15,6 +20,14 @@ export function primaryId(env: Env): string {
     .toLowerCase();
 }
 
+/**
+ * 功能：把一段流量记进待上报账本。
+ * @param id 用户 id
+ * @param up 上行字节
+ * @param down 下行字节
+ * @param isNew 是否新连接（用于 conns 计数）
+ * @returns 无
+ */
 export function pendAdd(id: string, up: number, down: number, isNew?: boolean) {
   if (!id) return;
   const p = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
@@ -27,6 +40,12 @@ export function pendAdd(id: string, up: number, down: number, isNew?: boolean) {
   S.pend.set(id, p);
 }
 
+/**
+ * 功能：安排一次上报。已有定时器时，大流量触发的 delay=0 不能被之前的 30 秒定时器压住。
+ * @param env 环境变量
+ * @param delay 延迟毫秒，0 表示尽快
+ * @returns 无
+ */
 export function scheduleFlush(env: Env, delay?: number) {
   if (S.tflush) {
     // 大流量触发 delay=0 时，不能被之前排好的 30 秒定时器压住
@@ -48,6 +67,12 @@ export function kickFlush(env: Env, id: string | null) {
   scheduleFlush(env, 0);
 }
 
+/**
+ * 功能：把待上报账本 POST 给 DO。成功才 ack（否则 nack 以便重算），失败回滚流量。
+ * @param env 环境变量
+ * @param force 忽略节流
+ * @returns 发送成功为 true
+ */
 export async function pendFlush(env: Env, force?: boolean): Promise<void> {
   if (!env || !env.METER || !S.pend.size) return;
   if (!force && Date.now() - S.pendAt < S.pendMs) return;

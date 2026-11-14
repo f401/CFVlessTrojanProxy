@@ -1,5 +1,10 @@
 import { loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
 
+/**
+ * 功能：渲染「链接列表」形式的订阅（每行一条 vless/trojan URL）。
+ * @param o 订阅输入（主机、端口、凭据等）
+ * @returns 纯文本
+ */
 export function renderLinks(
   env: Env,
   url: URL,

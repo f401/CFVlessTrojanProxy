@@ -123,6 +123,10 @@ export class RelayHealth {
     return rows.slice(0, limit);
   }
 
+  /**
+   * 功能：清空中继健康表（测试与自愈用）。
+   * @returns 无
+   */
   clear(): void {
     this.m.clear();
     this.sent.clear();
@@ -130,6 +134,10 @@ export class RelayHealth {
     this.loaded = false;
   }
 
+  /**
+   * 功能：当前表内中继条数（含未过期的 sent/pending）。
+   * @returns 行数
+   */
   size(): number {
     return this.m.size;
   }
@@ -139,6 +147,10 @@ export class RelayHealth {
     return !this.loaded;
   }
 
+  /**
+   * 功能：标记「已从 KV 载入过」，避免同一 isolate 反复读 KV。
+   * @returns 无
+   */
   markLoaded(): void {
     this.loaded = true;
   }

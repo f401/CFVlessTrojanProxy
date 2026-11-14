@@ -42,6 +42,11 @@ const TFB_N: Map<string, number> = new Map();
 
 /** 每轮最多挑一个「最近被怀疑」的站点做 2 条中继的实测（1 DO 请求 + 2 子请求）。 */
 const TFB_V: Map<string, string> = new Map();
+/**
+ * 功能：每轮挑一个待验站点跑一批 tfb（每站点 30 分钟最多 3 批，不写 KV）。
+ * @param env 环境变量
+ * @returns 无
+ */
 async function tfbRound(env: Env): Promise<void> {
   const now0 = Date.now();
   // 站点过期就三张表一起清，避免 TFB_AT/TFB_N 只增不减
@@ -60,6 +65,11 @@ async function tfbRound(env: Env): Promise<void> {
   }
 }
 
+/**
+ * 功能：cron 主流程：算预算 → 准入复测 → 站点探测 → 入口扫描 → 快照。
+ * @param env 环境变量
+ * @returns 无
+ */
 async function cronOnce(env: Env): Promise<void> {
   try {
     // 一轮 cron 的子请求预算先算清：准入（池子）、判定（目标 x 通道）、入口（客户端→边缘）

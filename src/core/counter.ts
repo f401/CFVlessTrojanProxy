@@ -25,11 +25,19 @@ export function cnt(k: string, n = 1) {
   S.cnt[k] = (S.cnt[k] || 0) + (n === undefined ? 1 : n);
 }
 
+/**
+ * 功能：读当日计数快照（先滚动日界）。
+ * @returns 各计数字段与日期 d（YYYY-MM-DD）
+ */
 export function cntView() {
   rollCntDay();
   return { ...S.cnt, d: S.cntDay || new Date().toISOString().slice(0, 10) };
 }
 
+/**
+ * 功能：取「自上次调用以来」的增量并把当前值记为已上报。
+ * @returns 字段名 → 增量
+ */
 export function cntDelta() {
   rollCntDay();
   const out: Record<string, number> = {};

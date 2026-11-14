@@ -26,6 +26,10 @@ export class SubscriptionView {
     return pick(o);
   }
 
+  /**
+   * 功能：私有：kind → 渲染函数的映射表（clash / singbox / links）。
+   * @returns 映射表
+   */
   private table(): Record<SubKind, (o: SubViewIn) => string> {
     return {
       clash: (o) => renderClash(o.env, o.url, o.id, o.host, o.learned, o.regions, o.auth),

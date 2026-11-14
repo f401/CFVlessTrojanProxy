@@ -125,6 +125,12 @@ export function uuidFromBytes(b: Uint8Array) {
  */
 export const WS_MSG_MAX = 256 * 1024; // 閸楁洖鎶氭稉濠囨閿涙F 鐎电绉存径?WS 濞戝牊浼呮导姘辨纯閹恒儲鏌囬柧?
 
+/**
+ * 功能：安全发送——WS 未开或已关闭时静默丢弃（隧道里对端随时消失，不能因此抛错）。
+ * @param ws WebSocket 兼容对象
+ * @param data 待发字节
+ * @returns 无
+ */
 export function safeSend(ws: WebSocketLike, data: Uint8Array) {
   try {
     if (!ws || ws.readyState !== WS_OPEN) return;

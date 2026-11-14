@@ -202,6 +202,10 @@ export class Connection {
     if (k) S.inflight.set(k, (S.inflight.get(k) || 0) + 1);
   }
 
+  /**
+   * 功能：连接结束时把该目标的 inflight 计数减一（并发场景用于观测并发度）。
+   * @returns 无
+   */
   clearInflight(): void {
     if (!this.inflightKey) return;
     const n = (S.inflight.get(this.inflightKey) || 1) - 1;

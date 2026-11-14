@@ -2,6 +2,16 @@ import { escapeHtml } from "./html";
 import { loadNodes, pickProtos } from "./sub-common";
 import { P_T, VERSION } from "../core/util";
 
+/**
+ * 功能：渲染控制面板（用量、节点、判定、日志等分区的 HTML）。
+ * @param env 环境变量
+ * @param url 当前 URL（决定高亮的分区）
+ * @param id 用户 id
+ * @param host 站点域名
+ * @param key 管理密钥（写进页面内的链接）
+ * @param info 面板数据
+ * @returns HTML 字符串
+ */
 export function renderHtml(env: Env, url: URL, id: string, host: string, key: string, info: PanelInfo) {
   const base = `${url.origin}/${id}`;
   // 路径里已经有 ? 时必须用 &，否则 /stats?format=html?k=xxx 会把 format 的值

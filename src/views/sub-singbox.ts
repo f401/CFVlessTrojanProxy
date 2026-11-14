@@ -1,5 +1,10 @@
 import { loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
 
+/**
+ * 功能：渲染 sing-box 配置（出站 + 分组 + 出站 DNS 策略）。
+ * @param o 订阅输入
+ * @returns JSON 字符串
+ */
 export function renderSingbox(
   env: Env,
   url: URL,

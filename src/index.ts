@@ -20,6 +20,13 @@ import { pendFlush } from "./store/index";
  * 具体实现全在 routes/ 与 proxy/ 里，这个文件不应该再长出业务逻辑。
  */
 export default {
+  /**
+   * 功能：Worker 入口。按路径把请求分派给边缘页、管理端、订阅、代理升级与 DO 内部路由。
+   * @param request 请求
+   * @param env 环境变量
+   * @param ctx 执行上下文
+   * @returns 响应
+   */
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     try {
       const url = new URL(request.url);

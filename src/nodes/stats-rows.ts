@@ -3,6 +3,11 @@ import { costOf, p90Of, ZERO_STAT } from "./score";
 
 /* 看板 view-model：把节点统计压成纯展示行，views 不再读 S / 算分 */
 
+/**
+ * 功能：生成面板「节点明细」的行数据（键、延迟、吞吐、成功率、探活次数）。
+ * @param env 环境变量
+ * @returns 行数组
+ */
 export function statsNodeRows(
   alive: NodeEntry[],
   nsMap: Record<string, Record<string, number | string>>,

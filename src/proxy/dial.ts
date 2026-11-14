@@ -225,6 +225,11 @@ export async function httpProbe(host: string, ms = 2500): Promise<{ code: number
     return { code: 0, colo: "" };
   }
 }
+/**
+ * 功能：判断目标是否 CF 托管（A 记录落在 CF 网段）。DoH 失败一律按「否」处理，宁可多试一次直连。
+ * @param host 目标主机名或 IP 字面量
+ * @returns 是 CF 托管为 true
+ */
 export async function isCfHost(host: string) {
   if (isV4Literal(host)) return isCfIp(host);
   let ips: string[] = [];
@@ -236,6 +241,13 @@ export async function isCfHost(host: string) {
   for (const ip of ips) if (isCfIp(ip)) return true;
   return false;
 }
+/**
+ * 功能：解析 A 记录后依次尝试连接，返回第一个连上的 socket（IPv6 环境里强制走 v4 出口）。
+ * @param host 目标主机名或 IP
+ * @param port 端口
+ * @param budget 解析+连接总预算毫秒，0 表示默认 3000
+ * @returns socket；全部失败返回 null
+ */
 export async function dial4(host: string, port: number, budget = 0) {
   const raw = isV4Literal(host) ? [host] : await withTimeout(resolveV4All(host), budget || 3000).catch(() => []);
   const list: string[] = Array.isArray(raw) ? raw : [];

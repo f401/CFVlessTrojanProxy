@@ -78,12 +78,25 @@ export class Judge {
     return vBad(host, "r:" + ip);
   }
 
+  /**
+   * 功能：私有：落一条封锁结论（强证据，覆盖流量弱证据），并写一条日志。
+   * @param e 流量事件（目标、上行/下行字节）
+   * @param chan 通道
+   * @param ck 通道键（判定表键）
+   * @param now 当前时间戳
+   * @returns 无
+   */
   private markBlocked(e: TrafficEvt, chan: Chan, ck: string, now: number): void {
     S.smCnt.delete(ck);
     recordBlock({ target: e.host, chan, down: e.down, ok: false });
     S.needPx.set(e.host, now + PX_TTL);
   }
 
+  /**
+   * 功能：私有：由流量事件构造通道对象（经中转带 IP，否则直连）。
+   * @param e 流量事件
+   * @returns 通道对象
+   */
   private chanOf(e: TrafficEvt): Chan {
     const ip = e.node ? e.node.slice(0, e.node.lastIndexOf(":")) : "";
     return e.via === "node" && ip ? { kind: "r", ip } : DIRECT;

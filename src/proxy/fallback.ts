@@ -5,6 +5,14 @@ import { checkTarget } from "./dial";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 
+/**
+ * 功能：换一个节点再拨一次（首包失败后的兜底，跳过刚失败的那个）。
+ * @param env 环境变量
+ * @param host 目标主机
+ * @param port 目标端口
+ * @param skip 要跳过的节点键
+ * @returns socket；无可用节点返回 null
+ */
 export async function dialAnother(
   _env: Env,
   st: Connection,

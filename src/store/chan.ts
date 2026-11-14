@@ -114,6 +114,12 @@ export async function chOpen(id: string, host: string, port: number): Promise<Re
   return { id, ok: true, ms: Date.now() - t0, chLen: ch.length, x25519: true };
 }
 
+/**
+ * 功能：阻塞直到通道攒够 n 字节（或关闭/超时），返回已攒到的数据。
+ * @param c 通道
+ * @param n 期望字节数
+ * @returns 数据；通道已关闭且空时返回 null
+ */
 function need(c: Chan, n: number): Uint8Array | null {
   let have = 0;
   for (const x of c.chunks) have += x.length;
@@ -195,6 +201,11 @@ export async function chSh(id: string, waitMs: number): Promise<Record<string, u
   };
 }
 
+/**
+ * 功能：关闭通道会话（标记结束并唤醒等待方）。
+ * @param id 会话 id
+ * @returns {id, ok}
+ */
 export function chClose(id: string): Record<string, unknown> {
   const c = CH.get(id);
   if (!c) return { id, ok: false };
@@ -206,6 +217,12 @@ export function chClose(id: string): Record<string, unknown> {
   CH.delete(id);
   return { id, ok: true };
 }
+/**
+ * 功能：从通道会话读数据，最多等 waitMs。
+ * @param id 会话 id
+ * @param waitMs 等待毫秒
+ * @returns {id, ok, data?, err?}
+ */
 export async function chRead(id: string, waitMs: number): Promise<Record<string, unknown>> {
   const c = CH.get(id);
   if (!c) return { id, ok: false, err: "no-session" };

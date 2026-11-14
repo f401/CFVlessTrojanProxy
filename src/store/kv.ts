@@ -36,6 +36,14 @@ export async function kvSet(env: Env, key: string, obj: unknown, opts?: { expira
   return kvPut(env.STATS, key, await seal(env, obj), opts);
 }
 
+/**
+ * 功能：写 KV（吞掉异常，KV 故障不能让请求失败）。
+ * @param kv KV 绑定
+ * @param key 键
+ * @param val 字符串值
+ * @param opts 可选 TTL
+ * @returns 无
+ */
 export async function kvPut(kv: KVNamespace, key: string, val: string, opts?: { expirationTtl?: number }) {
   // 10048 = 当日写额度耗尽。既然写不进去，10 分钟内别再试，
   // 免得每个连接都白跑一次 KV 调用并刷日志。

@@ -33,6 +33,11 @@ export class Policy {
     return !(host && vBad(host, "r:" + ip)) && !vBad("*", "r:" + ip);
   }
 
+  /**
+   * 功能：单点决策——综合判定表、站点偏好、预算与策略分级，决定本次请求走直连还是某条中继。
+   * @param c 决策上下文（目标、候选通道、是否 CF 托管等）
+   * @returns 选中的通道与理由
+   */
   decide(c: Ctx): Choice {
     let usable = c.relays.filter((ip) => this.chanOk(ip, c.host));
     // 比例兜底：被判死的通道超过 3/4 时，只保留最近判死的两条，其余解除 ——
@@ -175,6 +180,10 @@ export function decide(c: Ctx): Choice {
 export function shadow(c: Ctx): Choice {
   return POLICY.shadow(c);
 }
+/**
+ * 功能：策略是否生效（SC.POLICY 分级：0 只影子统计 / 1 只放开硬规则 / 2 全生效）。
+ * @returns 生效为 true
+ */
 export function policyOn(): boolean {
   return SC.POLICY > 0;
 }

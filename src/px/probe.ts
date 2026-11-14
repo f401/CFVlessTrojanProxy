@@ -181,6 +181,11 @@ export function chunks<T>(arr: T[], n: number): T[][] {
   return out;
 }
 
+/**
+ * 功能：池子源列表：env.poolSrc 优先，非法项回退内置 6 个源。
+ * @param env 环境变量
+ * @returns 源 URL 数组
+ */
 export function poolSources(env: Env): string[] {
   const custom = String(env.poolSrc || "").trim();
   if (!custom) return POOL_SOURCES;
@@ -215,6 +220,11 @@ export function srcHealth(): Record<string, { n: number; until: number }> {
   return out;
 }
 
+/**
+ * 功能：按源健康度顺序抓取并合并去重（失败的源排到最后，不删除）。
+ * @param env 环境变量
+ * @returns 本次抓取统计：新增数、总数、每源行数
+ */
 export async function refillPool(env: Env): Promise<PoolRefill> {
   const seen = new Map<string, PoolEntry>();
   const sources: Record<string, { lines: number; ok: number }> = Object.create(null);

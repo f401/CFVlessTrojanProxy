@@ -23,6 +23,10 @@ const UA =
 // 根证书库只解析一次（模块级缓存；顶层不放 let，架构门禁不允许）
 const DB: { p: Promise<unknown> | null } = { p: null };
 
+/**
+ * 功能：懒构造证书库（只有真正跑 subtls 时才解析内置根证书）。
+ * @returns 证书库对象
+ */
 function db(): Promise<unknown> {
   // 根库解析在 DO 里可能挂住（实测 dbt 端点 10s 无响应），用 1.2s 计时器兜底退回原始 PEM 字符串：
   // subtls 在跳过校验时并不需要解析结果，正常路径下解析是 0ms。
@@ -45,6 +49,13 @@ function race<T>(p: Promise<T>, ms: number, onEnd: () => void): Promise<T | unde
   ]);
 }
 
+/**
+ * 功能：用内置 subtls 做一次完整 TLS 探测并读到 HTTP 状态（手动调试用；自动探测走 tunnelfetch）。
+ * @param host 目标主机名
+ * @param relay 中继 host:port，空串表示直连
+ * @param path 请求路径
+ * @returns ok / status / ms / bytes / err
+ */
 export async function probeTls(
   host: string,
   path = "/",
@@ -232,6 +243,13 @@ export async function probeTls(
 
 // —— 诊断：只发 ClientHello、只读首个记录，完全不碰密码学 ——
 // 用来判断「DO / 请求路径被 CPU 上限打断」到底是握手算力问题，还是这套 stream 读泵的开销问题。
+/**
+ * 功能：低层 TLS 探测，只推进到指定阶段就返回，便于在 DO 的 CPU 预算里分片执行。
+ * @param host 目标主机名
+ * @param relay 中继 host:port，空串表示直连
+ * @param stage sh 只收到 ServerHello / cert 收到证书 / full 完整握手
+ * @returns ok / stage / ms / err
+ */
 export async function probeRaw(host: string, relay = "", stage = "sh"): Promise<TlsProbeResult> {
   const t0 = Date.now();
   const hardEnd = t0 + 2500;

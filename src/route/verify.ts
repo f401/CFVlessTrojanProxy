@@ -24,96 +24,200 @@ interface VQ {
 const QMAX = 24;
 const TTL = 120000;
 
-/** 记录一次「可疑」，供下一轮 waitUntil 复核（不直接下判定） */
-export function queueVerify(host: string, chan: Chan): void {
-  if (!host) return;
-  const ck = chanKey(chan);
-  const now = Date.now();
-  for (const q of S.vtQ) {
-    if (q.host === host && q.ck === ck && now - q.t < TTL) {
-      q.t = now;
-      return;
+/**
+ * 复核队列与差分判定。
+ *
+ * 所有状态都存在 `S.vtQ` / `S.vtLast` 里（跨 isolate 不共享），
+ * 本类只负责「什么时候排一次复核、拿到两个状态码后怎么判」。
+ */
+export class VerifyQueue {
+  /**
+   * 功能：记录一次「可疑」，留给下一轮 waitUntil 复核（这里不下判定）。
+   * 同一（站点, 通道）在 2 分钟内重复触发只刷新时间，不重复排队。
+   * @param host 目标主机
+   * @param chan 可疑通道
+   * @returns 无
+   */
+  queueVerify(host: string, chan: Chan): void {
+    if (!host) return;
+    const ck = chanKey(chan);
+    const now = Date.now();
+    for (const q of S.vtQ) {
+      if (q.host === host && q.ck === ck && now - q.t < TTL) {
+        q.t = now;
+        return;
+      }
     }
+    S.vtQ.push({ host, ck, t: now });
+    if (S.vtQ.length > QMAX) S.vtQ.shift();
   }
-  S.vtQ.push({ host, ck, t: now });
-  if (S.vtQ.length > QMAX) S.vtQ.shift();
+
+  /**
+   * 功能：取走一条待复核项（取出即清空，避免重复花预算）。
+   * @returns 待复核项数组（0 或 1 条）
+   */
+  takeVerify(): VQ[] {
+    const now = Date.now();
+    const out = S.vtQ.filter((q) => now - q.t < TTL).slice(0, 1);
+    S.vtQ = S.vtQ.filter((q) => now - q.t < TTL && !out.includes(q));
+    return out;
+  }
+
+  /**
+   * 功能：待复核队列当前长度。
+   * @returns 条数
+   */
+  queueLen(): number {
+    return S.vtQ.length;
+  }
+
+  /**
+   * 功能：纯函数——由两次实测的状态码判定。
+   * @param a 可疑通道的状态码（0 = 连接/握手失败）
+   * @param b 参照通道的状态码
+   * @returns ok（误判）/ chan（通道级封锁）/ site（站点级拒绝）/ unknown（证据不足）
+   */
+  judge(a: number, b: number): VJudge {
+    const ok = (c: number): boolean => c >= 200 && c < 400;
+    const blocked = (c: number): boolean => c >= 400 && c < 500;
+    if (ok(a)) return "ok";
+    if (blocked(a) && ok(b)) return "chan";
+    if (blocked(a) && blocked(b)) return "site";
+    if (a === 0 && ok(b)) return "chan"; // 可疑通道连握手都过不去，参照通道正常
+    return "unknown";
+  }
+
+  /**
+   * 功能：私有——选一条参照通道：优先已判 ok 的非 CF 中继，其次任意未判死的中继。
+   * @param host 目标主机
+   * @param skip 要跳过的通道键（就是可疑通道自己）
+   * @returns 中继 IP；没有可用参照时返回空串
+   */
+  private pickRef(host: string, skip: string): string {
+    let okOne = "";
+    let freeOne = "";
+    for (const [k] of S.alive) {
+      const ip = k.slice(0, k.lastIndexOf(":"));
+      const ck = "r:" + ip;
+      if (ck === skip) continue;
+      const st = vState(host, ck);
+      if (st === 1) {
+        okOne = ip;
+        break;
+      }
+      if (st !== 2 && st !== 3 && !freeOne) freeOne = ip;
+    }
+    return okOne || freeOne;
+  }
+
+  /**
+   * 功能：执行一轮复核：可疑通道 + 参照通道各探一次，按差分结论落判定。
+   * @returns 实际复核的条数
+   */
+  async runVerify(): Promise<number> {
+    const items = this.takeVerify();
+    let n = 0;
+    for (const q of items) {
+      const ch = q.ck;
+      const isD = ch === "d";
+      const ip = isD ? "" : ch.slice(2);
+      const ref = this.pickRef(q.host, isD ? "d" : ch);
+      if (!ref) continue;
+      // 直连也照此办理：可疑通道 = 直连（relay 传空），参照 = 一条中继。
+      // 「直连 403 + 中继 200」就是「直连被这个站点封、中继可用」的确切证据。
+      const a = await probeTls(q.host, "/head", isD ? "" : nodeKeyOf({ kind: "r", ip }));
+      const b = await probeTls(q.host, "/", nodeKeyOf({ kind: "r", ip: ref }));
+      const v = this.judge(a.code, b.code);
+      n++;
+      if (v === "chan") vSetState(q.host, ch, 2, 1);
+      else if (v === "site") vSetState(q.host, "*", 2, 1);
+      else if (v === "ok") vSetState(q.host, ch, 1, 1);
+      S.vtLast = { host: q.host, ck: ch, a: a.code, b: b.code, v, at: Date.now() };
+      if (v === "chan" || v === "site") S.needPx.set(q.host, Date.now() + 21600000);
+    }
+    return n;
+  }
+
+  /**
+   * 功能：给调试页用的复核概况。
+   * @returns 队列长度与最近一次复核结果
+   */
+  verifyInfo(): { q: number; last: typeof S.vtLast } {
+    return { q: S.vtQ.length, last: S.vtLast };
+  }
+
+  /**
+   * 功能：某条通道最近一次被复核的时间。
+   * @param host 目标主机
+   * @param ck 通道键
+   * @returns 毫秒时间戳；没复核过为 0
+   */
+  lastVerifyAt(host: string, ck: string): number {
+    return vAt(host, ck);
+  }
 }
 
-export function takeVerify(): VQ[] {
-  const now = Date.now();
-  const out = S.vtQ.filter((q) => now - q.t < TTL).slice(0, 1);
-  S.vtQ = S.vtQ.filter((q) => now - q.t < TTL && !out.includes(q));
-  return out;
-}
+/** 进程内唯一复核队列 */
+export const VERIFY = new VerifyQueue();
 
-export function queueLen(): number {
-  return S.vtQ.length;
+/**
+ * 功能：记录一次可疑（薄包装，委托 VERIFY.queueVerify）。
+ * @param host 目标主机
+ * @param chan 可疑通道
+ * @returns 无
+ */
+export function queueVerify(host: string, chan: Chan): void {
+  VERIFY.queueVerify(host, chan);
 }
 
 /**
- * 纯函数：由两次实测结论判定。
- * a = 可疑通道的 TLS 结果码，b = 参照通道的结果码（0 = 连接/握手失败）。
+ * 功能：取走一条待复核项（薄包装）。
+ * @returns 待复核项数组
+ */
+export function takeVerify(): VQ[] {
+  return VERIFY.takeVerify();
+}
+
+/**
+ * 功能：队列长度（薄包装）。
+ * @returns 条数
+ */
+export function queueLen(): number {
+  return VERIFY.queueLen();
+}
+
+/**
+ * 功能：差分判定（薄包装，纯函数）。
+ * @param a 可疑通道状态码
+ * @param b 参照通道状态码
+ * @returns ok / chan / site / unknown
  */
 export function judge(a: number, b: number): VJudge {
-  const ok = (c: number): boolean => c >= 200 && c < 400;
-  const blocked = (c: number): boolean => c >= 400 && c < 500;
-  if (ok(a)) return "ok";
-  if (blocked(a) && ok(b)) return "chan";
-  if (blocked(a) && blocked(b)) return "site";
-  if (a === 0 && ok(b)) return "chan"; // 可疑通道连握手都过不去，参照通道正常
-  return "unknown";
+  return VERIFY.judge(a, b);
 }
 
-/** 选一条参照通道：优先已判 ok 的非 CF 中继，其次任意未判死的中继 */
-function pickRef(host: string, skip: string): string {
-  let okOne = "";
-  let freeOne = "";
-  for (const [k] of S.alive) {
-    const ip = k.slice(0, k.lastIndexOf(":"));
-    const ck = "r:" + ip;
-    if (ck === skip) continue;
-    const st = vState(host, ck);
-    if (st === 1) {
-      okOne = ip;
-      break;
-    }
-    if (st !== 2 && st !== 3 && !freeOne) freeOne = ip;
-  }
-  return okOne || freeOne;
-}
-
-/** 执行一次复核：可疑通道 + 参照通道各探一次（每次 ≤2 个子请求） */
+/**
+ * 功能：跑一轮复核（薄包装）。
+ * @returns 实际复核条数
+ */
 export async function runVerify(): Promise<number> {
-  const items = takeVerify();
-  let n = 0;
-  for (const q of items) {
-    const ch = q.ck;
-    const isD = ch === "d";
-    const ip = isD ? "" : ch.slice(2);
-    const ref = pickRef(q.host, isD ? "d" : ch);
-    if (!ref) continue;
-    // 直连也照此办理：可疑通道 = 直连（relay 传空），参照 = 一条中继。
-    // 「直连 403 + 中继 200」就是「直连被这个站点封、中继可用」的确切证据。
-    const a = await probeTls(q.host, "/head", isD ? "" : nodeKeyOf({ kind: "r", ip }));
-    const b = await probeTls(q.host, "/", nodeKeyOf({ kind: "r", ip: ref }));
-    const v = judge(a.code, b.code);
-    n++;
-    if (v === "chan") vSetState(q.host, ch, 2, 1);
-    else if (v === "site") vSetState(q.host, "*", 2, 1);
-    else if (v === "ok") vSetState(q.host, ch, 1, 1);
-    S.vtLast = { host: q.host, ck: ch, a: a.code, b: b.code, v, at: Date.now() };
-    if (v === "chan" || v === "site") S.needPx.set(q.host, Date.now() + 21600000);
-  }
-  return n;
+  return VERIFY.runVerify();
 }
 
-/** 供 debug 展示 */
+/**
+ * 功能：调试概况（薄包装）。
+ * @returns 队列长度与最近结果
+ */
 export function verifyInfo(): { q: number; last: typeof S.vtLast } {
-  return { q: S.vtQ.length, last: S.vtLast };
+  return VERIFY.verifyInfo();
 }
 
-/** 功能：lastVerifyAt 是薄包装，直接委托 vAt。@param host string。@param ck string。@returns 转发 vAt 的返回值（number） */
+/**
+ * 功能：某通道最近复核时间（薄包装）。
+ * @param host 目标主机
+ * @param ck 通道键
+ * @returns 毫秒时间戳
+ */
 export function lastVerifyAt(host: string, ck: string): number {
-  return vAt(host, ck);
+  return VERIFY.lastVerifyAt(host, ck);
 }
-

@@ -13,6 +13,12 @@ function gauss(): number {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
+/**
+ * 功能：单层 Thompson 抽样。分数低的更可能被选中，同时用 β·σ 给「样本少」的候选补偿；候选先按带宽剪枝，只在前若干名里抽。
+ * @param mode lat（速率优先）或 tput（吞吐优先）
+ * @param bytes 本次目标流量，用于按流量折算失败/慢的代价
+ * @returns 选中的节点键；无候选时返回空串
+ */
 export function pickThom(mode: Mode, bytes = 0): string {
   const now = Date.now();
   const list = candsFor(mode);

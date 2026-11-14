@@ -192,3 +192,32 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
   `AppState`/DO，而不是模块实例；纯函数直接调用比服务定位器更轻。
 - **选择器放 `px/`**：它需要“当前中转出口/存活池”，放在中转域后 `nodes` 不再反向依赖 `px`，
   这是 v7 拆环的关键一步。
+
+## 类与职责（OOP 视图）
+
+状态归类的原则：**有跨请求可变状态的东西才配拥有类**；纯函数（编解码、格式化、URL 拼装）保持自由函数，套一层类只是噪音。
+
+| 类 | 文件 | 独占的可变状态 |
+| --- | --- | --- |
+| `NodeStatsTable`（`STATS`） | `src/nodes/stat.ts` | 每节点的权重、样本矩、CUSUM、快速失败窗口 |
+| `Scorer`（`SCORER`） | `src/nodes/score.ts` | 排行缓存、黑名单/冻结表、可用性判断 |
+| `Store` / `Seal` | `src/store/store.ts`、`crypto.ts` | KV 写入节流、AES 密钥缓存 |
+| `Snapshot` | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存 |
+| `Pending` | `src/store/pend.ts` | 待上报账本与 flush 定时器 |
+| `ChanTable` / `StatsTable` | `src/store/chan.ts`、`stats.ts` | 通道会话、用量读缓存 |
+| `Pool` | `src/px/pool.ts` | 池子、准入复测游标、探活坏点表 |
+| `PoolSources` | `src/px/probe.ts` | 源健康度（失败降权、1 小时冷却） |
+| `SeedStore` | `src/px/seed.ts` | 跨 isolate 的种子表（只存名字） |
+| `Selector` | `src/px/selector.ts` | 站点偏好 + 单层抽样入口 |
+| `Dialer` / `RegionPicker` | `src/proxy/dialer.ts`、`region.ts` | 中继串行拨号、地区选择 |
+| `VerdictTable`（`VT`） | `src/route/verdict.ts` | 判定表（站点 × 通道） |
+| `Judge`（`JUDGE`） | `src/route/judge.ts` | 流量侧弱证据的累加与落判定 |
+| `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级 |
+| `RelayHealth`（`HEALTH`） | `src/route/relay-health.ts` | 中继健康表（sent/pending 语义） |
+| `VerifyQueue`（`VERIFY`） | `src/route/verify.ts` | 复核队列与差分判定 |
+| `PoolSources`/`Budget` | `src/route/budget.ts` | 每轮预算分配（准入/复核/入口） |
+| `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表 |
+| `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
+| `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
+
+自由函数集中在 `src/core/{util,net,hist,quota,hosts}.ts`、`src/proxy/protocol.ts`、`src/views/{html,sub-links,sub-singbox,sub.ts}`：它们要么是纯计算，要么是字符串渲染，没有状态可装。

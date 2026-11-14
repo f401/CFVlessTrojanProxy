@@ -13,6 +13,11 @@ export const FLUSH_MAX_MS = 7200000; // 最迟 2 小时必落一次
 export const FLUSH_GAP = 2700000; // 全局闸门：45 分钟内已有别的 isolate 写过就不再写
 export const SNAP_TTL = 300000;
 
+/**
+ * 功能：读用量快照（KV 里的 USAGE_SNAP_KEY）。
+ * @param env 环境变量（STATS 为 KV）
+ * @returns 快照对象；不存在或读失败返回 null
+ */
 export async function usageSnapGet(env: Env) {
   try {
     return (await kvGet<UsageSnap>(env, USAGE_SNAP_KEY)) || null;
@@ -21,6 +26,12 @@ export async function usageSnapGet(env: Env) {
   }
 }
 
+/**
+ * 功能：写用量快照。读失败时直接跳过——拿空表覆盖会把别的用户的历史用量抹掉。
+ * @param env 环境变量
+ * @param users 可选的用户表（不传则用本地状态）
+ * @returns 无
+ */
 export async function usageSnapWrite(env: Env, users?: UserRec[]) {
   if (!env.STATS || !env.METER) return;
   // 读失败就跳过：拿空表继续写会把别的用户的历史用量覆盖掉
@@ -74,6 +85,13 @@ export async function usageSnapWrite(env: Env, users?: UserRec[]) {
   }
 }
 
+/**
+ * 功能：把某用户已上报的用量恢复进本地状态（换 isolate 后不让客户端看到「用量归零」）。
+ * @param env 环境变量
+ * @param id 用户 id
+ * @param snap 预读的快照（可选，避免重复读 KV）
+ * @returns 恢复后的用量记录；无快照返回 null
+ */
 export async function restoreUsage(env: Env, id: string, snap?: UsageSnap) {
   if (!env || !env.METER) return null;
   const s = snap || (await usageSnapGet(env));
@@ -91,6 +109,12 @@ export async function restoreUsage(env: Env, id: string, snap?: UsageSnap) {
   }
 }
 
+/**
+ * 功能：合并写快照的总入口。带两道节流：全局闸门 + 最小间隔，避免每个 isolate 各写各的把写次数写爆。
+ * @param env 环境变量
+ * @param force 跳过节流立即写
+ * @returns 无
+ */
 export async function flushSnap(env: Env, force?: boolean): Promise<void> {
   const kv = env.STATS;
   if (!kv) return;
@@ -118,6 +142,12 @@ export async function flushSnap(env: Env, force?: boolean): Promise<void> {
   }
 }
 
+/**
+ * 功能：真正合并并写入快照（把 DO 与本地读数合并后落 KV）。
+ * @param env 环境变量
+ * @param now 当前时间戳
+ * @returns 无
+ */
 async function writeSnap(env: Env, now: number): Promise<void> {
   // 第二个闸门是"全局"的：每个 isolate 各写各的会让写次数随实例数线性增长
   // （实测 8 个 isolate × 24 次/天 = 192 次）。快照本身就是合并写入，
@@ -204,6 +234,12 @@ async function writeSnap(env: Env, now: number): Promise<void> {
   }
 }
 
+/**
+ * 功能：取快照（带 TTL 缓存，fresh 可强制刷新）。
+ * @param env 环境变量
+ * @param fresh 忽略缓存
+ * @returns 快照对象或 null
+ */
 export async function getSnap(env: Env, fresh?: boolean) {
   if (!fresh && S.snapCache.v && Date.now() - S.snapCache.t < SNAP_TTL) return S.snapCache.v;
   let v = null;

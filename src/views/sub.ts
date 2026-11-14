@@ -21,6 +21,11 @@ const yamlStr = (s: string) => JSON.stringify(String(s));
 /** 普通主机名/端口保持裸写；只有含特殊字符时才加引号（不改变现有订阅的字节） */
 const yamlScalar = (s: string) => (/^[A-Za-z0-9._-]+$/.test(String(s)) ? String(s) : yamlStr(String(s)));
 
+/**
+ * 功能：渲染 mihomo/clash 配置（proxies、proxy-groups、rules）。
+ * @param o 订阅输入
+ * @returns YAML 字符串
+ */
 export function renderClash(
   env: Env,
   url: URL,

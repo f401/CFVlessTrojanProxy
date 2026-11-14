@@ -67,6 +67,14 @@ export function pickFresh(host: string, ips: string[], n: number): string[] {
   return [...list.slice(rotAt), ...list.slice(0, rotAt)].slice(0, Math.max(0, n));
 }
 
+/**
+ * 功能：在同一时间窗内对目标打「直连 + n 条中继」，按共识判定：有 2xx 且失败共存 → 只封失败通道；全 4xx → 站点级（不写封禁）；无状态码 → unknown 且只换出口。
+ * @param c 路由上下文（提供 DO 调用与预算）
+ * @param host 目标主机
+ * @param n 中继条数（1~3）
+ * @param list 指定中继列表（逗号分隔），空串表示自动挑
+ * @returns JSON 响应：verdict / escalate / rows
+ */
 export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): Promise<Response> {
   const own = [...S.alive.values()].map((x) => x.h);
   const pool = (list ? list.split(",") : own.length ? own : SEED)

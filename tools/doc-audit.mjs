@@ -8,6 +8,9 @@ const root = "src";
 const args = process.argv.slice(2);
 const topIdx = args.indexOf("--top");
 const TOP = topIdx >= 0 ? Number(args[topIdx + 1]) || 20 : 20;
+// 允许的最大缺注释数（--max N）：超过即退出码 1，preflight 用它当硬闸
+const maxIdx = args.indexOf("--max");
+const MAX = maxIdx >= 0 ? Number(args[maxIdx + 1]) || 0 : Number.POSITIVE_INFINITY;
 const only = args.find((a) => !a.startsWith("--") && !/^\d+$/.test(a));
 
 /** 递归收集 .ts 文件 */
@@ -60,4 +63,8 @@ for (const r of rows.slice(0, TOP)) {
   console.log(`${String(r.n).padStart(3)}  ${r.file}`);
   if (TOP <= 8) for (const m of r.miss.slice(0, 12)) console.log(`       ${m.line}: ${m.name}`);
 }
-process.exitCode = 0;
+if (sum > MAX) {
+  console.log(`\n✗ 注释门禁：缺注释 ${sum} 个，超过上限 ${MAX}`);
+  process.exitCode = 1;
+}
+process.exitCode = process.exitCode || 0;

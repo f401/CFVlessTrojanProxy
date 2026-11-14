@@ -29,6 +29,14 @@ export async function nodeSnapGet(env: Env, id: string): Promise<Record<string, 
   }
 }
 
+/**
+ * 功能：记流量：先记进全局待上报账本，再落到本地统计。
+ * @param id 用户 id
+ * @param up 上行字节
+ * @param down 下行字节
+ * @param isNewConn 是否新连接
+ * @returns 无
+ */
 export function statBump(id: string, up: number, down: number, isNewConn?: boolean) {
   if (!id) return;
   pendAdd(id, up, down, isNewConn); // 全局帐本（DO）
@@ -44,6 +52,12 @@ export function statBump(id: string, up: number, down: number, isNewConn?: boole
   s.last = Date.now();
 }
 
+/**
+ * 功能：带 60 秒本地缓存的用量读取（页面与订阅都走这里，避免每请求读 KV）。
+ * @param env 环境变量
+ * @param id 用户 id
+ * @returns 用量记录
+ */
 export async function readStatsCached(env: Env, id: string) {
   const hit = S.statCache.get(id);
   if (hit && Date.now() - hit.t < 60000) return hit.v;
@@ -53,6 +67,12 @@ export async function readStatsCached(env: Env, id: string) {
   return v;
 }
 
+/**
+ * 功能：读用量：合并持久值 + 本地增量 + 待上报增量。
+ * @param env 环境变量
+ * @param id 用户 id
+ * @returns {up, down, conns, first, last}
+ */
 export async function readStats(env: Env, id: string) {
   const local = S.stats.get(id) || { up: 0, down: 0, conns: 0, first: 0, last: 0 };
   const p = S.pend.get(id) || { up: 0, down: 0, conns: 0 };

@@ -15,6 +15,10 @@ export const BUCKET_DEF = "*";
 
 /** 当前写入的桶名 */
 export class SeedStore {
+  /**
+   * 功能：本 isolate 的分桶键（没探到机房时用默认桶，保证同机房共享、跨机房隔离）。
+   * @returns 字符串
+   */
   coloKey() {
     return S.colo || BUCKET_DEF;
   }

@@ -1,5 +1,11 @@
 /* 配额与订阅头：纯计算，不碰 IO */
 
+/**
+ * 功能：算有效配额：env.quotaBytes 优先，否则 1 TB；已用超过基数时按档位抬高上限。
+ * @param env 环境变量
+ * @param used 已用字节
+ * @returns 配额字节数
+ */
 export function effectiveQuota(env: Env, used: number) {
   const base = Number(env.quotaBytes) > 0 ? Number(env.quotaBytes) : 1024 ** 4; // 默认 1 TB
   const u = Number(used);
@@ -9,6 +15,12 @@ export function effectiveQuota(env: Env, used: number) {
   return total;
 }
 
+/**
+ * 功能：生成订阅响应头（流量已用/总量、订阅到期提示）。
+ * @param env 环境变量
+ * @param stats 用量统计（up/down 字节）
+ * @returns 可直接挂到 Response 的 Headers
+ */
 export function subHeaders(env: Env, stats: { up?: number; down?: number }) {
   const used = (stats.up || 0) + (stats.down || 0);
   const total = effectiveQuota(env, used);

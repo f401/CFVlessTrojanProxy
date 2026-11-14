@@ -99,6 +99,12 @@ ${rows || '<tr><td colspan="8" class="mu">还没有用户</td></tr>'}
 </div>
 <script>
 (function () {
+  /**
+   * 功能：生成一次性的提示条 HTML（成功/失败样式）。
+   * @param msg 文本（会被转义）
+   * @param bad 是否为错误样式
+   * @returns HTML 片段
+   */
   function flash(b, t) {
     var old = b.getAttribute("data-label") || b.textContent;
     b.textContent = t;
@@ -108,7 +114,16 @@ ${rows || '<tr><td colspan="8" class="mu">还没有用户</td></tr>'}
     var b = e.target.closest ? e.target.closest("button[data-copy]") : null;
     if (!b) return;
     var text = b.getAttribute("data-copy");
+    /**
+     * 功能：浏览器端小函数：复制成功后提示「已复制」（内联进页面，服务端不执行）。
+     * @returns 无
+     */
     function done() { flash(b, "已复制"); }
+    /**
+     * 功能：出错时的兜底响应（保留提示，不抛给用户 500）。
+     * @param msg 提示文本
+     * @returns 响应
+     */
     function fallback() {
       try {
         var ta = document.createElement("textarea");

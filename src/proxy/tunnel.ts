@@ -6,6 +6,12 @@ import { cnt } from "../core/counter";
 import { S } from "../core/state";
 import type { Connection } from "./connection";
 
+/**
+ * 功能：把上游数据流写回 WS（下游方向），流结束或出错时收尾。
+ * @param ws 客户端 WS
+ * @param reader 上游数据流
+ * @returns 无
+ */
 export function pipeBack(
   sock: Socket,
   ws: WebSocketLike,

@@ -12,6 +12,12 @@ import { toU8 } from "../core/util";
  */
 export const WS_UP_QUEUE_MAX = 8 * 1024 * 1024;
 
+/**
+ * 功能：把 WS 消息转成可读流。流被取消后仍会到来的消息直接丢弃（否则 enqueue 会抛 not in a state that permits enqueue）。
+ * @param ws WebSocket 兼容对象
+ * @param earlyData 客户端提前发的首包（base64 或空串）
+ * @returns 字节流
+ */
 export function wsToStream(ws: WebSocketLike, earlyData: string): ReadableStream<Uint8Array> {
   // 流被取消（pipeTo 提前结束）后 WS 仍可能在推消息：
   // 继续 enqueue 会抛 "The stream is not in a state that permits enqueue"，

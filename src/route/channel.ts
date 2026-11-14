@@ -11,10 +11,20 @@ export interface Chan {
 
 export const DIRECT: Chan = { kind: "d", ip: "" };
 
+/**
+ * 功能：把通道对象转成判定表用的键。
+ * @param c 通道
+ * @returns 直连为 d，其余为 kind:ip
+ */
 export function chanKey(c: Chan): string {
   return c.kind === "d" ? "d" : c.kind + ":" + c.ip;
 }
 
+/**
+ * 功能：把判定表键解析回通道对象。
+ * @param k 键字符串
+ * @returns 通道对象；无法解析返回 null
+ */
 export function parseChan(k: string): Chan | null {
   if (k === "d") return DIRECT;
   const i = k.indexOf(":");

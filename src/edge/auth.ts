@@ -5,6 +5,12 @@ import type { RouteCtx } from "./types";
 
 export const RL_MEM = new Map(); // ip -> { n, t }
 
+/**
+ * 功能：从 Cookie 头里取指定名字的值。
+ * @param req 请求
+ * @param name cookie 名
+ * @returns 值；没有时返回空串
+ */
 export function getCookie(req: Request, name: string) {
   const raw = req.headers.get("cookie") || "";
   for (const part of raw.split(";")) {
@@ -15,6 +21,11 @@ export function getCookie(req: Request, name: string) {
   return "";
 }
 
+/**
+ * 功能：SHA-256 摘要，小写 hex（用于管理密钥的摘要比较）。
+ * @param str 待摘要字符串
+ * @returns 64 位 hex
+ */
 export async function sha256Hex(str: string) {
   const d = await crypto.subtle.digest("SHA-256", enc.encode(str));
   return toHex(new Uint8Array(d));
@@ -34,6 +45,13 @@ async function adminDigest(env: Env): Promise<string> {
   return key ? await sha256Hex(key) : "";
 }
 
+/**
+ * 功能：管理端鉴权。优先读 X-Admin-Key / Authorization 头（URL 里的 k= 会留在日志与历史里），同时接受原文与 sha256 摘要。
+ * @param request 请求
+ * @param url 解析后的 URL（兼容 ?k= 旧用法）
+ * @param env 环境变量（adminKey）
+ * @returns 通过为 true
+ */
 export async function adminAuthed(request: Request, url: URL, env: Env) {
   // 优先用请求头：URL 里的 k= 会留在访问日志、浏览器历史、Referer 里，等于明文外泄
   const hdr = request.headers.get("x-admin-key") || "";
@@ -52,6 +70,12 @@ export async function adminAuthed(request: Request, url: URL, env: Env) {
   return tok === (await sessionToken(env, exp));
 }
 
+/**
+ * 功能：进程内固定窗口限流（每 ip 每分钟 limit 次）。
+ * @param ip 客户端标识
+ * @param limit 窗口内允许次数
+ * @returns 允许本次为 true
+ */
 export function rlTake(ip: string, limit: number) {
   const now = Date.now();
   const e = RL_MEM.get(ip);
@@ -70,11 +94,20 @@ export function rlReset(ip: string) {
   RL_MEM.delete(ip);
 }
 
+/**
+ * 功能：生成一次性随机串（时间前缀 + 12 字节随机），用于防重放。
+ * @returns 字符串
+ */
 export function newNonce() {
   const b = crypto.getRandomValues(new Uint8Array(12));
   return Date.now().toString(16) + "." + toHex(b);
 }
 
+/**
+ * 功能：生成易读随机密码（去掉 l/I/1/0/O 之类易混字符）。
+ * @param n 长度，非法值回退 16
+ * @returns 密码字符串
+ */
 export function randomPwd(n: number) {
   const A = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const len = Math.floor(Number(n)) > 0 ? Math.floor(Number(n)) : 16;

@@ -249,10 +249,18 @@ export function errCount(msg: unknown): void {
 /** 当前窗口内的错误分类计数（按次数降序） */
 /** 本 window 内被 5 秒限流丢掉的消息数（让「直方图全量」和「环被限流」能对账） */
 const ERR_DUP = new Map<number, number>(); // window → 被限流条数
+/**
+ * 功能：当前 10 分钟窗口里被限流丢掉的错误条数（与环里留下的条数对账）。
+ * @returns 条数
+ */
 export function errDup(): number {
   const win = Math.floor(Date.now() / 600000);
   return ERR_DUP.get(win) || 0;
 }
+/**
+ * 功能：当前窗口的错误直方图（按消息前两个词分类，降序取前 8）。
+ * @returns [{k 分类, n 次数}]
+ */
 export function errHist(): Array<{ k: string; n: number }> {
   const win = Math.floor(Date.now() / 600000);
   const out: Array<{ k: string; n: number }> = [];
@@ -261,6 +269,12 @@ export function errHist(): Array<{ k: string; n: number }> {
   return out.slice(0, 8);
 }
 
+/**
+ * 功能：记一条错误日志：先计数（限流前就计，保证账目不丢），再按「消息+tag」5 秒去重后写入 50 条环。
+ * @param msg 消息（会被截断到 200 字符）
+ * @param tag 关联键（一般是目标主机名）
+ * @returns 无
+ */
 export function logErr(msg: unknown, tag?: string | null) {
   const m = String(msg).slice(0, 200);
   try {

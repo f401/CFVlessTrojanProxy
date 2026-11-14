@@ -45,6 +45,14 @@ const PER_SCAN = 2;
 /** 最近一次入口探测失败原因（供 /debug?edge=1 观察；空串=没失败过） */
 export const EDGE_ERR = { s: "" };
 
+/**
+ * 功能：记录一次入口 IP 的探测结果（失败原因留在 EDGE_ERR 供 /health 展示）。
+ * @param ip 入口 IP
+ * @param ms 首字节毫秒（失败时为 0 或超时值）
+ * @param ok 是否可用
+ * @param err 失败原因（可选）
+ * @returns 无
+ */
 export function edgeAdd(ip: string, ms: number, ok: boolean, err = ""): void {
   if (!ok && err) EDGE_ERR.s = err.slice(0, 80);
   const now = Date.now();
@@ -77,6 +85,12 @@ export function edgeRank(max = 5): string[] {
   return rows.slice(0, max).map((r) => r.ip);
 }
 
+/**
+ * 功能：从 KV 载入入口偏好（默认 5 分钟节流，force 可跳过）。
+ * @param env 环境变量
+ * @param force 强制重载
+ * @returns 无
+ */
 export async function edgeLoad(env: Env, force = false): Promise<void> {
   const now = Date.now();
   if (!force && S.edgeAt && now - S.edgeAt < LOAD_MS) return;
@@ -94,6 +108,12 @@ export async function edgeLoad(env: Env, force = false): Promise<void> {
   }
 }
 
+/**
+ * 功能：把入口偏好写回 KV（没有变化就不写，避免白白消耗写额度）。
+ * @param env 环境变量
+ * @param force 强制写入
+ * @returns 无
+ */
 export async function edgeFlush(env: Env, force = false): Promise<void> {
   const now = Date.now();
   if (!S.edgeDirty) return;

@@ -15,6 +15,13 @@ export interface HttpProbeResult {
 
 const EMPTY: HttpProbeResult = { ok: false, code: 0, status: "", server: "", bytes: 0, ms: 0, err: "" };
 
+/**
+ * 功能：明文 HTTP/80 探目标是否可达（比 TLS 探测便宜，用于判断「IP 层通不通」）。
+ * @param host 目标主机名
+ * @param relay 中继 host:port，空串表示直连
+ * @param path 请求路径，默认 /
+ * @returns 探测结果：ok / status / ms / bytes / err
+ */
 export async function probeHttp80(host: string, relay = "", path = "/"): Promise<HttpProbeResult> {
   const t0 = Date.now();
   const [rh, rp] = relay ? relay.split(":") : [host, "80"];

@@ -22,6 +22,12 @@ const codeOf = (status: string): number => {
   return m ? Number(m[1]) : 0;
 };
 
+/**
+ * 功能：对一个站点扫一轮候选通道（逐条打真请求，收集 2xx 与否）。
+ * @param env 环境变量
+ * @param host 目标主机
+ * @returns 扫到的通道数与成功数
+ */
 export async function sweepHost(
   host: string,
   maxIp = 2,
