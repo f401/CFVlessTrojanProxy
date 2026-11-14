@@ -1922,5 +1922,12 @@ ok("PageView 可构造", typeof W.PageView === "function", "PageView");
   ok("只保留最近两条判死，其余被解除", relays.filter((ip) => W.vState("x.com", "r:" + ip) === 2).length <= 2, relays.map((ip) => W.vState("x.com", "r:" + ip)).join(","));
   W.vClear();
 }
-console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
+
+  // 第 56 组：IP 级封锁探测的判定收敛（cht 分支无需真实 403 现场也能验）
+  ok("全 200 → ok", W.tfVerdict([{ ok: true, status: 200 }, { ok: true, status: 200 }]) === "ok");
+  ok("全 403 → site（业务 403 不写封禁）", W.tfVerdict([{ ok: false, status: 403 }, { ok: false, status: 403 }]) === "site");
+  ok("200 与 403 并存 → chan（这才是 IP 级证据）", W.tfVerdict([{ ok: true, status: 200 }, { ok: false, status: 403 }]) === "chan");
+  ok("全失败 → unknown", W.tfVerdict([{ ok: false }, { ok: false }]) === "unknown");
+
+  console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

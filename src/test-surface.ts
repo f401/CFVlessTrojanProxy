@@ -1,4 +1,4 @@
-// 测试专用出口：只在 dist/_test.js 里存在，生产包不含此文件
+﻿// 测试专用出口：只在 dist/_test.js 里存在，生产包不含此文件
 export { sha224Bytes, toHex, VERSION, shadowRate, eachLimit, withTimeout } from "./core/util";
 export { detectProtocol, parseVLESS, parseTrojan, loadUsers } from "./proxy/protocol";
 export { checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
@@ -101,6 +101,7 @@ export { JUDGE, Judge } from "./route/judge";
 export { POLICY, Policy } from "./route/policy";
 export { judge, queueVerify, runVerify, verifyInfo, queueLen } from "./route/verify";
 export { recordBlock, recordPass } from "./route/observe";
+export { runTfb, tfVerdict } from "./route/tfb";
 
 export { handleDns, trojanUdpFrame } from "./proxy/dns";
 export { handleUpgrade } from "./proxy/session";
