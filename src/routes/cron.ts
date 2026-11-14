@@ -8,7 +8,7 @@ import { planRound } from "../route/budget";
 import { runRound } from "../route/round";
 import { edgeScan } from "../route/edge";
 import { runTfb } from "../route/tfb";
-import { EG, probeEg } from "../route/egfacts";
+import { EG, egCounts, egQuota, probeEg } from "../route/egfacts";
 import { DNS } from "../route/dnsfacts";
 import { probeFam } from "../proxy/dial";
 import { aliveList } from "../px/pool";
@@ -81,10 +81,11 @@ async function egRound(env: Env): Promise<void> {
   try {
     const list = await aliveList(env);
     // aliveList 返回的是条目；eg 的键是出口 IP 字面量，取 h
-    const todo = list
-      .map((x) => String(x.h || ""))
-      .filter((ip) => ip && !EG.famOf(ip, Date.now()))
-      .slice(0, 2);
+    const ips = list.map((x) => String(x.h || "")).filter(Boolean);
+    const now = Date.now();
+    // 出口族是 v8 的一等预算项：知道几条 v4 出口，才知道该不该多花探测名额（§7.3）
+    const cnts = egCounts(ips, now);
+    const todo = ips.filter((ip) => !EG.famOf(ip, now)).slice(0, egQuota(cnts.v4));
     if (!todo.length) return;
     cnt("egProbe", todo.length);
     await probeEg(todo, 2);

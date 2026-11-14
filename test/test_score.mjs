@@ -2712,5 +2712,24 @@ console.log("\n88) dns 事实：确证纯 v4 才降权 v6 出口");
   eq("快照里有记录数", typeof c.n, "number");
 }
 
+
+console.log("\n89) 出口族预算：几条 v4 出口决定探测名额");
+{
+  W.EG.clear();
+  const A = "198.51.100.10", B = "198.51.100.11", C = "198.51.100.12", D = "198.51.100.13";
+  W.EG.note(A, 4);
+  W.EG.note(B, 6);
+  const c1 = W.egCounts([A, B, C, D]);
+  eq("v4 计数", c1.v4, 1);
+  eq("v6 计数", c1.v6, 1);
+  eq("未知计数", c1.unk, 2);
+  eq("v4 不足 3 条时每轮探 4 条", W.egQuota(c1.v4), 4);
+  W.EG.note(C, 4);
+  W.EG.note(D, 4);
+  eq("v4 够 3 条回到 2 条", W.egQuota(W.egCounts([A, B, C, D]).v4), 2);
+  eq("配额边界：2 条仍要多探", W.egQuota(2), 4);
+  eq("配额边界：3 条不再加钱", W.egQuota(3), 2);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

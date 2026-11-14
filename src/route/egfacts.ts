@@ -183,3 +183,35 @@ export async function probeEg(ips: string[], max = 4): Promise<Array<{ ip: strin
   }
   return out;
 }
+
+/**
+ * 功能：统计一组中继的出口族分布 —— `alive` 里到底有几条 v4 出口，是 v8 的一等预算项。
+ * 为什么要它：好出口为 0 条时排序再好也只有个位数成功率（0→1 条值 82 个点），
+ * 所以「有几条 v4 出口」必须能在 `/health` 上直接看到，而不是靠猜。
+ * @param ips 中继 IP 列表
+ * @param now 当前时间
+ * @returns {{ v4: number, v6: number, unk: number }} 分布
+ */
+export function egCounts(ips: string[], now = Date.now()): { v4: number; v6: number; unk: number } {
+  let v4 = 0;
+  let v6 = 0;
+  let unk = 0;
+  for (const ip of ips) {
+    const f = EG.famOf(ip, now);
+    if (f === 4) v4 += 1;
+    else if (f === 6) v6 += 1;
+    else unk += 1;
+  }
+  return { v4, v6, unk };
+}
+
+/**
+ * 功能：这一轮该花几个 connect 名额去测「出口族未知」的中继。
+ * 依据（v8 §7.3）：v4 出口 <3 条时把更多预算给未知项 —— 每轮 4 条；够 3 条就回到 2 条，
+ * 因为再多的 v4 出口只值 0.9 个点，而 connect 名额是全局 6 个的硬上限。
+ * @param v4 当前已知 v4 出口条数
+ * @returns {number} 本轮探测条数
+ */
+export function egQuota(v4: number): number {
+  return v4 < 3 ? 4 : 2;
+}
