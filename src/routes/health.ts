@@ -1,6 +1,6 @@
 import { P_T, VERSION } from "../core/util";
 import { S } from "../core/state";
-import { errHist } from "../nodes/metrics";
+import { errDup, errHist } from "../nodes/metrics";
 import { EDGE_ERR, edgeRank } from "../route/edge";
 import { cntView } from "../core/counter";
 import { json, forbidden } from "../edge/respond";
@@ -20,6 +20,7 @@ export function health(c: RouteCtx): Response {
     candidates: S.candN,
     errors: S.errs.length,
     errsByKind: errHist(),
+    errsDup: errDup(),
     edge: { seen: S.edge.size, ranked: edgeRank(8).length, err: EDGE_ERR.s },
     colo: (c.cf && c.cf.colo) || "",
     cnt: cntView(),

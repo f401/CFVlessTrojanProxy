@@ -65,6 +65,7 @@ export { spdSnapshot } from "./core/node-snapshot";
 export { cntDelta, cntUnsend, cntView } from "./core/counter";
 export {
   logErr,
+  errDup,
   hostNodeMark,
   hostDirectMark,
   diagVerdict,

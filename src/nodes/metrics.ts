@@ -247,6 +247,12 @@ export function errCount(msg: unknown): void {
 }
 
 /** 当前窗口内的错误分类计数（按次数降序） */
+/** 本 window 内被 5 秒限流丢掉的消息数（让「直方图全量」和「环被限流」能对账） */
+const ERR_DUP = new Map<number, number>(); // window → 被限流条数
+export function errDup(): number {
+  const win = Math.floor(Date.now() / 600000);
+  return ERR_DUP.get(win) || 0;
+}
 export function errHist(): Array<{ k: string; n: number }> {
   const win = Math.floor(Date.now() / 600000);
   const out: Array<{ k: string; n: number }> = [];
@@ -265,8 +271,23 @@ export function logErr(msg: unknown, tag?: string | null) {
   const now0 = Date.now();
   const key = tag ? m + "|" + tag : m;
   const last = ERR_SEEN.get(key) || 0;
-  if (now0 - last < 5000) return;
-  if (ERR_SEEN.size > 200) ERR_SEEN.clear();
+  if (now0 - last < 5000) {
+    // 被限流丢掉的那部分也要有账：否则直方图（全量）和环（被限流）两个数没法对照
+    const win = Math.floor(now0 / 600000);
+    ERR_DUP.set(win, (ERR_DUP.get(win) || 0) + 1);
+    if (ERR_DUP.size > 8) for (const k of ERR_DUP.keys()) if (k < win - 1) ERR_DUP.delete(k);
+    return;
+  }
+  // 满了就按时间剪掉 5 秒前的键；以前是 ERR_SEEN.clear()，
+  // 一清表所有 host 立刻重新刷一遍，正好在最吵的时候放大日志量。
+  if (ERR_SEEN.size > 200) {
+    for (const [k, v] of ERR_SEEN) if (now0 - v >= 5000) ERR_SEEN.delete(k);
+    if (ERR_SEEN.size > 260) {
+      const keep = [...ERR_SEEN.entries()].sort((a, b) => b[1] - a[1]).slice(0, 130);
+      ERR_SEEN.clear();
+      for (const [k, v] of keep) ERR_SEEN.set(k, v);
+    }
+  }
   ERR_SEEN.set(key, now0);
 
   try {

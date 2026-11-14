@@ -2147,5 +2147,20 @@ console.log("\n70) 增量上报");
   eq("vtAck 之后不再重复上报", String(W.vtDelta().filter((x) => x.k.includes("ack.example.com")).length), "0");
 }
 
+// 71) 错误日志：限流与表满
+console.log("\n71) 错误日志限流");
+{
+  const d0 = W.errDup();
+  W.logErr("t71 dup probe", "h1");
+  W.logErr("t71 dup probe", "h1");
+  W.logErr("t71 dup probe", "h1");
+  ok("限流丢掉的也算进账", W.errDup() - d0 === 2, String(W.errDup() - d0));
+  const d1 = W.errDup();
+  for (let i = 0; i < 240; i++) W.logErr(`t71 flood ${i}`, `h${i}`);
+  W.logErr("t71 dup probe", "h1");
+  eq("表被灌满后，5 秒内的旧键仍被限流（不再整表清空）", W.errDup() - d1, 1);
+  ok("灌满没把限流表清空", W.errDup() - d1 === 1, String(W.errDup() - d1));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
