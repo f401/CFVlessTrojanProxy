@@ -72,12 +72,12 @@ export class EgFacts {
    * 功能：把出口族折算成代价乘数（选路时乘在代价上，越小越优先）。
    * @param {string} ip 中继 IP
    * @param {number} now 当前时间
-   * @returns {number} v4 → 0.8，v6 → 1.15，未知 → 1
+   * @returns {number} v4 → 0.95，v6 → 1.05，未知 → 1（只做同分打破：实测 ×0.8/×1.15 会把流量压到少数慢中继上，见清单 H5）
    */
   bias(ip: string, now = Date.now()): number {
     const f = this.famOf(ip, now);
-    if (f === 4) return 0.8;
-    if (f === 6) return 1.15;
+    if (f === 4) return 0.95;
+    if (f === 6) return 1.05;
     return 1;
   }
 
