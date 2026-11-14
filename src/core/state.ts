@@ -70,7 +70,7 @@ export class AppState {
   tsMem: { at: number; keys: string[] } = { at: 0, keys: [] };
 
   // —— 日计数 ——
-  cntKeys = ["egSent", "psNote", "psDO", "psSent", "deadNote", "deadDO", "deadClear", "ftSkip", "blkBatch", "blkWrote", "blkNoPeer", "blkDO", "bizSweeps", "blkContra", "egProbe", "capSet", "capNoise", "rehab", "cfDiff", "dnsProbe", "egDO", "cfObs", 
+  cntKeys = ["egSent", "psNote", "psDO", "psSent", "deadNote", "deadDO", "deadClear", "ftSkip", "blkBatch", "blkWrote", "blkNoPeer", "blkDO", "bizSweeps", "blkContra", "egProbe", "factsJoin", "factsDo", "factsCacheHit", "capSet", "capNoise", "rehab", "cfDiff", "dnsProbe", "egDO", "cfObs", 
     "conn",
     "direct",
     "node",
@@ -121,6 +121,8 @@ export class AppState {
   vtPend: Map<string, number> = new Map();
   vtSent: Map<string, number> = new Map();
   vtLoaded = false;
+  /** 冷启动事实读取的 single-flight 句柄：同一波次并发连接共用一次 DO 读（null = 没有在飞）。 */
+  vtFlight: Promise<void> | null = null;
   scanN = 12;
   poolIdx = 0;
   poolGen = 0;

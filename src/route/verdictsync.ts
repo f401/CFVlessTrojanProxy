@@ -57,21 +57,66 @@ export function vtAck(): void {
 export function vtNack(): void {
   S.vtPend.clear();
 }
-/** 冷启动拉一次远端强证据（失败静默：判定表本来就是「本 isolate 先信自己」） */
+/** 冷启动拉一次远端强证据（失败静默：判定表本来就是「本 isolate 先信自己」） *//**
+ * 功能：冷启动拉一次远端事实（失败静默：判定表本来就是「本 isolate 先信自己」）。
+ * 两条并发纪律：
+ * - single-flight：旧实现是「先同步置 `vtLoaded` 再 await」，于是同一波次里只有第 1 条连接真的在读，
+ *   其余全部空手返回 —— DO 读确实只有 1 次，但代价是 19 条连接在冷启动时盲选（实测首次请求 40% 对 40%）。
+ *   现在后到者等同一个 Promise（调用方用 200ms 上限，不会拖住首字节），换来同波次都有事实可用。
+ * - colo 缓存：同一 POP 的多个 isolate 共享 90 秒快照，命中率 ≈ 1−e^(−λ·TTL/60)
+ *   （λ=0.5/分、TTL=120s 时 63%，λ=2 时 86%），低流量下把「冷 isolate 只能盲选」的窗口压到十几次请求。
+ * @param env 环境绑定
+ * @returns {Promise<void>} 读完 resolve（失败也 resolve）
+ */
 export async function vtLoad(env: Env): Promise<void> {
   if (S.vtLoaded) return;
-  S.vtLoaded = true;
+  if (S.vtFlight) {
+    cnt("factsJoin");
+    return S.vtFlight;
+  }
+  S.vtFlight = vtFetch(env);
+  return S.vtFlight;
+}
+
+/** 远端事实的响应体形状（五种事实 + 判定表 + 中继健康度） */
+interface FactsBody {
+  vt?: VtRow[];
+  hl?: Array<{ i: string; o: number; b: number; d: number }>;
+  eg?: EgRow[];
+  ps?: Array<{ k: string; q: number; n: number; at: number }>;
+  dead?: Array<{ i: string; n: number; at: number }>;
+  blk2?: Array<{ k: string; n: number; at: number }>;
+}
+
+/**
+ * 功能：真正的一次读取（single-flight 的内核）—— 先看 colo 缓存，未命中再问 DO，并顺手回写缓存。
+ * @param env 环境绑定
+ * @returns {Promise<void>} 无返回值
+ */
+async function vtFetch(env: Env): Promise<void> {
   try {
-    const raw = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
-    const rr = await env.METER.get(env.METER.idFromName(raw)).fetch("https://meter/vt");
-    const jj = (await rr.json()) as {
-      vt?: VtRow[];
-      hl?: Array<{ i: string; o: number; b: number; d: number }>;
-      eg?: EgRow[];
-      ps?: Array<{ k: string; q: number; n: number; at: number }>;
-      dead?: Array<{ i: string; n: number; at: number }>;
-      blk2?: Array<{ k: string; n: number; at: number }>;
-    };
+    const ckey = new Request("https://facts.internal/meter/vt?u=" + encodeURIComponent(String(env.uuid || env.uuids || "")));
+    // Workers 的 `caches.default` 不在默认 TS lib 里，用结构化类型声明，避免为它引 dom 类型
+    const cs = (globalThis as unknown as {
+      caches?: { default?: { match: (r: Request) => Promise<Response | undefined>; put: (r: Request, x: Response) => Promise<void> } };
+    }).caches;
+    const cache = cs && cs.default ? cs.default : null;
+    let jj: FactsBody | null = null;
+    if (cache) {
+      const hit = await cache.match(ckey);
+      if (hit) {
+        jj = (await hit.json()) as FactsBody;
+        cnt("factsCacheHit");
+      }
+    }
+    if (!jj) {
+      const raw = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
+      const rr = await env.METER.get(env.METER.idFromName(raw)).fetch("https://meter/vt");
+      jj = (await rr.json()) as FactsBody;
+      cnt("factsDo");
+      // 回写缓存不阻塞连接：写失败（无 Cache API / 配额）也不影响本次结果
+      if (cache) void cache.put(ckey, new Response(JSON.stringify(jj), { headers: { "cache-control": "max-age=90" } })).catch(() => {});
+    }
     if (Array.isArray(jj.vt)) {
       // 过滤掉历史版本外发出去的通配封锁：它们已经在别的 isolate 里造成过大面积误封，重新导入只会复发。
       const rows = jj.vt.filter((r) => !r.k.startsWith("*|"));
@@ -79,16 +124,14 @@ export async function vtLoad(env: Env): Promise<void> {
       cnt("vtDO", rows.length);
     }
     if (Array.isArray(jj.hl)) HEALTH.merge(jj.hl);
-    // 出口族事实：冷启动一次灌进来，之后靠本地增量回传（与强证据同一条管道）
     if (Array.isArray(jj.eg)) cnt("egDO", EG.load(jj.eg));
-    // 成功率事实：冷启动一次灌入，之后靠本地增量回传
     if (Array.isArray(jj.ps)) cnt("psDO", PS.load(jj.ps));
-    // 「连不上」事实：只并已判死的行（失败一次不算事实）
     if (Array.isArray(jj.dead)) cnt("deadDO", DEAD.load(jj.dead));
-    // 单 IP 封锁事实：只并已确认（三批）的行；它只影响代价倍数，不会剔候选
     if (Array.isArray(jj.blk2)) cnt("blkDO", BLK.load(jj.blk2));
   } catch {
     // 读不到就当没有：不阻塞连接
+  } finally {
+    S.vtLoaded = true;
+    S.vtFlight = null;
   }
 }
-

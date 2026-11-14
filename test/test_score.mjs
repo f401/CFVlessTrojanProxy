@@ -2777,5 +2777,30 @@ console.log("\n91) 活跃池目标：不够 16 条就加码扫描");
   eq("带恢复时间", s1.retryAt > Date.now(), true);
 }
 
+
+console.log("\n92) 远端事实读取：并发只读一次 + colo 缓存命中");
+{
+  let hits = 0;
+  const mkEnv = () => ({ uuid: "u-test", METER: { idFromName: () => "id", get: () => ({ fetch: async () => { hits += 1; await new Promise((r) => setTimeout(r, 15)); return { json: async () => ({ eg: [], ps: [], dead: [], blk2: [] }) }; } }) } });
+  W.S.vtLoaded = false;
+  W.S.vtFlight = null;
+  const before = globalThis.caches;
+  delete globalThis.caches;
+  await Promise.all([W.vtLoad(mkEnv()), W.vtLoad(mkEnv()), W.vtLoad(mkEnv())]);
+  eq("三条并发只发一次 DO 读", hits, 1);
+  eq("读完标记为已加载", W.S.vtLoaded, true);
+  eq("句柄已释放", W.S.vtFlight, null);
+  // 缓存命中：有 colo 缓存时不应再问 DO
+  hits = 0;
+  W.S.vtLoaded = false;
+  globalThis.caches = { default: { match: async () => new Response(JSON.stringify({ eg: [], ps: [] })), put: async () => {} } };
+  await W.vtLoad(mkEnv());
+  eq("缓存命中不问 DO", hits, 0);
+  eq("缓存命中后仍标记已加载", W.S.vtLoaded, true);
+  globalThis.caches = before;
+  W.S.vtLoaded = false;
+  W.S.vtFlight = null;
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
