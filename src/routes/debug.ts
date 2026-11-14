@@ -10,6 +10,7 @@ import { diagVerdict, hostKey } from "../nodes/metrics";
 import { nsGet } from "../nodes/score";
 import { cfHttpCode } from "../proxy/cfverdict";
 import { sweepHost } from "../route/sweep";
+import { runTfb } from "../route/tfb";
 import { vAll, vState } from "../route/verdict";
 import { vtDelta, vtLoad } from "../route/verdictsync";
 import { cntView } from "../core/counter";
@@ -391,6 +392,13 @@ export async function debug(c: UserCtx): Promise<Response> {
       return json({ ok: false, error: errMsg(e) });
     }
   }
+  // IP 级封锁探测（见 route/tfb.ts）
+  if (url.searchParams.get("tfb")) {
+    const denyB = await adminOnly(c);
+    if (denyB) return denyB;
+    return runTfb(c, String(url.searchParams.get("tfb") || ""), Number(url.searchParams.get("n") || 2), String(url.searchParams.get("r") || ""));
+  }
+
   if (url.searchParams.get("tf")) {
     const denyTf = await adminOnly(c);
     if (denyTf) return denyTf;
@@ -403,31 +411,6 @@ export async function debug(c: UserCtx): Promise<Response> {
     )) as Response | undefined;
     const body = r ? await withTimeout(r.json(), 5000) : { ok: false, err: "tf-timeout" };
     return Response.json({ host: tfHost, relay: tfRelay, do: body });
-  }
-
-  // 握手分片骨架：?ch=<host>&gap=<ms> 建连 → 等 gap → 回来读（验证 socket 跨请求存活）
-  if (url.searchParams.get("ch")) {
-    const denyCh = await adminOnly(c);
-    if (denyCh) return denyCh;
-    const chHost = String(url.searchParams.get("ch") || "");
-    const gap = Math.max(0, Math.min(15000, Number(url.searchParams.get("gap") || 800)));
-    const cid = "c" + Date.now().toString(36);
-    const stub = c.env.METER.get(c.env.METER.idFromName("chan-probe"));
-    const t0 = Date.now();
-    const o1 = (await withTimeout(stub.fetch(`https://meter/chopen?id=${cid}&h=${encodeURIComponent(chHost)}&p=443`), 8000)) as Response | undefined;
-    const j1 = o1 ? await o1.json() : { ok: false, err: "open-timeout" };
-    await new Promise((r) => setTimeout(r, gap));
-    const j0 = url.searchParams.get("sh")
-      ? (await (async () => {
-          const r = (await withTimeout(stub.fetch(`https://meter/chsh?id=${cid}&w=2000`), 9000)) as Response | undefined;
-          return r ? await r.json() : { ok: false, err: "sh-timeout" };
-        })())
-      : null;
-    const o2 = (await withTimeout(stub.fetch(`https://meter/chread?id=${cid}&w=2000`), 9000)) as Response | undefined;
-    const j2 = o2 ? await o2.json() : { ok: false, err: "read-timeout" };
-    const o3 = (await withTimeout(stub.fetch(`https://meter/chclose?id=${cid}`), 5000)) as Response | undefined;
-    const j3 = o3 ? await o3.json() : { ok: false };
-    return Response.json({ gap, ms: Date.now() - t0, open: j1, sh: j0, read: j2, close: j3 });
   }
 
   // 跨请求 socket 存活实验：?hold=<host> 建连并发 hello，?cont=1 在下一个请求里读

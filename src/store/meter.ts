@@ -399,6 +399,13 @@ export class Meter {
       }
       return Response.json(out);
     }
+    if (p.endsWith("/tfb")) {
+      const host = url.searchParams.get("h") || "";
+      const list = (url.searchParams.get("r") || "").split(",").filter(Boolean).slice(0, 3);
+      const rows: unknown[] = [];
+      for (const relay of list) rows.push({ relay, ...(await probeTf(host, relay)) });
+      return Response.json({ host, rows, ms: Date.now() });
+    }
     if (p.endsWith("/tf"))
       return Response.json(
         await probeTf(url.searchParams.get("h") || "", url.searchParams.get("r") || "", url.searchParams.get("p") || "/"),
