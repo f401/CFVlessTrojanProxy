@@ -2312,6 +2312,15 @@ console.log("\n76) 出口族事实（v8 的 eg）");
   T.note("2001:db8::1", 6, t0);
   eq("v6 出口的代价乘数是 1.05", T.bias("2001:db8::1", false, t0 + 1000), 1.05);
   eq("没观测过的中继不做偏置", T.bias("198.51.100.9", false, t0 + 1000), 1);
+  // 冷 isolate：S.alive 还没探出来（relays 为空）时，用事实里的 v4 出口兜底，而不是直连
+  W.EG.clear();
+  W.EG.note("203.0.113.7", 4, Date.now());
+  const pin = W.decide({ host: "x.example.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: true });
+  eq("冷启动无存活中继时用 eg 里的 v4 出口", pin.why, "eg-pin");
+  eq("冷启动兜底选的是那条 v4", pin.chan.ip, "203.0.113.7");
+  W.EG.clear();
+  const none = W.decide({ host: "x.example.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: true });
+  eq("既没有存活中继也没有 eg 时才直连", none.why, "direct");
   eq("CF 站点：v4 出口不罚", T.bias("203.0.113.7", true, t0 + 1000), 1);
   eq("CF 站点：v6 出口重罚（实测 0/9 全 403）", T.bias("2001:db8::1", true, t0 + 1000), 40);
   eq("CF 站点：未知族压 8 倍（与 v6 同罚实测更差：60% vs 70%，回到 8）", T.bias("198.51.100.9", true, t0 + 1000), 8);

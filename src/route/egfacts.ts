@@ -132,6 +132,21 @@ export class EgFacts {
    * 功能：调试快照（按 `at` 降序）。
    * @returns {EgRow[]} 未过期的行，最多 64 条
    */
+  /**
+   * 功能：列出已知 v4 出口，最近的在前。
+   * 用途：冷 isolate 里 `S.alive` 还是空的时候，用它兜底挑一条「已验证能把页面送回来」的中继，
+   * 而不是退回直连（CF→CF 直连几乎必被自家边缘拒）。
+   * @param now 当前时间（用于过滤过期行）
+   * @returns {string[]} 中继 IP 列表
+   */
+  v4List(now = Date.now()): string[] {
+    this.trim(now);
+    const out: Array<{ i: string; at: number }> = [];
+    for (const [i, r] of this.m) if (r.f === 4) out.push({ i, at: r.at });
+    out.sort((a2, b2) => b2.at - a2.at);
+    return out.map((x) => x.i);
+  }
+
   snap(): EgRow[] {
     const now = Date.now();
     const out: EgRow[] = [];

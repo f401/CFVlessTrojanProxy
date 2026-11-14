@@ -12,6 +12,7 @@ import { chanPref } from "./prefs";
 import { runVerify } from "./verify";
 import { HEALTH, ipOf } from "./relay-health";
 import { CF_NEG, JUDGE } from "./judge";
+import { EG } from "./egfacts";
 import { relCostMode, relNote, relSnap } from "./relperf";
 import { psOk } from "./psfacts";
 import { deadNote, isDead } from "./deadfacts";
@@ -218,6 +219,11 @@ export class Policy {
       if (code === 403 && stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "http403" };
       if (code === 200 && !stick.length) return { chan: DIRECT, why: "http200" };
       if (stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "cf-any" };
+      // 冷 isolate 兜底：`S.alive` 还没探出来时 `stick` 是空的，原来的结局是直连 → 403。
+      // 事实层里已有「这条中继送回过整页」的 v4 出口（DO 读到的），先把它们用起来，
+      // 比直连稳得多（钉中继实测 v4 9/9 200、直连约 1/6）。只挑一条，失败交给 dialect 的重试。
+      const eg4 = EG.v4List();
+      if (eg4.length) return { chan: { kind: "r", ip: eg4[0] as string }, why: "eg-pin" };
     }
     return { chan: DIRECT, why: "direct" };
   }
