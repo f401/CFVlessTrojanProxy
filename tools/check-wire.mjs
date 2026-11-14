@@ -28,6 +28,11 @@ const NEED = [
   { sym: "capFactor", own: "src/route/capfacts.ts", why: "选路读取容量比" },
 ];
 
+// 槽位不是「调用」而是「注册」：符号扫描看不见它们，于是出现过一个真洞 ——
+// `HOOK.facts` 从来没被赋值，`?facts=none` 只影响 /health 显示、不影响选路，
+// 而所有行为测试都通过（它们直接调 factMul）。这里补一条静态检查。
+const SLOTS = ["facts", "factsFor", "factsDelta", "decide", "vtLoad"];
+
 const files = [];
 const walk = (d) => {
   for (const e of fs.readdirSync(d, { withFileTypes: true })) {
@@ -49,6 +54,17 @@ for (const n of NEED) {
     console.log(`FAIL ${n.sym} 没有生产调用点（${n.why}）`);
   }
 }
+// HOOK 槽位：proxy 层只读不赋值，赋值必须发生在别处（route 层注册）
+let slotFail = 0;
+for (const name of SLOTS) {
+  const needle = `HOOK.${name} =`;
+  const hits = prod.filter((f) => fs.readFileSync(f, "utf8").includes(needle));
+  if (!hits.length) {
+    slotFail += 1;
+    console.log(`FAIL HOOK.${name} 从未被注册（读它的代码会静默退回默认行为）`);
+  }
+}
+fail += slotFail;
 if (fail) {
   console.log(`\n接线扫描：${fail} 条事实没有被真实链路调用`);
   process.exit(1);
