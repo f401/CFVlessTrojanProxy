@@ -169,14 +169,66 @@ export interface PoolRefill {
  * @returns {Promise<PoolRefill>} 合并后的候选池与各源统计
  */
 /**
- * 源健康度（进程内）：记录每个源连续失败次数与冷却截止时间。
- * 镜像源经常整站挂掉或被限流，逐个重试会白烧子请求预算（免费计划 50 次/轮）。
- * 只影响「先抓谁」，不删除源：全部冷却时仍会按冷却到期时间全部重试。
+ * 功能：池子源健康度表（每个 isolate 一份，不跨 isolate 共享）。
+ *
+ * 镜像源经常整站挂掉或被限流，逐个重试会白烧子请求预算（免费计划每轮约 50 个子请求）。
+ * 这里只影响「先抓谁」，**不删除源**：全部冷却时仍会按冷却到期时间全部重试一遍。
  */
-const SRC_BAD = new Map<string, { n: number; until: number }>();
+export class SourceHealth {
+  /** 源 URL → { 连续失败次数, 冷却截止时间 } */
+  private bad = new Map<string, { n: number; until: number }>();
 
-/** 允许 env.poolSrc 覆盖源列表（逗号或空白分隔），默认用内置表 */
-/** 把数组切成每段不超过 n 个：用于「同时打开的连接数」受限的场景。 */
+  /**
+   * 功能：按健康度排序：可用源按配置顺序在前，连续失败且仍在冷却的源排最后。
+   * @param env Worker 环境（可含 poolSrc 覆盖源列表）
+   * @returns 源 URL 数组（与 poolSources 同一集合，只是顺序不同）
+   */
+  rank(env: Env): string[] {
+    const now = Date.now();
+    return poolSources(env)
+      .map((src, i) => {
+        const h = this.bad.get(src);
+        const bad = !!h && h.n >= 2 && h.until > now;
+        return { src, i, bad, until: h ? h.until : 0 };
+      })
+      .sort((a, b) => (a.bad === b.bad ? (a.bad ? a.until - b.until : a.i - b.i) : a.bad ? 1 : -1))
+      .map((x) => x.src);
+  }
+
+  /**
+   * 功能：记录一次抓取结果。成功清零，失败累加并刷新 1 小时冷却。
+   * @param src 源 URL
+   * @param ok 本次抓取是否成功
+   * @returns 无
+   */
+  note(src: string, ok: boolean): void {
+    const h = this.bad.get(src) || { n: 0, until: 0 };
+    // 失败只影响「先抓谁」的顺序，不清空计数就无从判断冷却是否该结束
+    if (ok) this.bad.set(src, { n: 0, until: 0 });
+    else this.bad.set(src, { n: h.n + 1, until: Date.now() + 3600_000 });
+  }
+
+  /**
+   * 功能：当前 isolate 的源健康快照（调试端点与面板用）。
+   * @returns 源 URL → { n, until } 的浅拷贝，调用方改动不会影响内部表
+   */
+  snap(): Record<string, { n: number; until: number }> {
+    const out: Record<string, { n: number; until: number }> = Object.create(null);
+    for (const [k, v] of this.bad) out[k] = { n: v.n, until: v.until };
+    return out;
+  }
+}
+
+/** 进程内单例：池子源健康度（每个 isolate 各自一份，不跨 isolate 共享） */
+export const SOURCES = new SourceHealth();
+
+/**
+ * 功能：把数组切成每段不超过 n 个。用于「同时打开的连接数」受限的场景
+ * （免费计划 connect() 并发上限见 SC.PROBE_CONC）。
+ * @param arr 原数组
+ * @param n 每段上限
+ * @returns 分段后的二维数组；n 非法时按 1 处理
+ */
 export function chunks<T>(arr: T[], n: number): T[][] {
   const lim = Math.max(1, Math.floor(n) || 1);
   const out: T[][] = [];
@@ -196,31 +248,31 @@ export function poolSources(env: Env): string[] {
   return list.length ? list : POOL_SOURCES;
 }
 
-/** 按健康度排序：可用源在前，连续失败的源排最后但仍会被重试 */
+/**
+ * 功能：按健康度排序的源列表（薄包装，委托 SOURCES.rank）。
+ * @param env 环境变量
+ * @returns 源 URL 数组
+ */
 export function srcRank(env: Env): string[] {
-  const now = Date.now();
-  return poolSources(env)
-    .map((src, i) => {
-      const h = SRC_BAD.get(src);
-      const bad = !!h && h.n >= 2 && h.until > now;
-      return { src, i, bad, until: h ? h.until : 0 };
-    })
-    .sort((a, b) => (a.bad === b.bad ? (a.bad ? a.until - b.until : a.i - b.i) : a.bad ? 1 : -1))
-    .map((x) => x.src);
+  return SOURCES.rank(env);
 }
 
-/** 记录一次抓取结果：成功清零，失败累加（连续 2 次起冷却） */
+/**
+ * 功能：记录一次抓取结果（薄包装，委托 SOURCES.note）。
+ * @param src 源 URL
+ * @param ok 是否成功
+ * @returns 无
+ */
 export function srcNote(src: string, ok: boolean): void {
-  const h = SRC_BAD.get(src) || { n: 0, until: 0 };
-  if (ok) SRC_BAD.set(src, { n: 0, until: 0 });
-  else SRC_BAD.set(src, { n: h.n + 1, until: Date.now() + 3600_000 });
+  SOURCES.note(src, ok);
 }
 
-/** 源健康快照（调试用） */
+/**
+ * 功能：源健康快照（薄包装，委托 SOURCES.snap）。
+ * @returns 源 URL → { n, until }
+ */
 export function srcHealth(): Record<string, { n: number; until: number }> {
-  const out: Record<string, { n: number; until: number }> = Object.create(null);
-  for (const [k, v] of SRC_BAD) out[k] = { n: v.n, until: v.until };
-  return out;
+  return SOURCES.snap();
 }
 
 /**
