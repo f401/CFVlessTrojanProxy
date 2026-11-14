@@ -13,6 +13,57 @@ export interface ScoreParts {
   n: number; jitMs: number; failMs: number; gate: string;
 }
 
+/** 候选列表（已过滤黑名单/冻结，按代价升序） */
+const CAND_TTL = 20000;      // 排行缓存寿命（按模式各记各的时间）
+const CAND_CACHE_MIN = 24;   // 候选少的时候不必缓存（重算也就几十 µs）
+const CAND_KEEP = 224;       // 排行榜只留前 N 名（pickThom 只看前 64 + 64 个样本不足的）
+const CAND_EXTRA = 64;       // 额外兜一批样本不足的节点，否则新节点永远进不了抽样池
+const CAND_SLICE = 128;      // 分片重建：每次 pick 最多给多少个节点打分（2000 候选一次算完要 4 ms）
+const CAND_SLICE_MIN = 1200; // 池子大于这个数才分片：800 个候选整算 1.6 ms 还吃得下，2000 个就要 4 ms
+
+/** 一次算完的排行（小池 / 大池冷启动）。只保留前 CAND_KEEP 名 + 最多 CAND_EXTRA 个样本不足的节点。 */
+function buildCands(m: Mode, now: number): RankRow[] {
+  const top: RankRow[] = [];
+  let usableN = 0;
+  for (const k of S.alive.keys()) {
+    if (!usable(k)) continue;
+    usableN++;
+    const v = costOf(k, m);
+    if (top.length < CAND_KEEP || v < top[top.length - 1].v) {
+      let lo = 0;
+      let hi = top.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        // 相等时插在后面：保持插入顺序（同价节点按 alive 顺序，结果可复现）
+        if (top[mid].v <= v) lo = mid + 1;
+        else hi = mid;
+      }
+      top.splice(lo, 0, { k, v });
+      if (top.length > CAND_KEEP) top.pop();
+    }
+  }
+  const seen = new Set(top.map((r) => r.k));
+  let extra = 0;
+  for (const k of S.alive.keys()) {
+    if (extra >= CAND_EXTRA) break;
+    if (seen.has(k) || !usable(k)) continue;
+    const s = S.nstat.get(k);
+    if (s && s.okW + s.failW >= SC.N_EFF_MIN) continue;
+    top.push({ k, v: costOf(k, m) });
+    seen.add(k);
+    extra++;
+  }
+  S.candN = usableN;
+  // 小池不写缓存：否则一次 2 节点的小算例会把后面 30 节点的算例喂成旧表
+  if (S.alive.size >= CAND_CACHE_MIN) {
+    const c = S.rankCache;
+    S.rankCache = { ...c, t: now, at: { ...c.at, [m]: now }, v: { ...c.v, [m]: top } };
+  }
+  return top;
+}
+
+/** Scorer：把原来的自由函数收成方法（行为逐位不变，外部仍可用同名薄包装） */
+export class Scorer {
 /**
  * 评分明细（v2）：排序与面板共用同一份分项，避免"面板一套公式、选路另一套"。
  *
@@ -20,7 +71,7 @@ export interface ScoreParts {
  *   吞吐 E10 = confB × (10MiB/cap) + (1-confB) × (10MiB/prior)
  *   score = 目标项 + FAIL×pFailRisk + STALL×pStall
  */
-export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = false, bytes = 0): ScoreParts {
+  scoreParts(k: string, mode: Mode, now = Date.now(), withGate = false, bytes = 0): ScoreParts {
   const m: Mode = mode === "tput" ? "tput" : "lat";
   const s = S.nstat.get(k) || ZERO_STAT;
   const a = S.alive.get(k);
@@ -95,49 +146,44 @@ export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = f
     n: N, jitMs, failMs, gate,
   };
 }
-
 /** 节点代价（毫秒当量，越小越好） */
-export function costOf(k: string, mode: Mode, now = Date.now()): number {
+  costOf(k: string, mode: Mode, now = Date.now()): number {
   return scoreParts(k, mode, now).score;
 }
-
 /** 是否处于冷却期 */
-export function isBlack(k: string) {
+  isBlack(k: string): boolean {
   const s = S.nstat.get(k);
   return !!(s && s.blackUntil > Date.now());
 }
 /** 是否被回滚冻结 */
-export function isFrozen(k: string) {
+  isFrozen(k: string): boolean {
   const s = S.nstat.get(k);
   return !!(s && s.freeUntil > Date.now());
 }
 /** 冻结一个刚出问题的节点 */
-export function freezeNode(k: string) {
+  freezeNode(k: string): void {
   if (!k) return;
   const s = nsGet(k);
   s.freeUntil = Math.max(s.freeUntil || 0, Date.now() + SC.ROLL_FREEZE);
   S.hostRankCache.clear();     // 站点排行里不能再推荐它
   invalidateRank();
 }
-
 /**
  * 中转后仍然大量空关闭 → 这个节点基本是坏的。
  * 只看"走了中转"的口径，直连空关闭是目标站的问题，不能算到节点头上。
  * @param {object} s 统计对象
  * @returns {boolean} 是否可疑
  */
-export function suspectOf(s: NodeStats | undefined): boolean {
+  suspectOf(s: NodeStats | undefined): boolean {
   if (!s) return false;
   const viaP = s.eCloseP || 0;
   const attempts = (s.tS || 0) + viaP;
   return attempts >= 5 && viaP / attempts > 0.5;
 }
-
 /** 可疑节点的 key 版本（面板/规则共用一份判定） */
-export function emptyCloseSuspect(k: string) {
+  emptyCloseSuspect(k: string): boolean {
   return suspectOf(S.nstat.get(k));
 }
-
 /**
  * 候选资格：活着、不在冷却/冻结、可用性够、不是空关闭可疑节点。
  * 全局选路与地区选路必须共用这一份判定 —— 否则 rg=xx 会绕过排除规则，
@@ -146,7 +192,7 @@ export function emptyCloseSuspect(k: string) {
  * @param {number} now 当前时间
  * @returns {boolean} 是否可用
  */
-export function usable(k: string, now = Date.now()): boolean {
+  usable(k: string, now = Date.now()): boolean {
   if (!S.alive.has(k) || isBlack(k) || isFrozen(k)) return false;
   const s = S.nstat.get(k);
   if (!s) return true;
@@ -155,59 +201,9 @@ export function usable(k: string, now = Date.now()): boolean {
   if (n >= 8 && availOf(s, now, e) < 0.4) return false;
   return !suspectOf(s);
 }
-
-/** 候选列表（已过滤黑名单/冻结，按代价升序） */
-const CAND_TTL = 20000;      // 排行缓存寿命（按模式各记各的时间）
-const CAND_CACHE_MIN = 24;   // 候选少的时候不必缓存（重算也就几十 µs）
-const CAND_KEEP = 224;       // 排行榜只留前 N 名（pickThom 只看前 64 + 64 个样本不足的）
-const CAND_EXTRA = 64;       // 额外兜一批样本不足的节点，否则新节点永远进不了抽样池
-const CAND_SLICE = 128;      // 分片重建：每次 pick 最多给多少个节点打分（2000 候选一次算完要 4 ms）
-const CAND_SLICE_MIN = 1200; // 池子大于这个数才分片：800 个候选整算 1.6 ms 还吃得下，2000 个就要 4 ms
-
-/** 一次算完的排行（小池 / 大池冷启动）。只保留前 CAND_KEEP 名 + 最多 CAND_EXTRA 个样本不足的节点。 */
-function buildCands(m: Mode, now: number): RankRow[] {
-  const top: RankRow[] = [];
-  let usableN = 0;
-  for (const k of S.alive.keys()) {
-    if (!usable(k)) continue;
-    usableN++;
-    const v = costOf(k, m);
-    if (top.length < CAND_KEEP || v < top[top.length - 1].v) {
-      let lo = 0;
-      let hi = top.length;
-      while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        // 相等时插在后面：保持插入顺序（同价节点按 alive 顺序，结果可复现）
-        if (top[mid].v <= v) lo = mid + 1;
-        else hi = mid;
-      }
-      top.splice(lo, 0, { k, v });
-      if (top.length > CAND_KEEP) top.pop();
-    }
-  }
-  const seen = new Set(top.map((r) => r.k));
-  let extra = 0;
-  for (const k of S.alive.keys()) {
-    if (extra >= CAND_EXTRA) break;
-    if (seen.has(k) || !usable(k)) continue;
-    const s = S.nstat.get(k);
-    if (s && s.okW + s.failW >= SC.N_EFF_MIN) continue;
-    top.push({ k, v: costOf(k, m) });
-    seen.add(k);
-    extra++;
-  }
-  S.candN = usableN;
-  // 小池不写缓存：否则一次 2 节点的小算例会把后面 30 节点的算例喂成旧表
-  if (S.alive.size >= CAND_CACHE_MIN) {
-    const c = S.rankCache;
-    S.rankCache = { ...c, t: now, at: { ...c.at, [m]: now }, v: { ...c.v, [m]: top } };
-  }
-  return top;
-}
-
 /** 候选排行（按代价升序）。大池分片重建：每次调用只给 CAND_SLICE 个节点打分，
  *  边算边维护有界的前 CAND_KEEP 名（不做事后排序），2000 候选不再有 4 ms 的重建尖峰。 */
-export function rankedCands(mode: Mode): RankRow[] {
+  rankedCands(mode: Mode): RankRow[] {
   const m: Mode = mode === "tput" ? "tput" : "lat";
   const now = Date.now();
   const c = S.rankCache;
@@ -256,16 +252,14 @@ export function rankedCands(mode: Mode): RankRow[] {
   S.rankCache = { ...c, t: now, at: { ...c.at, [m]: now }, v: { ...c.v, [m]: rows } };
   return rows;
 }
-
 /** 候选列表（已过滤黑名单/冻结，按代价升序）。缓存只冻结排序，不冻结"能不能用"。 */
-export function candsFor(mode: Mode): RankRow[] {
+  candsFor(mode: Mode): RankRow[] {
   const out: RankRow[] = [];
   for (const r of rankedCands(mode)) if (S.alive.has(r.k) && !isBlack(r.k) && !isFrozen(r.k)) out.push(r);
   return out;
 }
-
 /** 下一个候选（可跳过 avoid，可限定地区） */
-export function nextNode(mode: Mode, avoid: string, cc?: string | null): string {
+  nextNode(mode: Mode, avoid: string, cc?: string | null): string {
   const want = String(cc || "").toUpperCase();
   for (const x of candsFor(mode)) {
     if (x.k === avoid) continue;
@@ -277,9 +271,60 @@ export function nextNode(mode: Mode, avoid: string, cc?: string | null): string 
   }
   return "";
 }
-
 /** 当前最优（候选表第一名的 key） */
-export function bestFor(mode: Mode): string {
+  bestFor(mode: Mode): string {
   const c = candsFor(mode);
   return c.length ? c[0].k : "";
+}
+}
+
+/** 进程内唯一实例 */
+export const SCORER = new Scorer();
+
+export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = false, bytes = 0): ScoreParts {
+  return SCORER.scoreParts(k, mode, now, withGate, bytes);
+}
+
+export function costOf(k: string, mode: Mode, now = Date.now()): number {
+  return SCORER.costOf(k, mode, now);
+}
+
+export function isBlack(k: string): boolean {
+  return SCORER.isBlack(k);
+}
+
+export function isFrozen(k: string): boolean {
+  return SCORER.isFrozen(k);
+}
+
+export function freezeNode(k: string): void {
+  SCORER.freezeNode(k);
+}
+
+export function suspectOf(s: NodeStats | undefined): boolean {
+  return SCORER.suspectOf(s);
+}
+
+export function emptyCloseSuspect(k: string): boolean {
+  return SCORER.emptyCloseSuspect(k);
+}
+
+export function usable(k: string, now = Date.now()): boolean {
+  return SCORER.usable(k, now);
+}
+
+export function rankedCands(mode: Mode): RankRow[] {
+  return SCORER.rankedCands(mode);
+}
+
+export function candsFor(mode: Mode): RankRow[] {
+  return SCORER.candsFor(mode);
+}
+
+export function nextNode(mode: Mode, avoid: string, cc?: string | null): string {
+  return SCORER.nextNode(mode, avoid, cc);
+}
+
+export function bestFor(mode: Mode): string {
+  return SCORER.bestFor(mode);
 }

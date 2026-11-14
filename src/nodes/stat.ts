@@ -2,13 +2,64 @@ import { HIST_BASE, HIST_N, SC } from "../core/const";
 import { pcts } from "../core/hist";
 import { S } from "../core/state";
 
+/** 衰减后的视图（只读投影，供评分函数复用） */
+export interface EffView {
+  k: number;
+  okW: number;
+  failW: number;
+  stallMs: number;
+  runMs: number;
+  sumW: number;
+  sumW2: number;
+  recentBytesW: number;
+  pN: number;
+  latN: number;
+}
+
+
 /* 节点统计原语：衰减、滑动窗口、EWMA/MAD、CUSUM、概率与可用性。 */
+
+/** 时间衰减因子：2^(-age/HL)。读到旧样本时用它折算，不改存储状态。 */
+const LN2 = Math.LN2;
+
+// 快速失败窗口用指数衰减，而不是"10 分钟内计数、到点清零"：
+// 旧写法里 9 分钟前的 4 次成功会把刚刚的 4 次失败稀释成 50%，
+// 而第 10 分钟一到，同一批失败又整段消失，风险曲线是断崖。
+function bumpWin(s: NodeStats, now: number, ok: boolean) {
+  const k = s.winAt ? Math.pow(0.5, Math.max(0, now - s.winAt) / SC.WIN_HL) : 0;
+  s.winOk *= k;
+  s.winFail *= k;
+  s.winAt = now;
+  if (ok) s.winOk += 1;
+  else s.winFail += 1;
+}
+
+/**
+ * 节点代价（毫秒当量，越小越好）。lat=速率优先，tput=吞吐优先。
+ * @param {string} k "host:port"
+ * @param {string} mode "lat" | "tput"
+ * @returns {number} 代价
+ */
+export const ZERO_STAT: NodeStats = {
+  ok: 0, fail: 0, at: 0, msLocal: 0, streak: 0, blackUntil: 0, freeUntil: 0, lastTry: 0,
+  pN: 0, pSum: 0, pSumSq: 0, pF: 0, cus: 0, cusB: 0, tcp: 0, tls: 0, tS: 0, tF: 0, okW: 0, failW: 0, eCloseP: 0, eCloseD: 0,
+  stallMs: 0, runMs: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0),
+  sumW: 0, sumW2: 0, recentBytesW: 0, lastSampleAt: 0,
+  counted: 0,
+  winAt: 0, winOk: 0, winFail: 0,
+};
+
+export const TEN_MB = 10 * 1048576;
+export const E10_PRIOR = (TEN_MB / SC.PRIOR_BPS) * 1000;   // 无吞吐样本时的先验代价（≈5 秒，PRIOR_BPS=2MB/s）
+
+/** NodeStatsTable：把原来的自由函数收成方法（行为逐位不变，外部仍可用同名薄包装） */
+export class NodeStatsTable {
 /**
  * 取节点统计对象（不存在则初始化）。
  * @param {string} k "host:port"
  * @returns {object} 统计对象
  */
-export function nsGet(k: string): NodeStats {
+  nsGet(k: string): NodeStats {
   let s: NodeStats | undefined = S.nstat.get(k);
   if (!s) {
     s = {
@@ -27,14 +78,13 @@ export function nsGet(k: string): NodeStats {
   }
   return s;
 }
-
 /**
  * 指数衰减：半衰期 SC.HL。更新前与读分前都要过一遍。
  * @param {object} s 统计对象
  * @param {number} now 当前时间戳
  * @returns {void}
  */
-export function nsDecay(s: NodeStats, now: number) {
+  nsDecay(s: NodeStats, now: number) {
   if (!s) return;
   if (!s.at) { s.at = now; return; }
   const k = Math.pow(0.5, (now - s.at) / SC.HL);
@@ -49,19 +99,15 @@ export function nsDecay(s: NodeStats, now: number) {
   if (s.hist) for (let i = 0; i < HIST_N; i++) s.hist[i] *= k;
   s.at = now;
 }
-
-/** 时间衰减因子：2^(-age/HL)。读到旧样本时用它折算，不改存储状态。 */
-const LN2 = Math.LN2;
-export function ageFactor(ms: number): number {
+  ageFactor(ms: number): number {
   if (!(ms > 0)) return 1;
   return Math.exp((-ms / SC.HL) * LN2);
 }
-
 /**
  * 读时有效视图（纯函数）。
  * 存储里的权重是"上次写入时刻"的值；隔了多久就按半衰期折算多少。
  */
-export function effView(s: NodeStats, now = Date.now()) {
+  effView(s: NodeStats, now = Date.now()): EffView {
   const k = ageFactor(now - (s.at || now));
   return {
     k,
@@ -77,11 +123,10 @@ export function effView(s: NodeStats, now = Date.now()) {
     latN: (s.pN + s.okW) * k,
   };
 }
-
 /**
  * 记一次空关闭（连接建立后 0 字节结束）。viaP=true 表示已经过了中转。
  */
-export function nsEmptyClose(k: string, viaP: boolean) {
+  nsEmptyClose(k: string, viaP: boolean) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -91,19 +136,6 @@ export function nsEmptyClose(k: string, viaP: boolean) {
   if (viaP && s.eCloseP >= 5) { S.hostRankCache.clear(); invalidateRank(); }
   s.at = now;
 }
-
-// 快速失败窗口用指数衰减，而不是"10 分钟内计数、到点清零"：
-// 旧写法里 9 分钟前的 4 次成功会把刚刚的 4 次失败稀释成 50%，
-// 而第 10 分钟一到，同一批失败又整段消失，风险曲线是断崖。
-function bumpWin(s: NodeStats, now: number, ok: boolean) {
-  const k = s.winAt ? Math.pow(0.5, Math.max(0, now - s.winAt) / SC.WIN_HL) : 0;
-  s.winOk *= k;
-  s.winFail *= k;
-  s.winAt = now;
-  if (ok) s.winOk += 1;
-  else s.winFail += 1;
-}
-
 /**
  * 近期失败率（3 分钟半衰期的指数窗口）。
  * 权重淡到不足 3 次就返回 0（交给慢通道），**不要用 +1/+10 平滑**：
@@ -111,7 +143,7 @@ function bumpWin(s: NodeStats, now: number, ok: boolean) {
  * 而空闲节点恰恰是每一个非游标节点 —— 等于给所有候选固定加 750ms，
  * 游标一旦坐稳就再也换不下来（仿真里 20 个节点全被这条压住）。
  */
-export function pFailFast(s: NodeStats, now = Date.now()): number {
+  pFailFast(s: NodeStats, now = Date.now()): number {
   if (!s || !s.winAt) return 0;
   const k = Math.pow(0.5, Math.max(0, now - s.winAt) / SC.WIN_HL);
   const bad = (s.winFail || 0) * k;
@@ -119,9 +151,8 @@ export function pFailFast(s: NodeStats, now = Date.now()): number {
   if (n < 2.5) return 0; // 3 次有效样本才发言（浮点衰减后 3.0 会略小于 3）
   return Math.min(0.9, bad / n);
 }
-
 /** 记一次成功（同时更新握手耗时 EWMA）。 */
-export function nsOk(k: string, tcp: number, tls: number) {
+  nsOk(k: string, tcp: number, tls: number) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -135,7 +166,6 @@ export function nsOk(k: string, tcp: number, tls: number) {
   if (tcp > 0) s.tcp = s.tcp ? s.tcp * (1 - SC.A) + tcp * SC.A : tcp;
   if (tls > 0) s.tls = s.tls ? s.tls * (1 - SC.A) + tls * SC.A : tls;
 }
-
 /**
  * 记一次探活结果：只进延迟样本，不参与可用性、也不解除熔断。
  * @param {string} k "host:port"
@@ -144,7 +174,7 @@ export function nsOk(k: string, tcp: number, tls: number) {
  * @param {number} tls TLS 往返
  * @returns {void}
  */
-export function nsProbe(k: string, ms: number, tcp: number, tls: number) {
+  nsProbe(k: string, ms: number, tcp: number, tls: number) {
   if (!k || !(ms > 0)) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -155,13 +185,12 @@ export function nsProbe(k: string, ms: number, tcp: number, tls: number) {
   if (tls > 0) s.tls = s.tls ? s.tls * (1 - SC.A) + tls * SC.A : tls;
   s.at = now;
 }
-
 /**
  * 探活失败：连续两次才拉黑 10 分钟（单次超时很常见，不能误杀）。
  * @param {string} k "host:port"
  * @returns {void}
  */
-export function nsProbeFail(k: string) {
+  nsProbeFail(k: string) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -174,13 +203,12 @@ export function nsProbeFail(k: string) {
   }
   s.at = now;
 }
-
 /**
  * 记一次失败，并按指数退避设置冷却。
  * @param {string} k "host:port"
  * @returns {void}
  */
-export function nsFail(k: string) {
+  nsFail(k: string) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -202,12 +230,11 @@ export function nsFail(k: string) {
   S.hostRankCache.clear();             // 冷却中的节点不该继续被站点排行推荐
   invalidateRank();                    // 失败改变了排序前提
 }
-
 /**
  * 站点侧失败：连上了节点，但目标站 0 字节关闭 / 拒绝。
  * 只轻记全局（0.2 次），不动连续失败阶梯 —— 一个站封了这个 IP，不该毁掉节点在别处的排名。
  */
-export function nsSiteFail(k: string) {
+  nsSiteFail(k: string) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -218,7 +245,6 @@ export function nsSiteFail(k: string) {
   // 这里不再清排行缓存：站点失败对全局分的影响只有 0.2 次，
   // 而清缓存会让下一个请求重算 200 个节点。站点级画像在 hostNodeMark 里精确失效。
 }
-
 /**
  * 记录一个吞吐样本：进 log2 直方图（带衰减，所以 p90 反映"近期峰值"）。
  * @param {string} k "host:port"
@@ -227,7 +253,7 @@ export function nsSiteFail(k: string) {
  * @param {object} _env 保留位（落盘已统一走 store 的调度，这里不再用）
  * @returns {void}
  */
-export function nsSpeed(k: string, bps: number, bytes: number, _env: Env, w = 1) {
+  nsSpeed(k: string, bps: number, bytes: number, _env: Env, w = 1) {
   if (!k || !(bps > 0)) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -259,9 +285,8 @@ export function nsSpeed(k: string, bps: number, bytes: number, _env: Env, w = 1)
   s.at = now;
   S.seedDirty = true;
 }
-
 /** 记录卡顿时长（背压累计） */
-export function nsStall(k: string, stallMs: number, runMs: number) {
+  nsStall(k: string, stallMs: number, runMs: number) {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
@@ -269,9 +294,8 @@ export function nsStall(k: string, stallMs: number, runMs: number) {
   s.runMs += runMs || 0;
   s.at = now;
 }
-
 /** 记录本地实测延迟（ttfb，主延迟信号）：winsorize 后进 EWMA，MAD 进 pSumSq，偏离累积进 cus */
-export function nsLatency(k: string, ms: number) {
+  nsLatency(k: string, ms: number) {
   if (!k || !(ms > 0)) return;
   const s = nsGet(k);   // 必须走 nsGet，否则缺 stallMs/runMs 会让 pStall 变 NaN
   const base = s.pSum || ms;
@@ -289,7 +313,6 @@ export function nsLatency(k: string, ms: number) {
     s.msLocal = Math.round(s.pSum);
   }
 }
-
 /**
  * 失败概率。只看真实流量，不看探活。
  * 用"后验上界"而不是点估计：样本越少越往坏的方向估，
@@ -297,7 +320,7 @@ export function nsLatency(k: string, ms: number) {
  * @param {object} s 统计对象
  * @returns {number} 0~0.9 的失败概率估计
  */
-export function pFailOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
+  pFailOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
   if (!s) return 0.1;
   const e = e0 || effView(s, now);
   const N = e.okW + e.failW;
@@ -311,9 +334,8 @@ export function pFailOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof e
   const premium = 0.5 * Math.sqrt(varr) * (1 - Math.exp(-N / 4));
   return Math.min(0.9, Math.max(0, pMean + premium));
 }
-
 /** 可用性（小样本用后验均值，大样本用 Wilson 下界） */
-export function availOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
+  availOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
   if (!s) return 0.5;
   const e = e0 || effView(s, now);
   const ok = e.okW, bad = e.failW;
@@ -327,37 +349,92 @@ export function availOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof e
   }
   return (ok + 1) / (n + 2);
 }
-
 /** 卡顿占比（无数据 = 0.05） */
-export function pStallOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
+  pStallOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
   if (!s) return 0.05;
   const e = e0 || effView(s, now);
   return (e.stallMs + 50) / (e.runMs + 1000);
 }
-
-/**
- * 节点代价（毫秒当量，越小越好）。lat=速率优先，tput=吞吐优先。
- * @param {string} k "host:port"
- * @param {string} mode "lat" | "tput"
- * @returns {number} 代价
- */
-export const ZERO_STAT: NodeStats = {
-  ok: 0, fail: 0, at: 0, msLocal: 0, streak: 0, blackUntil: 0, freeUntil: 0, lastTry: 0,
-  pN: 0, pSum: 0, pSumSq: 0, pF: 0, cus: 0, cusB: 0, tcp: 0, tls: 0, tS: 0, tF: 0, okW: 0, failW: 0, eCloseP: 0, eCloseD: 0,
-  stallMs: 0, runMs: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0),
-  sumW: 0, sumW2: 0, recentBytesW: 0, lastSampleAt: 0,
-  counted: 0,
-  winAt: 0, winOk: 0, winFail: 0,
-};
-
-export const TEN_MB = 10 * 1048576;
-export const E10_PRIOR = (TEN_MB / SC.PRIOR_BPS) * 1000;   // 无吞吐样本时的先验代价（≈5 秒，PRIOR_BPS=2MB/s）
-
-
 /** 排行缓存作废：节点状态变了就调它（排序与时间戳一起清，避免只清一半）。
  *  表与进行中的分片进度都留着：否则每次失败都退化成「只有前 128 名」的半张表，
  *  失败密集时还会把分片循环反复打回起点（永远算不完一轮）。 */
-export function invalidateRank() {
+  invalidateRank() {
   const c = S.rankCache;
   S.rankCache = { t: 0, at: {}, v: c.v, step: c.step };
+}
+}
+
+/** 进程内唯一实例 */
+export const STATS = new NodeStatsTable();
+
+export function nsGet(k: string): NodeStats {
+  return STATS.nsGet(k);
+}
+
+export function nsDecay(s: NodeStats, now: number) {
+  STATS.nsDecay(s, now);
+}
+
+export function ageFactor(ms: number): number {
+  return STATS.ageFactor(ms);
+}
+
+export function effView(s: NodeStats, now = Date.now()): EffView {
+  return STATS.effView(s, now);
+}
+
+export function nsEmptyClose(k: string, viaP: boolean) {
+  STATS.nsEmptyClose(k, viaP);
+}
+
+export function pFailFast(s: NodeStats, now = Date.now()): number {
+  return STATS.pFailFast(s, now);
+}
+
+export function nsOk(k: string, tcp: number, tls: number) {
+  STATS.nsOk(k, tcp, tls);
+}
+
+export function nsProbe(k: string, ms: number, tcp: number, tls: number) {
+  STATS.nsProbe(k, ms, tcp, tls);
+}
+
+export function nsProbeFail(k: string) {
+  STATS.nsProbeFail(k);
+}
+
+export function nsFail(k: string) {
+  STATS.nsFail(k);
+}
+
+export function nsSiteFail(k: string) {
+  STATS.nsSiteFail(k);
+}
+
+export function nsSpeed(k: string, bps: number, bytes: number, _env: Env, w = 1) {
+  STATS.nsSpeed(k, bps, bytes, _env, w);
+}
+
+export function nsStall(k: string, stallMs: number, runMs: number) {
+  STATS.nsStall(k, stallMs, runMs);
+}
+
+export function nsLatency(k: string, ms: number) {
+  STATS.nsLatency(k, ms);
+}
+
+export function pFailOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
+  return STATS.pFailOf(s, now, e0);
+}
+
+export function availOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
+  return STATS.availOf(s, now, e0);
+}
+
+export function pStallOf(s: NodeStats, now = Date.now(), e0?: ReturnType<typeof effView>): number {
+  return STATS.pStallOf(s, now, e0);
+}
+
+export function invalidateRank() {
+  STATS.invalidateRank();
 }
