@@ -1945,5 +1945,11 @@ ok("PageView 可构造", typeof W.PageView === "function", "PageView");
   ok("混采仍为 chan（不受字节影响）", W.tfClass([{ ok: true, status: 200, bytes: 45290 }, { ok: false, status: 403, bytes: 4 }]) === "chan");
   ok("ipfam 也只换出口、不写封禁", W.tfEscalate("ipfam") === "rotate");
 
+  
+  // 第 59 组：rotate 的消费者 —— 换出口优先挑没探过的中继
+  ok("没探过的一律优先", W.pickFresh("pf.test", ["pa", "pb", "pc"], 2).join(",") === "pa,pb");
+  W.vSetState("pf.test", "r:pa", 2, 1);
+  ok("探过的排到后面", W.pickFresh("pf.test", ["pa", "pb", "pc"], 2).join(",") === "pb,pc");
+  ok("已探过的不会被挤出上限外时仍可用", W.pickFresh("pf.test", ["pa"], 2).join(",") === "pa");
   console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

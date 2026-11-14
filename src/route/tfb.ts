@@ -2,7 +2,7 @@
 type RouteCtx = { env: Env };
 import { S } from "../core/state";
 import { withTimeout } from "../core/util";
-import { vSet, vSetState } from "./verdict";
+import { vAt, vSet, vSetState } from "./verdict";
 
 /** 兜底中继：本 isolate 还没跑过 cron 时 S.alive 为空，用几个已知可用的顶一下。 */
 const SEED = ["185.253.117.147", "45.136.117.194", "91.215.154.80"];
@@ -43,12 +43,23 @@ export function tfClass(rows: Array<{ ok: boolean; status?: number; bytes?: numb
   return tiny ? "ipfam" : "site";
 }
 
+/**
+ * 换出口策略：优先挑「该站点还没探过」的中继，其次挑最久没探过的。
+ * 这是 rotate 的真正消费者 —— 全 4xx 时不写封禁，而是扩大采样面。
+ */
+export function pickFresh(host: string, ips: string[], n: number): string[] {
+  const seen = (ip: string) => vAt(host, "r:" + ip);
+  const fresh = ips.filter((ip) => !seen(ip));
+  const rest = ips.filter((ip) => seen(ip)).sort((a, b) => seen(a) - seen(b));
+  return [...fresh, ...rest].slice(0, Math.max(0, n));
+}
+
 export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): Promise<Response> {
   const own = [...S.alive.values()].map((x) => x.h);
-  const ips = (list ? list.split(",") : own.length ? own : SEED)
+  const pool = (list ? list.split(",") : own.length ? own : SEED)
     .map((x) => x.trim().split(":")[0])
-    .filter((h, i, arr) => h && arr.indexOf(h) === i)
-    .slice(0, Math.max(1, Math.min(3, n)));
+    .filter((h, i, arr) => h && arr.indexOf(h) === i);
+  const ips = pickFresh(host, pool, Math.max(1, Math.min(3, n)));
   // 直连也算一条通道：DO 的出口族与中继不同，常常正好一个 403 一个 200（真混采样）
   const dq = "https://meter/tf?h=" + encodeURIComponent(host) + "&r=";
   const dres = (await withTimeout(stub0(c).fetch(dq), 8000)) as Response | undefined;

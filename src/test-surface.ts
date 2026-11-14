@@ -101,7 +101,7 @@ export { JUDGE, Judge } from "./route/judge";
 export { POLICY, Policy } from "./route/policy";
 export { judge, queueVerify, runVerify, verifyInfo, queueLen } from "./route/verify";
 export { recordBlock, recordPass } from "./route/observe";
-export { runTfb, tfVerdict, tfClass, tfEscalate } from "./route/tfb";
+export { runTfb, tfVerdict, tfClass, tfEscalate, pickFresh } from "./route/tfb";
 
 export { handleDns, trojanUdpFrame } from "./proxy/dns";
 export { handleUpgrade } from "./proxy/session";
