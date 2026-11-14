@@ -6,6 +6,7 @@ import { cronScan, flushPx } from "../px/pool";
 import { planRound } from "../route/budget";
 import { runRound } from "../route/round";
 import { edgeScan } from "../route/edge";
+import { runTfb } from "../route/tfb";
 import { SEL } from "../px/selector";
 import { flushSnap, pendFlush, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
 import { loadUsers } from "../proxy/protocol";
@@ -32,6 +33,21 @@ export async function runCron(env: Env, ctx: ExecutionContext): Promise<void> {
   );
 }
 
+/** 站点 → 上次 IP 级探测时间（每站点 10 分钟最多一次）。 */
+const TFB_AT: Map<string, number> = new Map();
+
+/** 每轮最多挑一个「最近被怀疑」的站点做 2 条中继的实测（1 DO 请求 + 2 子请求）。 */
+async function tfbRound(env: Env): Promise<void> {
+  const now = Date.now();
+  for (const [host, until] of S.needPx) {
+    if (until <= now) continue;
+    if (now - (TFB_AT.get(host) || 0) < 600000) continue;
+    TFB_AT.set(host, now);
+    await runTfb({ env } as unknown as Parameters<typeof runTfb>[0], host, 2);
+    return;
+  }
+}
+
 async function cronOnce(env: Env): Promise<void> {
   try {
     // 一轮 cron 的子请求预算先算清：准入（池子）、判定（目标 x 通道）、入口（客户端→边缘）
@@ -39,6 +55,7 @@ async function cronOnce(env: Env): Promise<void> {
     await cronScan(env, plan.adm);
     await runRound(plan);
     await edgeScan(env);
+    await tfbRound(env);
     SEL.afterScan(env);
   } catch (e) {
     logErr(`cron: ${errMsg(e)}`);
