@@ -7,7 +7,10 @@ export function pxDecision(request: Request, host: string, cfHost: boolean, want
   const fn = HOOK.decide;
   if (!fn) return wantPx;
   const cip = request.headers.get("cf-connecting-ip") || "";
-  const out = fn({ host, cfHost, clientV6: cip.includes(":"), legacyWantsRelay: wantPx, mode, facts: HOOK.facts ? HOOK.facts() : undefined });
+  // ?fx=none|all|eg,ps —— 只改这一条连接的事实开关，用来在同一条命令内交替做配对测量
+  const fx = new URL(request.url).searchParams.get("fx");
+  const facts = fx !== null && HOOK.factsFor ? HOOK.factsFor(fx) : HOOK.facts ? HOOK.facts() : undefined;
+  const out = fn({ host, cfHost, clientV6: cip.includes(":"), legacyWantsRelay: wantPx, mode, facts });
   const hard =
     out.why === "v6-cf" ||
     out.why === "v6-cf-none" ||

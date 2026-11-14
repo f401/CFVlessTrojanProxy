@@ -20,7 +20,7 @@ import { BLK } from "./blkfacts";
 import { capNote } from "./capfacts";
 import { factMul } from "./factmul";
 import { FACTS, type FactsDelta } from "./factsstore";
-import { FACT_ALL } from "./factflags";
+import { FACT_ALL, factOnce } from "./factflags";
 
 /** 全开的默认集合：没有读到 `env.facts` 时用它，等价于「不裁剪」。 */
 const FULL_ON: ReadonlySet<string> = new Set<string>(FACT_ALL);
@@ -307,6 +307,11 @@ HOOK.capNote = (ip: string, kbs: number): void => { capNote(ip, kbs); };
 HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
     HOOK.deadNote = (ip: string, ok: boolean): void => deadNote(ip, ok);
     HOOK.factsDelta = (): FactsDelta => FACTS.delta();
+    // 之前没注册这个槽位 -> DecisionIn.facts 恒 undefined -> scoreOf 走 FULL_ON，
+    // 也就是「facts 绑定只影响 /health 显示、不影响选路」。这是 check-wire 抓不到的接线洞
+    // （它扫的是符号是否有生产调用点，而槽位是「注册」不是「调用」）。
+    HOOK.facts = (): ReadonlySet<string> => (S.factSet ?? new Set<string>(FACT_ALL));
+    HOOK.factsFor = (raw: string): ReadonlySet<string> => factOnce(raw);
     HOOK.vtLoad = (env: Env): Promise<void> => vtLoad(env);
   }
 }

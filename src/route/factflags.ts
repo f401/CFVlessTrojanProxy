@@ -36,6 +36,19 @@ export function factParse(raw: unknown): Set<FactName> {
 }
 
 /**
+ * 功能：解析「只对这一条连接生效」的临时开关（`?fx=` 查询串）。
+ *
+ * 为什么要这个入口：事实层的收益一直测不出来，因为链路的读数漂移比任何代码差别都大；
+ * 想在**同一条命令内交替**比较「有事实 / 无事实」，就必须能按请求粒度切换，而不是改绑定
+ * （改绑定要等缓存过期，两次测量已经不同天了）。
+ * @param raw 查询串（`none` / `all` / 逗号分隔的名字）
+ * @returns {ReadonlySet<FactName>} 本次请求生效的事实
+ */
+export function factOnce(raw: string): ReadonlySet<FactName> {
+  return factParse(raw) as ReadonlySet<FactName>;
+}
+
+/**
  * 功能：读当前 isolate 的事实开关（每个 isolate 只解析一次）。
  *
  * 为什么要有它：清单 §H4 要求「先上只观测的、选路类事实按单条可回滚粒度上」。

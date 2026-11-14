@@ -63,6 +63,8 @@ export interface Hooks {
   capNote: ((ip: string, kbs: number) => void) | null;
   /** 取当前启用的事实集合（由 route 层注册：它知道 `env.facts` 的语义）。 */
   facts: (() => ReadonlySet<string>) | null;
+  /** 按查询串临时切换事实集合（`?fx=none`）：只影响当前请求，配对测量用。 */
+  factsFor: ((raw: string) => ReadonlySet<string>) | null;
 }
 
 export interface TrafficEvt {
@@ -82,5 +84,5 @@ export interface TrafficEvt {
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,
-  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, factsDelta: null, psNote: null, deadNote: null, syncAck: null, syncNack: null, relPerf: null, capNote: null, facts: null };
+  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, factsDelta: null, psNote: null, deadNote: null, syncAck: null, syncNack: null, relPerf: null, capNote: null, facts: null, factsFor: null };
 
