@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/const.ts` 的 `VERSION`，当前 **7.47** 已上线，工作区里 7.48+ 的改动尚未部署）。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，当前 **7.64** 已上线）。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -137,7 +137,8 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 
 ## 9. 当前状态与未完成
 
-- 线上 **7.47**；工作区 7.48+ 的改动（第 14 轮之后的预算/入口/健康表/日志/探活过期/注释等）**全部未部署**。
+- 线上 **7.64**（工作区与线上一致）。选路现状：`SC.POLICY = 2`（判定层全生效）；冷 isolate 由 `src/px/warm.ts` 的 `seedAlive` 起搏（不 await），判定表里**通配封锁不外发也不导入**。
+- 正在攻的问题：CF 托管站点（如 x.com）经中继仍会有 ~20–30% 的 4 字节 `IPv6` 403 —— 根因是中继出口地址族，服务端只能「学」（`CF_NEG` 软降权 + 站点级硬封锁）不能改。下一步方向：给中继记「出口地址族」（一次探测 + 缓存），首次请求前就避开 v6 出口。
 - OOP 收类已完成到「有模块级可变状态就有类」：`Pool`、`Scorer`、`Store`、`SeedStore`、`VerdictTable`、`Judge`、`Policy`、`RelayHealth`、`VerifyQueue`、`EdgePrefs`、`SourceHealth`、`PendingLedger`、`HostProfile`、`ErrRing`、`RouteTable`……（清单见 `docs/ARCHITECTURE.md` 的「类与职责」表）。剩下的是纯计算/纯渲染模块，按约定**不**改成类。
 - 待用户验证：`/<uuid>/debug?tlsnow=<host>` 的双栈并排结果（`subtls` 与 `tunnelfetch` 是否给出同一结论），决定是否删除 vendored `subtls`（约 55 KB）。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
