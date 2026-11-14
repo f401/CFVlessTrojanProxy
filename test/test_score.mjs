@@ -1884,5 +1884,30 @@ ok("cl 命中 subscription 且需要 RTT/统计", W.ROUTES.route("cl")?.name ===
 ok("裸 /<uuid> 也命中 subscription", W.ROUTES.route("")?.name === "subscription", "empty");
 ok("logs 命中但不需要 RTT", W.ROUTES.route("logs")?.name === "logs" && !W.ROUTES.needsRtt("logs"), "logs");
 ok("未知子路径返回 undefined（404）", W.ROUTES.route("nope") === undefined, "nope");
+// ═══ 第 53 组：判死通道的复检（P6-3）═══
+{
+  const rndBak = Math.random;
+  const c53 = { host: "x.com", cfHost: true, clientV6: false, relays: ["9.9.9.1", "9.9.9.2"], legacyWantsRelay: true };
+  W.vClear();
+  W.vSetState("x.com", "r:9.9.9.1", 2, 1);
+  Math.random = () => 0.01; // 命中 5% 复检
+  const d1 = W.decide(c53);
+  ok("被判死的通道会被 5% 概率复检", d1.why === "explore" && d1.chan.ip === "9.9.9.1", d1.why);
+  Math.random = () => 0.9; // 不命中
+  const d2 = W.decide(c53);
+  ok("不在复检时仍避开被判死的通道", d2.why !== "explore" && d2.chan.ip === "9.9.9.2", d2.why);
+  // 复检成功后应恢复正常（探测级 ok）
+  W.vSetState("x.com", "r:9.9.9.1", 1, 1);
+  const d3 = W.decide(c53);
+  ok("复检成功即解除封禁", W.vState("x.com", "r:9.9.9.1") === 1 && d3.why !== "explore", d3.why);
+  // 成功只代表「当时能通」：再次出现差分证据应能重新判死（否则一旦通过就再也不学）
+  W.vClear(); // 换一个干净场景：只有流量级的弱 ok
+  W.vSetState("x.com", "r:9.9.9.1", 1, 0); // 流量级 ok（弱证据）
+  W.vSetState("x.com", "r:9.9.9.2", 1, 1);
+  W.recordBlock({ target: "x.com", chan: { kind: "r", ip: "9.9.9.1" }, down: 800, ok: false });
+  ok("流量级的 ok 可被差分证据推翻", W.vState("x.com", "r:9.9.9.1") === 2, String(W.vState("x.com", "r:9.9.9.1")));
+  Math.random = rndBak;
+  W.vClear();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

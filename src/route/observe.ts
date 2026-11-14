@@ -2,7 +2,7 @@
 // 硬规则：traffic 只能产生「弱 ok」，blocked/dead 只能由 probe 或 client 产生。
 import { nsProbe, nsProbeFail } from "../nodes/score";
 import { Chan, chanKey, nodeKeyOf } from "./channel";
-import { vSet, vSetState, vState } from "./verdict";
+import { vSet, vSetState, vState, vSrc, vAt } from "./verdict";
 
 export interface ProbeEvt {
   target: string; // 目标 IP，或 "*"（中继路径钉不死目标 IP）
@@ -37,13 +37,14 @@ export function recordTraffic(e: TrafficEvt): void {
  *  只在没有 probe 级 ok 时生效，所以被探测确认过能打通的中继不会被一次小响应当掉。 */
 export function recordBlock(e: TrafficEvt): void {
   const ck = chanKey(e.chan);
-  if (vState(e.target, ck) === 1) return;
-  vSetState(e.target, ck, 2, 0);
+  // 探测/端到端刚确认过的通道免于被差分证据推翻（1 小时内的好证据比一次小响应可信）
+  if (vState(e.target, ck) === 1 && vSrc(e.target, ck) >= 1 && Date.now() - vAt(e.target, ck) < 3600000) return;
+  vSetState(e.target, ck, 2, 1); // 差分证据与探测同级：可推翻流量级的 ok
 }
 
 /** 反向证据：大响应回来 = 这条通道对这个站点能打通，顺手解除之前的小响应误判 */
 export function recordPass(e: TrafficEvt): void {
-  vSetState(e.target, chanKey(e.chan), 1, 0);
+  vSetState(e.target, chanKey(e.chan), 1, 1); // 真拿到整页 = 与探测同级的好证据
 }
 
 export interface ClientEvt {

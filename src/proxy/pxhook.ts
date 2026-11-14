@@ -13,7 +13,7 @@ export function pxDecision(request: Request, host: string, cfHost: boolean, want
     out.why === "v6-cf-none" ||
     out.why === "http403" ||
     out.why === "http200" ||
-    out.why === "dir-blocked";
+    out.why === "dir-blocked" || out.why === "explore";
   // CF 托管目标（x.com 这类）：直连与 CF 中继都是 CF→CF，客户端出口原样透传，
   // 只有非 CF 主机能改判。这一条不需要任何学习/池子信息，先让它硬生效，
   // 中继选不出来时 session 会自己回落直连（不会把请求卡死）。

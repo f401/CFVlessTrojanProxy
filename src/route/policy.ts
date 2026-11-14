@@ -40,6 +40,13 @@ export class Policy {
       vClearHost(c.host);
       usable = c.relays.slice();
     }
+    // 探索：被判死的通道按 5% 概率复检 —— 判死只是「当前证据」，网络会变，不试就永远好不了。
+    // 成功的大响应会经 Judge 把它改回 ok；失败只会刷新 TTL，代价是一次连接的尝试。
+    const blocked = c.relays.filter((ip) => !this.chanOk(ip, c.host));
+    if (blocked.length && Math.random() < 0.05) {
+      return { chan: { kind: "r", ip: blocked[0] as string }, why: "explore" };
+    }
+
     // 直连已被实测/差分判死（任何站点都适用）→ 直接换中继
     if (usable.length && vBad(c.host, "d")) {
       const nonCf0 = usable.filter((ip) => !isCfIp(ip));

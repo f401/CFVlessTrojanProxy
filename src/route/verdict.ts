@@ -53,6 +53,11 @@ export class VerdictTable {
     this.m.set(k, { t, c, state, code: old?.code || 0, ms: old?.ms || 0, n: (old?.n || 0) + 1, at: Date.now(), src });
   }
 
+  /** 该结论的证据来源（0 流量 / 1 探测 / 2 端到端） */
+  srcOf(t: string, c: string): VSrc {
+    return this.fresh(this.m.get(VerdictTable.key(t, c)))?.src ?? 0;
+  }
+
   get(t: string, c: string): number {
     return this.fresh(this.m.get(VerdictTable.key(t, c)))?.code || 0;
   }
@@ -148,7 +153,10 @@ export function vSetState(t: string, c: string, state: VState, src: VSrc): void 
 export function vGet(t: string, c: string): number {
   return VT.get(t, c);
 }
-export function vState(t: string, c: string): VState {
+export function vSrc(t: string, c: string): VSrc {
+      return VT.srcOf(t, c);
+    }
+    export function vState(t: string, c: string): VState {
   return VT.state(t, c);
 }
 export function vAt(t: string, c: string): number {
