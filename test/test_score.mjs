@@ -2186,5 +2186,19 @@ console.log("\n72) 探活失败过期");
   ok("探活成功立刻清除", W.probeBadSkip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000) === false, "false");
 }
 
+console.log("\n73) 业务 403 不被误升级为通配封锁");
+{
+  const ev = (o) => ({ host: "shop.example.com", cf: true, ok: true, down: 0, up: 0, life: 100, via: "node", node: "198.51.100.9:443", ...o });
+  W.vClear();
+  // ① 没有「另一条通道出过整页」的差分证据：265 字节的业务 403 只该被软降权，不写通配
+  W.JUDGE.onTraffic(ev({ host: "api.example.com", down: 265 }));
+  eq("业务 403 不写通配封锁", W.vBad("*", "r:198.51.100.9"), false);
+  eq("业务 403 也不写站点级封锁", W.vBad("api.example.com", "r:198.51.100.9"), false);
+  // ② 同一站点另一条通道刚出过整页（bigDiff 成立），4 字节拒绝页（总 600 字节）才允许写通配
+  W.JUDGE.onTraffic(ev({ host: "www.example.com", down: 30000, node: "203.0.113.7:443" }));
+  W.JUDGE.onTraffic(ev({ host: "www.example.com", down: 600 }));
+  eq("差分成立时才写通配", W.vBad("*", "r:198.51.100.9"), true);
+  eq("通配封锁对其他站点同样生效", W.vBad("other.example.net", "r:198.51.100.9"), true);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

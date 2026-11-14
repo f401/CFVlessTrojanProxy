@@ -104,10 +104,15 @@ export class Judge {
     if (known && e.via === "node") {
       const nip = e.node ? e.node.slice(0, e.node.lastIndexOf(":")) : "";
       this.markNeg(e.host, nip, now);
-      // 通配降权（跨 isolate 有效）：CF 目标的 4 字节 `IPv6` 拒绝页总字节远小于 900 —— 这是这条中继的
-      // **出口地址族**问题，与用户位置无关，因此和其他统计（延迟/成功率）不同，它是可以共享的事实。
-      // 写 `*|r:<ip>` 让别的 isolate 也知道「这条中继对 CF 目标常走 v6」，冷启动时直接绕开。
-      if (e.cf && e.down < 900 && nip) vSetState("*", "r:" + nip, 2, 1);
+      // 通配降权（跨 isolate 有效）：CF 目标的 4 字节 `IPv6` 拒绝页，整条连接（含握手）不到 700 字节。
+      // 这是这条中继的**出口地址族**问题，与用户位置无关，因此和延迟/成功率不同，是可以共享的事实。
+      //
+      // 三重门槛，专为「业务 403 不被误伤」：
+      // ① 必须是 bigDiff —— 本 isolate 见过该站点**另一条通道**在 6 小时内出过 ≥20KB 整页（差分成因明确）；
+      //    只凭本出口 fetch 200 不够：那证明的是「站点活着」，不是「这条通道本该出整页」。
+      // ② 总字节 < 700 —— 业务 403（JSON 报错、nginx 403 页）通常 >900 字节；4 字节拒绝页加上握手也到不了 700。
+      // ③ 只写 `*|r:<中继>`，永远不写站点级封禁；判定表 30 分钟 TTL、5% 复检、全池判死时自愈。
+      if (e.cf && bigDiff && e.down < 700 && nip) vSetState("*", "r:" + nip, 2, 1);
     }
     if (!known) {
       queueVerify(e.host, chan); // 复核队列（PROBE_REQ=0 时只排队）
