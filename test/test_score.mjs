@@ -1725,6 +1725,24 @@ W.vClear();
   eq("?e=0 时不发实测组", y0.includes("url: https://probe.example.org/"), false);
 }
 
+// 第 38b 组：中继优选条目（把「经某条中继」做成客户端可实测的节点）
+{
+  const envR = { uuid: "u", nodes: "", proxyip: "auto" };
+  const keep = S.alive;
+  S.alive = new Map([
+    ["203.0.113.7:443", { h: "203.0.113.7", p: 443, cc: "", ms: 120, src: "pool" }],
+    ["198.51.100.9:443", { h: "198.51.100.9", p: 443, cc: "", ms: 180, src: "pool" }],
+  ]);
+  const yr = W.renderClash(envR, new URL("https://example.com/x"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
+  eq("中继条目：每条中继 × 协议 × 模式（成对出现）", (yr.match(/name: "r-/g) || []).length % 2 === 0 && (yr.match(/name: "r-/g) || []).length >= 4, true);
+  eq("中继条目含首条与次条", yr.includes("r-203.0.113.7-") && yr.includes("r-198.51.100.9-"), true);
+  eq("中继条目钉住具体中继", yr.includes("rx=203.0.113.7") && yr.includes("px=1"), true);
+  eq("中继优选组按 /health 实测", yr.includes('name: "\ud83d\udd01 \u4e2d\u7ee7\u4f18\u9009"'), true);
+  const y0r = W.renderClash(envR, new URL("https://example.com/x?e=0"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
+  eq("?e=0 时不发中继条目", (y0r.match(/name: "r-/g) || []).length, 0);
+  S.alive = keep;
+}
+
 // 第 39 组：节点偏好表（站点 × 通道的「能通 / 打不通」两栏）
 {
   W.vClear();

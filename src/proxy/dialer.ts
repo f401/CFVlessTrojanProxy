@@ -69,7 +69,8 @@ export class Dialer {
       (pxForce === 0 && !!env.proxyip && (learned || onList || relWin || (cfHost && !dirWin && httpCode !== 200)));
 
     if (pxDecision(request, host, cfHost, wantPx, SC.POLICY)) {
-      const p = parseProxyIp(await SEL.current(env, mode, st, host, cfHost));
+      // ?rx= 钉住中继（只给诊断脚本用）：跳过选择器直接用它，用来给每条中继量吞吐
+      const p = parseProxyIp(st.rx || (await SEL.current(env, mode, st, host, cfHost)));
       if (p && !checkTarget(p.host, p.port)) {
         const key = p.host + ":" + p.port;
         // 池子里的「优选 IP」本身就是 CF 边缘：拿它中转到 CF 托管目标，等于从同一边缘再撞一次。

@@ -42,6 +42,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
   let mode: Mode = "tput";
   let szBytes = 0;
   let pxForce = 0; // 1 = 强制中转，-1 = 强制直连，0 = 按名单 + 失败学习
+  let rxPin = ""; // ?rx= 指定的中继（诊断用，正常流量为空）
   try {
     const q = new URL(request.url).searchParams;
     ipTag = q.get("ip");
@@ -55,6 +56,9 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
     szBytes = qs === "i" ? SC.SZ_I : qs === "s" ? SC.SZ_S : qs === "b" ? SC.SZ_B : 0;
     const qp = q.get("px");
     pxForce = qp === "1" ? 1 : qp === "0" ? -1 : 0;
+    // ?rx=<ip[:port]>：诊断用，钉住这一条连接走哪条中继（给吞吐体检脚本用）
+    const qrx = (q.get("rx") || "").trim();
+    if (qrx && /^[0-9a-zA-Z.:\[\]-]{3,64}$/.test(qrx)) rxPin = qrx;
   } catch (e) {
     ipTag = null;
     ipRegion = null;
@@ -64,6 +68,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
 
   const st = new Connection(env, ctx, mode, ipTag || "");
   st.sz = szBytes;
+  st.rx = rxPin;
   cnt("conn");
 
   stream

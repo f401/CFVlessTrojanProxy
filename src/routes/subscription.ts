@@ -55,18 +55,21 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
     case "cl":
     case "pcl": {
       const s = await readStatsCached(env, id);
+      await aliveList(env); // 中继优选条目要列本机房存活中继（冷 isolate 从这里恢复）
       return text(SUBVIEW.render({ env, url, id, host, learned, regions, auth: c.auth }, "clash"), subHeaders(env, s));
     }
 
     case "sb":
     case "psb": {
       const s = await readStatsCached(env, id);
+      await aliveList(env);
       return json(SUBVIEW.render({ env, url, id, host, learned, regions, auth: c.auth }, "singbox"), subHeaders(env, s));
     }
 
     case "ty":
     case "pty": {
       const s = await readStatsCached(env, id);
+      await aliveList(env);
       return text(SUBVIEW.render({ env, url, id, host, learned, regions, auth: c.auth }, "links"), subHeaders(env, s));
     }
 

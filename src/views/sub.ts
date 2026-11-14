@@ -1,5 +1,6 @@
 import { X_EDGE_IPS, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
 import { edgeRank } from "../route/edge";
+import { S } from "../core/state";
 
 export * from "./sub-common";
 export { renderSingbox } from "./sub-singbox";
@@ -124,6 +125,34 @@ export function renderClash(
     }
   }
 
+  // 中继优选条目：把「经这条中继」做成可被客户端实测的节点。
+  // 中继那一跳的容量差异可达 3–6 倍（本地实测 275 KB/s vs 1642 KB/s），
+  // 而服务端每条连接可能落在新 isolate 上、拿不到别的 isolate 的样本（不跨 isolate 共享），
+  // 只有客户端自己逐条试才稳；路径里的 px=1&rx=<ip> 由服务端钉住该中继。
+  const relayNames: string[] = [];
+  const relayIps: string[] = [];
+  if (!noEdge) {
+    // 用本 isolate 已判活的中继（S.alive 里是 ip:port），不走 KV —— 订阅渲染是同步的
+    for (const k of S.alive.keys()) {
+      const ip = k.includes(":") ? k.slice(0, k.lastIndexOf(":")) : k;
+      if (/^[0-9.]{7,15}$/.test(ip) && !relayIps.includes(ip)) relayIps.push(ip);
+      if (relayIps.length >= 8) break;
+    }
+    for (const mode of ["tput", "lat"]) {
+      const suffix = mode === "lat" ? "L" : "T";
+      for (const proto of protos) {
+        if (proto === "trojan" && !pass) continue;
+        for (const ip of relayIps) {
+          const name = `r-${ip}-${proto === "trojan" ? "TJ" : "VL"}${suffix}`;
+          const srv = edgeIps.length ? String(edgeIps[relayNames.length % edgeIps.length]) : host;
+          emit(name, proto, srv, 443, `/?ed=2560&ip=relay&mode=${mode}&px=1&rx=${ip}`, true, "");
+          relayNames.push(name);
+          all.push(name);
+        }
+      }
+    }
+  }
+
   // 域名入口（备用）：能解析到 AAAA 的网络上会走 IPv6，目标侧就是 403；
   // 只在用户手动切换时使用，默认组一律走上面的 IPv4 字面量条目。
   const domNames: string[] = [];
@@ -163,6 +192,17 @@ export function renderClash(
     groups.push(`    lazy: false`);
     groups.push(q(edgeNames));
   }
+  const G_RELAY = "\ud83d\udd01 \u4e2d\u7ee7\u4f18\u9009";
+  if (relayNames.length) {
+    groups.push(`  - name: "${G_RELAY}"`);
+    groups.push(`    type: url-test`);
+    groups.push(`    url: https://${host}/health`);
+    groups.push(`    expected-status: 200`);
+    groups.push(`    interval: 300`);
+    groups.push(`    tolerance: 50`);
+    groups.push(`    lazy: false`);
+    groups.push(q(relayNames));
+  }
   const G_DOM = "📛 域名入口";
   if (domNames.length) {
     groups.push(`  - name: "${G_DOM}"`);
@@ -175,7 +215,7 @@ export function renderClash(
   groups.push(`    interval: 300`);
   groups.push(`    tolerance: 30`);
   groups.push(`    lazy: false`);
-  groups.push(q(edgeNames.length ? [G_EDGE, ...pick(byMode.tput, 5)] : pick(byMode.tput, 5)));
+  groups.push(q([...(edgeNames.length ? [G_EDGE] : []), ...(relayNames.length ? [G_RELAY] : []), ...pick(byMode.tput, 5)]));
 
   groups.push(`  - name: "${G_LAT}"`);
   groups.push(`    type: url-test`);
@@ -183,7 +223,7 @@ export function renderClash(
   groups.push(`    interval: 300`);
   groups.push(`    tolerance: 30`);
   groups.push(`    lazy: false`);
-  groups.push(q(edgeNames.length ? [G_EDGE, ...pick(byMode.lat, 5)] : pick(byMode.lat, 5)));
+  groups.push(q([...(edgeNames.length ? [G_EDGE] : []), ...(relayNames.length ? [G_RELAY] : []), ...pick(byMode.lat, 5)]));
 
   if (regNames.length) {
     groups.push(`  - name: "${G_REG}"`);
@@ -209,7 +249,7 @@ export function renderClash(
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
   groups.push(
-    `    proxies: ["${G_TPUT}", "${G_LAT}"${domNames.length ? `, "${G_DOM}"` : ""}${edgeNames.length ? `, "${G_EDGE}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && all.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
+    `    proxies: ["${G_TPUT}", "${G_LAT}"${domNames.length ? `, "${G_DOM}"` : ""}${edgeNames.length ? `, "${G_EDGE}"` : ""}${relayNames.length ? `, "${G_RELAY}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && all.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
   );
 
   return [
