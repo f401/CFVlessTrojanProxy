@@ -204,18 +204,30 @@ export function renderClash(
     groups.push(q(relayNames));
   }
   const G_DOM = "📛 域名入口";
+  const G_TU = "📡 通道实测";
   if (domNames.length) {
     groups.push(`  - name: "${G_DOM}"`);
     groups.push(`    type: select`);
     groups.push(q(domNames));
   }
+  // 模式组的成员顺序就是客户端的选择顺序：① 先信「端到端实测能过这个站点」的通道（只有 ?tu= 才有）；
+  // ② 再入口优选；③ 再中继优选；④ 然后是具体节点；⑤ 最后拿域名入口兜底 —— 8 个钉住的 v4 边缘
+  // 全不通时，用户至少还能走域名。url-test 只在这些成员之间测速，顺序本身表达的是可信度。
   groups.push(`  - name: "${G_TPUT}"`);
   groups.push(`    type: url-test`);
   groups.push(`    url: http://www.gstatic.com/generate_204`);
   groups.push(`    interval: 300`);
   groups.push(`    tolerance: 30`);
   groups.push(`    lazy: false`);
-  groups.push(q([...(edgeNames.length ? [G_EDGE] : []), ...(relayNames.length ? [G_RELAY] : []), ...pick(byMode.tput, 5)]));
+  groups.push(
+    q([
+      ...(tuUrl && all.length ? [G_TU] : []),
+      ...(edgeNames.length ? [G_EDGE] : []),
+      ...(relayNames.length ? [G_RELAY] : []),
+      ...pick(byMode.tput, 5),
+      ...(domNames.length ? [G_DOM] : []),
+    ]),
+  );
 
   groups.push(`  - name: "${G_LAT}"`);
   groups.push(`    type: url-test`);
@@ -223,7 +235,15 @@ export function renderClash(
   groups.push(`    interval: 300`);
   groups.push(`    tolerance: 30`);
   groups.push(`    lazy: false`);
-  groups.push(q([...(edgeNames.length ? [G_EDGE] : []), ...(relayNames.length ? [G_RELAY] : []), ...pick(byMode.lat, 5)]));
+  groups.push(
+    q([
+      ...(tuUrl && all.length ? [G_TU] : []),
+      ...(edgeNames.length ? [G_EDGE] : []),
+      ...(relayNames.length ? [G_RELAY] : []),
+      ...pick(byMode.lat, 5),
+      ...(domNames.length ? [G_DOM] : []),
+    ]),
+  );
 
   if (regNames.length) {
     groups.push(`  - name: "${G_REG}"`);
@@ -232,7 +252,6 @@ export function renderClash(
   }
 
 
-  const G_TU = "📡 通道实测";
   // 通道实测组：成员是「按中继走」的节点条目，客户端对 tu 指定的 URL 逐条实测，
   // 只有真能打通（expected-status 200）的通道才算健康 —— 端到端证据，零服务端开销。
   if (tuUrl && all.length) {

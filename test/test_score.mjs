@@ -2591,5 +2591,28 @@ console.log("\n83) 单 IP 封锁（blk）：三批 × 每批 3 次、只折价�
   W.S.peers.clear();
   W.S.bigTyp.clear();
 }
+
+console.log("\n84) 订阅的客户端链：实测组优先、域名入口兜底");
+{
+  const envS = { uuid: "u", nodes: "", proxyip: "auto" };
+  const rend = (q) => W.renderClash(envS, new URL("https://example.com/x" + q), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
+  const seg = (text, name) => {
+    const i = text.indexOf(`  - name: "${name}"`);
+    if (i < 0) return "";
+    const j = text.indexOf("\n  - name:", i + 5);
+    return text.slice(i, j < 0 ? undefined : j);
+  };
+  const base = rend("");
+  const tput = seg(base, "🚀 吞吐优先");
+  const lat = seg(base, "⚡ 速率优先");
+  eq("吞吐组第一个成员是入口优选（无 ?tu= 时）", tput.includes('proxies: ["🌐 入口优选"'), true);
+  eq("速率组第一个成员也是入口优选", lat.includes('proxies: ["🌐 入口优选"'), true);
+  eq("两个模式组都以域名入口收尾", tput.includes('", "📛 域名入口"]') && lat.includes('", "📛 域名入口"]'), true);
+  const withTu = seg(rend("?tu=" + encodeURIComponent("https://probe.example.org/")), "🚀 吞吐优先");
+  eq("有 ?tu= 时实测组排在最前", withTu.includes('proxies: ["📡 通道实测"'), true);
+  eq("有 ?tu= 时也保留域名入口兜底", withTu.includes('", "📛 域名入口"]'), true);
+  const noEdge = seg(rend("?e=0"), "🚀 吞吐优先");
+  eq("?e=0 时成员里没有入口优选", noEdge.includes("🌐 入口优选"), false);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
