@@ -322,6 +322,8 @@ export class Connection {
           const xfer = Math.max(1, ms - t0);
           const kbs = this.down >= 1048576 ? (this.down / 1024) * 1000 / xfer : 0;
 HOOK.relPerf?.(this.host, ip, t0, kbs);
+          // 只有真正拉到 ≥40KB 才算一次可用的吞吐样本：4 字节 403 页算出的"速度"是假的（文档 D5）
+          if (this.down >= 40960) HOOK.capNote?.(ip, Math.round((this.down / 1024) * 1000 / Math.max(1, Date.now() - this.t0)));
           // 「站点 × 中继」成功率（v8 §5 的 ps）：拿到完整响应（>64B）才算过。
           // 64B 这条线来自实测：旧的「4 字节 IPv6 拒绝页」已变成 737B HTML（§19.2），
           // 所以不能只排除 4 字节；而正常页面哪怕再小也有几百字节（example.com 932B）。

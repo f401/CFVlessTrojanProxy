@@ -2731,5 +2731,32 @@ console.log("\n89) 出口族预算：几条 v4 出口决定探测名额");
   eq("配额边界：3 条不再加钱", W.egQuota(3), 2);
 }
 
+
+console.log("\n90) 吞吐容量噪声门：只记比值，两次不一致就不记");
+{
+  W.CAP.clear();
+  const t0 = Date.now();
+  const A = "198.51.100.20";
+  for (let i = 0; i < 8; i += 1) W.CAP.note("198.51.100." + (30 + i), 100, t0);
+  eq("单次样本不构成容量比", W.CAP.capOf(A, t0), 1);
+  const w1 = W.CAP.note(A, 200, t0);
+  eq("第一次 200 还不算", w1, false);
+  const w2 = W.CAP.note(A, 200, t0 + 1000);
+  eq("两次一致且是池内 2 倍 → 记下", w2, true);
+  eq("容量比夹到 2.0", W.CAP.capOf(A, t0 + 1000), 2);
+  eq("吞吐模式代价 ×0.5", W.CAP.factor(A, "tput", t0 + 1000), 0.5);
+  eq("延迟模式不看容量", W.CAP.factor(A, "lat", t0 + 1000), 1);
+  const B2 = "198.51.100.21";
+  W.CAP.note(B2, 100, t0);
+  W.CAP.note(B2, 400, t0 + 1000);
+  eq("两次差 4 倍 → 不记（噪声）", W.CAP.capOf(B2, t0 + 1000), 1);
+  const C = "198.51.100.22";
+  W.CAP.note(C, 105, t0);
+  W.CAP.note(C, 110, t0 + 1000);
+  eq("与池内中位数接近 → 不记", W.CAP.capOf(C, t0 + 1000), 1);
+  eq("过期后回中性", W.CAP.capOf(A, t0 + 1000 + W.CAP_TTL + 1), 1);
+  W.CAP.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

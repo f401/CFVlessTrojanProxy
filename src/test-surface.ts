@@ -109,6 +109,7 @@ export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, pickFresh } from "./route/tfb";
 export { RELPERF, REL_TTL, relCost, relCostFor, relCostMode, relNote, relSnap } from "./route/relperf";
 export { EG, EG_TTL, EgFacts, egCounts, egQuota } from "./route/egfacts";
+export { CAP, CAP_TTL, CapFacts, capFactor } from "./route/capfacts";
 export { PS, psFactor, psNote, psOk, psPrior, psSnap } from "./route/psfacts";
 export { DEAD, DEAD_N, deadNote, isDead } from "./route/deadfacts";
 export { FO, FirstObs, FO_GRAY, FO_LIMIT, FO_PAGE } from "./core/firstobs";

@@ -17,6 +17,7 @@ import { EG } from "./egfacts";
 import { PS, psFactor, psOk } from "./psfacts";
 import { DEAD, deadNote, isDead } from "./deadfacts";
 import { BLK, blkPen } from "./blkfacts";
+import { capFactor, capNote } from "./capfacts";
 import { DNS } from "./dnsfacts";
 import { cnt } from "../core/counter";
 
@@ -130,7 +131,7 @@ export class Policy {
       // 有样本时把实测过不了的通道乘贵 —— 仍然只是乘数，绝不剔候选（v8 §15 I2）。
       // blk：判为「这个站点在这个出口上被封锁」时只乘 6 倍代价（v8 §15 的 I1：永不剔候选）
       // dns：确证「纯 v4 站点」时把 v6 出口乘 2 —— 结构性过不去，不是状态不好。
-      return base * EG.bias(ip) * DNS.penOf(c.host, EG.famOf(ip)) * psFactor(c.host, ip) * blkPen(c.host, ip);
+      return base * EG.bias(ip) * DNS.penOf(c.host, EG.famOf(ip)) * psFactor(c.host, ip) * blkPen(c.host, ip) * capFactor(ip, c.mode || "tput");
     };
     // 站点级自愈：整池都被同一站点写满 ⇒ 判据失效/站点在拒绝所有人，清空并静默 30 分钟
     BLK.sweep(c.host, usable);
@@ -296,6 +297,7 @@ HOOK.syncNack = (): void => {
     HOOK.chanPref = (ip: string, host = ""): number => chanPref(ip, host);
     HOOK.win = (host: string): { d: boolean; r: boolean } => this.win(host);
 HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => relNote(host, ip, ttfb, kbs);
+HOOK.capNote = (ip: string, kbs: number): void => { capNote(ip, kbs); };
 HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
     HOOK.psDelta = (): Array<{ k: string; q: number; n: number; at: number }> => PS.delta();
     HOOK.deadNote = (ip: string, ok: boolean): void => deadNote(ip, ok);

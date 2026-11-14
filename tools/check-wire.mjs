@@ -24,6 +24,8 @@ const NEED = [
   { sym: "probeFam", own: "src/proxy/dial.ts", why: "AAAA 探测的生产调用点" },
   { sym: "probeEg", own: "src/route/egfacts.ts", why: "出口族探测的生产调用点" },
   { sym: "commitFact", own: "src/route/commitfact.ts", why: "写入决策器被真实链路调用" },
+  { sym: "CAP.note", own: "src/route/capfacts.ts", why: "吞吐容量写入点（经 HOOK.capNote 的薄包装 capNote）", via: "capNote" },
+  { sym: "capFactor", own: "src/route/capfacts.ts", why: "选路读取容量比" },
 ];
 
 const files = [];

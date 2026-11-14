@@ -13,6 +13,7 @@ import { FO } from "../core/firstobs";
 import { LAT } from "../core/latobs";
 import { DNS } from "../route/dnsfacts";
 import { egCounts } from "../route/egfacts";
+import { CAP } from "../route/capfacts";
 import { BLK } from "../route/blkfacts";
 
 /** /health：进程自述。带 pageKey 时要求 ?k= */
@@ -38,6 +39,7 @@ cf: FACT.snap(),
     first: FO.snap(),
     lat: LAT.snap(),
     dns: DNS.snap(),
+    cap: CAP.snap(),
     relays: (() => { const ips = [...S.alive.values()].map((x) => String(x.h || "")).filter(Boolean); const c = egCounts(ips); return { alive: ips.length, eg4: c.v4, eg6: c.v6, egUnk: c.unk }; })(),
     blk: BLK.snap(),
     edge: { seen: S.edge.size, ranked: edgeRank(8).length, err: EDGE_ERR.s },

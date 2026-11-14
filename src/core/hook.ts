@@ -56,6 +56,8 @@ export interface Hooks {
   nonCfFirst: (() => boolean) | null;
   /** 一条连接结束时的「站点 × 中继」实测（首字节 ms、下行 KB/s），由 route 层记录 */
   relPerf: ((host: string, ip: string, ttfb: number, kbs: number) => void) | null;
+  /** 吞吐取样（v8 §5.1 的 R1 噪声门）：capacity 只记相对比值，与站点无关。 */
+  capNote: ((ip: string, kbs: number) => void) | null;
 }
 
 export interface TrafficEvt {
@@ -75,5 +77,5 @@ export interface TrafficEvt {
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,
-  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, egDelta: null, psDelta: null, psNote: null, deadNote: null, deadDelta: null, blkDelta: null, syncAck: null, syncNack: null, relPerf: null };
+  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, egDelta: null, psDelta: null, psNote: null, deadNote: null, deadDelta: null, blkDelta: null, syncAck: null, syncNack: null, relPerf: null, capNote: null };
 
