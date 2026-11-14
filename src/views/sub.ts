@@ -162,10 +162,10 @@ export function renderClash(
     groups.push(q(regNames));
   }
 
-  if (optX && edgeNames.length) {
+  if (tuUrl && edgeNames.length) {
     groups.push(`  - name: "${G_X}"`);
     groups.push("    type: url-test");
-    groups.push("    url: https://x.com/");
+    groups.push(`    url: ${tuUrl}`);
     groups.push("    expected-status: 200");
     groups.push("    interval: 180");
     groups.push("    tolerance: 0");

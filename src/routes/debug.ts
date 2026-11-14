@@ -513,7 +513,7 @@ export async function debug(c: UserCtx): Promise<Response> {
     return json({ ok: true, seeded });
   }
 
-  const h = url.searchParams.get("host") || "x.com";
+  const h = url.searchParams.get("host") || "example.com";
   const out: Record<string, unknown> = { host: h, aaaa: null, a: null, v6Connect: null };
   try {
     out.aaaa = await resolveAAAA(h);

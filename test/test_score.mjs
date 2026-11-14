@@ -601,7 +601,7 @@ eq("两次样本就能比较出快慢", p3, "p:443");
 
 /* ---------- 10. 站点族 / 保质期 / 缓存 ---------- */
 eq("api.x.com → x.com", W.hostKey("api.x.com"), "x.com");
-eq("pbs.twimg.com → x.com", W.hostKey("pbs.twimg.com"), "x.com");
+eq("img.example.com → example.com", W.hostKey("img.example.com"), "example.com");
 eq("www.example.co.uk 保留三段", W.hostKey("www.example.co.uk"), "example.co.uk");
 eq("a.b.example.com → example.com", W.hostKey("a.b.example.com"), "example.com");
 eq("IP 原样", W.hostKey("1.2.3.4"), "1.2.3.4");
@@ -610,10 +610,10 @@ eq("IP 原样", W.hostKey("1.2.3.4"), "1.2.3.4");
 reset();
 node("f1:443", { tcp: 50 });
 node("f2:443", { tcp: 60 });
-W.hostNodeMark("api.x.com", "f1:443", { ok: true, bad: false, bytes: 100, ttfb: 70 });
-W.hostNodeMark("pbs.twimg.com", "f2:443", { ok: true, bad: false, bytes: 100, ttfb: 200 });
-eq("同族两个域名共用一张表", W.S.hostNode.get("x.com").size, 2);
-eq("族内按首字节排序", W.hostRank("x.com", "lat")[0].k, "f1:443");
+W.hostNodeMark("www.example.com", "f1:443", { ok: true, bad: false, bytes: 100, ttfb: 70 });
+W.hostNodeMark("img.example.com", "f2:443", { ok: true, bad: false, bytes: 100, ttfb: 200 });
+eq("同族两个域名共用一张表", W.S.hostNode.get("example.com").size, 2);
+eq("族内按首字节排序", W.hostRank("example.com", "lat")[0].k, "f1:443");
 
 // 保质期：7 小时前的样本降权 300ms
 reset();
@@ -1714,12 +1714,12 @@ W.vClear();
   eq("入口优选组按 /health 实测", y.includes('name: "🌐 入口优选"') && y.includes("url: https://example.com/health"), true);
   eq("默认订阅不含站点特化（无 x 组）", y.includes('name: "\ud83d\udef0 x \u4f18\u9009"'), false);
   eq("默认订阅不含站点规则", /DOMAIN-SUFFIX,x\.com/.test(y), false);
-  const yx = W.renderClash(envS, new URL("https://example.com/x?x=1"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
-  eq("?x=1 才发 x 组（按 x.com 实测）", yx.includes("url: https://x.com/"), true);
-  eq("?x=1 时 x 规则排在 GEOIP 之前", yx.indexOf("DOMAIN-SUFFIX,x.com") >= 0 && yx.indexOf("DOMAIN-SUFFIX,x.com") < yx.indexOf("GEOIP,CN,DIRECT"), true);
+  const ytu = W.renderClash(envS, new URL("https://example.com/x?tu=" + encodeURIComponent("https://probe.example.org/")), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
+  eq("?tu= 才发按客户端实测的 url-test 组", ytu.includes("url: https://probe.example.org/"), true);
+  eq("?tu= 也不引入站点级规则", /DOMAIN-SUFFIX/.test(ytu), false);
   const y0 = W.renderClash(envS, new URL("https://example.com/x?e=0"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
   eq("?e=0 时不发边缘条目", (y0.match(/name: "e-/g) || []).length, 0);
-  eq("?e=0 时不发 x 组", y0.includes("🛰 x 优选"), false);
+  eq("?e=0 时不发实测组", y0.includes("url: https://probe.example.org/"), false);
 }
 
 // 第 39 组：节点偏好表（站点 × 通道的「能通 / 打不通」两栏）

@@ -97,7 +97,7 @@ ${link("/stats?format=html", "用量看板：进度条 + 各入口实测 RTT/机
 ${link("/logs", "最近 50 条异常（仅当前 isolate）", "JSON")}
 ${link("/proxyip", "代理池状态：当前节点、备选（含国家）、黑名单、轮换策略", "JSON")}
 ${link("/proxyip?refresh=1", "手动触发一轮扫描（验 20 个候选，约 20–40 秒）", "ACTION")}
-${link("/debug?host=x.com", "查某域名的 A / AAAA 解析结果", "DEBUG")}
+${link("/debug?host=example.com", "查某域名的 A / AAAA 解析结果", "DEBUG")}
 ${link("/debug?probe=1.2.3.4:443", "单点探测某个候选 proxyip 是否可用", "DEBUG")}
 </table>
 
@@ -113,7 +113,7 @@ ${row("?k=", "页面口令（配置了 pageKey 才生效）", false)}
 <h2>行为说明</h2>
 <div class="note">
 <ul>
-<li><b>默认出口</b>：直连，出口是 Cloudflare 边缘 IP；连不上（Cloudflare 托管站点如 x.com）才降级到 proxyip。</li>
+<li><b>默认出口</b>：直连，出口是 Cloudflare 边缘 IP；连不上（Cloudflare 托管站点如 X）才降级到 proxyip。</li>
 <li><b>地区出口</b>：路径带 <code>&amp;rg=xx</code> 时跳过直连，直接用该国 proxyip，出口即该国 IP。</li>
 <li><b>切换策略</b>：<code>${i.policy || "失败 5 次才换，切换后驻留 6 小时"}</code>，能通就一直用，不主动跳 IP。</li>
 <li><b>鉴权</b>：UUID（VLESS）/ 密码（Trojan），两者共用同一套统计。</li>

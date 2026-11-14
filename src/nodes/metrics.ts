@@ -126,7 +126,7 @@ export function hostKey(host: string): string {
   if (/^[\d.]+$/.test(h) || h.includes(":")) return h; // IP 字面量原样
 
   // 手工归并（同一套基础设施，物理路径通常一致）
-  if (/(^|\.)(x|twitter)\.com$|(^|\.)twimg\.com$/.test(h)) return "x.com";
+  return siteKey(h);
   if (/(^|\.)(google|youtube|ytimg|googlevideo|gstatic|googleapis|ggpht)\.com$/.test(h)) return "google.com";
   if (/(^|\.)(facebook|instagram|fbcdn|cdninstagram)\.(com|net)$/.test(h)) return "meta.com";
   if (/(^|\.)(github|githubusercontent|githubassets)\.com$/.test(h)) return "github.com";
@@ -412,4 +412,20 @@ export function diagVerdict(
     verdict: "全部节点都被拦，直连也不通：大概率是站点自身规则（地区封锁 / 登录态）或 TLS 指纹，需用浏览器直连验证一次",
     suspect: names,
   };
+}
+
+/**
+ * 站点族键：同一站点的不同子域共享一份样本。
+ * 通用规则（不针对任何具体网站）：取可注册域，即 host 的最后两段；
+ * 若倒数第二段是常见二级后缀（co/com/net/org/gov/edu/ac），则保留三段。
+ */
+export function siteKey(h: string): string {
+  const parts = String(h || "").toLowerCase().replace(/\.$/, "").split(".").filter(Boolean);
+  if (parts.length <= 2) return parts.join(".");
+  const last = parts[parts.length - 1];
+  const sld = parts[parts.length - 2];
+  if (parts.length >= 3 && /^(co|com|net|org|gov|edu|ac)$/.test(sld)) {
+    return parts.slice(-3).join(".");
+  }
+  return sld + "." + last;
 }
