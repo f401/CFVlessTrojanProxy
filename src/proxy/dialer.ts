@@ -64,13 +64,14 @@ export class Dialer {
     if (cfHost) refreshCfHttp(host, st.ctx);
     // 判定层要知道目标是 CF 托管：直连被自家边缘拒时一次即判，所以放在分支外
     st.cf = cfHost;
-    // 客户端出口地址族：v6 客户端打 CF 托管目标必被 4 字节 `IPv6` 页拒（F6），
-    // 而 v4 客户端直连往往就是好的——同时段对照实测「直连 6/8、中继 5/8」，
-    // 中继那一跳只多加两段 RTT（TTFB +0.4~1.3s），并不提升命中率。
-    const clientV6 = (request.headers.get("cf-connecting-ip") || "").includes(":");
+    // CF 托管目标：直连与中继谁更可能被拒，取决于**出口地址族**，与客户端族无关
+    // （隧道是原始 TCP，客户端 IP 不进隧道——7.85 用 clientV6 卡过一次，是错的）。
+    // 2026-11-15 04:14 实测：强制直连 2/6、强制中继 4/6、默认 5/6；且用户网络无 v6
+    // 时 clientV6 恒为假 → 这条恒走直连 → 全线 403。所以这里只问「有没有新鲜直连成功证据」，
+    // 有的情况交给 policy 的 direct-ok（5 分钟）判断，没有就优先中继。
     const wantPx =
       pxForce > 0 ||
-      (pxForce === 0 && !!env.proxyip && (learned || onList || relWin || (cfHost && clientV6 && !dirWin && httpCode !== 200)));
+      (pxForce === 0 && !!env.proxyip && (learned || onList || relWin || (cfHost && !dirWin && httpCode !== 200)));
 
     if (pxDecision(request, host, cfHost, wantPx, SC.POLICY, mode)) {
       // ?rx= 钉住中继（只给诊断脚本用）：跳过选择器直接用它，用来给每条中继量吞吐。
