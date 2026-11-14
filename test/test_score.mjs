@@ -2330,5 +2330,42 @@ console.log("\n76) 出口族事实（v8 的 eg）");
   W.EG.clear();
 }
 
+console.log("\n77) 事实写入决策器（v8 的 commitFact）");
+{
+  const T = 1700000000000;
+  const R = (x) => ({ kind: "relay", host: "x.com", relay: "45.136.117.194", at: T, ...x });
+  const D = (x) => ({ kind: "direct", host: "x.com", at: T, ...x });
+  const K = "x.com|45.136.117.194";
+  const V = [
+    ["回显 v4 写 eg", R({ echoFam: 4, down: 620 }), {}, "ok", "eg"],
+    ["回显太小不算", R({ echoFam: 4, down: 20 }), {}, "R_ECHO_SMALL"],
+    ["tiny + 有大响应 + 两批 → 写 blk", R({ down: 737, status: 403 }), { bigTypical: 45000, peers: [D({ down: 45290 })], prevBatch: { [K]: { at: T - 61000 } } }, "ok", "blk"],
+    ["403 tiny 且无对照 → 站点级", R({ down: 737, status: 403 }), { bigTypical: 45000 }, "R_SITE_LEVEL"],
+    ["200 tiny 且对照不够大", R({ down: 737, status: 200 }), { bigTypical: 45000, peers: [D({ down: 5000 })] }, "R_NO_BIG_PEER"],
+    ["tiny 只有一批", R({ down: 737, status: 403 }), { bigTypical: 45000, peers: [D({ down: 45290 })] }, "R_SINGLE_BATCH"],
+    ["直连腿 tiny 永不写 blk", D({ down: 737, status: 403 }), { bigTypical: 45000, peers: [R({ down: 45290 })], prevBatch: { d: { at: T - 61000 } } }, "R_DIRECT_NEVER"],
+    ["429 只退避", R({ down: 400, status: 429 }), { bigTypical: 45000 }, "R_429_BACKOFF"],
+    ["全通道 4xx = 站点级", R({ down: 1277, status: 415 }), { bigTypical: 1277 }, "R_SITE_LEVEL"],
+    ["业务 4xx 有对照 → 记 ps", R({ down: 1277, status: 415 }), { bigTypical: 1277, peers: [D({ down: 45290 })] }, "ok", "ps"],
+    ["正常大响应 → ps", R({ down: 45290, status: 200 }), { bigTypical: 45000 }, "ok", "ps"],
+    ["证书错 → dead", R({ err: "x509", down: 0 }), {}, "ok", "dead"],
+    ["直连证书错不写 dead", D({ err: "x509" }), {}, "R_DEAD_DIRECT"],
+    ["三分钟内同通道出过整页 → 矛盾", R({ down: 737, status: 403 }), { bigTypical: 45000, peers: [D({ down: 45290 })], prevBatch: { [K]: { at: T - 61000 } }, lastBigAt: { "x.com": T - 120000 } }, "R_CONTRADICTORY"],
+    ["节流：60s 内同键只写一次", R({ down: 45290, status: 200 }), { bigTypical: 45000, lastWrite: { [K]: T - 30000 } }, "R_THROTTLED"],
+    ["1277B 且典型 1277 → 业务页不是 tiny", R({ down: 1277, status: 200 }), { bigTypical: 1277, peers: [D({ down: 1277 })] }, "ok", "ps"],
+    ["932B 且典型 932 → 业务页不是 tiny", { kind: "relay", host: "example.com", relay: "45.147.250.39", at: T, down: 932, status: 200 }, { bigTypical: 932 }, "ok", "ps"],
+    ["737B 且典型未知 → 仍算 tiny（有对照两批）", R({ down: 737, status: 403 }), { bigTypical: 0, peers: [D({ down: 45290 })], prevBatch: { [K]: { at: T - 61000 } } }, "ok", "blk"],
+    ["没拿到任何字节", R({ down: 0, status: 0 }), {}, "R_NO_BYTES"],
+  ];
+  let okN = 0;
+  for (const [name, o, ctx, wr, wk] of V) {
+    const r = W.commitFact(o, ctx);
+    const pass = r.reason === wr && (wk ? Boolean(r.write) && r.write.kind === wk : true);
+    eq(name, pass, true);
+    if (pass) okN += 1;
+  }
+  eq("19 条向量与原型逐条一致", okN, V.length);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
