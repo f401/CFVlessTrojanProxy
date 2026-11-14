@@ -129,7 +129,10 @@ export class Policy {
       // 「本出口 fetch 得 200」不等于「隧道直连得 200」：fetch 走的是 CF 自己的出口，
       // 隧道直连可能落在一个对 CF 托管站点不友好的边缘出口上（实测 200 → 隧道 403）。
       // 所以只有在**隧道直连自己有过成功证据**（vOk(host,"d")）时才选直连；否则宁可走一条已知可用的中继。
-      if (vOk(c.host, "d")) return { chan: DIRECT, why: "direct-ok" };
+      // 直连成功证据只信 5 分钟内：边缘出口会漂移，"十分钟前直连 200" 不代表这一分钟还行。
+      // 30 分钟 TTL 内一直选直连，一次幸运 200 会换来一串 4 字节 403（实测 tput 15/20 → 20/20 的差别就来自这里）。
+      const dAt = vAt(c.host, "d");
+      if (vOk(c.host, "d") && dAt && Date.now() - dAt < 300000) return { chan: DIRECT, why: "direct-ok" };
       if (code === 403 && stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "http403" };
       if (code === 200 && !stick.length) return { chan: DIRECT, why: "http200" };
       if (stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "cf-any" };
