@@ -1948,7 +1948,7 @@ ok("PageView 可构造", typeof W.PageView === "function", "PageView");
 
   
   // 第 59 组：rotate 的消费者 —— 换出口优先挑没探过的中继
-  ok("没探过的一律优先", W.pickFresh("pf.test", ["pa", "pb", "pc"], 2).join(",") === "pa,pb");
+  ok("没探过的一律优先（起点按 10 分钟轮转，但要满额且不重复）", (function () { const r = W.pickFresh("pf.z", ["pa", "pb", "pc"], 2); return r.length === 2 && new Set(r).size === 2; })());
   W.vSetState("pf.test", "r:pa", 2, 1);
   ok("探过的排到后面", W.pickFresh("pf.test", ["pa", "pb", "pc"], 2).join(",") === "pb,pc");
   ok("已探过的不会被挤出上限外时仍可用", W.pickFresh("pf.test", ["pa"], 2).join(",") === "pa");

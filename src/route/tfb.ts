@@ -57,7 +57,10 @@ export function pickFresh(host: string, ips: string[], n: number): string[] {
   const seen = (ip: string) => vAt(host, "r:" + ip);
   const fresh = ips.filter((ip) => !seen(ip));
   const rest = ips.filter((ip) => seen(ip)).sort((a, b) => seen(a) - seen(b));
-  return [...fresh, ...rest].slice(0, Math.max(0, n));
+  // 全部没探过时，按 10 分钟一档轮转起点：否则小池子永远取数组前 n 条，"换出口"名存实亡
+  const list = [...fresh, ...rest];
+  const rotAt = fresh.length === list.length ? Math.floor(Date.now() / 600000) % Math.max(1, list.length) : 0;
+  return [...list.slice(rotAt), ...list.slice(0, rotAt)].slice(0, Math.max(0, n));
 }
 
 export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): Promise<Response> {
