@@ -107,7 +107,7 @@ export { POLICY, Policy } from "./route/policy";
 export { judge, queueVerify, runVerify, verifyInfo, queueLen } from "./route/verify";
 export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, pickFresh } from "./route/tfb";
-export { RELPERF, REL_TTL, relCost, relNote, relSnap } from "./route/relperf";
+export { RELPERF, REL_TTL, relCost, relCostFor, relCostMode, relNote, relSnap } from "./route/relperf";
 
 export { handleDns, trojanUdpFrame } from "./proxy/dns";
 export { handleUpgrade } from "./proxy/session";

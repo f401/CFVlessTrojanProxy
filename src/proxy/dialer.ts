@@ -68,7 +68,7 @@ export class Dialer {
       pxForce > 0 ||
       (pxForce === 0 && !!env.proxyip && (learned || onList || relWin || (cfHost && !dirWin && httpCode !== 200)));
 
-    if (pxDecision(request, host, cfHost, wantPx, SC.POLICY)) {
+    if (pxDecision(request, host, cfHost, wantPx, SC.POLICY, mode)) {
       // ?rx= 钉住中继（只给诊断脚本用）：跳过选择器直接用它，用来给每条中继量吞吐
       const p = parseProxyIp(st.rx || (await SEL.current(env, mode, st, host, cfHost)));
       if (p && !checkTarget(p.host, p.port)) {

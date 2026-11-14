@@ -39,10 +39,26 @@ export function relCostOf(s: RelSample | null): number {
 }
 
 /**
+ * 按模式折算代价：吞吐模式看「拉 1MB 要多久」，延迟模式只看首字节。
+ * 为什么分开：同一对（站点, 中继）可能「首字节很快但带宽很小」，反过来也有；
+ * 用同一个代价函数会让延迟优先模式被大文件吞吐的样本带偏，吞吐优先模式又会忽略首字节。
+ * @param mode 传输模式（`tput` / `lat`）
+ * @param s 样本（null 表示没量过）
+ * @returns 毫秒；没量过返回 1e6
+ */
+export function relCostFor(mode: string, s: RelSample | null): number {
+  if (!s) return 1e6;
+  if (mode === "lat") return s.ttfb;
+  return s.ttfb + 1024_000 / Math.max(32, s.kbs);
+}
+
+/**
  * 站点 × 中继的实测性能表。
  */
 export class RelPerfTable {
   private m = new Map<string, RelSample>();
+  /** 站点无关的聚合样本（同一条中继在所有站点上的表现），用来在新站点上先给个底 */
+  private by = new Map<string, RelSample>();
 
   /**
    * 记一条样本。
@@ -61,15 +77,19 @@ export class RelPerfTable {
     const old = this.m.get(k);
     if (!old || now - old.at > REL_TTL) {
       this.m.set(k, { n: 1, ttfb, kbs, at: now });
-      return;
+    } else {
+      // EWMA：首字节 0.5 权重（抖动大），速率 0.35（变化慢但也要跟得上）
+      this.m.set(k, {
+        n: Math.min(8, old.n + 1),
+        ttfb: old.ttfb * 0.5 + ttfb * 0.5,
+        kbs: old.kbs * 0.65 + kbs * 0.35,
+        at: now,
+      });
     }
-    // EWMA：首字节 0.5 权重（抖动大），速率 0.35（变化慢但也要跟得上）
-    this.m.set(k, {
-      n: Math.min(8, old.n + 1),
-      ttfb: old.ttfb * 0.5 + ttfb * 0.5,
-      kbs: old.kbs * 0.65 + kbs * 0.35,
-      at: now,
-    });
+    // 站点无关的聚合：新站点第一次命中时才有底可用（见 costFor 的说明）
+    const a = this.by.get(ip);
+    if (!a || now - a.at > REL_TTL) this.by.set(ip, { n: 1, ttfb, kbs, at: now });
+    else this.by.set(ip, { n: Math.min(8, a.n + 1), ttfb: a.ttfb * 0.5 + ttfb * 0.5, kbs: a.kbs * 0.65 + kbs * 0.35, at: now });
   }
 
   /**
@@ -90,7 +110,23 @@ export class RelPerfTable {
   }
 
   /**
-   * 排序代价：没有样本一律 1e6。
+   * 站点无关的该中继聚合样本（任何站点上量到的都算）。
+   * @param ip 中继出口
+   * @param now 当前时刻
+   * @returns 样本；没有或已过期返回 null
+   */
+  agg(ip: string, now = Date.now()): RelSample | null {
+    const s = this.by.get(ip);
+    if (!s) return null;
+    if (now - s.at > REL_TTL) {
+      this.by.delete(ip);
+      return null;
+    }
+    return s;
+  }
+
+  /**
+   * 排序代价：没有样本一律 1e6。只认本站点样本（测试与调试用，口径干净）。
    * @param host 站点
    * @param ip 中继出口
    * @param now 当前时刻
@@ -98,6 +134,25 @@ export class RelPerfTable {
    */
   cost(host: string, ip: string, now = Date.now()): number {
     return relCostOf(this.get(host, ip, now));
+  }
+
+  /**
+   * 按传输模式取排序代价。
+   * @param mode 传输模式（`tput` / `lat`）
+   * @param host 站点
+   * @param ip 中继出口
+   * @param now 当前时刻
+   * @returns 毫秒；没量过返回 1e6
+   */
+  costFor(mode: string, host: string, ip: string, now = Date.now()): number {
+    const s = this.get(host, ip, now);
+    if (s) return relCostFor(mode, s);
+    // 本站点还没量过这条中继：用它在别的站点上的表现兜底（+200ms 表示「不是本站点的亲测」）。
+    // 为什么要兜底：新站点第一次命中时，若所有中继都是 1e6，排序退化成「按池子顺序」，
+    // 等于把已经量到的快中继扔掉重学一遍；而中继出口的容量大体与目标站点无关。
+    const a = this.agg(ip, now);
+    if (a) return relCostFor(mode, a) + 200;
+    return 1e6;
   }
 
   /**
@@ -123,6 +178,7 @@ export class RelPerfTable {
    */
   clear(): void {
     this.m.clear();
+    this.by.clear();
   }
 
   /**
@@ -170,4 +226,24 @@ export function relCost(host: string, ip: string): number {
  */
 export function relSnap(host: string) {
   return RELPERF.snap(host);
+}
+
+/**
+ * 薄包装：按传输模式取排序代价。
+ * @param mode 传输模式（`tput` / `lat`）
+ * @param host 站点
+ * @param ip 中继出口
+ * @returns 毫秒；没量过 1e6
+ */
+export function relCostMode(mode: string, host: string, ip: string): number {
+  return RELPERF.costFor(mode, host, ip);
+}
+
+/**
+ * 薄包装：站点无关的聚合样本（跨站点学到的中继容量）。
+ * @param ip 中继出口
+ * @returns 样本；没量过返回 null
+ */
+export function relAgg(ip: string) {
+  return RELPERF.agg(ip);
 }

@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，当前 **7.75** 已上线）。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，当前 **7.79** 已上线）。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -137,7 +137,14 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 
 ## 9. 当前状态与未完成
 
-- 线上 **7.75**（工作区与线上一致）。7.74/7.75 是为「下载速度起不来」这条线服务的：
+- 线上 **7.79**（工作区与线上一致）。7.76–7.79 是为「按站点选中继」这条线服务的：
+  · `src/route/relperf.ts`（7.76）：`RelPerfTable` 记「站点 × 中继」的首字节与下行 KB/s（EWMA 0.5/0.35，TTL 10 分钟，表上限 512），
+    排序链 `negOf → posOf → scoreOf → vAt`；`scoreOf` 有本站点样本就按样本，没有就用**跨站点聚合**（+200ms 罚）兜底，再没有才 1e6 + 健康度。
+  · 按模式取代价（7.77）：吞吐 `ttfb + 1024KB/kbs`，延迟只看 `ttfb`；`DecisionIn.mode` 由 `pxDecision(..., mode)` 带进来。
+  · 吞吐模式冷启动**逐条轮换**中继（7.79）：站点毫无证据时第 1–3 条连接分别落不同中继（`why: rel-rot`），
+    否则钉住一条 60 秒会让其余中继永远没有样本，「挑最快」永远学不出来；延迟模式仍走 `cold-pin`。
+  · `/<uuid>/debug?rt=<host>`：看该站点已量过的中继（按代价升序）。`?rx=<ip>&px=1` 仍可钉住单条中继做对比。
+
   · `?rx=<ip>`（7.74）：把一条连接钉到指定中继上（配 `px=1`），只给诊断脚本用；`.tmp-sim/rbench.mjs` 靠它逐条量中继容量（实测 275 – 1642 KB/s，差 6 倍；另有两条握手必失败）。
   · 订阅新增 `🔁 中继优选`（7.75）：成员 `r-<ip>-<VL|TJ><T|L>`，路径带 `px=1&rx=<ip>`，用 url-test 打 `/health`，让**客户端**用自己到每条中继的真实路径逐条实测并选最快——服务端记不住这个排名（不跨 isolate 共享），客户端实测是唯一不破约束的做法。`?e=0` 时不发这些条目。
   · `/<uuid>/debug?bench=<url>&bytes=<n>`（7.73）：量**Worker 出口到源站**的吞吐（20 秒封顶）。实测 `speed.cloudflare.com` 8MB / 53ms ≈ **147 MB/s** ⇒ 源站那一腿不是瓶颈；客户端→边缘是**双峰**（~360 KB/s 与 ~2.1 MB/s），对应不同中继/边缘路径。

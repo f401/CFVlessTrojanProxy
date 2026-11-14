@@ -2261,5 +2261,37 @@ console.log("\n75) 正记忆优先复用");
   eq("清空后代价回到未知", W.relCost("a.example.com", "203.0.113.7"), 1e6);
 }
 
+// 第 38d 组：两种模式对「快」的定义不同
+{
+  W.RELPERF.clear();
+  // 甲：首字节 150ms、只有 100 KB/s；乙：首字节 400ms、2500 KB/s
+  W.relNote("c.example.com", "203.0.113.11", 150, 100);
+  W.relNote("c.example.com", "203.0.113.12", 400, 2500);
+  eq("delay 模式选首字节更快的那条", W.decide({ host: "c.example.com", cfHost: true, clientV6: false, relays: ["203.0.113.12", "203.0.113.11"], legacyWantsRelay: true, mode: "lat" }).chan.ip, "203.0.113.11");
+  eq("tput 模式选拉 1MB 更快的那条", W.decide({ host: "c.example.com", cfHost: true, clientV6: false, relays: ["203.0.113.11", "203.0.113.12"], legacyWantsRelay: true, mode: "tput" }).chan.ip, "203.0.113.12");
+  // 新站点没量过这条中继时，用它在别处学到的容量兜底（+200ms 罚），不该退回 1e6 重学一遍
+  eq("新站点沿用跨站点学到的中继容量", W.relCostMode("tput", "d.example.com", "203.0.113.12") < 1e6, true);
+  eq("本站点亲测比跨站点兜底更便宜", W.relCostMode("tput", "c.example.com", "203.0.113.12") < W.relCostMode("tput", "d.example.com", "203.0.113.12"), true);
+  W.RELPERF.clear();
+}
+
+// 第 38e 组：吞吐模式冷启动逐条轮换中继（否则永远只有一条中继有样本）
+{
+  W.RELPERF.clear();
+  const relays = ["203.0.113.21", "203.0.113.22", "203.0.113.23"];
+  const picked = [];
+  for (let i = 0; i < 3; i++) {
+    const d = W.decide({ host: "e" + i + ".example.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true, mode: "tput" });
+    picked.push(d.chan.ip);
+    eq("吞吐冷启动用轮换而不是钉住（why）", d.why, "rel-rot");
+  }
+  eq("连续三条连接落在不同中继上", new Set(picked).size, 3);
+  W.RELPERF.clear();
+  // 延迟模式仍按老办法钉住：首字节场景下「先量三条」的代价比吞吐模式高
+  const dl = W.decide({ host: "f.example.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true, mode: "lat" });
+  eq("延迟模式不轮换", dl.why, "cold-pin");
+  W.RELPERF.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

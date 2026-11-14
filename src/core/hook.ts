@@ -5,6 +5,8 @@ export interface DecisionIn {
   cfHost: boolean; // 目标托管在 CF 上
   clientV6: boolean; // 客户端出口是 IPv6（cf-connecting-ip）
   legacyWantsRelay: boolean; // 现状（wantPx），用于影子统计
+  /** 传输模式（`tput` / `lat`）：两种模式对「快」的定义不同，选路要能区分 */
+  mode?: string;
 }
 
 export interface DecisionOut {

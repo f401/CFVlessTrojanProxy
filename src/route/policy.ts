@@ -12,7 +12,7 @@ import { chanPref } from "./prefs";
 import { runVerify } from "./verify";
 import { HEALTH, ipOf } from "./relay-health";
 import { CF_NEG, JUDGE } from "./judge";
-import { relCost, relNote } from "./relperf";
+import { relCostMode, relNote, relSnap } from "./relperf";
 
 export interface Ctx {
   host: string;
@@ -20,6 +20,8 @@ export interface Ctx {
   clientV6: boolean; // 客户端出口是 IPv6（cf-connecting-ip）
   relays: string[]; // 池里可用中继的 IP
   legacyWantsRelay: boolean; // 现状：session 的 wantPx
+  /** 传输模式（`tput` / `lat`）；缺省按吞吐模式，测试可省略 */
+  mode?: string;
 }
 
 export interface Choice {
@@ -37,6 +39,8 @@ export class Policy {
    * 暴露在**一条**中继的波动下；等第一条整页证据回来，后续由粘性排序与负面记忆接管。
    */
   private pin = new Map<string, { ip: string; until: number }>();
+  /** 吞吐模式冷启动的轮换游标：让前几条连接分别落在不同中继上，尽快量出容量差异 */
+  private rot = 0;
 
   /**
    * 功能：冷启动时为站点挑一条固定中继，60 秒内复用同一条。
@@ -105,16 +109,20 @@ export class Policy {
     const hIdx = new Map<string, number>(HEALTH.rank(usable).map((ip, i) => [ip, i]));
     const hOf = (ip: string): number => hIdx.get(ip) ?? 99;
     // 站点 × 中继的实测代价：同一个中继对不同站点快慢差一个数量级，所以它比「站点无关的健康度」更贴题。
-    // 没量过的是 1e6，会排在量过的后面，但仍在 negOf/posOf 之后 —— 未知不等于坏。
-    const relOf = (ip: string): number => relCost(c.host, ip);
+    // 按模式取：吞吐优先看「拉 1MB 要多久」，延迟优先只看首字节（别被大文件样本带偏）。
+    // 有样本就按样本排；没样本的排到 1e6 之后，再用站点无关的健康度打破并列 ——
+    // 这样「量过且慢」不会被当成「没量过」重新插队，冷启动仍能靠健康度挑到合理的几条。
+    const scoreOf = (ip: string): number => {
+      const r = relCostMode(c.mode === "lat" ? "lat" : "tput", c.host, ip);
+      return r < 1e6 ? r : 1e6 + hOf(ip) * 1000;
+    };
     const stick = usable
       .slice()
       .sort(
         (a, b) =>
           negOf(a) - negOf(b) ||
           posOf(a) - posOf(b) ||
-          hOf(a) - hOf(b) ||
-          relOf(a) - relOf(b) ||
+          scoreOf(a) - scoreOf(b) ||
           vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a),
       );
     const nonCf = stick.filter((ip) => !isCfIp(ip));
@@ -134,8 +142,19 @@ export class Policy {
       // CF 托管目标：直连/CF 中继都是 CF→CF，会把客户端出口原样透传，能改判的只有非 CF 主机。
       // 本出口的 fetch 状态码只作辅助证据（CF→CF 的 fetch 常返回 200，隧道却 403）。
       const code = cfHttpCode(c.host);
-      // 冷启动：该站点没有任何通道证据、本出口也没拿到状态码 → 钉住单条中继 60 秒（理由见 pinFor）
-      if (!code && !stick.some((ip) => vAt(c.host, "r:" + ip) > 0)) {
+      // 吞吐模式：还没有任何「本站点可用」的证据时，**逐条轮换**而不是钉死一条 60 秒。
+      // 为什么：中继容量实测差 3–4 倍（1103 vs 300 KB/s），钉住一条时其余中继永远没有样本，
+      // 「按站点 × 中继挑最快」就永远学不出来；轮换几条后样本足够，再交给下面的排序去利用。
+      const coldSite = !stick.some((ip) => vAt(c.host, "r:" + ip) > 0) && !stick.some((ip) => JUDGE.posOn(c.host, ip));
+      if (c.mode !== "lat" && coldSite && relSnap(c.host).length === 0 && stick.length > 1) {
+        const pool = (nonCf.length ? nonCf : stick).filter((ip) => !JUDGE.negOn(c.host, ip));
+        const list = pool.length ? pool : stick;
+        const ip = list[this.rot++ % list.length] as string;
+        return { chan: { kind: "r", ip }, why: "rel-rot" };
+      }
+      // 冷启动：该站点没有任何通道证据、本出口也没拿到状态码、也还没有「站点×中继」样本
+      // → 钉住单条中继 60 秒（理由见 pinFor）。一旦有了样本就交给 stick 排序，避免钉住覆盖实测结论。
+      if (!code && coldSite && relSnap(c.host).length === 0) {
         // 钉住的那条一旦进了负面记忆就立刻换下一条：否则一次坏 egress 会在 60 秒里吞掉整个站点
         const pool = (nonCf.length ? nonCf : stick).filter((ip) => !JUDGE.negOn(c.host, ip));
         const cip = this.pinFor(c.host, pool.length ? pool : nonCf.length ? nonCf : stick);
