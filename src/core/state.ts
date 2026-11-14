@@ -45,6 +45,10 @@ export class AppState {
   bigChan: Map<string, string> = new Map();
   /** 每「站点|通道」的小响应连击数 */
   smCnt: Map<string, number> = new Map();
+  /** 每个站点最近 120s 内各通道的观测（环形 8 条）：v8 的「同窗口对照」 */
+  peers: Map<string, Array<{ ck: string; down: number; at: number }>> = new Map();
+  /** 每个站点见过的最大响应字节数：v8 的 bigTypical（tiny 的相对判据要用） */
+  bigTyp: Map<string, number> = new Map();
   /** 复核队列：流量发现「可疑」后排队做同站点两条通道的实测差分 */
   vtQ: Array<{ host: string; ck: string; t: number }> = [];
   /** 最近一次复核的结果（供 debug 展示） */

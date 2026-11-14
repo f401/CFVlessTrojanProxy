@@ -2384,5 +2384,38 @@ console.log("\n78) 写入决策器的影子统计");
   eq("清零后快照为空", W.FACT.snap().n, 0);
 }
 
+
+console.log("\n79) 同窗口对照与 bigTypical（影子从此能算出「本会写封锁」）");
+{
+  W.FACT.clear();
+  W.S.peers.clear();
+  W.S.bigTyp.clear();
+  const H = "cmp.example";
+  const ev = (x) => ({ host: H, via: "node", node: "45.136.117.194:443", down: 0, ok: true, life: 900, up: 0, ...x });
+  const A = "45.136.117.194:443";
+  const B = "91.215.153.143:443";
+  const t0 = 1_700_000_000_000;
+  eq("整页先入对照环形 → 本会写 ps", W.FACT.observe(ev({ node: A, down: 45290, ok: true }), t0), "ok");
+  eq("另一条中继的 tiny 只有一批 → 单批弃权", W.FACT.observe(ev({ node: B, down: 737, ok: false, life: 80 }), t0 + 1000), "R_SINGLE_BATCH");
+  eq("同一中继 ≥60s 后第二批 + 有整页对照 → 写入封锁", W.FACT.observe(ev({ node: B, down: 737, ok: false, life: 80 }), t0 + 70000), "ok");
+  eq("快照里记下 1 条本会写封锁", W.FACT.snap().would.blk, 1);
+  eq("bigTypical 取见过的最大响应", W.S.bigTyp.get(H), 45290);
+  eq("737B 对 45KB 的典型页算 tiny", W.isTiny({ kind: "relay", host: H, relay: "1.2.3.4", at: t0, down: 737, status: 403 }, 45290), true);
+  eq("1277B 对自身同尺寸的典型页不算 tiny", W.isTiny({ kind: "relay", host: H, relay: "1.2.3.4", at: t0, down: 1277, status: 415 }, 1277), false);
+  const C = "contra.example";
+  W.FACT.clear();
+  W.S.peers.clear();
+  W.S.bigTyp.clear();
+  W.S.bigByHost.set(C, t0);
+  const cev = (x) => ({ host: C, via: "node", node: A, down: 0, ok: true, life: 900, up: 0, ...x });
+  eq("先喂一条整页当对照", W.FACT.observe(cev({ node: B, down: 30000, ok: true }), t0), "ok");
+  eq("同通道第一批 tiny → 单批弃权", W.FACT.observe(cev({ down: 737, ok: false }), t0 + 1000), "R_SINGLE_BATCH");
+  eq("同通道 3 分钟内出过整页 → 判矛盾不写封锁", W.FACT.observe(cev({ down: 737, ok: false }), t0 + 62000), "R_CONTRADICTORY");
+  W.FACT.clear();
+  W.S.peers.clear();
+  W.S.bigTyp.clear();
+  W.S.bigByHost.delete(C);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

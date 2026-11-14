@@ -6,10 +6,15 @@
 //
 // 影子模式的产出：一条连接的「观测 → 决策」分布（`ps/blk/dead/none` + 拒绝理由码）。
 // 只要线上 `blk`（`would`）长期为 0，就说明「业务 403 不写封锁」这条在真实流量里站得住。
+//
+// 本模块同时补上影子成立的前提：v8 需要两样 v7 没有的输入 ——
+// · `peers`：同站点 120 秒内**其他通道**的观测（判断「有没有一条通道拿到整页」）；
+// · `bigTypical`：本站点见过的最大响应字节数（tiny 的相对判据要用）。
+// 两者都只在本 isolate 内存里（跨 isolate 不共享统计，见 AGENTS.md 硬约束 1）。
 import { cnt } from "../core/counter";
 import { S } from "../core/state";
 import type { TrafficEvt } from "../core/hook";
-import { commitFact, type FactCtx, type FactObs } from "./commitfact";
+import { BIG_WIN, commitFact, factKey, isTiny, type FactCtx, type FactObs } from "./commitfact";
 
 /** 影子统计的一次快照 */
 export interface FactShadowSnap {
@@ -27,10 +32,8 @@ export interface FactShadowSnap {
  * 已知失真（必须在报告里说明，不能当成等价）：
  * · `TrafficEvt` 没有 HTTP 状态码，这里用 `ok` 合成（200 / 0）——所以 `429` 与 4xx 的区分
  *   在影子阶段是缺失的，`R_429_BACKOFF` 永远不会命中；
- * · 没有「同窗口其他通道」的观测缓存，`peers` 恒为空，于是 `blk` 只会命中
- *   `R_NO_BIG_PEER`，不会真的算出「会写封锁」；
- * · `bigTypical` 还没有落盘（`S.bigByHost` 只存时间），这里用 0（只按绝对阈值判 tiny）。
- * 这三条正是下一轮要补齐的事实层输入；补齐后同一条规则才会给出线上可比的结论。
+ * · `lastBigAt` 只在 judge 记过整页时才非零，影子自己不会制造它（宁可少判封锁）。
+ * 至于 `peers` 与 `bigTypical` 两项输入，已由 `notePeer` 补齐 —— `blk` 规则现在能给出线上可比的结论。
  * @param {TrafficEvt} e 连接收尾事件
  * @param {number} now 当前时间
  * @returns {FactObs} 观测
@@ -49,18 +52,61 @@ export function shadowObs(e: TrafficEvt, now: number): FactObs {
 }
 
 /**
- * 功能：影子上下文 —— 只用 v7 已经有的状态，不新增任何存储。
+ * 功能：通道键 —— 必须与 `commitFact` 的 `factKey` 同构，否则 `prevBatch` 查不到（实测踩过）。
+ * 直连腿额外带上站点名，避免不同站点的直连共享同一个批次时钟。
+ * @param {FactObs} o 观测
+ * @returns {string} 通道键
+ */
+function chanKey(o: FactObs): string {
+  return o.kind === "direct" ? o.host + "|d" : factKey(o);
+}
+
+/**
+ * 功能：把一条观测压进本站点的对照环形（同通道的旧观测会被覆盖）。
  * @param {FactObs} o 观测
  * @param {number} now 当前时间
- * @returns {FactCtx} commitFact 需要的上下文
+ * @returns {void}
  */
-export function shadowCtx(o: FactObs, now: number): FactCtx {
-  const key = o.host + "|" + (o.relay || "d");
+export function notePeer(o: FactObs, now: number): void {
+  const ck = chanKey(o);
+  const cur = S.peers.get(o.host) || [];
+  const next = cur.filter((x) => x.ck !== ck && now - x.at <= BIG_WIN);
+  next.push({ ck, down: o.down || 0, at: now });
+  S.peers.set(o.host, next.slice(-8));
+  if (S.peers.size > 512) S.peers.clear();
+  // bigTypical：只增不减地记录见过的最大响应（宁可把 tiny 判严，也别冤枉业务页）
+  const typ = S.bigTyp.get(o.host) || 0;
+  if ((o.down || 0) > typ) S.bigTyp.set(o.host, o.down || 0);
+  if (S.bigTyp.size > 512) S.bigTyp.clear();
+}
+
+/**
+ * 功能：影子上下文 —— 从本 isolate 已有的状态拼出 `commitFact` 需要的上下文。
+ * @param {FactObs} o 当前观测
+ * @param {number} now 当前时间
+ * @param {Record<string, { at: number }>} prev 已确认批次
+ * @returns {FactCtx} 上下文
+ */
+export function shadowCtx(o: FactObs, now: number, prev: Record<string, { at: number }>): FactCtx {
+  const ck = chanKey(o);
+  const peers: FactObs[] = (S.peers.get(o.host) || [])
+    .filter((x) => x.ck !== ck && now - x.at <= BIG_WIN)
+    .map((x) => ({
+      kind: "relay" as const,
+      host: o.host,
+      relay: x.ck.slice(x.ck.lastIndexOf(":") + 1),
+      at: x.at,
+      down: x.down,
+      status: 200,
+    }));
   const bigAt = S.bigByHost.get(o.host) || 0;
-  // 同一通道以前回过小响应 → 当作「已有上一批」，这样 R_SINGLE_BATCH 才有意义
-  const seen = (S.smCnt.get(o.kind === "relay" ? o.host + "|r:" + o.relay : o.host + "|d") || 0) > 0;
-  const ctx: FactCtx = { now, bigTypical: 0, lastBigAt: bigAt ? { [o.host]: bigAt } : {} };
-  if (seen) ctx.prevBatch = { [key]: { at: now - 61000 } };
+  const ctx: FactCtx = {
+    now,
+    bigTypical: S.bigTyp.get(o.host) || 0,
+    peers,
+    lastBigAt: bigAt ? { [o.host]: bigAt } : {},
+  };
+  if (prev[ck]) ctx.prevBatch = { [ck]: { at: prev[ck].at } };
   return ctx;
 }
 
@@ -74,6 +120,8 @@ export class FactShadow {
   private n = 0;
   private would = new Map<string, number>();
   private why = new Map<string, number>();
+  /** 每个键上一次 tiny 观测的时间：第二批要 ≥60s 才算确认 */
+  private prevBlk = new Map<string, number>();
 
   /**
    * 功能：观察一条连接收尾事件（只统计，不写任何事实）。
@@ -83,12 +131,19 @@ export class FactShadow {
    */
   observe(e: TrafficEvt, now = Date.now()): string {
     const o = shadowObs(e, now);
-    const r = commitFact(o, shadowCtx(o, now));
+    const ck = chanKey(o);
+    const prevAt = this.prevBlk.get(ck) || 0;
+    const prev: Record<string, { at: number }> = prevAt ? { [ck]: { at: prevAt } } : {};
+    const r = commitFact(o, shadowCtx(o, now, prev));
     this.n += 1;
     const kind = r.write ? r.write.kind : "none";
     this.would.set(kind, (this.would.get(kind) || 0) + 1);
     this.why.set(r.reason, (this.why.get(r.reason) || 0) + 1);
     cnt("cfObs");
+    // tiny 观测记一批（无论这次是否凑够对照）：下一次 tiny 才有机会变成「两批确认」
+    if (isTiny(o, S.bigTyp.get(o.host) || 0)) this.prevBlk.set(ck, now);
+    if (this.prevBlk.size > 2048) this.prevBlk.clear();
+    notePeer(o, now);
     return r.reason;
   }
 
@@ -105,6 +160,7 @@ export class FactShadow {
     this.n = 0;
     this.would.clear();
     this.why.clear();
+    this.prevBlk.clear();
   }
 }
 
