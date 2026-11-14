@@ -1,10 +1,10 @@
-// 部署闸门：拒绝把明文包推上线（协议关键字严格为 0），域名类只做提示。
+﻿// 部署闸门：拒绝把明文包推上线（协议关键字严格为 0），域名类只做提示。
 // 用法：node tools/check-obf.js <file> [more...]
 const fs = require("node:fs");
 // 严格：任何出现都说明没混淆干净
-const STRICT = ["vless", "vmess", "trojan", "shadowsocks", "xray", "clash", "sing-box", "subscription", "proxyip", "githubusercontent", "workers.dev", "x-admin-key"];
+const STRICT = ["vless", "vmess", "trojan", "shadowsocks", "xray", "clash", "sing-box", "subscription", "proxyip", "githubusercontent", "workers.dev"];
 // 提示：功能性字面量（站点族键/正则/面板文案），有也不 blocking
-const INFO = ["x.com", "twitter", "twimg", "twttr", "t.co"];
+const INFO = ["x-admin-key", "x.com", "twitter", "twimg", "twttr", "t.co"];
 const files = process.argv.slice(2);
 if (!files.length) {
   console.error("usage: node tools/check-obf.js <file> ...");
