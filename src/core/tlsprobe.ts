@@ -44,11 +44,14 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
 
   const chunks: Uint8Array[] = [];
   let ended = false;
-  let notify: (() => void) | null = null;
+  // 等待者队列（不能只存一个回调：pump 在「检查 chunks 为空」与「登记等待者」之间插入一次 push 时，
+  // 单槽 notify 会丢掉唤醒，读函数就永远挂着 —— 这正是探测一直 timeout / 被 CPU 上限打断的原因）
+  const waiters: Array<() => void> = [];
   const wake = () => {
-    const f = notify;
-    notify = null;
-    if (f) f();
+    while (waiters.length) {
+      const f = waiters.shift();
+      if (f) f();
+    }
   };
   let pumpErr = false;
   const reader = sock.readable.getReader();
@@ -93,8 +96,10 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
       const c = chunks[0];
       if (!c) {
         if (ended) return undefined;
+        // 先再检查一次，再登记等待者：push 与 drain 都在同一个微任务里完成，不存在丢唤醒窗口
+        if (chunks.length) continue;
         await new Promise<void>((res) => {
-          notify = res;
+          waiters.push(res);
         });
         continue;
       }
@@ -169,4 +174,171 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
   const cm = /^HTTP\/1\.[01] (\d{3})/.exec(status);
   const code = cm ? Number(cm[1]) : 0;
   return { ok: code >= 200 && code < 400, code, status, server, head, ms: Date.now() - t0, hsMs, bytes: got.length, err: "" };
+}
+
+// —— 诊断：只发 ClientHello、只读首个记录，完全不碰密码学 ——
+// 用来判断「DO / 请求路径被 CPU 上限打断」到底是握手算力问题，还是这套 stream 读泵的开销问题。
+export async function probeRaw(host: string, relay = "", stage = "sh"): Promise<TlsProbeResult> {
+  const t0 = Date.now();
+  const hardEnd = t0 + 2500;
+  const [rHost, rPort] = relay ? relay.split(":") : [host, "443"];
+  let sock: ReturnType<typeof connect>;
+  try {
+    sock = connect({ hostname: rHost, port: Number(rPort) || 443 });
+  } catch (e) {
+    return { ...EMPTY, err: "connect: " + String((e as Error).message).slice(0, 80) };
+  }
+  const chunks: Uint8Array[] = [];
+  let ended = false;
+  const waiters: Array<() => void> = [];
+  const wake = () => {
+    while (waiters.length) {
+      const f = waiters.shift();
+      if (f) f();
+    }
+  };
+  let pumpErr = false;
+  const reader = sock.readable.getReader();
+  const pump = (async () => {
+    for (;;) {
+      const r = await reader.read();
+      if (r.done) return;
+      if (r.value && r.value.length) {
+        chunks.push(new Uint8Array(r.value));
+        wake();
+      }
+    }
+  })();
+  pump.then(
+    () => {
+      ended = true;
+      wake();
+    },
+    () => {
+      ended = true;
+      pumpErr = true;
+      wake();
+    },
+  );
+  const take = async (bytes: number): Promise<Uint8Array | undefined> => {
+    const out = new Uint8Array(bytes);
+    let got = 0;
+    while (got < bytes) {
+      if (Date.now() > hardEnd) return undefined;
+      const c = chunks[0];
+      if (!c) {
+        if (ended) return undefined;
+        if (chunks.length) continue;
+        await new Promise<void>((res) => {
+          waiters.push(res);
+        });
+        continue;
+      }
+      const n = Math.min(c.length, bytes - got);
+      out.set(c.subarray(0, n), got);
+      got += n;
+      if (n === c.length) chunks.shift();
+      else chunks[0] = c.subarray(n);
+    }
+    return out;
+  };
+
+  // 最小 ClientHello（x25519 的 key_share 是随机字节，服务器仍会回 ServerHello / HRR）
+  const rnd = new Uint8Array(32);
+  crypto.getRandomValues(rnd);
+  const ks = new Uint8Array(32);
+  crypto.getRandomValues(ks);
+  const sni = new TextEncoder().encode(host);
+  const ext = (t: number, body: Uint8Array) => {
+    const o = new Uint8Array(4 + body.length);
+    o[0] = t >> 8;
+    o[1] = t & 0xff;
+    o[2] = body.length >> 8;
+    o[3] = body.length & 0xff;
+    o.set(body, 4);
+    return o;
+  };
+  const u16 = (n: number) => new Uint8Array([n >> 8, n & 0xff]);
+  const cat = (...parts: Uint8Array[]) => {
+    const len = parts.reduce((a, p) => a + p.length, 0);
+    const o = new Uint8Array(len);
+    let at = 0;
+    for (const p of parts) {
+      o.set(p, at);
+      at += p.length;
+    }
+    return o;
+  };
+  const sniBody = cat(u16(sni.length + 3), new Uint8Array([0]), u16(sni.length), sni);
+  const groups = cat(u16(2), u16(29));
+  const share = cat(u16(4 + ks.length), u16(29), u16(ks.length), ks);
+  const alpn = cat(u16(3), new Uint8Array([2]), new TextEncoder().encode("h2"));
+  const exts = cat(
+    ext(0, sniBody),
+    ext(10, groups),
+    ext(51, share),
+    ext(43, cat(new Uint8Array([2]), u16(0x0304))),
+    ext(16, alpn),
+  );
+  const body = cat(
+    u16(0x0303),
+    rnd,
+    new Uint8Array([32]),
+    new Uint8Array(32),
+    u16(2),
+    u16(0x1301),
+    new Uint8Array([1, 0]),
+    u16(exts.length),
+    exts,
+  );
+  const hs = cat(new Uint8Array([1]), new Uint8Array([(body.length >> 16) & 0xff, (body.length >> 8) & 0xff, body.length & 0xff]), body);
+  const hello = cat(new Uint8Array([0x16, 0x03, 0x01]), u16(hs.length), hs);
+
+  let wrote = 0;
+  try {
+    const w = sock.writable.getWriter();
+    await w.write(hello);
+    w.releaseLock();
+    wrote = hello.length;
+  } catch (e) {
+    return { ...EMPTY, err: "write: " + String((e as Error).message).slice(0, 60), ms: Date.now() - t0 };
+  }
+  const tWrite = Date.now() - t0;
+  if (stage === "hello") {
+    try {
+      sock.close();
+    } catch {
+      pumpErr = true;
+    }
+    return { ...EMPTY, ms: tWrite, bytes: wrote, err: "stop:hello" };
+  }
+  const hdr = await take(5);
+  const tHdr = Date.now() - t0;
+  if (!hdr) {
+    try {
+      sock.close();
+    } catch {
+      pumpErr = true;
+    }
+    return { ...EMPTY, ms: tHdr, bytes: wrote, err: pumpErr ? "reset" : ended ? "eof" : "no-hdr" };
+  }
+  const rlen = (hdr[3] << 8) | hdr[4];
+  const rec = rlen > 0 && rlen < 8192 ? await take(rlen) : undefined;
+  try {
+    sock.close();
+  } catch {
+    pumpErr = true;
+  }
+  const head = rec ? Array.from(rec.subarray(0, 12)).map((b) => b.toString(16).padStart(2, "0")).join(" ") : "";
+  return {
+    ok: !!rec,
+    code: 0,
+    status: "",
+    server: "",
+    head,
+    ms: Date.now() - t0,
+    hsMs: tHdr,
+    bytes: wrote + (rec ? rec.length + 5 : 0),
+    err: rec ? "" : "short",
+  };
 }

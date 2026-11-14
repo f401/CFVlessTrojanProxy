@@ -1,5 +1,7 @@
 import { errMsg, withTimeout } from "../core/util";
 import { probeHttp80 } from "../core/http80";
+import { probeRaw } from "../core/tlsprobe";
+import { probeTls } from "../core/tlsprobe";
 import { connect } from "cloudflare:sockets";
 
 import { S } from "../core/state";
@@ -296,6 +298,35 @@ export async function debug(c: UserCtx): Promise<Response> {
       const q = new URLSearchParams({ h: ph, r: pr, p: pp });
       const resp = await withTimeout(stub.fetch("https://meter/probe?" + q.toString()), 4000);
       const out = (await withTimeout(resp.json(), 3000)) as Record<string, unknown>;
+      return json({ ok: true, probe: out });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
+  // 诊断：只发 ClientHello / 只读首个记录，不碰密码学。
+  // 用来区分「CPU 上限装不下握手」与「stream 读泵本身太贵」。
+  if (url.searchParams.get("raw")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const rh = String(url.searchParams.get("raw"));
+    const rr = url.searchParams.get("r") || "";
+    const st = url.searchParams.get("stage") || "sh";
+    try {
+      const out = await withTimeout(probeRaw(rh, rr, st), 6000);
+      return json({ ok: true, raw: out });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
+  // 诊断：在**请求路径**里直接跑完整握手（不经 DO），用来看免费额度到底卡在哪
+  if (url.searchParams.get("tlsnow")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const th = String(url.searchParams.get("tlsnow"));
+    const tr = url.searchParams.get("r") || "";
+    const tp = url.searchParams.get("p") || "/";
+    try {
+      const out = await probeTls(th, tp, tr);
       return json({ ok: true, probe: out });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
