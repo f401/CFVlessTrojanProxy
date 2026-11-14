@@ -11,7 +11,7 @@ import { withTimeout } from "../core/util";
 import { logErr } from "../nodes/metrics";
 import { nsFail } from "../nodes/stat";
 import { SEL } from "../px/selector";
-import { cfHttpCode, refreshCfHttp } from "./cfverdict";
+import { refreshCfHttp } from "./cfverdict";
 import { checkTarget, dial, dial4, isCfHost, isV6Literal, parseProxyIp } from "./dial";
 import { pxDecision } from "./pxhook";
 
