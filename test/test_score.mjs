@@ -1956,5 +1956,32 @@ ok("PageView 可构造", typeof W.PageView === "function", "PageView");
   // 第 60 组：无状态码（连不上/RST）必须归 unknown，不能落到 ipfam
   ok("全失败无状态码 → unknown", W.tfClass([{ ok: false }, { ok: false }]) === "unknown");
   ok("有状态码但全 4xx 仍按字节分层", W.tfClass([{ ok: false, status: 403, bytes: 4 }]) === "ipfam");
+  
+  // 第 61 组：穷举各种采样组合，验证「业务 4xx 永不写封禁」这条不变量
+  {
+    const A = [
+      { name: "200", r: { ok: true, status: 200, bytes: 45290 } },
+      { name: "403tiny", r: { ok: false, status: 403, bytes: 4 } },
+      { name: "403big", r: { ok: false, status: 403, bytes: 265 } },
+      { name: "404", r: { ok: false, status: 404, bytes: 0 } },
+      { name: "dead", r: { ok: false } },
+    ];
+    let combos = 0, bans = 0, badBan = 0, escOnOk = 0, noEscOnFail = 0;
+    for (const a of A) for (const b of A) for (const c of A) {
+      const rows = [a.r, b.r, c.r];
+      const v = W.tfClass(rows);
+      const esc = W.tfEscalate(v);
+      const has200 = rows.some((x) => x.ok && x.status === 200);
+      combos++;
+      if (v === "chan") bans++;                      // chan 是唯一会写 state=2 的分支
+      if (v === "chan" && !has200) badBan++;         // 有 200 才允许封禁
+      if (v === "ok" && esc !== "none") escOnOk++;   // ok 不换出口
+      if (!has200 && esc !== "rotate") noEscOnFail++; // 没有 200 必须继续换出口
+    }
+    ok("穷举 125 种采样组合", combos === 125);
+    ok("封禁只可能出现在 chan", bans > 0 && badBan === 0);
+    ok("ok 不触发换出口", escOnOk === 0);
+    ok("没有任何 2xx 时一律继续换出口（不写封禁）", noEscOnFail === 0);
+  }
   console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
