@@ -68,7 +68,7 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
   // 直连也算一条通道：DO 的出口族与中继不同，常常正好一个 403 一个 200（真混采样）
   const dq = "https://meter/tf?h=" + encodeURIComponent(host) + "&r=";
   const dres = (await withTimeout(stub0(c).fetch(dq), 8000)) as Response | undefined;
-  const direct = dres ? ((await withTimeout(dres.json(), 4000)) as { ok: boolean; status?: number; ms?: number }) : { ok: false };
+  const direct = dres ? ((await withTimeout(dres.json(), 4000)) as { ok: boolean; status?: number; bytes?: number; ms?: number }) : { ok: false };
   const q =
     "https://meter/tfb?h=" + encodeURIComponent(host) + "&r=" + encodeURIComponent(ips.map((x) => x + ":443").join(","));
   const stub = stub0(c);
@@ -76,8 +76,8 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
   const body = r
     ? ((await withTimeout(r.json(), 5000)) as { rows?: Array<{ relay: string; ok: boolean; status?: number; ms?: number }> })
     : { rows: [] };
-  const rows = (body.rows || []) as Array<{ relay: string; ok: boolean; status?: number; ms?: number }>;
-  if (direct.ok || (direct as { status?: number }).status) rows.unshift({ relay: "direct", ok: !!direct.ok, status: direct.status, ms: direct.ms });
+  const rows = (body.rows || []) as Array<{ relay: string; ok: boolean; status?: number; bytes?: number; ms?: number }>;
+  if (direct.ok || (direct as { status?: number }).status) rows.unshift({ relay: "direct", ok: !!direct.ok, status: direct.status, bytes: direct.bytes, ms: direct.ms });
   const okN = rows.filter((x) => x.ok && x.status === 200).length;
   const badN = rows.filter((x) => (x.status || 0) >= 400).length;
   const verdict = tfClass(rows as Array<{ ok: boolean; status?: number; bytes?: number }>);
