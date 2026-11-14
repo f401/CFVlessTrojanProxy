@@ -41,7 +41,11 @@ const TFB_AT: Map<string, number> = new Map();
 const TFB_N: Map<string, number> = new Map();
 
 /** 每轮最多挑一个「最近被怀疑」的站点做 2 条中继的实测（1 DO 请求 + 2 子请求）。 */
+const TFB_V: Map<string, string> = new Map();
 async function tfbRound(env: Env): Promise<void> {
+  const now0 = Date.now();
+  // 站点过期就三张表一起清，避免 TFB_AT/TFB_N 只增不减
+  for (const [h, t] of S.needPx) if (t <= now0) { S.needPx.delete(h); TFB_AT.delete(h); TFB_N.delete(h); TFB_V.delete(h); }
   const now = Date.now();
   for (const [host, until] of S.needPx) {
     if (until <= now) continue;

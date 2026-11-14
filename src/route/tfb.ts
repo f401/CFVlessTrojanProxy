@@ -4,6 +4,7 @@ import { S } from "../core/state";
 import { withTimeout } from "../core/util";
 import { vAt, vSet, vSetState } from "./verdict";
 import { logErr } from "../nodes/metrics";
+const lastV: Map<string, string> = new Map();
 
 /** 兜底中继：本 isolate 还没跑过 cron 时 S.alive 为空，用几个已知可用的顶一下。 */
 const SEED = ["185.253.117.147", "45.136.117.194", "91.215.154.80"];
@@ -91,6 +92,9 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
     else if (row.ok && row.status === 200) vSet(host, ip === "direct" ? "d" : "r:" + ip, 200, Number(row.ms || 0), 1);
   }
   const escalate = tfEscalate(verdict);
-  logErr(`tfb ${host} ${verdict} ok=${okN} bad=${badN} esc=${escalate} n=${rows.length}`);
+  const tag = verdict + "/" + escalate;
+  const same = lastV.get(host) === tag;
+  lastV.set(host, tag);
+  if (!same) logErr(`tfb ${host} ${verdict} ok=${okN} bad=${badN} esc=${escalate} n=${rows.length}`);
   return Response.json({ host, probed: rows.length, okN, badN, verdict, escalate, rows });
 }
