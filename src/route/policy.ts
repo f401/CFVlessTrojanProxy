@@ -28,6 +28,31 @@ export interface Choice {
 
 /** 选路策略：纯内存、可单测；所有「哪条通道」的判断都收敛在这里 */
 export class Policy {
+  /**
+   * 冷启动钉住表：站点 → { 中继 IP, 到期时间 }。
+   *
+   * 为什么要它：新 isolate 里某个站点还没有任何证据时，并发进来的多条连接会各自按健康度顺序选，
+   * 等于同时赌好几条中继；任一条出口恰好是 v6/脏出口就丢一批请求。钉住一条（60 秒）后，冷启动只
+   * 暴露在**一条**中继的波动下；等第一条整页证据回来，后续由粘性排序与负面记忆接管。
+   */
+  private pin = new Map<string, { ip: string; until: number }>();
+
+  /**
+   * 功能：冷启动时为站点挑一条固定中继，60 秒内复用同一条。
+   * @param host 目标站
+   * @param list 候选通道（已排序）
+   * @param now 当前时间戳
+   * @returns 选中的中继 IP（候选为空时返回空串）
+   */
+  pinFor(host: string, list: string[], now = Date.now()): string {
+    const cur = this.pin.get(host);
+    if (cur && cur.until > now && list.includes(cur.ip)) return cur.ip;
+    const pick = list[0] || "";
+    if (pick) this.pin.set(host, { ip: pick, until: now + 60_000 });
+    else this.pin.delete(host);
+    return pick;
+  }
+
   /** 通道是否可用：既没有站点级封禁，也没有通配级封禁（vBad 自身会回退到通配） */
   chanOk(ip: string, host = ""): boolean {
     return !(host && vBad(host, "r:" + ip)) && !vBad("*", "r:" + ip);
@@ -89,9 +114,16 @@ export class Policy {
     if (c.cfHost) {
       // CF 托管目标：直连/CF 中继都是 CF→CF，会把客户端出口原样透传，能改判的只有非 CF 主机。
       // 本出口的 fetch 状态码只作辅助证据（CF→CF 的 fetch 常返回 200，隧道却 403）。
+      const code = cfHttpCode(c.host);
+      // 冷启动：该站点没有任何通道证据、本出口也没拿到状态码 → 钉住单条中继 60 秒（理由见 pinFor）
+      if (!code && !stick.some((ip) => vAt(c.host, "r:" + ip) > 0)) {
+        // 钉住的那条一旦进了负面记忆就立刻换下一条：否则一次坏 egress 会在 60 秒里吞掉整个站点
+        const pool = (nonCf.length ? nonCf : stick).filter((ip) => !JUDGE.negOn(c.host, ip));
+        const cip = this.pinFor(c.host, pool.length ? pool : nonCf.length ? nonCf : stick);
+        if (cip) return { chan: { kind: "r", ip: cip }, why: "cold-pin" };
+      }
       if (okOnes.length) return { chan: { kind: "r", ip: okOnes[0] }, why: "cf-ok-relay" };
       if (nonCf.length) return { chan: { kind: "r", ip: nonCf[0] }, why: "cf-noncf" };
-      const code = cfHttpCode(c.host);
       if (code === 403 && stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "http403" };
       if (code === 200) return { chan: DIRECT, why: "http200" };
       if (stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "cf-any" };
