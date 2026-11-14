@@ -17,6 +17,7 @@ export {
   trojanPasswordOf,
 } from "./views/sub";
 export { SUBVIEW, SubscriptionView } from "./views/subview";
+export { ROUTES, RouteTable } from "./routes/table";
 export { loadRtt, rttLearn, rttMark } from "./nodes/metrics";
 export { subHeaders, effectiveQuota } from "./core/quota";
 export { S } from "./core/state";

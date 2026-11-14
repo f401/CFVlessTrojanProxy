@@ -2,11 +2,9 @@ import { errMsg } from "./core/util";
 
 import { handleUpgrade } from "./proxy/session";
 import { health } from "./routes/health";
-import { logs } from "./routes/logs";
 import { runCron } from "./routes/cron";
-import { subscription } from "./routes/subscription";
 import { admin } from "./routes/admin";
-import { proxyip, debug } from "./routes/tools";
+import { ROUTES } from "./routes/table";
 
 import { loadRtt, logErr } from "./nodes/metrics";
 
@@ -75,36 +73,25 @@ export default {
         S.meterCache.delete(id);
       }
 
-      switch (sub) {
-        case "":
-        case "cl":
-        case "pcl":
-        case "sb":
-        case "psb":
-        case "ty":
-        case "pty":
-        case "stats": {
-          // 只有订阅/统计需要 RTT 与地区列表：/logs、/debug 不再白读 KV
-          const learned = await loadRtt(env, id);
-          const regions = await regionListAsync(env);
-          return subscription({ ...base, id, learned, regions }, sub === "" ? "page" : sub);
-        }
+      // 路由表分发：表决定「要不要先推增量 / 读 RTT」，组装根只负责按表调用
+      const def = ROUTES.route(sub);
+      if (!def) return new Response("Not Found", { status: 404 });
 
-        case "logs": {
-          return logs({ ...base, id });
-        }
-
-        case "proxyip": {
-          return proxyip({ ...base, id });
-        }
-
-        case "debug": {
-          return debug({ ...base, id });
-        }
-
-        default:
-          return new Response("Not Found", { status: 404 });
+      // 订阅 / 看用量之前：把本 isolate 还没送达的增量推给 DO，并跳过 60s 读缓存。
+      // 用 pendFlush 自带的 30 秒节流，不再 force —— 订阅刷新再快也不该每 10 秒打一次 DO；
+      // 而且 readStats 会把尚未推上去的 S.pend 直接加回来，数字本来就是准的。
+      if (env.METER && def.stats) {
+        await pendFlush(env);
+        S.statCache.delete(id);
+        S.meterCache.delete(id);
       }
+
+      if (def.rtt) {
+        const learned = await loadRtt(env, id);
+        const regions = await regionListAsync(env);
+        return def.handle({ ...base, id, learned, regions }, sub);
+      }
+      return def.handle({ ...base, id, learned: {}, regions: [] }, sub);
     } catch (e) {
       const msg = errMsg(e);
       logErr(`router: ${msg}`);

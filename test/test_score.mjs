@@ -1878,5 +1878,11 @@ ok("Attacher 可构造", typeof W.Attacher === "function", "Attacher");
 // ═══ 第 51 组：SubscriptionView（P6-1）═══
 ok("SubscriptionView 是类实例且可 render()", typeof W.SUBVIEW === "object" && typeof W.SUBVIEW.render === "function", "SUBVIEW");
 ok("SubscriptionView 可构造", typeof W.SubscriptionView === "function", "SubscriptionView");
+// ═══ 第 52 组：路由表（P6-2）═══
+ok("RouteTable 注册了四条用户级路由", W.ROUTES.names().join(",") === "subscription,logs,proxyip,debug", W.ROUTES.names().join(","));
+ok("cl 命中 subscription 且需要 RTT/统计", W.ROUTES.route("cl")?.name === "subscription" && W.ROUTES.needsRtt("cl") && W.ROUTES.needsStats("cl"), "cl");
+ok("裸 /<uuid> 也命中 subscription", W.ROUTES.route("")?.name === "subscription", "empty");
+ok("logs 命中但不需要 RTT", W.ROUTES.route("logs")?.name === "logs" && !W.ROUTES.needsRtt("logs"), "logs");
+ok("未知子路径返回 undefined（404）", W.ROUTES.route("nope") === undefined, "nope");
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
