@@ -104,6 +104,10 @@ export class Judge {
     if (known && e.via === "node") {
       const nip = e.node ? e.node.slice(0, e.node.lastIndexOf(":")) : "";
       this.markNeg(e.host, nip, now);
+      // 通配降权（跨 isolate 有效）：CF 目标的 4 字节 `IPv6` 拒绝页总字节远小于 900 —— 这是这条中继的
+      // **出口地址族**问题，与用户位置无关，因此和其他统计（延迟/成功率）不同，它是可以共享的事实。
+      // 写 `*|r:<ip>` 让别的 isolate 也知道「这条中继对 CF 目标常走 v6」，冷启动时直接绕开。
+      if (e.cf && e.down < 900 && nip) vSetState("*", "r:" + nip, 2, 1);
     }
     if (!known) {
       queueVerify(e.host, chan); // 复核队列（PROBE_REQ=0 时只排队）
