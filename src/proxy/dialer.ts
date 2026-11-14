@@ -56,7 +56,11 @@ export class Dialer {
       }
       if (cfHost) S.cfHost.set(host, Date.now() + 1800000);
     }
-    if (cfHost && !S.vtLoaded && HOOK.vtLoad) await HOOK.vtLoad(env);
+    if (cfHost && !S.vtLoaded && HOOK.vtLoad) {
+      // 冷 isolate 读一次事实能省掉「注定失败的第一次请求」，但首字节不能为它排队：
+      // 最多等 200ms，超时先放行（事实会在后台继续应用，下一条连接就能用上）。
+      await Promise.race([HOOK.vtLoad(env), new Promise<void>((r) => setTimeout(r, 200))]);
+    }
     const win = HOOK.win ? HOOK.win(host) : { d: false, r: false };
     const dirWin = win.d;
     const relWin = win.r;

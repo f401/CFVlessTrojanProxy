@@ -10,6 +10,7 @@ import { PS } from "../route/psfacts";
 import { EG } from "../route/egfacts";
 import { DEAD } from "../route/deadfacts";
 import { FO } from "../core/firstobs";
+import { LAT } from "../core/latobs";
 import { BLK } from "../route/blkfacts";
 
 /** /health：进程自述。带 pageKey 时要求 ?k= */
@@ -33,6 +34,7 @@ cf: FACT.snap(),
     ps: PS.snap(),
     dead: DEAD.snap(),
     first: FO.snap(),
+    lat: LAT.snap(),
     blk: BLK.snap(),
     edge: { seen: S.edge.size, ranked: edgeRank(8).length, err: EDGE_ERR.s },
     colo: (c.cf && c.cf.colo) || "",

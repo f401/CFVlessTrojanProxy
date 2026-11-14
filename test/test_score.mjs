@@ -2676,5 +2676,21 @@ console.log("\n86) commitFact 单一裁决：ps 由 judge 写入");
   eq("影子与生产结论一致（无 cfDiff）", W.cntView().cfDiff || 0, c0);
 }
 
+
+console.log("\n87) 延迟观测：p95all / p95ok / good3s");
+{
+  W.LAT.clear();
+  for (let i = 0; i < 10; i++) W.LAT.note(true, 500 + i * 100);
+  W.LAT.note(true, 9000); // 一条很慢的成功
+  for (let i = 0; i < 9; i++) W.LAT.note(false, 60); // 失败页很快
+  const s1 = W.LAT.snap();
+  eq("样本数", s1.n, 20);
+  eq("good3s 只算成功且 ≤3s", s1.good3s, 0.5);
+  eq("p95ok 抓到那条 9 秒", s1.p95ok >= 9000, true);
+  eq("p95all 不高于 p95ok（失败页更快）", s1.p95all <= s1.p95ok, true);
+  W.LAT.clear();
+  eq("清空后归零", W.LAT.snap().n, 0);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

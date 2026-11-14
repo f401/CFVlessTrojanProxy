@@ -5,6 +5,7 @@ import { errMsg } from "../core/util";
 import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { FO } from "../core/firstobs";
+import { LAT } from "../core/latobs";
 import { nsLatency, nsOk, nsSpeed, nsStall } from "../nodes/score";
 import { markSeedDirty } from "../px/seed";
 import { S } from "../core/state";
@@ -302,6 +303,8 @@ export class Connection {
         cnt(this.node ? "node" : "direct");
         // 前 3 条用户连接的质量：低流量客户端几乎每条请求都落冷 isolate，这是唯一能看到的「第一眼」
         FO.note(this.down);
+        // 延迟观测：成功口径是「拿到内容」，不是 2xx（业务 4xx 也是内容）
+        LAT.note(this.down > 64, Date.now() - this.t0);
         // 真实流量的"成功"样本：可用性(pFail/availOf)、面板成功率全靠它。
         // 早先只有失败才记账（nsFail），成功只走 SEL.resetFail()，而那里
         // 第一行就是 `if (!S.pxFailSeen) return` —— 健康节点永远 n=0，
