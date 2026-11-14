@@ -165,10 +165,52 @@ export interface PoolRefill {
  * @param {object} env Worker 环境
  * @returns {Promise<PoolRefill>} 合并后的候选池与各源统计
  */
-export async function refillPool(_env: Env): Promise<PoolRefill> {
+/**
+ * 源健康度（进程内）：记录每个源连续失败次数与冷却截止时间。
+ * 镜像源经常整站挂掉或被限流，逐个重试会白烧子请求预算（免费计划 50 次/轮）。
+ * 只影响「先抓谁」，不删除源：全部冷却时仍会按冷却到期时间全部重试。
+ */
+const SRC_BAD = new Map<string, { n: number; until: number }>();
+
+/** 允许 env.poolSrc 覆盖源列表（逗号或空白分隔），默认用内置表 */
+export function poolSources(env: Env): string[] {
+  const custom = String((env as { poolSrc?: string }).poolSrc || "").trim();
+  if (!custom) return POOL_SOURCES;
+  const list = custom.split(/[,\s]+/).filter((x) => /^https?:\/\//.test(x));
+  return list.length ? list : POOL_SOURCES;
+}
+
+/** 按健康度排序：可用源在前，连续失败的源排最后但仍会被重试 */
+export function srcRank(env: Env): string[] {
+  const now = Date.now();
+  return poolSources(env)
+    .map((src, i) => {
+      const h = SRC_BAD.get(src);
+      const bad = !!h && h.n >= 2 && h.until > now;
+      return { src, i, bad, until: h ? h.until : 0 };
+    })
+    .sort((a, b) => (a.bad === b.bad ? (a.bad ? a.until - b.until : a.i - b.i) : a.bad ? 1 : -1))
+    .map((x) => x.src);
+}
+
+/** 记录一次抓取结果：成功清零，失败累加（连续 2 次起冷却） */
+export function srcNote(src: string, ok: boolean): void {
+  const h = SRC_BAD.get(src) || { n: 0, until: 0 };
+  if (ok) SRC_BAD.set(src, { n: 0, until: 0 });
+  else SRC_BAD.set(src, { n: h.n + 1, until: Date.now() + 3600_000 });
+}
+
+/** 源健康快照（调试用） */
+export function srcHealth(): Record<string, { n: number; until: number }> {
+  const out: Record<string, { n: number; until: number }> = Object.create(null);
+  for (const [k, v] of SRC_BAD) out[k] = { n: v.n, until: v.until };
+  return out;
+}
+
+export async function refillPool(env: Env): Promise<PoolRefill> {
   const seen = new Map<string, PoolEntry>();
   const sources: Record<string, { lines: number; ok: number }> = Object.create(null);
-  for (const src of POOL_SOURCES) {
+  for (const src of srcRank(env)) {
     let lines = 0;
     const before = seen.size;
     try {
@@ -195,6 +237,7 @@ export async function refillPool(_env: Env): Promise<PoolRefill> {
       lines = -1;
     }
     sources[src] = { lines, ok: seen.size - before };
+    srcNote(src, lines >= 0);
   }
   for (const h of EXTRA_HOSTS) {
     // seen 的键是 "ip:port"：以前用不带端口的 h 去重，永远判不存在，

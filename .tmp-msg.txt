@@ -1,1 +1,1 @@
-refactor(site): 站点族键通用化 + 订阅按客户端实测的 url-test 组（7.40）
+refactor(sub): 删除 X_RULES 与 ?x=1 站点级规则，订阅只留通用实测组（7.41）
