@@ -24,14 +24,38 @@ const UA =
 const DB: { p: Promise<unknown> | null } = { p: null };
 
 function db(): Promise<unknown> {
-  if (!DB.p) DB.p = TrustedCert.databaseFromPEM(ROOTS).catch(() => ROOTS);
+  // 根库解析在 DO 里可能挂住（实测 dbt 端点 10s 无响应），用 1.2s 计时器兜底退回原始 PEM 字符串：
+  // subtls 在跳过校验时并不需要解析结果，正常路径下解析是 0ms。
+  if (!DB.p)
+    DB.p = Promise.race([
+      TrustedCert.databaseFromPEM(ROOTS).catch(() => ROOTS),
+      new Promise((res) => setTimeout(() => res(ROOTS), 1200)),
+    ]);
   return DB.p;
 }
 
 const EMPTY: TlsProbeResult = { ok: false, code: 0, status: "", server: "", head: "", ms: 0, hsMs: 0, bytes: 0, err: "" };
 
-export async function probeTls(host: string, path = "/", relay = ""): Promise<TlsProbeResult> {
+// 真实计时器：Worker 里 Date.now() 在一次同步 CPU 段内是冻结的（只在 I/O 边界前推），
+// 所以「等数据」这种纯等待必须用 setTimeout 竞速，否则永远等不到截止时间（这就是探测一直 timeout 的原因）。
+function race<T>(p: Promise<T>, ms: number, onEnd: () => void): Promise<T | undefined> {
+  return Promise.race([
+    p.catch(() => undefined),
+    new Promise<undefined>((res) => setTimeout(() => { onEnd(); res(undefined); }, ms)),
+  ]);
+}
+
+export async function probeTls(
+  host: string,
+  path = "/",
+  relay = "",
+  mark?: (stage: string) => void,
+): Promise<TlsProbeResult> {
   const t0 = Date.now();
+  const mk = (x: string) => {
+    if (mark) mark(x);
+  };
+  mk("start");
   // 硬截止：调用方（DO / 请求路径）都有很紧的 CPU 上限，探测不能把请求拖死
   const hardEnd = t0 + 3000;
   const [rHost, rPort] = relay ? relay.split(":") : [host, "443"];
@@ -44,6 +68,7 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
 
   const chunks: Uint8Array[] = [];
   let ended = false;
+  let stopped = false;
   // 等待者队列（不能只存一个回调：pump 在「检查 chunks 为空」与「登记等待者」之间插入一次 push 时，
   // 单槽 notify 会丢掉唤醒，读函数就永远挂着 —— 这正是探测一直 timeout / 被 CPU 上限打断的原因）
   const waiters: Array<() => void> = [];
@@ -98,9 +123,22 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
         if (ended) return undefined;
         // 先再检查一次，再登记等待者：push 与 drain 都在同一个微任务里完成，不存在丢唤醒窗口
         if (chunks.length) continue;
-        await new Promise<void>((res) => {
-          waiters.push(res);
-        });
+        // 用真实计时器兜底：握手停顿（服务器不回包）时不能无限等，否则调用方只能靠外层超时
+        await race(
+          new Promise<void>((res) => {
+            waiters.push(res);
+          }),
+          1500,
+          () => {
+            stopped = true;
+            try {
+              sock.close();
+            } catch {
+              pumpErr = true;
+            }
+          },
+        );
+        if (stopped) return undefined;
         continue;
       }
       const take = Math.min(c.length, bytes - got);
@@ -112,6 +150,7 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
     return out;
   };
 
+  mk("hs-before");
   const q = new LazyReadFunctionReadQueue(nextChunk);
   const writer = sock.writable.getWriter();
   const writeNet = (data: Uint8Array) => {
@@ -122,9 +161,21 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
 
   let tls: { read(bytes?: number): Promise<Uint8Array | undefined>; write(d: Uint8Array): Promise<void> };
   try {
+    mk("db-before");
     const rootDb = await db();
+    mk("db-after");
     // 必须把 mode 透传给读队列：mode=1 是 PEEK，吞掉一个字节会让 TLS 解析错位（Illegal TLS record type 0x3）
-  tls = await startTls(host, rootDb, (n: number, mode?: ReadMode) => q.read(n, mode), writeNet, {});
+  // 握手同样要有时限：用计时器竞速，超时即关 socket 并返回明确错误（而不是让整次调用被外层掐死）
+  const hs = await race(startTls(host, rootDb, (n: number, mode?: ReadMode) => q.read(n, mode), writeNet, {}), 6000, () => {
+    stopped = true;
+    try {
+      sock.close();
+    } catch {
+      pumpErr = true;
+    }
+  });
+  if (!hs) return { ...EMPTY, err: "handshake-timeout", ms: Date.now() - t0 };
+  tls = hs;
   } catch (e) {
     try {
       sock.close();
@@ -133,26 +184,29 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
     }
     return { ...EMPTY, err: "tls: " + String((e as Error).message).slice(0, 90), ms: Date.now() - t0 };
   }
+  mk("hs-after");
   const hsMs = Date.now() - t0;
 
   const req = `GET ${path} HTTP/1.1\r\nHost: ${host}\r\nUser-Agent: ${UA}\r\nAccept: */*\r\nConnection: close\r\n\r\n`;
   try {
+    mk("write-before");
     await tls.write(new TextEncoder().encode(req));
+    mk("write-after");
   } catch (e) {
     pumpErr = true;
     return { ...EMPTY, err: "write: " + String((e as Error).message).slice(0, 60), ms: Date.now() - t0, hsMs };
   }
 
   let got: Uint8Array = new Uint8Array(0);
-  const deadline = Math.min(Date.now() + 8000, hardEnd);
-  while (Date.now() < deadline && got.length < 4096) {
+  // 每次读取都自带 1.5s 计时器，这里给一个次数上限就足够（Date.now() 在同步段内不走）
+  for (let i = 0; i < 8 && got.length < 4096 && !stopped; i++) {
     const part = await Promise.race([
       tls.read().catch(() => undefined),
       new Promise<undefined>((res) => setTimeout(() => res(undefined), 1500)),
     ]);
     if (!part) {
       if (got.length) break;
-      if (pumpErr || ended) break;
+      if (pumpErr || ended || stopped) break;
       continue;
     }
     const next = new Uint8Array(got.length + part.length);

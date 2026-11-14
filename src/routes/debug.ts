@@ -294,9 +294,10 @@ export async function debug(c: UserCtx): Promise<Response> {
     const pp = url.searchParams.get("p") || "/";
     if (!env.METER) return json({ ok: false, error: "no METER" });
     try {
-      const stub = env.METER.get(env.METER.idFromName(id));
+      const inst = url.searchParams.get("n") || "";
+      const stub = env.METER.get(env.METER.idFromName(inst ? id + "::" + inst : id));
       const q = new URLSearchParams({ h: ph, r: pr, p: pp });
-      const resp = await withTimeout(stub.fetch("https://meter/probe?" + q.toString()), 4000);
+      const resp = await withTimeout(stub.fetch("https://meter/probe?" + q.toString()), 26000);
       const out = (await withTimeout(resp.json(), 3000)) as Record<string, unknown>;
       return json({ ok: true, probe: out });
     } catch (e) {
@@ -339,9 +340,124 @@ export async function debug(c: UserCtx): Promise<Response> {
     if (!env.METER) return json({ ok: false, error: "no METER" });
     const ms = Number(url.searchParams.get("burn") || 50);
     try {
-      const stub = env.METER.get(env.METER.idFromName(id));
+      // 独立实例名：上一次被 CPU 墙打断的请求可能让该实例的串行队列永久 pending
+      const inst = url.searchParams.get("n") || "burn";
+      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
       const resp = await withTimeout(stub.fetch(`https://meter/burn?ms=${ms}`), 15000);
       return json({ ok: true, burn: await resp.json() });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
+  // 读 DO 里记录下来的探测阶段
+  if (url.searchParams.get("stage")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    try {
+      const inst = url.searchParams.get("n") || "";
+      if (!inst) return json({ ok: false, error: "need &n=<inst>" });
+      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
+      const resp = await withTimeout(stub.fetch("https://meter/stage"), 8000);
+      return json({ ok: true, stage: await resp.json() });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
+  // DO 里 setTimeout 是否触发 / 根库解析耗时
+  if (url.searchParams.get("tim") || url.searchParams.get("dbt")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const inst = url.searchParams.get("n") || "t" + Date.now();
+    try {
+      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
+      const path = url.searchParams.get("tim") ? `https://meter/tim?ms=${Number(url.searchParams.get("tim"))}` : "https://meter/dbt";
+      const resp = await withTimeout(stub.fetch(path), 20000);
+      return json({ ok: true, out: await resp.json() });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
+  // 固定迭代量的纯 CPU 循环：量 DO 的真实算力预算（不依赖 Date.now）
+  if (url.searchParams.get("iter")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const n = Number(url.searchParams.get("iter") || 1000000);
+    try {
+      const inst = url.searchParams.get("n") || "it" + Date.now();
+      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
+      const resp = await withTimeout(stub.fetch(`https://meter/iter?n=${n}`), 20000);
+      return json({ ok: true, iter: await resp.json() });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
+  // 跨请求 socket 存活实验：?hold=<host> 建连并发 hello，?cont=1 在下一个请求里读
+  if (url.searchParams.get("hold")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const hh = String(url.searchParams.get("hold"));
+    try {
+      const inst = url.searchParams.get("n") || "hold" + Date.now();
+      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
+      const q = new URLSearchParams({ h: hh });
+      const resp = await withTimeout(stub.fetch("https://meter/hold?" + q.toString()), 15000);
+      return json({ ok: true, hold: await resp.json(), inst });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
+  if (url.searchParams.get("cont")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    try {
+      const inst = url.searchParams.get("n") || "";
+      if (!inst) return json({ ok: false, error: "need &n=<same inst as hold>" });
+      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
+      const resp = await withTimeout(stub.fetch("https://meter/cont"), 20000);
+      return json({ ok: true, cont: await resp.json() });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
+  // DO 里发 ClientHello（不碰密码学）：验证 DO 是否能对外 connect
+  if (url.searchParams.get("draw")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const hh = String(url.searchParams.get("draw"));
+    const rr = url.searchParams.get("r") || "";
+    try {
+      const inst = url.searchParams.get("n") || "raw" + Date.now();
+      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
+      const q = new URLSearchParams({ h: hh, r: rr });
+      const resp = await withTimeout(stub.fetch("https://meter/raw?" + q.toString()), 15000);
+      return json({ ok: true, raw: await resp.json() });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
+  // 纯同步忙等：区分「CPU 预算」与「crypto.subtle 不返回」
+  if (url.searchParams.get("burnjs")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const ms = Number(url.searchParams.get("burnjs") || 20);
+    try {
+      const inst = url.searchParams.get("n") || "js" + Date.now();
+      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
+      const resp = await withTimeout(stub.fetch(`https://meter/burnjs?ms=${ms}`), 20000);
+      return json({ ok: true, burn: await resp.json() });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
+  // 逐项量 DO 里的 WebCrypto API
+  if (url.searchParams.get("crypto")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    try {
+      const inst = url.searchParams.get("n") || "cr" + Date.now();
+      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
+      const resp = await withTimeout(stub.fetch("https://meter/crypto"), 25000);
+      return json({ ok: true, crypto: await resp.json() });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
     }

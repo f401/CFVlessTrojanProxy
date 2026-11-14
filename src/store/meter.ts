@@ -1,5 +1,7 @@
+import ROOTS from "../vendor/roots";
+import { TrustedCert } from "../vendor/subtls";
 import { seal, unseal } from "./index";
-import { probeTls } from "../core/tlsprobe";
+import { probeRaw, probeTls } from "../core/tlsprobe";
 import { probeHttp80 } from "../core/http80";
 
 /* do */
@@ -283,8 +285,52 @@ export class Meter {
       const rr = url.searchParams.get("r") || "";
       const pp = url.searchParams.get("p") || "/";
       if (!/^[a-z0-9.*-]+(\.[a-z0-9*-]+)+$/i.test(hh)) return Response.json({ ok: false, err: "bad host" }, { status: 400 });
-      const out = await probeTls(hh, pp, rr);
+      // 硬兜底：探测内部任何一步挂住，也要在 5 秒内给出答复，并带上最后到达的阶段
+      let stage = "start";
+      const mark = (x: string) => {
+        stage = x;
+      };
+      const out = await Promise.race([
+        probeTls(hh, pp, rr, mark),
+        new Promise<Record<string, unknown>>((res) => setTimeout(() => res({ ok: false, err: "probe-timeout", stage }), 5000)),
+      ]);
       return Response.json(out);
+    }
+    if (p.endsWith("/raw")) {
+      // 诊断：DO 里能不能对外 connect（不碰密码学，只发 ClientHello 读首个记录）
+      const hh = String(url.searchParams.get("h") || "github.com");
+      const rr = url.searchParams.get("r") || "";
+      const out = await probeRaw(hh, rr);
+      return Response.json(out);
+    }
+    if (p.endsWith("/stage")) {
+      const v = await this.st.storage.get("pstage");
+      return Response.json({ stage: v || null });
+    }
+    if (p.endsWith("/tim")) {
+      // 诊断：DO 里 setTimeout 会不会触发（不触发，则所有「计时器竞速」的截止时间都失效）
+      const ms = Math.max(10, Math.min(3000, Number(url.searchParams.get("ms") || 200)));
+      const t0 = Date.now();
+      await new Promise((res) => setTimeout(res, ms));
+      return Response.json({ ok: true, asked: ms, wall: Date.now() - t0 });
+    }
+    if (p.endsWith("/dbt")) {
+      // 诊断：根库解析（subtls 的 databaseFromPEM）能不能在 DO 里及时返回
+      const t0 = Date.now();
+      try {
+        const db = await TrustedCert.databaseFromPEM(ROOTS);
+        return Response.json({ ok: true, wall: Date.now() - t0, roots: Array.isArray(db) ? db.length : -1 });
+      } catch (e) {
+        return Response.json({ ok: false, wall: Date.now() - t0, err: String(e).slice(0, 80) });
+      }
+    }
+    if (p.endsWith("/iter")) {
+      // 固定迭代次数的纯 CPU 循环：不依赖 Date.now()（Worker 里同步段内时间冻结）
+      const n = Math.max(1, Math.min(200000000, Number(url.searchParams.get("n") || 1000000)));
+      const t0 = Date.now();
+      let x = 7;
+      for (let i = 0; i < n; i++) x = (x * 31 + 7) % 1000003;
+      return Response.json({ ok: true, n, wall: Date.now() - t0, x });
     }
     if (p.endsWith("/burn")) {
       // 诊断：量 DO 自己的 CPU 预算（用 digest 循环烧 CPU，返回完成了多少次）
@@ -297,6 +343,59 @@ export class Meter {
         n++;
       }
       return Response.json({ ok: true, n, ms: Date.now() - t0 });
+    }
+    if (p.endsWith("/burnjs")) {
+      // 同步忙等：完全不碰 crypto，用来区分「CPU 预算不够」与「crypto.subtle 不返回」
+      const ms = Math.max(1, Math.min(5000, Number(url.searchParams.get("ms") || 20)));
+      const t0 = Date.now();
+      let x = 7;
+      let n = 0;
+      while (Date.now() - t0 < ms) {
+        for (let i = 0; i < 1000; i++) x = (x * 31 + 7) % 1000003;
+        n++;
+      }
+      return Response.json({ ok: true, n, ms: Date.now() - t0 });
+    }
+    if (p.endsWith("/crypto")) {
+      // 逐项量：随机数 / 单次 digest / HMAC importKey+sign，任一项挂着就说明该 API 在 DO 里不可用
+      const out: Record<string, number | string> = {};
+      let t = Date.now();
+      try {
+        crypto.getRandomValues(new Uint8Array(32));
+        out.random = Date.now() - t;
+      } catch (e) {
+        out.random = "err " + String(e);
+      }
+      t = Date.now();
+      try {
+        const h = await crypto.subtle.digest("SHA-256", new Uint8Array(64));
+        out.digest = Date.now() - t;
+        out.digestLen = h.byteLength;
+      } catch (e) {
+        out.digest = "err " + String(e);
+      }
+      t = Date.now();
+      try {
+        const k = await crypto.subtle.importKey("raw", new Uint8Array(32), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+        out.importKey = Date.now() - t;
+        t = Date.now();
+        await crypto.subtle.sign("HMAC", k, new Uint8Array(16));
+        out.sign = Date.now() - t;
+      } catch (e) {
+        out.sign = "err " + String(e);
+      }
+      t = Date.now();
+      try {
+        const p1 = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+        out.genP256 = Date.now() - t;
+        t = Date.now();
+        await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+        out.genP256b = Date.now() - t;
+        out.hasP1 = p1 ? 1 : 0;
+      } catch (e) {
+        out.genP256 = "err " + String(e);
+      }
+      return Response.json(out);
     }
     if (p.endsWith("/cl")) {
       return Response.json({ cl: this.cl });
