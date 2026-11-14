@@ -35,6 +35,10 @@ export function renderClash(
   // 所以入口偏好交给客户端的 url-test 组实测：这里只提供候选 CF 边缘 IP，
   // 有实测排名（edge:pref）时用它排序，否则用内置的 8 个种子 IP。
   const noEdge = Boolean(manual) || url.searchParams.get("e") === "0";
+  // 通道实测：客户端对该 URL 逐条中继做 url-test（expected-status 200），把「哪条中继真能打通」
+  // 变成端到端实测，而不是服务端靠流量推断（免费计划跑不动 TLS 客户端）。
+  const tuRaw = url.searchParams.get("tu") || "";
+  const tuUrl = /^https:\/\/[^\s"]+$/.test(tuRaw) ? tuRaw : "";
   const ranked = noEdge ? [] : edgeRank(8);
   const edgeIps: string[] = noEdge ? [] : ranked.length ? ranked : X_EDGE_IPS.slice(0, 8);
   const nodes = orderNodes(loadNodes(env, host), learned);
@@ -169,10 +173,24 @@ export function renderClash(
     groups.push(q([...edgeNames, G_TPUT]));
   }
 
+  const G_TU = "📡 通道实测";
+  // 通道实测组：成员是「按中继走」的节点条目，客户端对 tu 指定的 URL 逐条实测，
+  // 只有真能打通（expected-status 200）的通道才算健康 —— 端到端证据，零服务端开销。
+  if (tuUrl && all.length) {
+    groups.push(`  - name: "${G_TU}"`);
+    groups.push("    type: url-test");
+    groups.push(`    url: ${tuUrl}`);
+    groups.push("    expected-status: 200");
+    groups.push("    interval: 180");
+    groups.push("    tolerance: 0");
+    groups.push("    lazy: false");
+    groups.push(q(pick(all, 64)));
+  }
+
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
   groups.push(
-    `    proxies: ["${G_TPUT}", "${G_LAT}"${edgeNames.length ? `, "${G_EDGE}"` : ""}${optX && edgeNames.length ? `, "${G_X}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
+    `    proxies: ["${G_TPUT}", "${G_LAT}"${edgeNames.length ? `, "${G_EDGE}"` : ""}${optX && edgeNames.length ? `, "${G_X}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && all.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
   );
 
   return [

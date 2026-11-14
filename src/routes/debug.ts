@@ -7,11 +7,12 @@ import { diagVerdict, hostKey } from "../nodes/metrics";
 import { nsGet } from "../nodes/score";
 import { cfHttpCode } from "../proxy/cfverdict";
 import { sweepHost } from "../route/sweep";
-import { vAll } from "../route/verdict";
+import { vAll, vState } from "../route/verdict";
 import { vtDelta, vtLoad } from "../route/verdictsync";
 import { cntView } from "../core/counter";
 import { planView } from "../route/budget";
 import { prefsJson } from "../route/prefs";
+import { DIRECT, chanKey } from "../route/channel";
 import { HEALTH } from "../route/relay-health";
 import { verifyInfo } from "../route/verify";
 import { checkTarget, dohQuery, expandV6, httpProbe, isCfHost, resolveAAAA, resolveV4All } from "../proxy/dial";
@@ -21,6 +22,7 @@ import { clSnapshot, restoreUsage } from "../store/index";
 import { adminOnly } from "../edge/auth";
 import { edgeFlush, edgeLoad, edgeNodes, edgeRank, edgeScan } from "../route/edge";
 
+import type { Chan } from "../route/channel";
 import type { RouteCtx } from "../edge/types";
 
 type UserCtx = RouteCtx & { id: string };
@@ -260,6 +262,43 @@ export async function debug(c: UserCtx): Promise<Response> {
     const probed = await edgeScan(env);
     await edgeFlush(env, true);
     return json({ ok: true, probed, rank: edgeRank(5), nodes: edgeNodes(5) });
+  }
+  // 明文 HTTP 诊断：?http=x.com&r=185.253.117.147:80（r 省略=直连）。
+  // :80 的状态码语义因站而异（x.com 直连回 500、经中继常回中继自己的 404），只诊断、不写判定。
+  if (url.searchParams.get("http")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const hh = String(url.searchParams.get("http"));
+    const rr = url.searchParams.get("r") || "";
+    const pp = url.searchParams.get("p") || "/";
+    if (!env.METER) return json({ ok: false, error: "no METER" });
+    try {
+      const stub = env.METER.get(env.METER.idFromName(id));
+      const q = new URLSearchParams({ h: hh, r: rr, p: pp });
+      const out = (await (await stub.fetch("https://meter/http80?" + q.toString())).json()) as Record<string, unknown>;
+      const chan = rr ? ({ kind: "r", ip: rr.split(":")[0] } as Chan) : DIRECT;
+      return json({ ok: true, probe: out, note: "diagnostic only", chan: chanKey(chan), state: vState(hh, chanKey(chan)) });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
+  // 真实 TLS 探测：请求路径只有 10ms CPU，握手交给 DO（DO 也会超限，见 docs/判定验收.md §7）。
+  // 用法：?tls=x.com&r=185.253.117.147:443&p=/
+  if (url.searchParams.get("tls")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const ph = String(url.searchParams.get("tls"));
+    const pr = url.searchParams.get("r") || "";
+    const pp = url.searchParams.get("p") || "/";
+    if (!env.METER) return json({ ok: false, error: "no METER" });
+    try {
+      const stub = env.METER.get(env.METER.idFromName(id));
+      const q = new URLSearchParams({ h: ph, r: pr, p: pp });
+      const out = (await (await stub.fetch("https://meter/probe?" + q.toString())).json()) as Record<string, unknown>;
+      return json({ ok: true, probe: out });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
   }
   if (url.searchParams.get("restore") === "1") {
     const deny = await adminOnly(c);

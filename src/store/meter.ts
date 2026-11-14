@@ -1,4 +1,6 @@
 import { seal, unseal } from "./index";
+import { probeTls } from "../core/tlsprobe";
+import { probeHttp80 } from "../core/http80";
 
 /* do */
 export class Meter {
@@ -131,7 +133,8 @@ export class Meter {
   }
 
   private async handle(req: Request): Promise<Response> {
-    const p = new URL(req.url).pathname;
+    const url = new URL(req.url);
+    const p = url.pathname;
 
     if (p.endsWith("/add")) {
       let d: MeterBody = {};
@@ -265,6 +268,24 @@ export class Meter {
     }
 
     // 只在当前为 0 时回填，天然幂等，重建脚本后能自动恢复历史用量
+    // 明文 HTTP 证据：零 TLS，CPU 几乎为零，DO 里也能跑。
+    if (p.endsWith("/http80")) {
+      const hh = url.searchParams.get("h") || "";
+      const rr = url.searchParams.get("r") || "";
+      const pp = url.searchParams.get("p") || "/";
+      if (!/^[a-z0-9.*-]+(\.[a-z0-9*-]+)+$/i.test(hh)) return Response.json({ ok: false, err: "bad host" }, { status: 400 });
+      return Response.json(await probeHttp80(hh, rr, pp));
+    }
+    // TLS 探测走 DO：请求路径只有 10ms CPU 预算，DO 有独立且大得多的预算。
+    // 一次探测不落盘、不额外写 DO（结果由调用方并入既有批次），不增加 KV 写。
+    if (p.endsWith("/probe")) {
+      const hh = url.searchParams.get("h") || "";
+      const rr = url.searchParams.get("r") || "";
+      const pp = url.searchParams.get("p") || "/";
+      if (!/^[a-z0-9.*-]+(\.[a-z0-9*-]+)+$/i.test(hh)) return Response.json({ ok: false, err: "bad host" }, { status: 400 });
+      const out = await probeTls(hh, pp, rr);
+      return Response.json(out);
+    }
     if (p.endsWith("/cl")) {
       return Response.json({ cl: this.cl });
     }

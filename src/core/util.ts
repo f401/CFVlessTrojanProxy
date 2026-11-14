@@ -1,30 +1,30 @@
-/* 閫氱敤宸ュ叿锛氱紪鐮?鍝堝笇/瀛楄妭澶勭悊/WS 鍙戦€?*/
+﻿/* 闁氨鏁ゅ銉ュ徔閿涙氨绱惍?閸濆牆绗?鐎涙濡径鍕倞/WS 閸欐垿鈧?*/
 export const WS_OPEN = 1;
-export const WS_BUFFER_LIMIT = 1024 * 1024; // 涓嬭鍙戦€佺紦鍐茶秴杩?1MB 灏卞紑濮嬭儗鍘?
-export const WS_STALL_MS = 60000; // 瀹㈡埛绔竴鏃舵敹涓嶅姩寰堝父瑙侊紝缁欏埌 60 绉?
-export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 纭笂闄愶細鍒洜涓哄鎴风鎱㈠氨鎶婁笅杞芥帎浜?
-export const VERSION = "7.13";
+export const WS_BUFFER_LIMIT = 1024 * 1024; // 娑撳顢戦崣鎴︹偓浣虹处閸愯尪绉存潻?1MB 鐏忓崬绱戞慨瀣剹閸?
+export const WS_STALL_MS = 60000; // 鐎广垺鍩涚粩顖欑閺冭埖鏁规稉宥呭З瀵板牆鐖剁憴渚婄礉缂佹瑥鍩?60 缁?
+export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 绾兛绗傞梽鎰剁窗閸掝偄娲滄稉鍝勵吂閹撮顏幈銏犳皑閹跺﹣绗呮潪鑺ュ笌娴?
+export const VERSION = "7.15";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 
 /* ==================================================================
- * 搂1  甯搁噺涓庡伐鍏?
+ * 鎼?  鐢悂鍣烘稉搴′紣閸?
  * ================================================================== */
 
 export const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"));
 
-// 瀵嗙爜缁戝畾鐨勮鍙栵細浼樺厛 env.pwd锛堜腑鎬у悕锛夛紝鍏煎鑰佺殑 env[P_T]
+// 鐎靛棛鐖滅紒鎴濈暰閻ㄥ嫯顕伴崣鏍电窗娴兼ê鍘?env.pwd閿涘牅鑵戦幀褍鎮曢敍澶涚礉閸忕厧顔愰懓浣烘畱 env[P_T]
 export const secretPwd = (env: Env) => String((env && (env.pwd || env[P_T])) || "").trim();
 
-/** 褰卞瓙娴侀噺榛樿姣斾緥锛氬彧鍦ㄣ€屽綋鍓嶈妭鐐规牱鏈笉瓒炽€嶆椂鎵嶆彁鍗囧埌 SC.EXPLORE_MAX */
+/** 瑜板崬鐡欏ù渚€鍣烘妯款吇濮ｆ柧绶ラ敍姘涧閸︺劊鈧苯缍嬮崜宥堝Ν閻愯鐗遍張顑跨瑝鐡掔偨鈧秵妞傞幍宥嗗絹閸楀洤鍩?SC.EXPLORE_MAX */
 export const SHADOW_DEFAULT = 0.05;
 
 /**
- * 瑙ｆ瀽 pxShadow銆備笁澶勶紙閫夋嫨鍣?/ 鎺у埗椤?/ /proxyip锛夊繀椤荤敤鍚屼竴濂楄鍒欙紝
- * 鍚﹀垯闈㈡澘鏄剧ず 10%銆佸疄闄呰窇 5%锛屾垨鑰?pxShadow=0 鏃舵樉绀烘垚 10%銆?
- *   鏈缃?/ 闈炴硶 鈫?榛樿 5%
- *   鏄惧紡 0       鈫?0锛堝叧闂帰绱級
- *   >1           鈫?1锛堝皝椤讹級
+ * 鐟欙絾鐎?pxShadow閵嗗倷绗佹径鍕剁礄闁瀚ㄩ崳?/ 閹貉冨煑妞?/ /proxyip閿涘绻€妞よ崵鏁ら崥灞肩婵傛顫夐崚娆欑礉
+ * 閸氾箑鍨棃銏℃緲閺勫墽銇?10%閵嗕礁鐤勯梽鍛扮獓 5%閿涘本鍨ㄩ懓?pxShadow=0 閺冭埖妯夌粈鐑樺灇 10%閵?
+ *   閺堫亣顔曠純?/ 闂堢偞纭?閳?姒涙顓?5%
+ *   閺勬儳绱?0       閳?0閿涘牆鍙ч梻顓熷赴缁鳖澁绱?
+ *   >1           閳?1閿涘牆鐨濇い璁圭礆
  */
 export function shadowRate(env: Env) {
   const raw = env ? env.pxShadow : undefined;
@@ -35,8 +35,8 @@ export function shadowRate(env: Env) {
 }
 
 /**
- * 鍙€夌殑璇锋眰瓒呮椂淇″彿锛氳繍琛屾椂娌℃湁 AbortSignal.timeout 鏃惰繑鍥?undefined锛堜笉褰卞搷璇锋眰锛夈€?
- * 鍙敤浜?cron / 璇婃柇杩欑被"鎱竴鐐规病鍏崇郴锛屼絾涓嶈兘鏃犻檺绛?鐨勫閮?fetch銆?
+ * 閸欘垶鈧娈戠拠閿嬬湴鐡掑懏妞傛穱鈥冲娇閿涙俺绻嶇悰灞炬濞屸剝婀?AbortSignal.timeout 閺冩儼绻戦崶?undefined閿涘牅绗夎ぐ鍗炴惙鐠囬攱鐪伴敍澶堚偓?
+ * 閸欘亞鏁ゆ禍?cron / 鐠囧﹥鏌囨潻娆戣"閹鳖澀绔撮悙瑙勭梾閸忓磭閮撮敍灞肩稻娑撳秷鍏橀弮鐘绘缁?閻ㄥ嫬顦婚柈?fetch閵?
  */
 export function timeoutSignal(ms: number): AbortSignal | undefined {
   const AS =
@@ -45,9 +45,9 @@ export function timeoutSignal(ms: number): AbortSignal | undefined {
 }
 
 /**
- * 缁?Promise 鍔犺秴鏃讹紝骞跺湪缁撴潫鏃舵竻鎺夊畾鏃跺櫒銆?
- * 鐩存帴鐢?Promise.race 浼氭妸 setTimeout 鐣欏湪閭ｉ噷锛氫竴杞?cron 鎺?60 涓妭鐐癸紝
- * 灏辨槸 60 涓浣欑殑 4 绉掑畾鏃跺櫒锛屾棦鍗?CPU 鍙堟嫋闀胯姹傜敓鍛藉懆鏈熴€?
+ * 缂?Promise 閸旂姾绉撮弮璁圭礉楠炶泛婀紒鎾存将閺冭埖绔婚幒澶婄暰閺冭泛娅掗妴?
+ * 閻╁瓨甯撮悽?Promise.race 娴兼碍濡?setTimeout 閻ｆ瑥婀柇锝夊櫡閿涙矮绔存潪?cron 閹?60 娑擃亣濡悙鐧哥礉
+ * 鐏忚鲸妲?60 娑擃亜顦挎担娆戞畱 4 缁夋帒鐣鹃弮璺烘珤閿涘本妫﹂崡?CPU 閸欏牊瀚嬮梹鑳嚞濮瑰倻鏁撻崨钘夋噯閺堢喆鈧?
  */
 export async function withTimeout<T>(p: Promise<T>, ms: number, msg = "timeout"): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -64,8 +64,8 @@ export async function withTimeout<T>(p: Promise<T>, ms: number, msg = "timeout")
 }
 
 /**
- * 鏈夐檺骞跺彂鍦拌窇寮傛浠诲姟锛氭棦涓嶈 50 涓敤鎴峰悓鏃舵墦 DO锛屼篃涓嶉€€鍖栨垚涓茶銆?
- * 椤哄簭涓嶄繚璇侊紝璋冪敤鏂瑰彧鍏冲績銆屽叏閮ㄥ畬鎴愩€嶃€?
+ * 閺堝妾洪獮璺哄絺閸︽媽绐囧鍌涱劄娴犺濮熼敍姘＆娑撳秷顔€ 50 娑擃亞鏁ら幋宄版倱閺冭埖澧?DO閿涘奔绡冩稉宥夆偓鈧崠鏍ㄥ灇娑撹尪顢戦妴?
+ * 妞ゅ搫绨稉宥勭箽鐠囦緤绱濈拫鍐暏閺傜懓褰ч崗鍐茬妇閵嗗苯鍙忛柈銊ョ暚閹存劑鈧秲鈧?
  */
 export async function eachLimit<T>(list: readonly T[], limit: number, fn: (x: T) => Promise<void>): Promise<void> {
   const n = Math.max(1, Math.min(Math.floor(limit) || 1, list.length));
@@ -79,14 +79,14 @@ export async function eachLimit<T>(list: readonly T[], limit: number, fn: (x: T)
   await Promise.all(Array.from({ length: n }, worker));
 }
 
-// 鍗忚鍚嶅湪杩愯鏃舵嫾瑁咃紝婧愮爜閲屼笉鍑虹幇鏄庢枃锛屾贩娣嗗悗涔熶笉浼氭畫鐣?
+// 閸楀繗顔呴崥宥呮躬鏉╂劘顢戦弮鑸靛鐟佸拑绱濆┃鎰垳闁插奔绗夐崙铏瑰箛閺勫孩鏋冮敍灞捐穿濞ｅ棗鎮楁稊鐔剁瑝娴兼碍鐣悾?
 export const P_V = String.fromCharCode(118, 108, 101, 115, 115); // 118 108 101 115 115
 export const P_T = String.fromCharCode(116, 114, 111, 106, 97, 110); // 116 114 111 106 97 110
 
 /**
- * 瀛楄妭鏁扮粍 鈫?灏忓啓鍗佸叚杩涘埗瀛楃涓层€?
- * @param {Uint8Array|ArrayBuffer|number[]} u8 瀛楄妭搴忓垪
- * @returns {string} 鍗佸叚杩涘埗涓诧紝闀垮害涓哄瓧鑺傛暟 脳 2
+ * 鐎涙濡弫鎵矋 閳?鐏忓繐鍟撻崡浣稿彋鏉╂稑鍩楃€涙顑佹稉灞傗偓?
+ * @param {Uint8Array|ArrayBuffer|number[]} u8 鐎涙濡惔蹇撳灙
+ * @returns {string} 閸椾礁鍙氭潻娑樺煑娑撹绱濋梹鍨娑撳搫鐡ч懞鍌涙殶 鑴?2
  */
 export function toHex(u8: Uint8Array) {
   let s = "";
@@ -95,9 +95,9 @@ export function toHex(u8: Uint8Array) {
 }
 
 /**
- * 鎶?WebSocket 娑堟伅/ArrayBuffer/TypedArray 缁熶竴鎴?Uint8Array銆?
- * @param {unknown} d 鍘熷娑堟伅浣?
- * @returns {Uint8Array} 瀛楄妭瑙嗗浘
+ * 閹?WebSocket 濞戝牊浼?ArrayBuffer/TypedArray 缂佺喍绔撮幋?Uint8Array閵?
+ * @param {unknown} d 閸樼喎顫愬☉鍫熶紖娴?
+ * @returns {Uint8Array} 鐎涙濡憴鍡楁禈
  */
 export function toU8(d: unknown) {
   if (d instanceof Uint8Array) return d;
@@ -108,9 +108,9 @@ export function toU8(d: unknown) {
 }
 
 /**
- * 16 瀛楄妭 鈫?鏍囧噯 UUID 瀛楃涓诧紙8-4-4-4-12锛夈€?
- * @param {Uint8Array} b 闀垮害鑷冲皯 16 鐨勫瓧鑺傛暟缁?
- * @returns {string} 灏忓啓 UUID
+ * 16 鐎涙濡?閳?閺嶅洤鍣?UUID 鐎涙顑佹稉璇х礄8-4-4-4-12閿涘鈧?
+ * @param {Uint8Array} b 闂€鍨閼峰啿鐨?16 閻ㄥ嫬鐡ч懞鍌涙殶缂?
+ * @returns {string} 鐏忓繐鍟?UUID
  */
 export function uuidFromBytes(b: Uint8Array) {
   const h = toHex(b);
@@ -118,18 +118,18 @@ export function uuidFromBytes(b: Uint8Array) {
 }
 
 /**
- * 鍚?WebSocket 鍙戦€佹暟鎹紱杩炴帴宸插叧闂垨鍙戦€佸け璐ユ椂闈欓粯蹇界暐銆?
- * @param {WebSocket} ws 鐩爣杩炴帴
- * @param {Uint8Array|ArrayBuffer} data 寰呭彂閫佹暟鎹?
+ * 閸?WebSocket 閸欐垿鈧焦鏆熼幑顕嗙幢鏉╃偞甯村鎻掑彠闂傤厽鍨ㄩ崣鎴︹偓浣搞亼鐠愩儲妞傞棃娆撶帛韫囩晫鏆愰妴?
+ * @param {WebSocket} ws 閻╊喗鐖ｆ潻鐐村复
+ * @param {Uint8Array|ArrayBuffer} data 瀵板懎褰傞柅浣规殶閹?
  * @returns {void}
  */
-export const WS_MSG_MAX = 256 * 1024; // 鍗曞抚涓婇檺锛欳F 瀵硅秴澶?WS 娑堟伅浼氱洿鎺ユ柇閾?
+export const WS_MSG_MAX = 256 * 1024; // 閸楁洖鎶氭稉濠囨閿涙F 鐎电绉存径?WS 濞戝牊浼呮导姘辨纯閹恒儲鏌囬柧?
 
 export function safeSend(ws: WebSocketLike, data: Uint8Array) {
   try {
     if (!ws || ws.readyState !== WS_OPEN) return;
-    // 澶у潡鎷嗗抚锛氫竴娆?send 瓒呰繃绾?1 MB 鏃惰繍琛屾椂鍙兘鐩存帴閲嶇疆杩炴帴锛?
-    // 琛ㄧ幇灏辨槸"涓嬭浇鍒?1 MB 宸﹀彸蹇呮柇"銆?
+    // 婢堆冩健閹峰棗鎶氶敍姘濞?send 鐡掑懓绻冪痪?1 MB 閺冩儼绻嶇悰灞炬閸欘垵鍏橀惄瀛樺复闁插秶鐤嗘潻鐐村复閿?
+    // 鐞涖劎骞囩亸杈ㄦЦ"娑撳娴囬崚?1 MB 瀹革箑褰歌箛鍛焽"閵?
     if (data && data.length > WS_MSG_MAX) {
       for (let i = 0; i < data.length; i += WS_MSG_MAX) {
         ws.send(data.subarray(i, Math.min(i + WS_MSG_MAX, data.length)));
@@ -138,13 +138,13 @@ export function safeSend(ws: WebSocketLike, data: Uint8Array) {
       ws.send(data);
     }
   } catch (e) {
-    /* 瀵圭宸插叧闂紝蹇界暐 */
+    /* 鐎靛湱顏鎻掑彠闂傤叏绱濊箛鐣屾殣 */
   }
 }
 
 /**
- * 閲婃斁涓€娆¤繛鎺ユ寔鏈夌殑鍏ㄩ儴璧勬簮锛堝啓閿?+ 涓婃父 socket锛夈€?
- * @param {object} st 杩炴帴鐘舵€佸璞?
+ * 闁插﹥鏂佹稉鈧▎陇绻涢幒銉﹀瘮閺堝娈戦崗銊╁劥鐠у嫭绨敍鍫濆晸闁?+ 娑撳﹥鐖?socket閿涘鈧?
+ * @param {object} st 鏉╃偞甯撮悩鑸碘偓浣割嚠鐠?
  * @returns {void}
  */
 export function releaseAll(st: { writer: { releaseLock(): void } | null; sock: { close(): void } | null } | null) {
@@ -152,7 +152,7 @@ export function releaseAll(st: { writer: { releaseLock(): void } | null; sock: {
   try {
     if (st.writer) st.writer.releaseLock();
   } catch (e) {
-    /* 浠嶆湁鏈畬鎴愮殑鍐欙紝蹇界暐 */
+    /* 娴犲秵婀侀張顏勭暚閹存劗娈戦崘娆欑礉韫囩晫鏆?*/
   }
   st.writer = null;
   closeQuietly(st.sock);
@@ -160,8 +160,8 @@ export function releaseAll(st: { writer: { releaseLock(): void } | null; sock: {
 }
 
 /**
- * 闈欓粯鍏抽棴 socket锛屽拷鐣ラ噸澶嶅叧闂骇鐢熺殑寮傚父銆?
- * @param {Socket|null} sock 寰呭叧闂殑杩炴帴
+ * 闂堟瑩绮崗鎶芥４ socket閿涘苯鎷烽悾銉╁櫢婢跺秴鍙ч梻顓濋獓閻㈢喓娈戝鍌氱埗閵?
+ * @param {Socket|null} sock 瀵板懎鍙ч梻顓犳畱鏉╃偞甯?
  * @returns {void}
  */
 export function closeQuietly(sock: { close(): void } | null | undefined) {
@@ -173,7 +173,7 @@ export function closeQuietly(sock: { close(): void } | null | undefined) {
 }
 
 /* ==================================================================
- * 搂2  SHA-224锛圱rojan 閴存潈鐢紱WebCrypto 涓嶆彁渚?SHA-224锛?
+ * 鎼?  SHA-224閿涘湵rojan 闁村瓨娼堥悽顭掔幢WebCrypto 娑撳秵褰佹笟?SHA-224閿?
  * ================================================================== */
 
 export const SHA_K = new Uint32Array([
@@ -193,9 +193,9 @@ export const SHA_H224 = new Uint32Array([
 export const rotr = (x: number, n: number) => ((x >>> n) | (x << (32 - n))) >>> 0;
 
 /**
- * 璁＄畻 SHA-224 鎽樿锛堢函 JS 瀹炵幇锛岀敤浜?Trojan 瀵嗙爜鏍￠獙锛夈€?
- * @param {Uint8Array} data 寰呮憳瑕佹暟鎹?
- * @returns {Uint8Array} 28 瀛楄妭鎽樿
+ * 鐠侊紕鐣?SHA-224 閹芥顩﹂敍鍫㈠嚱 JS 鐎圭偟骞囬敍宀€鏁ゆ禍?Trojan 鐎靛棛鐖滈弽锟犵崣閿涘鈧?
+ * @param {Uint8Array} data 瀵板懏鎲崇憰浣规殶閹?
+ * @returns {Uint8Array} 28 鐎涙濡幗妯款洣
  */
 export function sha224Bytes(data: Uint8Array | ArrayBuffer) {
   const data8 = toU8(data);
@@ -266,15 +266,15 @@ export function sha224Bytes(data: Uint8Array | ArrayBuffer) {
 }
 
 /* ==================================================================
- * 搂3  閴存潈
- *    VLESS : env.uuids / env.uuid  鈥斺€?閫楀彿鍒嗛殧鐨?UUID 鍒楄〃
- *    瀵嗙爜缁戝畾: env.pwd            鈥斺€?"uuid:password,uuid:password"
- *            瀵嗙爜鍦?isolate 棣栨浣跨敤鏃剁畻鎴?sha224 鍝堝笇锛屾槧灏勫洖 uuid
+ * 鎼?  闁村瓨娼?
+ *    VLESS : env.uuids / env.uuid  閳ユ柡鈧?闁褰块崚鍡涙閻?UUID 閸掓銆?
+ *    鐎靛棛鐖滅紒鎴濈暰: env.pwd            閳ユ柡鈧?"uuid:password,uuid:password"
+ *            鐎靛棛鐖滈崷?isolate 妫ｆ牗顐兼担璺ㄦ暏閺冨墎鐣婚幋?sha224 閸濆牆绗囬敍灞炬Ё鐏忓嫬娲?uuid
  * ================================================================== */
 
 /**
- * 鎶?catch 鍒扮殑浠绘剰鍊艰浆鎴愪竴鍙ュ彲璇荤殑閿欒鏂囨湰銆?
- * 缁熶竴鍏ュ彛锛岄伩鍏嶆瘡涓?catch 閲屽啓 `errMsg(e)`銆?
+ * 閹?catch 閸掓壆娈戞禒缁樺壈閸婅壈娴嗛幋鎰閸欍儱褰茬拠鑽ゆ畱闁挎瑨顕ら弬鍥ㄦ拱閵?
+ * 缂佺喍绔撮崗銉ュ經閿涘矂浼╅崗宥嗙槨娑?catch 闁插苯鍟?`errMsg(e)`閵?
  */
 export function errMsg(e: unknown, max = 200): string {
   let out: string;
