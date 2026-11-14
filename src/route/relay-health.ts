@@ -32,7 +32,9 @@ export class RelayHealth {
   /** 记一次收尾结果；node 是 host:port，直连时为空 */
   note(node: string, down: number, ok: boolean): void {
     if (!node) return;
-    const ip = node.slice(0, node.lastIndexOf(":"));
+    // 与 ipOf() 同一套解析：裸 IP（没有 :port 后缀）也必须能用 ——
+    // 以前这里用 slice(0, -1)，会把最后一位数字吃掉，记成一个不存在的 IP。
+    const ip = ipOf(node);
     if (!ip) return;
     let s = this.m.get(ip);
     if (!s) {
@@ -120,11 +122,21 @@ export class RelayHealth {
     this.loaded = true;
   }
 
-  /** 超过容量时先丢「最老且没有零字节记录」的行 */
+  /**
+   * 超过容量时先丢「最老且没有零字节记录」的行。
+   * 第一遍跳过 dead>0（那些行还带着「这中继连不上」的结论，有用），
+   * 但必须有第二遍硬兜底：公开池里绝大多数中继一次都没连上过、全是 dead>0，
+   * 只靠第一遍时 drop() 一个都删不掉，Map 会无限长下去。
+   */
   private drop(): void {
     const rows = [...this.m.entries()].sort((a, b) => a[1].at - b[1].at);
     for (const [k, s] of rows) {
       if (s.dead > 0) continue;
+      this.m.delete(k);
+      this.sent.delete(k);
+      if (this.m.size <= MAX_IP) return;
+    }
+    for (const [k] of rows) {
       this.m.delete(k);
       this.sent.delete(k);
       if (this.m.size <= MAX_IP) return;

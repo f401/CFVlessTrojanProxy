@@ -2096,5 +2096,21 @@ console.log("\n68) 探活分段");
   eq("空数组不产生段", String(W.chunks([], 6).length), "0");
   eq("非法 n 退化成 1", String(W.chunks([1, 2, 3], 0).map((x) => x.length).join(",")), "1,1,1");
 }
+// 69) 中继健康表的有界性与键解析
+console.log("\n69) 中继健康表");
+{
+  const h1 = new W.RelayHealth();
+  for (let i = 0; i < 260; i++) h1.note(`10.0.${Math.floor(i / 250)}.${i % 250}:443`, 30000, true);
+  ok("整页中继不会把表撑破", h1.size() <= 200, String(h1.size()));
+  const h2 = new W.RelayHealth();
+  for (let i = 0; i < 260; i++) h2.note(`10.1.${Math.floor(i / 250)}.${i % 250}:443`, 0, false);
+  ok("全是死中继时表也有界（回归）", h2.size() <= 200, String(h2.size()));
+  const h3 = new W.RelayHealth();
+  h3.note("1.2.3.4", 5000, false);
+  eq("裸 IP 也按原样记键", h3.json(3)[0].ip, "1.2.3.4");
+  h3.note("2606:4700::1:443", 30000, true);
+  eq("IPv6:port 切出裸地址", h3.json(3).map((r) => r.ip).join(",").includes("2606:4700::1"), true);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
