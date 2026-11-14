@@ -49,3 +49,17 @@
 - 每一步都必须过：`tools/tsc.js`、`tools/check-arch.js`（<560 行/文件、单向依赖、无顶层 let）、`test_score`、`test_v3`、`smoke`、`sim`、`golden`。
 - 行为等价优先：先改成类、保持逻辑逐位一致，再单独提交「优化」。
 - 任何一步让线上 `/health`、`?vt`、订阅字节发生变化，都必须能一键回滚（提交粒度 ≤1 阶段）。
+
+## 5. P1 实施记录（7.01，提交 `c2ef569`）
+
+| 项 | 改法 |
+| --- | --- |
+| 中继存活度 | 新增 `src/route/relay-health.ts`：`class RelayHealth`（`note/score/rank/json/clear`）+ `HEALTH`；未知 0.5、两次零字节 <0.3 |
+| 偏好视图 | `src/route/prefs.ts` → `class Prefs` + `PREFS`，旧函数保留薄包装 |
+| 中继排序 | `Policy.relays()` 改走 `HEALTH.rank()`：废中继排后面 |
+| 隔离兜底 | `HOOK.veto` 追加 `HEALTH.score(ip) < 0.3`：快死的中继不再被选中 |
+| 非 CF 优先 | `S.relayOff` 删除，改由 `HOOK.nonCfFirst`（Policy 实现）+ selector 现算 `isCfIp` |
+| 证据回灌 | `Judge.onTraffic` 顺手 `HEALTH.note(node, down, ok)` |
+
+验收：`S` 判定字段 9 → 7（`relayOff`、`cfBlock` 已先后消失）；`test_score` 386 全绿；`?prefs` 输出不变；线上 7.01 实测 `api.x.com` 4/4 都拿到 403（改前 4 次里 2 次 timeout）。
+
