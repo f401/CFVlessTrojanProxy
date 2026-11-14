@@ -63,3 +63,15 @@
 
 验收：`S` 判定字段 9 → 7（`relayOff`、`cfBlock` 已先后消失）；`test_score` 386 全绿；`?prefs` 输出不变；线上 7.01 实测 `api.x.com` 4/4 都拿到 403（改前 4 次里 2 次 timeout）。
 
+## 6. P2 实施记录（7.02，提交 `0c711e2`）
+
+| 文件 | 改法 |
+| --- | --- |
+| `src/nodes/stat.ts` | `class NodeStatsTable`（`nsGet/nsDecay/ageFactor/effView/nsOk/nsProbe/nsProbeFail/nsFail/nsSiteFail/nsSpeed/nsStall/nsLatency/pFailOf/availOf/pStallOf/invalidateRank`）+ `STATS` + 同名薄包装；新增 `EffView` 接口 |
+| `src/nodes/score.ts` | `class Scorer`（`scoreParts/costOf/isBlack/isFrozen/freezeNode/usable/rankedCands/candsFor/nextNode/bestFor`）+ `SCORER` + 同名薄包装 |
+
+做法：脚本按「顶层 `export function` 块 → class 方法 + 同名包装」机械转换，函数体一字未动；需要显式返回类型的两处（`effView`、`emptyCloseSuspect`）手工补注解，否则 class 方法与包装会形成循环推断退化成 `void`。
+
+等价性证据：`test_score` 386 / `test_v3` 186 / `smoke` 30 / `sim` 22 / golden 8 全部一致；仿真 2000 节点 **1.14x (1.12–1.15)、命中 66%**，与重构前逐位相同；行数 stat.ts 395 / score.ts 308。
+
+
