@@ -16,7 +16,7 @@ const stub0 = (c: RouteCtx) => c.env.METER.get(c.env.METER.idFromName("tf-probe"
  *  · 全部失败        → unknown（中继或网络问题，不冤枉任何一方）
  */
 /** 判定收敛：200 与 403 并存才升级为 IP 级封锁证据；全 403 说明是站点级，不写封禁。 */
-export function tfVerdict(rows: Array<{ ok: boolean; status?: number }>): "ok" | "chan" | "site" | "unknown" {
+export function tfVerdict(rows: Array<{ ok: boolean; status?: number; bytes?: number }>): "ok" | "chan" | "site" | "unknown" {
   const okN = rows.filter((x) => x.ok && x.status === 200).length;
   const badN = rows.filter((x) => (x.status || 0) >= 400).length;
   return okN > 0 && badN > 0 ? "chan" : okN > 0 ? "ok" : badN > 0 ? "site" : "unknown";
@@ -28,7 +28,19 @@ export function tfVerdict(rows: Array<{ ok: boolean; status?: number }>): "ok" |
  * 改为「换一批出口继续探」（rotate）。业务 4xx（非 CF 目标）保持 none。
  */
 export function tfEscalate(verdict: string): "rotate" | "none" {
-  return verdict === "site" ? "rotate" : "none";
+  return verdict === "site" || verdict === "ipfam" ? "rotate" : "none";
+}
+
+/**
+ * 五态收敛：在 tfVerdict 的「全 4xx」里再按响应字节分一层。
+ * CF 的 IP 族拒绝页 body 只有 4 字节；业务 4xx 会带内容体（实测 265 B JSON）。
+ * 注意：ipfam 与 site 都不写封禁，分错只是标签差异，永不误伤业务 403。
+ */
+export function tfClass(rows: Array<{ ok: boolean; status?: number; bytes?: number }>): string {
+  const base = tfVerdict(rows);
+  if (base !== "site") return base;
+  const tiny = rows.every((x) => (x.status || 0) >= 400 && Number(x.bytes || 0) <= 32);
+  return tiny ? "ipfam" : "site";
 }
 
 export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): Promise<Response> {
@@ -52,7 +64,7 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
   if (direct.ok || (direct as { status?: number }).status) rows.unshift({ relay: "direct", ok: !!direct.ok, status: direct.status, ms: direct.ms });
   const okN = rows.filter((x) => x.ok && x.status === 200).length;
   const badN = rows.filter((x) => (x.status || 0) >= 400).length;
-  const verdict = tfVerdict(rows);
+  const verdict = tfClass(rows as Array<{ ok: boolean; status?: number; bytes?: number }>);
   for (const row of rows) {
     const ip = row.relay.split(":")[0];
     if (verdict === "chan" && row.status === 403) vSetState(host, ip === "direct" ? "d" : "r:" + ip, 2, 1);

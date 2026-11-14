@@ -1,4 +1,4 @@
-import * as W from "./_bundle.mjs";
+﻿import * as W from "./_bundle.mjs";
 import { webcrypto } from "node:crypto";
 
 // Node 18 没有全局 crypto（Workers 有），补一个给 tlsHello() 用
@@ -1937,6 +1937,13 @@ ok("PageView 可构造", typeof W.PageView === "function", "PageView");
   ok("CF 托管站点全 403 → 判为出口族被封，改换一批出口（不写封禁）", W.tfEscalate("site") === "rotate");
   ok("混采仍走 chan，不会被误升级", W.tfEscalate("chan") === "none");
   ok("ok / unknown 不做处置", W.tfEscalate("ok") === "none" && W.tfEscalate("unknown") === "none");
+
+  
+  // 第 58 组：全 4xx 的细分 —— 近零字节是 IP 族拒绝，带内容体是业务拒绝
+  ok("CF 族拒绝页（body 4B）→ ipfam", W.tfClass([{ ok: false, status: 403, bytes: 4 }, { ok: false, status: 403, bytes: 4 }]) === "ipfam");
+  ok("业务 403（265B JSON）→ site", W.tfClass([{ ok: false, status: 403, bytes: 265 }, { ok: false, status: 403, bytes: 265 }]) === "site");
+  ok("混采仍为 chan（不受字节影响）", W.tfClass([{ ok: true, status: 200, bytes: 45290 }, { ok: false, status: 403, bytes: 4 }]) === "chan");
+  ok("ipfam 也只换出口、不写封禁", W.tfEscalate("ipfam") === "rotate");
 
   console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
