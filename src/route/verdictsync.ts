@@ -19,10 +19,15 @@ export function vtDelta(): VtRow[] {
   for (const [k, t] of S.vtPend) {
     const bar = k.indexOf("|");
     if (bar <= 0 || t <= now) continue;
+    if (k.startsWith("*|")) continue; // 通配封锁不外发：见下方 vtDelta 里的说明
     out.push({ k, s: 2, t });
   }
   for (const v of vAll()) {
     if (v.state < 2) continue;
+    // 通配封锁（`*|通道`）**不跨 isolate 共享**：它 30 分钟才过期，几轮突发就能把大半中继在别的
+    // isolate 里标死，可用池变薄后连接反而更差（实测失败率 10% → 50%）。站点级证据（`站点|通道`）
+    // 仍然同步 —— 那才是「这个站点这条通道被封」的可信事实。
+    if (v.t === "*") continue;
     const k = v.t + "|" + v.c;
     const exp = v.at + 1800000;
     if (exp <= now) continue;
@@ -57,8 +62,10 @@ export async function vtLoad(env: Env): Promise<void> {
     const rr = await env.METER.get(env.METER.idFromName(raw)).fetch("https://meter/vt");
     const jj = (await rr.json()) as { vt?: VtRow[]; hl?: Array<{ i: string; o: number; b: number; d: number }> };
     if (Array.isArray(jj.vt)) {
-      vImport(jj.vt);
-      cnt("vtDO", jj.vt.length);
+      // 过滤掉历史版本外发出去的通配封锁：它们已经在别的 isolate 里造成过大面积误封，重新导入只会复发。
+      const rows = jj.vt.filter((r) => !r.k.startsWith("*|"));
+      vImport(rows);
+      cnt("vtDO", rows.length);
     }
     if (Array.isArray(jj.hl)) HEALTH.merge(jj.hl);
   } catch {

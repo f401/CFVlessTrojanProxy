@@ -11,7 +11,7 @@ import { vtAck, vtDelta, vtLoad, vtNack } from "./verdictsync";
 import { chanPref } from "./prefs";
 import { runVerify } from "./verify";
 import { HEALTH, ipOf } from "./relay-health";
-import { JUDGE } from "./judge";
+import { CF_NEG, JUDGE } from "./judge";
 
 export interface Ctx {
   host: string;
@@ -94,7 +94,9 @@ export class Policy {
     // 突发场景下「每条连接都按健康度盲选」会分散到少数 v6 出口/质量差的中继；按站点证据排序能让
     // 已经证明「这个站点走它能成」的同一条中继被反复复用 —— 普适规则，不含站点特判。
     // 短负面记忆（10 分钟）优先于粘性：刚回过异常小响应的通道先让开一条连接，过期自动恢复。
-    const negOf = (ip: string): number => (JUDGE.negOn(c.host, ip) ? 1 : 0);
+    // CF 托管目标额外参考「这条中继对 CF 站点普遍不友好」的通用记录（站点无关，但只在本 isolate）。
+    const negOf = (ip: string): number =>
+      JUDGE.negOn(c.host, ip) || (c.cfHost && JUDGE.negOn(CF_NEG, ip)) ? 1 : 0;
     const stick = usable
       .slice()
       .sort((a, b) => negOf(a) - negOf(b) || vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a));
@@ -124,8 +126,12 @@ export class Policy {
       }
       if (okOnes.length) return { chan: { kind: "r", ip: okOnes[0] }, why: "cf-ok-relay" };
       if (nonCf.length) return { chan: { kind: "r", ip: nonCf[0] }, why: "cf-noncf" };
+      // 「本出口 fetch 得 200」不等于「隧道直连得 200」：fetch 走的是 CF 自己的出口，
+      // 隧道直连可能落在一个对 CF 托管站点不友好的边缘出口上（实测 200 → 隧道 403）。
+      // 所以只有在**隧道直连自己有过成功证据**（vOk(host,"d")）时才选直连；否则宁可走一条已知可用的中继。
+      if (vOk(c.host, "d")) return { chan: DIRECT, why: "direct-ok" };
       if (code === 403 && stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "http403" };
-      if (code === 200) return { chan: DIRECT, why: "http200" };
+      if (code === 200 && !stick.length) return { chan: DIRECT, why: "http200" };
       if (stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "cf-any" };
     }
     return { chan: DIRECT, why: "direct" };

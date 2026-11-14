@@ -13,7 +13,7 @@ import { shadowRate } from "../core/util";
 import { hostKey, hostRank, hostUntried, logErr } from "../nodes/metrics";
 import { MODES, keyOf } from "./const";
 import { pickThom } from "./ts";
-import { aliveList, pxGet } from "./pool";
+import { aliveList, ensurePool, pxGet } from "./pool";
 import { cnt } from "../core/counter";
 import { pxPolicy } from "./probe";
 import {
@@ -356,6 +356,13 @@ export class Selector {
     if (raw.toLowerCase() !== "auto") {
       if (st) st.node = raw;
       return raw;
+    }
+    // 冷 isolate（新机房/刚回收）里内存池是空的，而候选池早就由别的机房提交进了 KV：
+    // 这里按需从代际键拉一次，否则连上的第一个请求只能直连 —— 对 CF 托管目标就是必 403。
+    // 节流 60 秒：池子确实没有时不要每个请求都读一次 KV。
+    if (!S.pool.length && Date.now() - (S.poolAt || 0) > 60000) {
+      S.poolAt = Date.now();
+      await ensurePool(env);
     }
     await pxGet(env);
     const vet = HOOK.veto;

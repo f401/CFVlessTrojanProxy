@@ -1625,7 +1625,9 @@ eq("影子模式统计不一致", W.S.polDiff, 1);
 const pl = W.planRound(1600, 8);
 ok("预算不超过子请求硬上限", pl.adm + pl.vt + pl.edge <= pl.cap, JSON.stringify(pl));
 ok("池子很饿时优先给准入", pl.adm >= 4, JSON.stringify(pl));
-ok("策略默认只放开硬规则（level 1）", W.SC.POLICY === 1);
+// 7.62 起策略全生效（level 2）：判定层已有 660+ 条断言与线上实测背书，
+// 且「隧道直连成功证据 / 中继软降权」这些判据只有全生效时才真正影响选路。
+ok("策略默认全生效（level 2）", W.SC.POLICY === 2);
 ok("policyOn 在 level>=1 时为真", W.policyOn() === true);
 // 第 32 组：决策注入（core HOOK）与影子一致率
 ok("策略实现已注册到 HOOK", typeof W.HOOK.decide === "function");
@@ -1774,7 +1776,12 @@ const d403 = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["
 ok("本出口 403 → 决策绕中继", d403.chan.kind === "r" && d403.why === "http403");
 W.S.cfHttp.set("x.com", { code: 200, colo: "VIE", t: Date.now() });
 const d200 = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5"], legacyWantsRelay: true });
-eq("本出口 200 → 决策直连（少一跳）", d200.chan.kind, "d");
+// 本出口 fetch 的 200 只代表 CF 自己出得去，不代表隧道直连出得去（实测同一时刻 200 → 隧道 403），
+// 所以只有隧道直连自己有过成功证据时才省这一跳。
+eq("本出口 200 但隧道直连无证据 → 仍走已知可用中继", d200.chan.kind, "r");
+W.vSetState("x.com", "d", 1, 1);
+const d200b = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5"], legacyWantsRelay: false });
+ok("隧道直连有过成功证据 → 才省这一跳（direct-ok）", d200b.chan.kind === "d" && d200b.why === "direct-ok");
 W.S.cfHttp.clear();
 ok("没有状态码证据时不会强行推翻池子判断", W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: false }).chan.kind === "d");
 // 第 43 组：差分判据 —— 保护「正常的业务 403」
@@ -2186,19 +2193,19 @@ console.log("\n72) 探活失败过期");
   ok("探活成功立刻清除", W.probeBadSkip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000) === false, "false");
 }
 
-console.log("\n73) 业务 403 不被误升级为通配封锁");
+console.log("\n73) 业务 4xx 不被误升级成封锁");
 {
   const ev = (o) => ({ host: "shop.example.com", cf: true, ok: true, down: 0, up: 0, life: 100, via: "node", node: "198.51.100.9:443", ...o });
   W.vClear();
-  // ① 没有「另一条通道出过整页」的差分证据：265 字节的业务 403 只该被软降权，不写通配
   W.JUDGE.onTraffic(ev({ host: "api.example.com", down: 265 }));
+  eq("业务 403 不写站点级封锁", W.vBad("api.example.com", "r:198.51.100.9"), false);
   eq("业务 403 不写通配封锁", W.vBad("*", "r:198.51.100.9"), false);
-  eq("业务 403 也不写站点级封锁", W.vBad("api.example.com", "r:198.51.100.9"), false);
-  // ② 同一站点另一条通道刚出过整页（bigDiff 成立），4 字节拒绝页（总 600 字节）才允许写通配
   W.JUDGE.onTraffic(ev({ host: "www.example.com", down: 30000, node: "203.0.113.7:443" }));
-  W.JUDGE.onTraffic(ev({ host: "www.example.com", down: 600 }));
-  eq("差分成立时才写通配", W.vBad("*", "r:198.51.100.9"), true);
-  eq("通配封锁对其他站点同样生效", W.vBad("other.example.net", "r:198.51.100.9"), true);
+  W.JUDGE.onTraffic(ev({ host: "www.example.com", down: 260, node: "198.51.100.9:443" }));
+  eq("差分成立也只做软降权（不写通配）", W.vBad("*", "r:198.51.100.9"), false);
+  eq("差分成立时软降权生效", W.JUDGE.negOn("www.example.com", "198.51.100.9"), true);
+  eq("软降权 10 分钟后失效", W.JUDGE.negOn("www.example.com", "198.51.100.9", Date.now() + 601000), false);
 }
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

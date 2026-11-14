@@ -118,6 +118,7 @@ export class AppState {
   poolIdx = 0;
   poolGen = 0;
   poolBuilt = 0;
+  poolAt = 0; // 上次「按需加载候选池」的尝试时间（冷 isolate 首次连接用，节流 60 秒）
 
   // —— 计量 ——
   stats: Map<string, StatsLocal> = new Map();
