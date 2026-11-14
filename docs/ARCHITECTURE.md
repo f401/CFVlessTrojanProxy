@@ -206,7 +206,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Pending` | `src/store/pend.ts` | 待上报账本与 flush 定时器 |
 | `ChanTable` / `StatsTable` | `src/store/chan.ts`、`stats.ts` | 通道会话、用量读缓存 |
 | `Pool` | `src/px/pool.ts` | 池子、准入复测游标、探活坏点表 |
-| `PoolSources` | `src/px/probe.ts` | 源健康度（失败降权、1 小时冷却） |
+| `SourceHealth`（`SOURCES`） | `src/px/probe.ts` | 池子源健康度（连续失败降权、1 小时冷却、不删源） |
 | `SeedStore` | `src/px/seed.ts` | 跨 isolate 的种子表（只存名字） |
 | `Selector` | `src/px/selector.ts` | 站点偏好 + 单层抽样入口 |
 | `Dialer` / `RegionPicker` | `src/proxy/dialer.ts`、`region.ts` | 中继串行拨号、地区选择 |
@@ -215,7 +215,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级 |
 | `RelayHealth`（`HEALTH`） | `src/route/relay-health.ts` | 中继健康表（sent/pending 语义） |
 | `VerifyQueue`（`VERIFY`） | `src/route/verify.ts` | 复核队列与差分判定 |
-| `PoolSources`/`Budget` | `src/route/budget.ts` | 每轮预算分配（准入/复核/入口） |
+| `EdgePrefs`（`EDGE`） | `src/route/edge.ts` | 入口偏好表（探测结果、KV 落盘、订阅条目） |
+| `Budget`（`planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核/入口），纯函数入口 |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表 |
 | `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
