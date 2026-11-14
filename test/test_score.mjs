@@ -2272,20 +2272,29 @@ console.log("\n75) 正记忆优先复用");
   // 新站点没量过这条中继时，用它在别处学到的容量兜底（+200ms 罚），不该退回 1e6 重学一遍
   eq("新站点沿用跨站点学到的中继容量", W.relCostMode("tput", "d.example.com", "203.0.113.12") < 1e6, true);
   eq("本站点亲测比跨站点兜底更便宜", W.relCostMode("tput", "c.example.com", "203.0.113.12") < W.relCostMode("tput", "d.example.com", "203.0.113.12"), true);
+  // 小响应（4 字节 403 页 / 只量到首字节）不能被当成「小带宽」重罚：
+  // 否则 45KB 的正常首页（2.5 秒 = 18KB/s）会比 403 页（4 字节 = 46KB/s）更贵，排序反向。
+  W.relNote("h.example.com", "203.0.113.30", 80, 0);
+  W.relNote("h.example.com", "203.0.113.32", 300, 100);
+  eq("没量到吞吐的样本按首字节+固定罚计", Math.round(W.relCostMode("tput", "h.example.com", "203.0.113.30")), 2080);
+  eq("没量到吞吐的样本比实测很慢的中继更便宜", W.relCostMode("tput", "h.example.com", "203.0.113.30") < W.relCostMode("tput", "h.example.com", "203.0.113.32"), true);
   W.RELPERF.clear();
 }
 
-// 第 38e 组：吞吐模式冷启动逐条轮换中继（否则永远只有一条中继有样本）
+// 第 38e 组：吞吐模式给「本站点还没量过」的中继采样机会（否则永远只有一条中继有样本）
 {
   W.RELPERF.clear();
   const relays = ["203.0.113.21", "203.0.113.22", "203.0.113.23"];
+  // 先量过其中一条：轮换只在「有锚样本」之后做，避免冷站点一上来就试坏机器
+  W.relNote("g.example.com", "203.0.113.21", 200, 1000);
   const picked = [];
-  for (let i = 0; i < 3; i++) {
-    const d = W.decide({ host: "e" + i + ".example.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true, mode: "tput" });
+  for (let i = 0; i < 2; i++) {
+    const d = W.decide({ host: "g.example.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true, mode: "tput" });
     picked.push(d.chan.ip);
-    eq("吞吐冷启动用轮换而不是钉住（why）", d.why, "rel-rot");
+    eq("吞吐模式给未量过的中继采样机会（why）", d.why, "rel-rot");
   }
-  eq("连续三条连接落在不同中继上", new Set(picked).size, 3);
+  eq("轮换不会重复落在已量过的那条上", picked.every((ip) => ip !== "203.0.113.21"), true);
+  eq("两条未量过的中继各被轮到一次", new Set(picked).size, 2);
   W.RELPERF.clear();
   // 延迟模式仍按老办法钉住：首字节场景下「先量三条」的代价比吞吐模式高
   const dl = W.decide({ host: "f.example.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true, mode: "lat" });

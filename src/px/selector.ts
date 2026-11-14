@@ -363,7 +363,14 @@ export class Selector {
     // 节流 60 秒：池子确实没有时不要每个请求都读一次 KV。
     if (!S.pool.length && Date.now() - (S.poolAt || 0) > 60000) {
       S.poolAt = Date.now();
-      await ensurePool(env);
+      // 最多等 700ms：ensurePool 会读 KV 代际键，必要时还要去公开源抓列表，
+      // 实测在冷 isolate 上能拖到 2–4 秒——那是用户已经在等首字节的时间，
+      // 不能整段押在这里。超时就先放行（有 S.alive 就用，没有就走直连），
+      // 让后台继续把池子补齐，下一条连接就能用上。
+      await Promise.race([
+        ensurePool(env).catch(() => 0),
+        new Promise<void>((r) => setTimeout(r, 700)),
+      ]);
     }
     // 池子有了但一条都没探活过：就地起搏几个（5 分钟节流），否则 relays() 只能回空，
     // CF 托管目标会一路直连下去。**不 await**：探活会占 300–2200ms，挡在首字节前面

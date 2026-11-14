@@ -309,7 +309,13 @@ export class Connection {
         if (this.node && this.host && this.down > 0) {
           const ms = Math.max(1, Date.now() - this.tAttach);
           const ip = this.node.includes(":") ? this.node.slice(0, this.node.lastIndexOf(":")) : this.node;
-          HOOK.relPerf?.(this.host, ip, this.ttfb > 0 ? this.ttfb : ms, ((this.down / 1024) * 1000) / ms);
+          const t0 = this.ttfb > 0 ? this.ttfb : ms;
+          // 吞吐只在「真的传了一大段」时才有意义：45KB 的正常首页在 2.5 秒里只有 18KB/s，
+          // 而 4 字节的 403 页在 80 毫秒里也有 46KB/s —— 小样本算出来的速率会反向排序。
+          // 1MB 以上才算「过了慢启动」；其余样本 kbs 记 0（只保留首字节），由代价函数特殊处理。
+          const xfer = Math.max(1, ms - t0);
+          const kbs = this.down >= 1048576 ? (this.down / 1024) * 1000 / xfer : 0;
+          HOOK.relPerf?.(this.host, ip, t0, kbs);
         }
       // 通道证据：交给决策层（弱证据只可能把 unknown 提成 ok；判死只有 probe 能下）
       if (this.host && HOOK.traffic) {

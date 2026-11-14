@@ -147,12 +147,13 @@ export class Policy {
       // 「按站点 × 中继挑最快」就永远学不出来；轮换几条后样本足够，再交给下面的排序去利用。
       const coldSite = !stick.some((ip) => vAt(c.host, "r:" + ip) > 0) && !stick.some((ip) => JUDGE.posOn(c.host, ip));
       const fresh = relSnap(c.host).length;
-      if (c.mode !== "lat" && coldSite && fresh < 2 && stick.length > 1) {
-        // 只在前 3 名里轮换：实测「吞吐最快的两条中继」对 CF 托管站点恰好 0/4 与 2/4 全 403
-        // （出口地址族不同），在整池上轮换等于拿用户的请求去试坏机器；3 条足够量出容量差异。
-        const top = (nonCf.length ? nonCf : stick).slice(0, 3);
-        const list = top.length ? top : stick.slice(0, 3);
-        const ip = list[this.rot++ % list.length] as string;
+      // 只给「本站点一次都没量过」的中继采样机会，而且必须已经有 1 条样本做锚：
+      // 全池轮换会把 0/4、2/4 全 403 的中继塞给用户（实测 tput 2/8），
+      // 完全不轮换又永远学不出容量差异（只剩一条中继有样本）。小步、只朝没试过的走。
+      const seen = new Set(relSnap(c.host).map((r) => r.ip));
+      const unmeasured = stick.filter((ip) => !JUDGE.negOn(c.host, ip) && !seen.has(ip));
+      if (c.mode !== "lat" && coldSite && fresh >= 1 && unmeasured.length > 0) {
+        const ip = unmeasured[this.rot++ % unmeasured.length] as string;
         return { chan: { kind: "r", ip }, why: "rel-rot" };
       }
       // 冷启动：该站点没有任何通道证据、本出口也没拿到状态码、也还没有「站点×中继」样本

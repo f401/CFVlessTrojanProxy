@@ -34,8 +34,13 @@ const MAX = 512;
  */
 export function relCostOf(s: RelSample | null): number {
   if (!s) return 1e6;
-  // 1024 KB / (KB/s) 换成 ms，再加首字节；kbs 下限 32 防止除零与「0.1 KB/s 的假样本」爆表
-  return s.ttfb + 1024_000 / Math.max(32, s.kbs);
+  // kbs <= 0 表示「这次只量到首字节，没量到吞吐」（小响应 / 4 字节 403 页 / 连接被掐断）：
+  // 不能按小带宽重罚——一个 45KB 的正常首页在 2.5 秒里只有 ~18KB/s，
+  // 按 1024KB 折算会得 5.7 万毫秒，比「4 字节 403 页」还贵，排序就会把能用的中继排到最后。
+  // 这种样本只给首字节 + 一个固定惩罚，真正的失败信号由负面记忆（JUDGE.negOn）负责。
+  if (s.kbs <= 0) return s.ttfb + 2000;
+  // 512 KB / (KB/s) 换成 ms，再加首字节；kbs 下限 32 防止除零与「0.1 KB/s 的假样本」爆表
+  return s.ttfb + 512_000 / Math.max(32, s.kbs);
 }
 
 /**
@@ -49,7 +54,8 @@ export function relCostOf(s: RelSample | null): number {
 export function relCostFor(mode: string, s: RelSample | null): number {
   if (!s) return 1e6;
   if (mode === "lat") return s.ttfb;
-  return s.ttfb + 1024_000 / Math.max(32, s.kbs);
+  if (s.kbs <= 0) return s.ttfb + 2000;
+  return s.ttfb + 512_000 / Math.max(32, s.kbs);
 }
 
 /**
