@@ -73,7 +73,7 @@ export {
   hostKey,
   hostUntried,
 } from "./nodes/metrics";
-export { tlsHello, refillPool } from "./px/probe";
+export { tlsHello, refillPool, srcNote, srcRank, srcHealth, poolSources, POOL_SOURCES } from "./px/probe";
 export { regionListAsync } from "./px/regions";
 export { clSnapshot, nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats } from "./store/index";
 export { runCron } from "./routes/cron";

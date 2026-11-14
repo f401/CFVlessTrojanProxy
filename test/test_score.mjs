@@ -1999,5 +1999,22 @@ eq("tfClass 带内容体 → site", W.tfClass([
   { ok: false, status: 403, bytes: 4 },
 ]), "site");
 
+/* ---------- 63. 源健康度：连续失败的源被降权，成功即恢复 ---------- */
+{
+  const envSrc = { poolSrc: "https://a.example/x.txt, https://b.example/y.txt, https://c.example/z.txt" };
+  eq("env.poolSrc 覆盖生效", W.srcRank(envSrc).join(","), "https://a.example/x.txt,https://b.example/y.txt,https://c.example/z.txt");
+  eq("没有 poolSrc 时用内置表", W.srcRank({}).length, 6);
+  W.srcNote("https://a.example/x.txt", false);
+  eq("失败一次仍排第一", W.srcRank(envSrc)[0], "https://a.example/x.txt");
+  W.srcNote("https://a.example/x.txt", false);
+  eq("连续两次失败排到最后", W.srcRank(envSrc)[2], "https://a.example/x.txt");
+  eq("其余源保持原顺序", W.srcRank(envSrc).slice(0, 2).join(","), "https://b.example/y.txt,https://c.example/z.txt");
+  eq("失败源仍会被重试（不删除）", W.srcRank(envSrc).length, 3);
+  W.srcNote("https://a.example/x.txt", true);
+  eq("成功一次立刻恢复首位", W.srcRank(envSrc)[0], "https://a.example/x.txt");
+  eq("env.poolSrc 非法值回退内置表", W.srcRank({ poolSrc: "not-a-url" }).length, 6);
+  eq("health 记录了该源", typeof W.srcHealth()["https://a.example/x.txt"], "object");
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

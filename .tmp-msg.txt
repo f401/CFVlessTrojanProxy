@@ -1,1 +1,1 @@
-feat(pool): 源健康度——连续失败的镜像源自动降权，支持 env.poolSrc 覆盖（7.42）
+feat(debug): /proxyip?src=1 输出源健康与抓取顺序（7.43）
