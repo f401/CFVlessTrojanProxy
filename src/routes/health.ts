@@ -3,6 +3,7 @@ import { S } from "../core/state";
 import { errDup, errHist } from "../nodes/metrics";
 import { EDGE_ERR, edgeRank } from "../route/edge";
 import { cntView } from "../core/counter";
+import { FACT } from "../route/factshadow";
 import { json, forbidden } from "../edge/respond";
 import type { RouteCtx } from "../edge/types";
 
@@ -22,6 +23,7 @@ export function health(c: RouteCtx): Response {
     errors: S.errs.length,
     errsByKind: errHist(),
     errsDup: errDup(),
+    cf: FACT.snap(),
     edge: { seen: S.edge.size, ranked: edgeRank(8).length, err: EDGE_ERR.s },
     colo: (c.cf && c.cf.colo) || "",
     cnt: cntView(),

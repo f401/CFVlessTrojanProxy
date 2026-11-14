@@ -66,7 +66,7 @@ export class AppState {
   tsMem: { at: number; keys: string[] } = { at: 0, keys: [] };
 
   // —— 日计数 ——
-  cntKeys = ["egSent", "egDO", 
+  cntKeys = ["egSent", "egDO", "cfObs", 
     "conn",
     "direct",
     "node",

@@ -2367,5 +2367,22 @@ console.log("\n77) 事实写入决策器（v8 的 commitFact）");
   eq("19 条向量与原型逐条一致", okN, V.length);
 }
 
+console.log("\n78) 写入决策器的影子统计");
+{
+  W.FACT.clear();
+  const ev = (x) => ({ host: "shadow.example", via: "node", node: "45.136.117.194:443", down: 0, ok: true, life: 900, up: 0, ...x });
+  eq("整页 → 本会写 ps", W.FACT.observe(ev({ down: 45290, ok: true })), "ok");
+  eq("tiny 但没有同窗口对照 → 弃权", W.FACT.observe(ev({ down: 737, ok: true, life: 80 })), "R_NO_BIG_PEER");
+  eq("直连腿的 tiny → 永不写封锁", W.FACT.observe(ev({ via: "direct", node: "", down: 737 })), "R_DIRECT_NEVER");
+  eq("零字节 → 弃权", W.FACT.observe(ev({ down: 0, ok: false })), "R_NO_BYTES");
+  const sn = W.FACT.snap();
+  eq("影子统计了 4 条", sn.n, 4);
+  eq("本会写 ps 的只有 1 条", sn.would.ps, 1);
+  eq("本会写封锁的是 0 条", sn.would.blk || 0, 0);
+  eq("理由码也被统计", sn.why.R_NO_BYTES, 1);
+  W.FACT.clear();
+  eq("清零后快照为空", W.FACT.snap().n, 0);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

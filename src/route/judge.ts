@@ -11,6 +11,7 @@ import { cfHttpCode } from "../proxy/cfverdict";
 import { cnt } from "../core/counter";
 import { queueVerify } from "./verify";
 import { HEALTH } from "./relay-health";
+import { FACT } from "./factshadow";
 
 const BIG = 20000; // 整页（含握手）的下限
 const SMALL_MAX = 12000; // 小响应上限：再大就不当封锁证据
@@ -99,6 +100,12 @@ export class Judge {
   onTraffic(e: TrafficEvt): void {
     if (e.host === S.site) return; // 探自己域名必 522（CF 自环），不构成任何通道证据
     HEALTH.note(e.node, e.down, e.ok); // 中继存活度：与站点无关的那一半证据
+    // 影子：用 v8 的写入规则算一遍「本会写什么」，只统计不落库（接线第 1 步）
+    try {
+      FACT.observe(e);
+    } catch {
+      /* 影子统计绝不影响真实判定 */
+    }
     const chan = this.chanOf(e);
     const ck = e.host + "|" + chanKey(chan);
     const now = Date.now();
