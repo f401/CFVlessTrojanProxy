@@ -2758,5 +2758,24 @@ console.log("\n90) 吞吐容量噪声门：只记比值，两次不一致就不�
   W.CAP.clear();
 }
 
+
+console.log("\n91) 活跃池目标：不够 16 条就加码扫描");
+{
+  eq("目标 16 条", W.ALIVE_TARGET, 16);
+  eq("下限 12 条", W.ALIVE_MIN, 12);
+  eq("空池按缺额加码（16-0+4 超过预算 4）", W.alivePlan(0, 4), 20);
+  eq("10 条时加到 10（16-10+4=10）", W.alivePlan(10, 4), 10);
+  eq("已经够用时不加码", W.alivePlan(16, 4), 4);
+  eq("超额时按预算走", W.alivePlan(40, 30), 30);
+  eq("加码不会压低预算", W.alivePlan(0, 60), 60);
+  const s0 = W.srcStat();
+  eq("初始没有失败源", s0.bad, 0);
+  W.srcNote("https://example.invalid/list.txt", false);
+  W.srcNote("https://example.invalid/list.txt", false);
+  const s1 = W.srcStat();
+  eq("连续失败的源计入", s1.bad, 1);
+  eq("带恢复时间", s1.retryAt > Date.now(), true);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
