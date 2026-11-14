@@ -1866,5 +1866,8 @@ ok("Pool 是类实例，抓取/探活/准入都在它身上", typeof W.POOL === 
 ok("Pool 提供准入巡检", typeof W.POOL.ensurePool === "function" && typeof W.POOL.commitPool === "function", "ensure/commit");
 ok("Pool 提供读视图", typeof W.POOL.pxGet === "function" && typeof W.POOL.aliveList === "function", "pxGet/alive");
 eq("nsOf 空列表返回空表", Object.keys(W.POOL.nsOf([], 5)).length, 0);
+// ═══ 第 48 组：Dialer（P5）═══
+ok("Dialer 是类实例且有 open()", typeof W.DIALER === "object" && typeof W.DIALER.open === "function", "DIALER");
+ok("Dialer 与 Connection 解耦（不持有 session 状态）", typeof W.Dialer === "function", "Dialer");
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

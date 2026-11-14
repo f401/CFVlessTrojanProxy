@@ -1,21 +1,15 @@
 import { errMsg } from "../core/util";
 import type { Socket } from "cloudflare:sockets";
-import { HOOK } from "../core/hook";
-
 import { Connection } from "./connection";
 import { wsToStream } from "./ws-in";
 import { dialAnother } from "./fallback";
 import { pipeBack } from "./tunnel";
 import { logErr, rttLearn, rttMark } from "../nodes/metrics";
-import { cfHttpCode, refreshCfHttp } from "./cfverdict";
-import { checkTarget, dial, dial4, expandV6, isCfHost, isV6Literal, parseProxyIp } from "./dial";
-import { pxDecision } from "./pxhook";
-import { withTimeout } from "../core/util";
-import { isCfIp } from "../core/net";
+import { checkTarget, expandV6, isV6Literal, parseProxyIp } from "./dial";
+import { DIALER } from "./dialer";
 import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./protocol";
 import { cnt } from "../core/counter";
 import { SC } from "../core/const";
-import { isPxHost } from "../core/hosts";
 import { kickFlush } from "../store/index";
 import { nsEmptyClose, nsFail } from "../nodes/score";
 import { SEL } from "../px/selector";
@@ -195,66 +189,8 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
             }
           } else {
             try {
-              // 难直连目标（如 x.com）：判据 = 名单 / 6h 学习 / CF 网段 / ?px=1，?px=0 一律直连
-              // 顺序：proxyip 优先（直连多半撞自家边缘），退 dial4，再退普通直连
-              const learned = (S.needPx.get(r.host) || 0) > Date.now();
-              const onList = isPxHost(env, r.host); // 手动名单/失败学习优先，省一次解析
-              let cfHost = (S.cfHost.get(r.host) || 0) > Date.now();
-              // 只有 proxyip=auto（自动选池）才做托管识别：DoH 700ms 兜底，解析不出来就按直连走
-              if (!learned && !onList && !cfHost && env.proxyip === "auto") {
-                // DoH 抖动会偶发失败，而这是判定层的关键输入：给两次机会（不负缓存）。
-                for (let k = 0; k < 2 && !cfHost; k++) {
-                  try { cfHost = await withTimeout(isCfHost(r.host), 1200); } catch { cfHost = false; }
-                }
-                if (cfHost) S.cfHost.set(r.host, Date.now() + 1800000);
-              }
-              if (cfHost && !S.vtLoaded && HOOK.vtLoad) await HOOK.vtLoad(env);              const win = HOOK.win ? HOOK.win(r.host) : { d: false, r: false };
-              const dirWin = win.d, relWin = win.r;
-    const httpCode = cfHost ? cfHttpCode(r.host) : 0;
-    if (cfHost) refreshCfHttp(r.host, ctx);
-    st.cf = cfHost; // 判定层要知道目标是 CF 托管：直连被自家边缘拒时一次即判，所以放在分支外
-    const wantPx =
-      pxForce > 0 ||
-      (pxForce === 0 &&
-        !!env.proxyip &&
-        (learned || onList || relWin || (cfHost && !dirWin && httpCode !== 200)));
-              if (pxDecision(request, r.host, cfHost, wantPx, SC.POLICY)) {
-                st.cf = cfHost;
-                     const p = parseProxyIp(await SEL.current(env, mode, st, r.host, cfHost));
-                if (p && !checkTarget(p.host, p.port)) {
-                  const key = p.host + ":" + p.port;
-                  // 池子里的「优选 IP」本身就是 CF 边缘：拿它中转到 CF 托管的目标，
-                  // 等于从同一边缘再撞一次，只会更慢更差 —— 直接跳过，走下面的 IPv4 直连。
-                  if (cfHost && isCfIp(p.host)) {
-                    logErr(`skip cf-edge relay ${p.host}`, r.host);
-                  } else {
-                    try {
-                      sock = await connect({ hostname: p.host, port: p.port });
-                      st.node = key;
-                      st.via = "node";
-                      st.retried = true;
-                      st.pxTries = 1;
-                      cnt("pxf");
-                      logErr(`forced proxyip ${p.host}`, r.host);
-                    } catch (e0) {
-                      nsFail(key); // 中转本身连不上：冷却它，回落到直连（宁可慢也别整站不可用）
-                    }
-                  }
-                }
-              }
-              // 中转不可用（池子空 / 连不上）或根本没走中转时：CF 托管的目标优先 A 记录拨号。
-              // 理由：connect({ hostname }) 走 A 还是 AAAA 由运行时决定，而 X 会直接拒 IPv6 出口（403 体只有「IPv6」四个字节）。
-              if (!sock) {
-                if (cfHost && !isV6Literal(r.host)) {
-                  sock = await dial4(r.host, r.port);
-                  if (sock) {
-                    cnt("px4");
-                    logErr(`ipv4 first ${r.host}`, r.host);
-                  }
-                }
-                if (!sock) sock = await dial(r.host, r.port);
-              }
-              if (!sock) throw new Error("skip-direct");
+              // 拨号策略整体在 Dialer 里：判难直连 → 选中继 → 退 IPv4 拨号 → 退直连（P5）
+              sock = await DIALER.open({ env, request, st, mode, host: r.host, port: r.port, pxForce });
             } catch (e) {
               const px0 = parseProxyIp(await SEL.current(env, mode, st, r.host, st.cf));
               if (!px0) {

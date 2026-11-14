@@ -98,3 +98,14 @@
 验收：tsc 0 error；`check-arch` 77 文件；bundle 333.2/336.2 KB；test_v3 186 / smoke 30 / test_score **397** / sim_v3 22 / golden 8；
 仿真 2000 节点 **1.14x (1.12–1.15)、命中 66%**、20 节点 1.26x（与重构前逐位相同）；
 线上 7.04：`/health` 7.04，`x.com` 200（MXP）、`api.x.com` 403（业务响应原样透传、判定表不拦截）。
+## P5-1（7.05）：拨号策略收成 Dialer（session.ts 556 → 499 行）
+
+| 项 | 改法 | 位置 |
+| --- | --- | --- |
+| Dialer | `export class Dialer { async open(o: DialOpts): Promise<Socket> }` + `DIALER`；把「判难直连（名单/6h 学习/CF 网段/?px=）→ 选中继 → 跳过 CF 边缘中继 → IPv4 拨号 → 普通直连」整段收进方法，失败抛 `skip-direct` | `src/proxy/dialer.ts`（新） |
+| session 瘦身 | 原 59 行内联拨号块 → 一行 `sock = await DIALER.open({ env, request, st, mode, host: r.host, port: r.port, pxForce });`；删掉 9 个因此不再需要的 import | `src/proxy/session.ts` |
+| 行为保持 | `st.cf` 仍在分支外赋值；`cnt("pxf"/"px4")`、`logErr`、`nsFail` 语义未变 | 同上 |
+| 测试 | 第 48 组 2 条（DIALER 实例与 open()、Dialer 可构造） | `test/test_score.mjs` |
+
+验收：tsc 0 error；`check-arch` **78 文件**；bundle 333.4/336.4 KB；test_v3 186 / smoke 30 / test_score **399** / sim_v3 22 / golden 8；
+线上 7.05：`x.com` 2/2 200（MXP，`cloudflare envoy`）、`api.x.com` 3/3 **403 原样透传**（业务响应不受影响）、`www.google.com` 200。
