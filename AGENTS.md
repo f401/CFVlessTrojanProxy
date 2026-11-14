@@ -138,6 +138,6 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 ## 9. 当前状态与未完成
 
 - 线上 **7.47**；工作区 7.48+ 的改动（第 14 轮之后的预算/入口/健康表/日志/探活过期/注释等）**全部未部署**。
-- OOP 还没做完的 4 个模块：`src/nodes/metrics.ts`（错误环 + 域名画像）、`src/px/probe.ts`（源健康度 `SRC_BAD`）、`src/route/edge.ts`（入口偏好 + `EDGE_ERR`）、`src/store/pend.ts`（待上报账本 + flush 定时器）。它们都被 60+ 条单测直接引用，转换时要同步 `src/test-surface.ts`。
+- OOP 收类已完成到「有模块级可变状态就有类」：`Pool`、`Scorer`、`Store`、`SeedStore`、`VerdictTable`、`Judge`、`Policy`、`RelayHealth`、`VerifyQueue`、`EdgePrefs`、`SourceHealth`、`PendingLedger`、`HostProfile`、`ErrRing`、`RouteTable`……（清单见 `docs/ARCHITECTURE.md` 的「类与职责」表）。剩下的是纯计算/纯渲染模块，按约定**不**改成类。
 - 待用户验证：`/<uuid>/debug?tlsnow=<host>` 的双栈并排结果（`subtls` 与 `tunnelfetch` 是否给出同一结论），决定是否删除 vendored `subtls`（约 55 KB）。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。

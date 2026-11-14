@@ -203,7 +203,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Scorer`（`SCORER`） | `src/nodes/score.ts` | 排行缓存、黑名单/冻结表、可用性判断 |
 | `Store` / `Seal` | `src/store/store.ts`、`crypto.ts` | KV 写入节流、AES 密钥缓存 |
 | `Snapshot` | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存 |
-| `Pending` | `src/store/pend.ts` | 待上报账本与 flush 定时器 |
+| `PendingLedger`（`PEND`） | `src/store/pend.ts` | 待上报账本、自适应退避与 flush 定时器 |
 | `ChanTable` / `StatsTable` | `src/store/chan.ts`、`stats.ts` | 通道会话、用量读缓存 |
 | `Pool` | `src/px/pool.ts` | 池子、准入复测游标、探活坏点表 |
 | `SourceHealth`（`SOURCES`） | `src/px/probe.ts` | 池子源健康度（连续失败降权、1 小时冷却、不删源） |
@@ -216,6 +216,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `RelayHealth`（`HEALTH`） | `src/route/relay-health.ts` | 中继健康表（sent/pending 语义） |
 | `VerifyQueue`（`VERIFY`） | `src/route/verify.ts` | 复核队列与差分判定 |
 | `EdgePrefs`（`EDGE`） | `src/route/edge.ts` | 入口偏好表（探测结果、KV 落盘、订阅条目） |
+| `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps） |
+| `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |
 | `Budget`（`planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核/入口），纯函数入口 |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表 |
 | `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
