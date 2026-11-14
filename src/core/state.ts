@@ -121,6 +121,8 @@ export class AppState {
   vtPend: Map<string, number> = new Map();
   vtSent: Map<string, number> = new Map();
   vtLoaded = false;
+  /** 本 isolate 解析过的事实开关（`env.facts`，见 `src/route/factflags.ts`）。 */
+  factSet: Set<string> | null = null;
   /** 冷启动事实读取的 single-flight 句柄：同一波次并发连接共用一次 DO 读（null = 没有在飞）。 */
   vtFlight: Promise<void> | null = null;
   scanN = 12;

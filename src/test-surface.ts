@@ -111,6 +111,8 @@ export { RELPERF, REL_TTL, relCost, relCostFor, relCostMode, relNote, relSnap } 
 export { EG, EG_TTL, EgFacts, egCounts, egQuota } from "./route/egfacts";
 export { CAP, CAP_TTL, CapFacts, capFactor } from "./route/capfacts";
 export { ALIVE_MIN, ALIVE_TARGET, alivePlan, srcStat } from "./px/aliveplan";
+export { FACT_ALL, factList, factOn, factParse } from "./route/factflags";
+export { factMul } from "./route/factmul";
 export { PS, psFactor, psNote, psOk, psPrior, psSnap } from "./route/psfacts";
 export { DEAD, DEAD_N, deadNote, isDead } from "./route/deadfacts";
 export { FO, FirstObs, FO_GRAY, FO_LIMIT, FO_PAGE } from "./core/firstobs";

@@ -24,6 +24,8 @@ interface Env {
   pxFailMax?: string;
   pxForceAt?: string;
   pxSchedH?: string;
+  /** 事实开关（plain_text）：all / none / 逗号分隔的 eg,ps,cap,blk,dns；未配置 = 全开 */
+  facts?: string;
   pxShadow?: string;
   defaultMode?: string;
   cfIpv6?: string;

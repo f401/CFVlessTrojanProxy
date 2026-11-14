@@ -7,7 +7,7 @@ export function pxDecision(request: Request, host: string, cfHost: boolean, want
   const fn = HOOK.decide;
   if (!fn) return wantPx;
   const cip = request.headers.get("cf-connecting-ip") || "";
-  const out = fn({ host, cfHost, clientV6: cip.includes(":"), legacyWantsRelay: wantPx, mode });
+  const out = fn({ host, cfHost, clientV6: cip.includes(":"), legacyWantsRelay: wantPx, mode, facts: HOOK.facts ? HOOK.facts() : undefined });
   const hard =
     out.why === "v6-cf" ||
     out.why === "v6-cf-none" ||

@@ -7,6 +7,8 @@ export interface DecisionIn {
   legacyWantsRelay: boolean; // 现状（wantPx），用于影子统计
   /** 传输模式（`tput` / `lat`）：两种模式对「快」的定义不同，选路要能区分 */
   mode?: string;
+  /** 启用的事实集合（`env.facts` 的解析结果）；缺省视为全开。 */
+  facts?: ReadonlySet<string>;
 }
 
 export interface DecisionOut {
@@ -58,6 +60,8 @@ export interface Hooks {
   relPerf: ((host: string, ip: string, ttfb: number, kbs: number) => void) | null;
   /** 吞吐取样（v8 §5.1 的 R1 噪声门）：capacity 只记相对比值，与站点无关。 */
   capNote: ((ip: string, kbs: number) => void) | null;
+  /** 取当前启用的事实集合（由 route 层注册：它知道 `env.facts` 的语义）。 */
+  facts: (() => ReadonlySet<string>) | null;
 }
 
 export interface TrafficEvt {
@@ -77,5 +81,5 @@ export interface TrafficEvt {
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,
-  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, egDelta: null, psDelta: null, psNote: null, deadNote: null, deadDelta: null, blkDelta: null, syncAck: null, syncNack: null, relPerf: null, capNote: null };
+  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, egDelta: null, psDelta: null, psNote: null, deadNote: null, deadDelta: null, blkDelta: null, syncAck: null, syncNack: null, relPerf: null, capNote: null, facts: null };
 

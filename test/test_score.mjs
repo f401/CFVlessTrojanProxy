@@ -2802,5 +2802,28 @@ console.log("\n92) 远端事实读取：并发只读一次 + colo 缓存命中")
   W.S.vtFlight = null;
 }
 
+
+console.log("\n93) 事实开关：五类乘数可单独回滚");
+{
+  const A = "203.0.113.70";
+  W.EG.clear();
+  W.EG.note(A, 4, Date.now());
+  eq("未配置时全开", [...W.factParse(undefined)].length, 5);
+  eq("空串表示全关", W.factParse("").size, 0);
+  eq("none 表示全关", W.factParse("none").size, 0);
+  eq("all 表示全开", W.factParse("all").size, 5);
+  eq("按名字打开", [...W.factParse("eg, blk")].sort().join(","), "blk,eg");
+  eq("未知名字被忽略", [...W.factParse("nope,ps")].join(","), "ps");
+  const onlyEg = W.factParse("eg");
+  eq("只开 eg 时乘数 = bias（v4 ×0.8）", Number(W.factMul(onlyEg, "example.com", A, "tput").toFixed(3)), 0.8);
+  eq("全关时乘数恒为 1", W.factMul(W.factParse(""), "example.com", A, "tput"), 1);
+  W.S.factSet = null;
+  eq("factOn 未配置时全开", [...W.factOn({})].length, 5);
+  W.S.factSet = null;
+  eq("factOn 读绑定字符串", [...W.factOn({ facts: "ps" })].join(","), "ps");
+  W.S.factSet = null;
+  W.EG.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
