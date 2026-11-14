@@ -142,7 +142,7 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 
 ## 9. 当前状态与未完成
 
-- 线上 **7.107**（`facts=none`，只观测；仓库同版）。7.80–7.85 修的是「中继那一跳到底值不值」：
+- 线上 **7.120**（`facts=eg`；仓库同版）。7.80–7.85 修的是「中继那一跳到底值不值」：
   · 7.81 `src/px/selector.ts` 冷 isolate 拉池子封顶 700ms（`ensurePool` 能拖 2–4 秒，那是用户等首字节的时间）；
   · 7.83 `src/route/relperf.ts` 代价函数纠偏：只有 ≥1MB 的传输才记吞吐，小样本按 `ttfb + 2000ms` 计
     （否则 45KB 正常页 18KB/s 比 4 字节 403 页 46KB/s 还「贵」，排序反向，实测 tput 4/24）；
