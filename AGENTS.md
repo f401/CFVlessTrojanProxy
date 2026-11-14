@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.120**（`facts=eg`））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.122**（仓库同版；7.122 未部署，线上仍是 7.121；`facts=eg`））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -142,7 +142,7 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 
 ## 9. 当前状态与未完成
 
-- 线上 **7.120**（`facts=eg`；仓库同版）。7.80–7.85 修的是「中继那一跳到底值不值」：
+- 线上 **7.121**（`facts=eg`）；仓库 7.122（未部署）。7.80–7.85 修的是「中继那一跳到底值不值」：
   · 7.81 `src/px/selector.ts` 冷 isolate 拉池子封顶 700ms（`ensurePool` 能拖 2–4 秒，那是用户等首字节的时间）；
   · 7.83 `src/route/relperf.ts` 代价函数纠偏：只有 ≥1MB 的传输才记吞吐，小样本按 `ttfb + 2000ms` 计
     （否则 45KB 正常页 18KB/s 比 4 字节 403 页 46KB/s 还「贵」，排序反向，实测 tput 4/24）；
