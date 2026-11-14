@@ -167,27 +167,43 @@ export const EG_BIG = 20000;
 /** `tiny` 上限：与 `commitfact` 的 `TINY_ABS` 同源，避免两处口径漂移 */
 export const EG_TINY = 2048;
 
+/** 推导 `eg` 时可用的旁证：都是「数据面已经发生的事实」，不需要任何额外探测 */
+export interface EgEv {
+  /** 同窗口是否另有通道对本站出过 ≥20KB 整页（小页 ⇒ 族级拒绝的必要对照） */
+  peerBig?: boolean;
+  /** 站点「确实能出内容」的旁证（本出口 fetch 200 或同站点别的通道出过整页） */
+  known?: boolean;
+  /** 本站点已被 DNS 事实确证为纯 v4（有 A 无 AAAA）：此时送到页面就证明中继有 v4 出口 */
+  siteV4?: boolean;
+}
+
 /**
  * 功能：从一次真实连接的响应推导中继出口族，并写进事实表（`eg` 的**唯一**生产来源）。
  * 为什么不用主动探测：实测 `probeTf` 的自定义 `dial` 连到的是探测器自己的出口（本机返回本机公网 IP、
- * 生产 DO 返回 Cloudflare 自有网段），据此判族会把 v4 中继反向加权，比不判更差（清单 §I 有完整证据）。
+ * 生产 DO 返回 Cloudflare 自有网段），据此判族会把 v4 中继反向加权，比不判更差（清单 §I）。
+ * 三条规则，按证据强度排：整页 ⇒ v4（硬）；`known` 成立时的小页 ⇒ v6（族级拒绝）；纯 v4 站点送页 ⇒ v4。
  * @param {string} ip 中继 IP（不带端口）
  * @param {number} down 本次下行字节数
- * @param {boolean} peerBig 同窗口是否另有通道出过 ≥20KB 整页（tiny 判 v6 的必要对照）
+ * @param {EgEv} ev 旁证（缺省为空对象，任一成立才可能写）
  * @param {number} now 观测时间
  * @returns {number} 本次写入的族（4 或 6），没写返回 0
  */
-export function egDerive(ip: string, down: number, peerBig: boolean, now = Date.now()): number {
+export function egDerive(ip: string, down: number, ev: EgEv = {}, now = Date.now()): number {
   if (!ip) return 0;
   // 整页是硬证据：v6 出口在 737B 的小页上就停住了，拿不到 20KB 以上
   if (down >= EG_BIG) {
     EG.note(ip, 4, now);
     return 4;
   }
-  // 小页只在「同窗口另外的通道确实能出整页」时才算族级拒绝，否则可能只是这个站点本来就这么小
-  if (peerBig && down > 0 && down <= EG_TINY) {
+  // 小页 + 「站点能出内容」的旁证 ⇒ 差分成因明确：站点没拒绝所有人，是这条通道的出口被拒
+  if (down > 0 && down <= EG_TINY && (ev.peerBig || ev.known)) {
     EG.note(ip, 6, now);
     return 6;
+  }
+  // 纯 v4 站点（DNS 确证无 AAAA）能送到页面 ⇒ 这条中继一定走 v4（v6-only 中继到不了它）
+  if (down > 0 && ev.siteV4) {
+    EG.note(ip, 4, now);
+    return 4;
   }
   return 0;
 }
