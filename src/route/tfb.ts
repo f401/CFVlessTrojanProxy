@@ -40,6 +40,9 @@ export function tfEscalate(verdict: string): "rotate" | "none" {
  */
 export function tfClass(rows: Array<{ ok: boolean; status?: number; bytes?: number }>): string {
   const base = tfVerdict(rows);
+  // 一行状态码都没有 = 连不上/被重置，既不是 ipfam 也不是 site
+  const hasCode = rows.some((x) => Number(x.status || 0) > 0);
+  if (!hasCode) return "unknown";
   if (base !== "site") return base;
   const tiny = rows.every((x) => (x.status || 0) >= 400 && Number(x.bytes || 0) <= 32);
   return tiny ? "ipfam" : "site";

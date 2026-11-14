@@ -1952,5 +1952,9 @@ ok("PageView 可构造", typeof W.PageView === "function", "PageView");
   W.vSetState("pf.test", "r:pa", 2, 1);
   ok("探过的排到后面", W.pickFresh("pf.test", ["pa", "pb", "pc"], 2).join(",") === "pb,pc");
   ok("已探过的不会被挤出上限外时仍可用", W.pickFresh("pf.test", ["pa"], 2).join(",") === "pa");
+  
+  // 第 60 组：无状态码（连不上/RST）必须归 unknown，不能落到 ipfam
+  ok("全失败无状态码 → unknown", W.tfClass([{ ok: false }, { ok: false }]) === "unknown");
+  ok("有状态码但全 4xx 仍按字节分层", W.tfClass([{ ok: false, status: 403, bytes: 4 }]) === "ipfam");
   console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
