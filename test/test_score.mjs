@@ -2541,5 +2541,55 @@ console.log("\n82) 冷启动口径：firstTry / firstPage / 灰带");
   W.FO.clear();
 }
 
+
+console.log("\n83) 单 IP 封锁（blk）：三批 × 每批 3 次、只折价、永不剔候选");
+{
+  const t0 = Date.now();
+  W.BLK.clear();
+  const feed = (host, ip, base) => { for (let b = 0; b < 3; b += 1) for (let k = 0; k < 3; k += 1) W.BLK.note({ host, ip, down: 737, peerBig: true, at: base + b * 61000 + k * 1000 }); };
+  eq("默认代价倍数是 1", W.blkPen("x.example", "203.0.113.81", t0), 1);
+  eq("没有整页对照时不投票", W.BLK.note({ host: "x.example", ip: "203.0.113.81", down: 737, peerBig: false, at: t0 }), false);
+  eq("无对照仍不算封锁", W.blkPen("x.example", "203.0.113.81", t0), 1);
+  // 一批只喂 2 次：这一批作废，不足以确认
+  for (let k = 0; k < 2; k += 1) W.BLK.note({ host: "x.example", ip: "203.0.113.81", down: 737, peerBig: true, at: t0 + k * 1000 });
+  W.BLK.note({ host: "x.example", ip: "203.0.113.81", down: 737, peerBig: true, at: t0 + 61000 });
+  eq("每批不足 3 次不算票", W.blkPen("x.example", "203.0.113.81", t0 + 61000), 1);
+  W.BLK.clear();
+  feed("x.example", "203.0.113.81", t0);
+  eq("三批 × 每批 3 次后代价 ×6", W.blkPen("x.example", "203.0.113.81", t0 + 122000), W.BLK_PEN);
+  eq("换个站点不受影响", W.blkPen("y.example", "203.0.113.81", t0 + 122000), 1);
+  eq("换个出口不受影响", W.blkPen("x.example", "203.0.113.82", t0 + 122000), 1);
+  eq("90 分钟后自动恢复", W.blkPen("x.example", "203.0.113.81", t0 + 122000 + 91 * 60000), 1);
+  // 反向证据：同通道刚出过整页就清零进度
+  W.BLK.clear();
+  feed("z.example", "203.0.113.83", t0);
+  W.BLK.contra("z.example", "203.0.113.83");
+  eq("反向证据清掉了已确认的行", W.blkPen("z.example", "203.0.113.83", t0 + 122000), 1);
+  // 站点级自愈 + 静默
+  W.BLK.clear();
+  const cands = ["203.0.113.91", "203.0.113.92"];
+  for (const ip of cands) feed("s.example", ip, t0);
+  eq("两条候选都被判封锁", [W.blkPen("s.example", cands[0], t0 + 122000), W.blkPen("s.example", cands[1], t0 + 122000)], [W.BLK_PEN, W.BLK_PEN]);
+  eq("整池被写满触发自愈", W.BLK.sweep("s.example", cands, t0 + 130000), true);
+  eq("自愈后代价回到 1", W.blkPen("s.example", cands[0], t0 + 130000), 1);
+  eq("自愈后该站点静默中", W.BLK.muted("s.example", t0 + 130000), true);
+  eq("静默期内不再写新行", W.BLK.note({ host: "s.example", ip: cands[0], down: 737, peerBig: true, at: t0 + 140000 }), false);
+  eq("静默 30 分钟后解除", W.BLK.muted("s.example", t0 + 130000 + 31 * 60000), false);
+  // 只折价：候选一个都不能少
+  W.BLK.clear();
+  W.PS.clear();
+  W.DEAD.clear();
+  const H2 = "blk.example";
+  W.relNote(H2, "203.0.113.94", 300, 0, t0);
+  W.relNote(H2, "203.0.113.95", 100, 0, t0);
+  feed(H2, "203.0.113.95", t0);
+  const d1 = W.decide({ host: H2, cfHost: true, clientV6: false, relays: ["203.0.113.94", "203.0.113.95"], legacyWantsRelay: true, mode: "tput" });
+  eq("被判封锁的那条排到后面（原本它最快）", d1.chan.ip, "203.0.113.94");
+  const d2 = W.decide({ host: H2, cfHost: true, clientV6: false, relays: ["203.0.113.95"], legacyWantsRelay: true, mode: "tput" });
+  eq("只剩被判封锁的一条时仍然用它（永不剔候选）", d2.chan.ip, "203.0.113.95");
+  W.BLK.clear();
+  W.S.peers.clear();
+  W.S.bigTyp.clear();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

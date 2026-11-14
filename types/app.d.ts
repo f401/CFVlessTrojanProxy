@@ -396,6 +396,7 @@ interface MeterBody {
   eg?: Array<{ i: string; f: number; at: number }>;
   ps?: Array<{ k: string; q: number; n: number; at: number }>;
   dead?: Array<{ i: string; n: number; at: number }>;
+  blk2?: Array<{ k: string; n: number; at: number }>;
   /** 老快照：全局计数 / 节点快照 */
   g?: Record<string, number>;
   s?: Record<string, NodeSnap>;

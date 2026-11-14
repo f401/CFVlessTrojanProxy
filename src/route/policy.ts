@@ -16,6 +16,7 @@ import { relCostMode, relNote, relSnap } from "./relperf";
 import { EG } from "./egfacts";
 import { PS, psFactor, psNote } from "./psfacts";
 import { DEAD, deadNote, isDead } from "./deadfacts";
+import { BLK, blkPen } from "./blkfacts";
 
 export interface Ctx {
   host: string;
@@ -122,8 +123,11 @@ export class Policy {
       // v6 出口照样有机会被选中，只是要明显更便宜才会排到前面。
       // 再叠「站点 × 中继」成功率折价：没有样本时因子恒为 1（接入前后逐位相同）；
       // 有样本时把实测过不了的通道乘贵 —— 仍然只是乘数，绝不剔候选（v8 §15 I2）。
-      return base * EG.bias(ip) * psFactor(c.host, ip);
+      // blk：判为「这个站点在这个出口上被封锁」时只乘 6 倍代价（v8 §15 的 I1：永不剔候选）
+      return base * EG.bias(ip) * psFactor(c.host, ip) * blkPen(c.host, ip);
     };
+    // 站点级自愈：整池都被同一站点写满 ⇒ 判据失效/站点在拒绝所有人，清空并静默 30 分钟
+    BLK.sweep(c.host, usable);
     const ranked = usable
       .slice()
       .sort(
@@ -249,6 +253,7 @@ HOOK.syncAck = (): void => {
   EG.ack();
   PS.ack();
   DEAD.ack();
+  BLK.ack();
 };
 HOOK.syncNack = (): void => {
   HEALTH.nack();
@@ -256,6 +261,7 @@ HOOK.syncNack = (): void => {
   EG.nack();
   PS.nack();
   DEAD.nack();
+  BLK.nack();
 };
     HOOK.verify = (): Promise<number> => runVerify();
     HOOK.veto = (host: string, ip: string): boolean => {
@@ -276,6 +282,7 @@ HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
     HOOK.psNote = (host: string, ip: string, ok: boolean): void => psNote(host, ip, ok);
     HOOK.deadNote = (ip: string, ok: boolean): void => deadNote(ip, ok);
     HOOK.deadDelta = (): Array<{ i: string; n: number; at: number }> => DEAD.delta();
+    HOOK.blkDelta = (): Array<{ k: string; n: number; at: number }> => BLK.delta();
     HOOK.egDelta = (): Array<{ i: string; f: number; at: number }> => EG.delta();
     HOOK.vtLoad = (env: Env): Promise<void> => vtLoad(env);
   }

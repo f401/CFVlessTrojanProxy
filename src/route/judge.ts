@@ -12,6 +12,7 @@ import { cnt } from "../core/counter";
 import { queueVerify } from "./verify";
 import { HEALTH } from "./relay-health";
 import { FACT } from "./factshadow";
+import { BLK } from "./blkfacts";
 
 const BIG = 20000; // 整页（含握手）的下限
 const SMALL_MAX = 12000; // 小响应上限：再大就不当封锁证据
@@ -109,6 +110,15 @@ export class Judge {
     const chan = this.chanOf(e);
     const ck = e.host + "|" + chanKey(chan);
     const now = Date.now();
+    // v8 的 blk：只有「本通道 tiny + 同窗口另一通道出过整页」才投票（三批独立确认后才写行）。
+    // 这里只喂证据，不决定顺序 —— 后果是代价 ×6（policy 里乘），候选永远不会被移出。
+    if (e.via === "node" && e.node && e.host) {
+      const nip = e.node.slice(0, e.node.lastIndexOf(":"));
+      const row = S.peers.get(e.host);
+      const peerBig = !!row && row.some((x) => x.down >= 20000 && Date.now() - x.at <= 120000);
+      if (nip && e.down > 0 && e.down <= 2048 && peerBig) BLK.note({ host: e.host, ip: nip, down: e.down, peerBig: true, at: now });
+      else if (nip && e.down >= 20000) BLK.contra(e.host, nip);
+    }
 
     if (e.ok && e.down >= BIG) {
       cnt("trHit");
