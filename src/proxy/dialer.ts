@@ -73,9 +73,11 @@ export class Dialer {
     // 2026-11-15 04:14 实测：强制直连 2/6、强制中继 4/6、默认 5/6；且用户网络无 v6
     // 时 clientV6 恒为假 → 这条恒走直连 → 全线 403。所以这里只问「有没有新鲜直连成功证据」，
     // 有的情况交给 policy 的 direct-ok（5 分钟）判断，没有就优先中继。
+    // 本出口 fetch 的 200 不代表隧道直连能成（fetch 走 CF 自己的出口）：7.60 起就用它挡过一次，
+    // 但实测 `httpCode === 200` 时隧道仍有大量 403 —— 继续用它会让「明明有 v4 中继」的请求退回直连。
     const wantPx =
       pxForce > 0 ||
-      (pxForce === 0 && !!env.proxyip && (learned || onList || relWin || (cfHost && !dirWin && httpCode !== 200)));
+      (pxForce === 0 && !!env.proxyip && (learned || onList || relWin || (cfHost && !dirWin)));
 
     if (pxDecision(request, host, cfHost, wantPx, SC.POLICY, mode)) {
       // ?rx= 钉住中继（只给诊断脚本用）：跳过选择器直接用它，用来给每条中继量吞吐。
