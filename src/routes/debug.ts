@@ -13,6 +13,7 @@ import { vtDelta, vtLoad } from "../route/verdictsync";
 import { cntView } from "../core/counter";
 import { planView } from "../route/budget";
 import { prefsJson } from "../route/prefs";
+import { REL_TTL, relSnap } from "../route/relperf";
 import { DIRECT, chanKey } from "../route/channel";
 import { HEALTH } from "../route/relay-health";
 import { verifyInfo } from "../route/verify";
@@ -51,6 +52,8 @@ export async function debug(c: UserCtx): Promise<Response> {
     S.vtLoaded = false;
     await vtLoad(env);
   }
+  // 站点 × 中继 的实测性能（本 isolate 内）：只列出已经量过的中继，代价越低越该选
+  if (url.searchParams.get("rt")) return json({ host: String(url.searchParams.get("rt") || "").slice(0, 80), rows: relSnap(String(url.searchParams.get("rt") || "").slice(0, 80)), alive: S.alive.size, ttl: REL_TTL });
   if (vtHost) {
     // 只读表：userland TLS 探测已在 7.69 删除（免费计划必然 1102），证据一律来自真实流量与 tfb。
     const sw = { ips: [], nodes: [], rows: [] };

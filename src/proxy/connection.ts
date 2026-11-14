@@ -304,6 +304,13 @@ export class Connection {
         // 第一行就是 `if (!S.pxFailSeen) return` —— 健康节点永远 n=0，
         // 面板显示"一个连接都没有"，可用性门槛也永远不触发。
         if (this.node && !this.failed && this.down > 0) nsOk(this.node, 0, 0);
+        // 「站点 × 中继」实测：同一中继对不同站点快慢可能差一个数量级（出口地区/中转路径不同），
+        // 记下这次的首字节与下行速率，供决策层按站点挑中继；只在本 isolate 内，不跨 isolate 共享。
+        if (this.node && this.host && this.down > 0) {
+          const ms = Math.max(1, Date.now() - this.tAttach);
+          const ip = this.node.includes(":") ? this.node.slice(0, this.node.lastIndexOf(":")) : this.node;
+          HOOK.relPerf?.(this.host, ip, this.ttfb > 0 ? this.ttfb : ms, ((this.down / 1024) * 1000) / ms);
+        }
       // 通道证据：交给决策层（弱证据只可能把 unknown 提成 ok；判死只有 probe 能下）
       if (this.host && HOOK.traffic) {
         HOOK.traffic({ cf: this.cf, host: this.host, via: this.via as "node" | "direct" | "v6", node: this.node || "", down: this.down, ok: !this.failed && this.down > 0, life: Date.now() - this.t0, up: this.up });

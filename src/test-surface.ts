@@ -1,4 +1,4 @@
-﻿// 娴嬭瘯涓撶敤鍑哄彛锛氬彧鍦?dist/_test.js 閲屽瓨鍦紝鐢熶骇鍖呬笉鍚鏂囦欢
+// 娴嬭瘯涓撶敤鍑哄彛锛氬彧鍦?dist/_test.js 閲屽瓨鍦紝鐢熶骇鍖呬笉鍚鏂囦欢
 export { sha224Bytes, toHex, VERSION, shadowRate, eachLimit, withTimeout } from "./core/util";
 export { detectProtocol, parseVLESS, parseTrojan, loadUsers } from "./proxy/protocol";
 export { checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
@@ -107,6 +107,7 @@ export { POLICY, Policy } from "./route/policy";
 export { judge, queueVerify, runVerify, verifyInfo, queueLen } from "./route/verify";
 export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, pickFresh } from "./route/tfb";
+export { RELPERF, REL_TTL, relCost, relNote, relSnap } from "./route/relperf";
 
 export { handleDns, trojanUdpFrame } from "./proxy/dns";
 export { handleUpgrade } from "./proxy/session";

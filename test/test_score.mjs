@@ -2245,5 +2245,21 @@ console.log("\n75) 正记忆优先复用");
   eq("普通目标不受正记忆影响", W.decide({ ...ctx, cfHost: false }).chan.kind, "d");
 }
 
+// 第 38c 组：站点 × 中继的实测性能记忆（同一中继对不同站点快慢不同）
+{
+  W.RELPERF.clear();
+  W.relNote("a.example.com", "203.0.113.7", 200, 1600);
+  W.relNote("a.example.com", "203.0.113.9", 400, 300);
+  eq("快中继代价更低", W.relCost("a.example.com", "203.0.113.7") < W.relCost("a.example.com", "203.0.113.9"), true);
+  eq("没量过的中继代价是 1e6", W.relCost("a.example.com", "203.0.113.99"), 1e6);
+  eq("样本按站点分开存", W.relCost("b.example.com", "203.0.113.7"), 1e6);
+  // 两条中继都能通时，选代价更低的那条（健康度都未知 → 由站点 × 中继决定）
+  const ctxR = { host: "a.example.com", cfHost: true, clientV6: false, relays: ["203.0.113.9", "203.0.113.7"], legacyWantsRelay: true };
+  eq("按站点 × 中继选更快的那条", W.decide(ctxR).chan.ip, "203.0.113.7");
+  eq("调试快照按代价升序", W.relSnap("a.example.com")[0].ip, "203.0.113.7");
+  W.RELPERF.clear();
+  eq("清空后代价回到未知", W.relCost("a.example.com", "203.0.113.7"), 1e6);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -40,6 +40,8 @@ export interface Hooks {
   syncNack: (() => void) | null;
   /** 是否该优先非 CF 出口（原来由池子的 relayOff 集合表达，现由判定层决定） */
   nonCfFirst: (() => boolean) | null;
+  /** 一条连接结束时的「站点 × 中继」实测（首字节 ms、下行 KB/s），由 route 层记录 */
+  relPerf: ((host: string, ip: string, ttfb: number, kbs: number) => void) | null;
 }
 
 export interface TrafficEvt {
@@ -57,5 +59,5 @@ export interface TrafficEvt {
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,
-  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, syncAck: null, syncNack: null };
+  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, syncAck: null, syncNack: null, relPerf: null };
 

@@ -12,6 +12,7 @@ import { chanPref } from "./prefs";
 import { runVerify } from "./verify";
 import { HEALTH, ipOf } from "./relay-health";
 import { CF_NEG, JUDGE } from "./judge";
+import { relCost, relNote } from "./relperf";
 
 export interface Ctx {
   host: string;
@@ -103,6 +104,9 @@ export class Policy {
     // 健康度（本 isolate 的中继吞吐/成功率）作为下一层：它跟站点无关，但对「这条中继背后是不是坏 egres」有信息量。
     const hIdx = new Map<string, number>(HEALTH.rank(usable).map((ip, i) => [ip, i]));
     const hOf = (ip: string): number => hIdx.get(ip) ?? 99;
+    // 站点 × 中继的实测代价：同一个中继对不同站点快慢差一个数量级，所以它比「站点无关的健康度」更贴题。
+    // 没量过的是 1e6，会排在量过的后面，但仍在 negOf/posOf 之后 —— 未知不等于坏。
+    const relOf = (ip: string): number => relCost(c.host, ip);
     const stick = usable
       .slice()
       .sort(
@@ -110,6 +114,7 @@ export class Policy {
           negOf(a) - negOf(b) ||
           posOf(a) - posOf(b) ||
           hOf(a) - hOf(b) ||
+          relOf(a) - relOf(b) ||
           vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a),
       );
     const nonCf = stick.filter((ip) => !isCfIp(ip));
@@ -224,6 +229,7 @@ HOOK.syncNack = (): void => {
     HOOK.prefer = (host: string, ip: string): boolean => this.prefer(host, ip);
     HOOK.chanPref = (ip: string, host = ""): number => chanPref(ip, host);
     HOOK.win = (host: string): { d: boolean; r: boolean } => this.win(host);
+HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => relNote(host, ip, ttfb, kbs);
     HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
     HOOK.vtLoad = (env: Env): Promise<void> => vtLoad(env);
   }
