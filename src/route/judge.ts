@@ -123,6 +123,8 @@ export class Judge {
       else if (e.down < 1500) cnt("sz2");
       else if (e.down < 3000) cnt("sz3");
       else cnt("sz4");
+      // 归因：小响应是「直连出口被拒」还是「中继出口被拒」——调参前必须知道钱花在哪条路上
+      cnt(e.via === "node" ? "smN" : "smD");
     }
     const n = (S.smCnt.get(ck) || 0) + 1;
     S.smCnt.set(ck, n);

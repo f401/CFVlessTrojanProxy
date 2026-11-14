@@ -92,6 +92,8 @@ export class AppState {
     "vtDO",
     "trHit",
     "trSmall",
+    "smN",
+    "smD",
     "sz1",
     "sz2",
     "sz3",
