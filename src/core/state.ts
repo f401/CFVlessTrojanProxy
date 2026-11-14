@@ -70,7 +70,7 @@ export class AppState {
   tsMem: { at: number; keys: string[] } = { at: 0, keys: [] };
 
   // —— 日计数 ——
-  cntKeys = ["egSent", "psNote", "psDO", "psSent", "deadNote", "deadDO", "deadClear", "ftSkip", "blkBatch", "blkWrote", "blkNoPeer", "blkDO", "bizSweeps", "blkContra", "egProbe", "egDO", "cfObs", 
+  cntKeys = ["egSent", "psNote", "psDO", "psSent", "deadNote", "deadDO", "deadClear", "ftSkip", "blkBatch", "blkWrote", "blkNoPeer", "blkDO", "bizSweeps", "blkContra", "egProbe", "rehab", "egDO", "cfObs", 
     "conn",
     "direct",
     "node",

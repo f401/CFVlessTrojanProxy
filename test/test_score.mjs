@@ -2614,5 +2614,33 @@ console.log("\n84) 订阅的客户端链：实测组优先、域名入口兜底"
   const noEdge = seg(rend("?e=0"), "🚀 吞吐优先");
   eq("?e=0 时成员里没有入口优选", noEdge.includes("🌐 入口优选"), false);
 }
+
+console.log("\n85) 康复通道（v8 D12）");
+{
+  W.PS.clear();
+  W.RELPERF.clear();
+  const host = "rehab.example.com";
+  const A = "203.0.113.31", B = "203.0.113.32", C = "203.0.113.33";
+  // B 历史上有过整页（成功率 1.0），但现在被排到最后（代价极高）
+  for (let i = 0; i < 6; i++) W.psNote(host, B, true);
+  W.relNote(host, A, 200, 2000);
+  W.relNote(host, C, 220, 1900);
+  W.relNote(host, B, 9000, 20);
+  eq("历史成功率能读到", W.psOk(host, B) > 0.9, true);
+  eq("没样本返回 -1", W.psOk(host, A), -1);
+  const C2 = { host, cfHost: true, clientV6: false, relays: [A, B, C], legacyWantsRelay: true, mode: "tput" };
+  let last = null;
+  let hit = null;
+  for (let i = 1; i <= 40; i++) {
+    const d = W.decide(C2);
+    if (d.why === "rehab") { if (!hit) hit = { i, ip: d.chan.ip }; }
+    last = d;
+  }
+  eq("第 20 条触发康复", hit && hit.i, 20);
+  eq("康复选的是历史成过的那条", hit && hit.ip, B);
+  eq("第 40 条也触发", last.why, "rehab");
+  eq("康复不会永远抢第一（前 19 条不是 rehab）", hit && hit.i > 1, true);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

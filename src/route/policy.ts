@@ -14,9 +14,10 @@ import { HEALTH, ipOf } from "./relay-health";
 import { CF_NEG, JUDGE } from "./judge";
 import { relCostMode, relNote, relSnap } from "./relperf";
 import { EG } from "./egfacts";
-import { PS, psFactor, psNote } from "./psfacts";
+import { PS, psFactor, psNote, psOk } from "./psfacts";
 import { DEAD, deadNote, isDead } from "./deadfacts";
 import { BLK, blkPen } from "./blkfacts";
+import { cnt } from "../core/counter";
 
 export interface Ctx {
   host: string;
@@ -45,6 +46,9 @@ export class Policy {
   private pin = new Map<string, { ip: string; until: number }>();
   /** 吞吐模式冷启动的轮换游标：让前几条连接分别落在不同中继上，尽快量出容量差异 */
   private rot = 0;
+
+  /** 每个站点的决策序号：康复通道按「每 20 条一次」触发，不随机（可复现、可测） */
+  private seq = new Map<string, number>();
 
   /**
    * 功能：冷启动时为站点挑一条固定中继，60 秒内复用同一条。
@@ -141,6 +145,19 @@ export class Policy {
     // 不是删除：全池都判死时仍要发出请求（leastBad），否则用户看到的是「无候选」而不是业务页。
     const live = ranked.filter((ip) => !isDead(ip));
     const stick = live.length ? live : ranked;
+    // 康复通道（v8 §3.2 / D12）：每 20 条请求放 1 条「历史上有过整页、但现在排在最后」的中继。
+    // 不这么做就存在死锁：被降权的通道再也拿不到样本 → 成功率永远停在先验 → 永远回不来。
+    // 用序号而不是随机数，是为了让「第 20 条会康复」这件事可复现、可断言。
+    const nth = (this.seq.get(c.host) || 0) + 1;
+    this.seq.set(c.host, nth);
+    if (nth % 20 === 0 && stick.length > 1) {
+      const back = stick.filter((ip) => psOk(c.host, ip) >= 0.6 || JUDGE.posOn(c.host, ip));
+      const worst = back.length ? (back[back.length - 1] as string) : "";
+      if (worst && worst !== stick[0]) {
+        cnt("rehab");
+        return { chan: { kind: "r", ip: worst }, why: "rehab" };
+      }
+    }
     const nonCf = stick.filter((ip) => !isCfIp(ip));
     const okOnes = stick.filter((ip) => vOk(c.host, "r:" + ip) || vOk("*", "r:" + ip));
 

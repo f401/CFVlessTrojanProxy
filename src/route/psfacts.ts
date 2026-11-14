@@ -121,6 +121,35 @@ export class PsFacts {
    * @param {number} now 当前时间
    * @returns {number} 0..1 或 NaN
    */
+  /**
+   * 功能：读这条通道历史上拿到整页的比例（0..1），没有样本返回 -1。
+   * 为什么需要单独一个：`factor()` 会把「没样本」伪装成「中等」，而康复通道要区分
+   * 「从没试过」与「试过且成过、后来被降权了」—— 后者才值得放一条康复请求。
+   * @param host 目标站点
+   * @param ip 中继出口 IP
+   * @param now 当前时间（毫秒）
+   * @returns 历史成功率，或 -1 表示无样本
+   */
+  /**
+   * 功能：取一行样本，过期返回 null（过期即删，避免回收逻辑散在各处）。
+   * @param host 目标站点
+   * @param ip 中继 IP
+   * @param now 当前时间
+   * @returns 样本行或 null
+   */
+  private get(host: string, ip: string, now: number): PsRow | null {
+    const r = this.rows.get(host + "|" + ip);
+    if (!r) return null;
+    if (now - r.at > PS_TTL) {
+      this.rows.delete(host + "|" + ip);
+      return null;
+    }
+    return r;
+  }
+  okOf(host: string, ip: string, now = Date.now()): number {
+    const r = this.get(host, ip, now);
+    return r ? r.q / 255 : -1;
+  }
   pOf(host: string, ip: string, now = Date.now()): number {
     const r = this.rows.get(host + "|" + ip);
     if (!r || now - r.at > PS_TTL) return NaN;
@@ -248,6 +277,17 @@ export const PS = new PsFacts();
  */
 export function psNote(host: string, ip: string, ok: boolean, now = Date.now()): void {
   PS.note(host, ip, ok, now);
+}
+
+/**
+ * 功能：薄包装 —— 历史成功率（供康复通道判断「这条通道曾经成过」）。
+ * @param {string} host 目标站点
+ * @param {string} ip 中继 IP
+ * @param {number} now 当前时间
+ * @returns {number} 0..1；-1 表示没有样本
+ */
+export function psOk(host: string, ip: string, now = Date.now()): number {
+  return PS.okOf(host, ip, now);
 }
 
 /**
