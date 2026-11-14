@@ -128,6 +128,7 @@ async function vtFetch(env: Env): Promise<void> {
     cnt("psDO", nf.ps);
     cnt("deadDO", nf.dead);
     cnt("blkDO", nf.blk2);
+    cnt("dnsDO", nf.dns);
   } catch {
     // 读不到就当没有：不阻塞连接
   } finally {

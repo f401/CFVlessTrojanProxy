@@ -46,6 +46,7 @@ export interface Hooks {
     ps?: Array<{ k: string; q: number; n: number; at: number }>;
     dead?: Array<{ i: string; n: number; at: number }>;
     blk2?: Array<{ k: string; n: number; at: number }>;
+    dns?: Array<{ h: string; v: number; at: number }>;
   }) | null;
   /** 「站点 × 中继」真实观测（拿到完整响应=成功） */
   psNote: ((host: string, ip: string, ok: boolean) => void) | null;

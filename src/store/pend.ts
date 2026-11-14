@@ -127,6 +127,7 @@ export class PendingLedger {
             if (fd.dead && fd.dead.length) body.dead = fd.dead;
             if (fd.ps && fd.ps.length) body.ps = fd.ps;
             if (fd.eg && fd.eg.length) body.eg = fd.eg;
+            if (fd.dns && fd.dns.length) body.dns = fd.dns;
           }
           const cl = this.clSnap(40);
           if (cl.length) body.cl = cl; // 连接观测（按节点聚合）：同理，离线可标定

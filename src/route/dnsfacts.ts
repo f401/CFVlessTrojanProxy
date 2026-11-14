@@ -25,12 +25,23 @@ interface DnsRow {
   at: number;
 }
 
+/** 上行/下行的 DNS 事实行：`h` 站点、`v` 1 有 AAAA / 0 确证没有、`at` 观测时间。 */
+export interface DnsWire {
+  h: string;
+  v: number;
+  at: number;
+}
+
 /**
- * 功能：DNS 事实表（纯内存、isolate 内）。
+ * 功能：DNS 事实表（纯内存、isolate 内），并把确证过的结论攒成待上行增量。
  * @returns {DnsFacts} 进程内单例见 `DNS`
  */
 export class DnsFacts {
   private rows = new Map<string, DnsRow>();
+  /** 待上行：本轮新记、还没被 ack 的行（未 ack 前重发 = 重试，不是重复计数）。 */
+  private pend = new Map<string, DnsRow>();
+  /** 已上行：ack 之后留在表里做参考，不再进增量。 */
+  private sent = new Map<string, DnsRow>();
 
   /**
    * 功能：记一条确证过的 DNS 结论。
@@ -45,6 +56,8 @@ export class DnsFacts {
     // 同一时刻的重复观测：保留「有 AAAA」的那条（它更保守：不会把站点误判成纯 v4）
     if (cur && now - cur.at < 60_000 && cur.v6 === 1) return;
     this.rows.set(host, { v6: v6 ? 1 : 0, at: now });
+    // 只有确证过的结论才进增量：DoH 抖动时调用方根本不会调 note（见文件头）
+    this.pend.set(host, { v6: v6 ? 1 : 0, at: now });
     this.drop(now);
   }
 
@@ -77,6 +90,51 @@ export class DnsFacts {
   }
 
   /**
+   * 功能：取出待上行的增量。
+   * @returns {DnsWire[]} 最多 60 行
+   */
+  delta(): DnsWire[] {
+    const out: DnsWire[] = [];
+    for (const [h, r] of this.pend) {
+      out.push({ h, v: r.v6, at: r.at });
+      if (out.length >= 60) break;
+    }
+    return out;
+  }
+
+  /** 功能：上报成功 —— 待发转已发。@returns {void} */
+  ack(): void {
+    for (const [h, r] of this.pend) this.sent.set(h, r);
+    this.pend.clear();
+  }
+
+  /** 功能：上报失败 —— 丢弃待发，下轮重算（不把失败当已送达）。@returns {void} */
+  nack(): void {
+    this.pend.clear();
+  }
+
+  /**
+   * 功能：合并远端事实（冷启动一次灌入）。只认更新的观测。
+   * @param rows 远端行
+   * @returns {number} 实际并入的行数
+   */
+  load(rows: DnsWire[]): number {
+    let n = 0;
+    for (const r of rows) {
+      if (!r || typeof r.h !== "string" || !r.h) continue;
+      if (r.v !== 0 && r.v !== 1) continue;
+      const at = Number(r.at) || 0;
+      if (!at) continue;
+      const cur = this.rows.get(r.h);
+      if (cur && cur.at >= at) continue;
+      this.rows.set(r.h, { v6: r.v, at });
+      this.sent.set(r.h, { v6: r.v, at });
+      n += 1;
+    }
+    return n;
+  }
+
+  /**
    * 功能：快照（调试与 `/health` 用）。
    * @returns {{ n: number, v6: number, v4: number }} 计数
    */
@@ -98,6 +156,8 @@ export class DnsFacts {
   /** 功能：清空（测试与调试端点用） @returns {void} */
   clear(): void {
     this.rows.clear();
+    this.pend.clear();
+    this.sent.clear();
   }
 
   /**

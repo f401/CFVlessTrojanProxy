@@ -1,4 +1,4 @@
-import { mergeAt, mergeBlk } from "../core/facts";
+import { mergeFacts } from "./factmerge";
 import { seal, unseal } from "./index";
 import { probeHttp80 } from "../core/http80";
 import { chClose, chOpen, chRead, chSh } from "./chan";
@@ -25,6 +25,8 @@ export class Meter {
   ps: Record<string, { q: number; n: number; at: number }>;
   /** 中继「连不上」事实：IP → { n 连续失败次数, at }。判死才会影响选路，仅由连接层触发 */
   dead: Record<string, { n: number; at: number }>;
+  /** DNS 事实：站点 → { v: 1 有 AAAA / 0 确证没有, at }。24 小时寿命，只用于代价乘数 */
+  dns: Record<string, { v: number; at: number }>;
   /** 单 IP 封锁事实：`host|relay` → { n 批数, at }。只影响代价（×6），从不剔候选 */
   blk2: Record<string, { n: number; at: number }>;
   /** 请求串行队列：/add 与 /set 交错会让内存和 storage 的顺序不一致 */
@@ -48,6 +50,7 @@ export class Meter {
     this.eg = {};
     this.ps = {};
     this.dead = {};
+    this.dns = {};
     this.blk2 = {};
     this.st.blockConcurrencyWhile(async () => {
       // 单键存储：每次 /add 只写 1 行。
@@ -68,6 +71,7 @@ export class Meter {
     if (o.eg && typeof o.eg === "object") this.eg = o.eg as unknown as Record<string, { f: number; at: number }>;
     if (o.ps && typeof o.ps === "object") this.ps = o.ps as unknown as Record<string, { q: number; n: number; at: number }>;
     if (o.dead && typeof o.dead === "object") this.dead = o.dead as unknown as Record<string, { n: number; at: number }>;
+    if (o.dns && typeof o.dns === "object") this.dns = o.dns as unknown as Record<string, { v: number; at: number }>;
     if (o.blk2 && typeof o.blk2 === "object") this.blk2 = o.blk2 as unknown as Record<string, { n: number; at: number }>;
         }
         return;
@@ -123,7 +127,7 @@ export class Meter {
     // 一次 put = 一行。四个字段塞进一个对象，行写入直接 ÷4。
     await this.st.storage.put(
       "a",
-      await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl, blk: this.blk, vt: this.vt, hl: this.hl, eg: this.eg, ps: this.ps, dead: this.dead, blk2: this.blk2 }),
+      await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl, blk: this.blk, vt: this.vt, hl: this.hl, eg: this.eg, ps: this.ps, dead: this.dead, blk2: this.blk2, dns: this.dns }),
     );
   }
 
@@ -216,49 +220,7 @@ export class Meter {
         for (const k of ks.slice(200)) delete this.vt[k];
       }
     }
-    // 出口族事实搭便车：新观测覆盖旧观测（at 更大者胜），过期行直接丢；表上限 512 条
-    if (Array.isArray(d.eg) && d.eg.length) {
-      for (const r of d.eg as Array<{ i?: unknown; f?: unknown; at?: unknown }>) {
-        if (!r || typeof r.i !== "string" || typeof r.at !== "number") continue;
-        if (r.f !== 4 && r.f !== 6) continue;
-        if (r.at <= Date.now() - 21600000) continue;
-        const cur = this.eg[r.i];
-        if (cur && cur.at >= r.at) continue;
-        this.eg[r.i] = { f: r.f, at: r.at };
-      }
-      const ek = Object.keys(this.eg);
-      if (ek.length > 512) {
-        ek.sort((a, b) => this.eg[b].at - this.eg[a].at);
-        for (const k of ek.slice(512)) delete this.eg[k];
-      }
-    }
-    // 成功率事实（v8 §5 的 ps）：新观测覆盖旧观测；45 分钟没更新的行直接丢，表上限 512 条。
-    // 不做「按样本数投票」之类合并：各 isolate 的样本不可比（每条 isolate 看到的路径不同）。
-    if (Array.isArray(d.ps) && d.ps.length) {
-      for (const r of d.ps as Array<{ k?: unknown; q?: unknown; n?: unknown; at?: unknown }>) {
-        if (!r || typeof r.k !== "string" || !r.k.includes("|")) continue;
-        if (typeof r.at !== "number" || typeof r.q !== "number" || typeof r.n !== "number") continue;
-        if (r.at <= Date.now() - 2700000) continue;
-        const cur = this.ps[r.k];
-        if (cur && cur.at >= r.at) continue;
-        this.ps[r.k] = { q: Math.max(0, Math.min(255, Math.round(r.q))), n: Math.max(0, Math.min(32, r.n)), at: r.at };
-      }
-      const pk = Object.keys(this.ps);
-      if (pk.length > 512) {
-        pk.sort((a, b) => this.ps[b].at - this.ps[a].at);
-        for (const k of pk.slice(512)) delete this.ps[k];
-      }
-    }
-    // 「连不上」事实（形状 { i, n, at }）：更新的胜、30 分钟过期、上限 256；只收判死（n>=2）的行
-    if (Array.isArray(d.dead) && d.dead.length) {
-      mergeAt(this.dead, d.dead, 256, 1800000, (r) => {
-        const x = r as { n?: unknown; at?: unknown };
-        if (typeof x.at !== "number" || typeof x.n !== "number" || x.n < 2) return null;
-        return { n: Math.max(2, Math.min(9, Math.round(x.n))), at: x.at };
-      });
-    }
-    // 单 IP 封锁事实：形状 `{ k, n, at }`，更新的胜、90 分钟过期、上限 1024 条（逻辑在 core/facts）
-    if (Array.isArray(d.blk2) && d.blk2.length) mergeBlk(this.blk2, d.blk2, 1024, 90 * 60000);
+    mergeFacts(this, d);
     // 中继存活度搭便车：加性合并（只增不减，避免别的 isolate 的旧数据把本地结论冲掉）
     if (Array.isArray(d.hl) && d.hl.length) {
       for (const r of d.hl) {
@@ -457,7 +419,7 @@ export class Meter {
       ps.sort((a, b) => b.at - a.at);
       const dd = Object.entries(this.dead).map(([i, x]) => ({ i, n: x.n, at: x.at }));
       dd.sort((a, b) => b.at - a.at);
-      return Response.json({ vt: out.slice(0, 120), hl: hl.slice(0, 120), eg: eg.slice(0, 160), ps: ps.slice(0, 200), dead: dd.slice(0, 120), blk2: Object.entries(this.blk2).map(([k, v]) => ({ k, ...v })).slice(0, 120) });
+      return Response.json({ vt: out.slice(0, 120), hl: hl.slice(0, 120), eg: eg.slice(0, 160), ps: ps.slice(0, 200), dead: dd.slice(0, 120), blk2: Object.entries(this.blk2).map(([k, v]) => ({ k, ...v })).slice(0, 120), dns: Object.entries(this.dns).map(([h, x]) => ({ h, v: x.v, at: x.at })).slice(0, 160) });
     }
     if (p.endsWith("/blk")) {
       const nowB = Date.now();

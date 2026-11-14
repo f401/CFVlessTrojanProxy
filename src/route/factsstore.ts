@@ -2,6 +2,7 @@ import { EG, type EgRow } from "./egfacts";
 import { PS, type PsWire } from "./psfacts";
 import { DEAD, type DeadWire } from "./deadfacts";
 import { BLK, type BlkWire } from "./blkfacts";
+import { DNS, type DnsWire } from "./dnsfacts";
 
 /** 远端事实车身（与 `GET /meter/vt` 的返回字段一一对应）。 */
 export interface FactsBody {
@@ -9,6 +10,7 @@ export interface FactsBody {
   ps?: PsWire[];
   dead?: DeadWire[];
   blk2?: BlkWire[];
+  dns?: DnsWire[];
 }
 
 /** 上行增量的形状：四类事实各自可能为空。 */
@@ -17,6 +19,7 @@ export interface FactsDelta {
   ps?: PsWire[];
   dead?: DeadWire[];
   blk2?: BlkWire[];
+  dns?: DnsWire[];
 }
 
 /**
@@ -33,14 +36,15 @@ export class FactsStore {
   /**
    * 功能：把远端拉回的事实合并进本地表（各自的 `load` 都只认更新的观测）。
    * @param b 远端车身
-   * @returns {{ eg: number; ps: number; dead: number; blk2: number }} 各自实际并入的行数
+   * @returns {{ eg: number; ps: number; dead: number; blk2: number; dns: number }} 各自实际并入的行数
    */
-  load(b: FactsBody): { eg: number; ps: number; dead: number; blk2: number } {
+  load(b: FactsBody): { eg: number; ps: number; dead: number; blk2: number; dns: number } {
     return {
       eg: Array.isArray(b.eg) ? EG.load(b.eg) : 0,
       ps: Array.isArray(b.ps) ? PS.load(b.ps) : 0,
       dead: Array.isArray(b.dead) ? DEAD.load(b.dead) : 0,
       blk2: Array.isArray(b.blk2) ? BLK.load(b.blk2) : 0,
+      dns: Array.isArray(b.dns) ? DNS.load(b.dns) : 0,
     };
   }
 
@@ -58,6 +62,8 @@ export class FactsStore {
     if (dead.length) out.dead = dead;
     const blk2 = BLK.delta();
     if (blk2.length) out.blk2 = blk2;
+    const dns = DNS.delta();
+    if (dns.length) out.dns = dns;
     return out;
   }
 
@@ -91,6 +97,7 @@ export class FactsStore {
     PS.clear();
     DEAD.clear();
     BLK.clear();
+    DNS.clear();
   }
 }
 

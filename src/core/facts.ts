@@ -33,8 +33,9 @@ export function mergeAt<T extends AtRow>(
     if (!row) continue;
     // 太旧的直接丢：跨 isolate 回放一份一小时前的结论没有意义
     if (ttl > 0 && now - row.at > ttl) continue;
-    const r = raw as { k?: unknown; i?: unknown };
-    const k = typeof r.k === "string" ? r.k : typeof r.i === "string" ? r.i : "";
+    const r = raw as { k?: unknown; i?: unknown; h?: unknown };
+    // 键可能在 `k`（host|relay）、`i`（ip）或 `h`（站点）上：三种形状都是既有 wire 类型，不另设归一化层
+    const k = typeof r.k === "string" ? r.k : typeof r.i === "string" ? r.i : typeof r.h === "string" ? r.h : "";
     if (!k) continue;
     const old = cur[k];
     // 严格更新：相同时间戳也保留本地的（两个 isolate 同一毫秒写同一键时不该互相翻转）

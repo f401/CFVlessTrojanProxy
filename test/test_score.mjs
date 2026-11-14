@@ -2891,5 +2891,20 @@ console.log("\n94) 四类事实门面：一次取齐增量，ack 后清空");
   eq("整页优先于 siteV4", W.egDerive("203.0.113.29", 45000, { siteV4: true }), 4);
   W.EG.clear();
 }
+
+console.log("\n95) dns 事实跨 isolate");
+W.DNS.clear();
+W.DNS.note("a.example.com", true, 1000);
+eq("note 后有增量", W.DNS.delta().length, 1);
+eq("增量带确证值", W.DNS.delta()[0].v, 1);
+W.DNS.ack();
+eq("ack 后增量为空", W.DNS.delta().length, 0);
+W.DNS.clear();
+W.DNS.note("a.example.com", false, 1000);
+W.DNS.ack();
+eq("只认更新的观测", W.DNS.load([{ h: "a.example.com", v: 1, at: 2000 }, { h: "a.example.com", v: 0, at: 500 }]), 1);
+eq("合并后取有 AAAA 的那条", W.DNS.v6Of("a.example.com", 2500), 1);
+eq("FACTS.clear 一并清 dns", (W.FACTS.clear(), W.DNS.v6Of("a.example.com", 3000)), -1);
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
