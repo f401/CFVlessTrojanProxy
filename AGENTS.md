@@ -1,0 +1,143 @@
+# AGENTS.md
+
+给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
+
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/const.ts` 的 `VERSION`，当前 **7.47** 已上线，工作区里 7.48+ 的改动尚未部署）。
+形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
+
+---
+
+## 1. 不能破的六条硬约束
+
+1. **统计不跨 isolate 共享。** `px:seed` 里只放 `{k,h,p,cc}`（名字与地址），延迟/成功率/带宽全部留在本 isolate 内存。理由：每个 isolate 到同一节点的 RTT 可能差一倍，共用统计会让选路持续选错。
+2. **没有 2xx 就不写封禁。** 封锁证据只来自「同一时间窗内，同站点有通道拿到 2xx、另一条没有」；全 4xx / 全超时只能 `rotate` 换出口重采，绝不能把站点或出口标记成 blocked。业务 403（如 `api.github.com`）必须原样透传。
+3. **绝不部署明文包。** `tools/check-obf.js` 是发版硬闸（严格关键字必须 0、`a_0x >= 100`、无 `class Meter` 明文），已前置进部署脚本，失败即 `REFUSE`。用户对此有过明确指令。
+4. **入口偏好只能客户端实测。** Worker 访问自家域名必然 522 自环，所以服务端探「客户端→边缘」在物理上不成立。订阅发 `server: <ip>` 条目 + `🌐 入口优选`（`url: https://<host>/health`、`expected-status: 200`）让客户端自己挑；`?e=0` 关闭、手动 `nodes` 优先。
+5. **免费计划的三条额度必须留余量。** ① 同时打开的 `connect()` ≤ 6（`SC.PROBE_CONC = 6`，除非你确认改的是别的量）；② 一次调用 fetch 子请求 ≤ 50（一轮预算 `plan.cap = 48`，refill + tfb 也在里面）；③ DO CPU 只有几十毫秒 —— 单发 TLS 握手只能走 `tunnelfetch`（`src/core/tf.ts`），vendored `subtls` 仅手动调试可达。
+6. **注释与文档是门禁，不是礼貌。** 每个函数/方法上方必须有 `/** 功能 / @param / @returns */`，`node tools/doc-audit.mjs --max 0` 不过就发不了版；函数体内也要写「这步在干嘛 / 为什么」，协议偏移与边界条件必须解释。
+
+---
+
+## 2. 目录与分层
+
+依赖方向（`tools/check-arch.js` 强制，反向依赖与循环依赖都报错）：
+
+```
+core  →  store  →  nodes  →  px  →  proxy  →  views  →  edge  →  routes
+```
+
+| 目录 | 职责 | 代表文件 |
+|---|---|---|
+| `src/core/` | 常量、状态表、工具、直方图、配额、TLS 探测封装 | `const.ts`、`state.ts`、`util.ts`、`hist.ts`、`tf.ts` |
+| `src/store/` | KV 与 DO（`Meter`）读写、快照、待上报账本、密钥链 | `store.ts`、`meter.ts`、`snapshot.ts`、`pend.ts`、`chan.ts` |
+| `src/nodes/` | 节点统计与打分、错误环、域名画像 | `stat.ts`、`score.ts`、`metrics.ts` |
+| `src/px/` | 候选池、探活、选择器、单层抽样、地区分组、seed 交互 | `pool.ts`、`probe.ts`、`selector.ts`、`ts.ts` |
+| `src/proxy/` | WS 入口、协议解析、拨号、连接计量、CF 托管识别 | `session.ts`、`connection.ts`、`dialer.ts`、`dial.ts` |
+| `src/views/` | 订阅（clash / sing-box）与面板 HTML | `sub.ts`、`subview.ts`、`panel.ts` |
+| `src/edge/` | 鉴权（`X-Admin-Key` / Bearer / sha256 摘要）、响应封装 | `auth.ts`、`respond.ts` |
+| `src/route/` | 判定层：verdict / judge / policy / budget / tfb / verify / edge 偏好 | `policy.ts`、`verdict.ts`、`tfb.ts` |
+| `src/routes/` | HTTP 路由：health、admin、debug、logs、proxyip、cron、table | `health.ts`、`cron.ts`、`table.ts` |
+
+`src/proxy/session.ts` **不能** import `src/route/*`（会形成 `proxy → route` 反向依赖 + 循环）。跨层通信用 `src/core/hook.ts` 的槽位：`src/route/policy.ts` 在模块顶层注册，`src/index.ts` 用 `import "./route/policy"` 做副作用装配。
+
+其他架构门禁：单文件 ≤ 560 行、禁止 `any`、禁止顶层 `let`（可变的跨请求状态一律进 `src/core/state.ts` 的 `S`）。
+
+---
+
+## 3. 常用命令
+
+```powershell
+node tools/preflight.mjs            # 全量本地门禁（tsc→arch→bundle→mk_test→四段测试→golden→混淆→simrun），默认不部署
+node tools/preflight.mjs --fast     # 跳过 sim_v3 / golden，约 20-25 s
+node tools/preflight.mjs --deploy   # 全绿后直接部署（等价于再跑 deploy-746.mjs）
+
+node tools/tsc.js                   # 类型检查（0 error 才允许继续）
+node tools/check-arch.js            # 分层 / 循环 / 顶层状态 / 体积
+node tools/bundle.js                # dist/_worker.js + dist/_test.js
+node test/mk_test.mjs               # 生成 test/_bundle.mjs（simrun 与 test_score 都读它）
+node test/test_v3.mjs               # 主功能（186 条）
+node test/smoke_v3.mjs              # 冒烟（30 条）
+node test/test_score.mjs            # 评分/选择（650+ 条）
+node test/sim_v3.mjs                # 仿真回归（22 条）
+node test/golden.mjs                # 订阅/面板快照（8 条）
+node test/golden.mjs write          # 有意改动输出时更新快照，必须在提交信息里说明
+
+node tools/doc-audit.mjs --max 0    # 函数级注释门禁
+node tools/body-audit.mjs           # 体内步骤注释体检（≥12 行且零注释的函数）
+node tools/doc-gen.mjs [--write]    # 给纯委托薄包装自动补一行式文档
+
+node tools/sim-select.mjs 4         # 选路仿真（SEEDS=4/8；结果必须看中位数）
+node tools/simrun.mjs --full        # 在本地 mock KV 上把 9 条路由跑一遍
+node .tmp-sim/req.mjs "/<uuid>/debug?vt=example.com"   # 通用本地请求，打印完整 body
+```
+
+`package.json` 的脚本是上述命令的别名：`npm run check|build|test|arch|obf|all`。
+
+---
+
+## 4. 发版流程（顺序不能错）
+
+```
+tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim_v3 / golden
+    → obf/pre.js → obf/obf_mid.js → check-obf → .tmp-sim/deploy-746.mjs → GET /health
+```
+
+必须记住的细节：
+
+- **`obf/pre.js` 与 `obf/obf_mid.js` 是两个阶段**。只跑 `obf_mid.js` 会部署成功但版本号不变（它吃的是 `pre.js` 的产物）—— 曾因此线上挂着旧版还以为发了新版。
+- `deploy-746.mjs` 只在 `VERSION` 变更后才有意义；它**不带 migrations**（`v1` 已应用，重复提交会报 tag 已存在）。
+- 只有「用户明确要求 / 改动落在运行时限制 / 发版本号」才部署；日常改动默认只跑本地门禁（用户明确要求少推 CF）。
+- 发完必须 `GET https://<host>/health` 核对 `version` 与 `关键字残留: 无`。
+
+### 账号级坑（都踩过）
+
+- `PUT /scripts/{name}/schedules` 的 body 必须是**顶层数组** `[{"cron":"*/30 * * * *"}]`，其他形状报 `10026`。
+- `GET /scripts/{name}/settings` 里 `secret_text` 的 `text` 返回空串，直接回写会**清空 `uuid/pwd/kek`**；重建 metadata 时必须显式写回这三个 secret。
+- `DELETE /scripts/{name}?force=true` 会**连带删掉该脚本的 sqlite DO 命名空间**；重建必须带 `migrations: { new_tag, new_sqlite_classes: ["Meter"] }` 且**不写 namespace_id**（复用它必报 `10061`）。
+- 免费计划里「非 sqlite 类迁移到 sqlite」会形成 `10074/10061/10064` 的互锁，唯一出路是删脚本重建；此时自定义域要重新绑定 `PUT /accounts/{acc}/workers/domains`。
+
+---
+
+## 5. 测试规范
+
+- `test/test_score.mjs` 的断言签名是 **`eq(label, got, want)`**（顺序反了会全部静默失败）。
+- 新断言组必须插在文件末尾 `process.exit()` **之前**，否则静默不执行、总数也不变。
+- `test/_bundle.mjs` 只有一份，`simrun`/`sim_v3`/`test_score` 都读它；改完源码不 `mk_test` 就跑测试等于测旧代码。
+- `src/test-surface.ts` 是对外暴露给测试的「窗口」：新增/改名导出时必须同步，否则测试拿到 `undefined`。
+- 仿真数字有噪声：同代码重跑 20 节点能在 1.28–1.54 之间跳。**只认 SEEDS=8 的中位数**，并且用 `git stash push -- src/` 做配对基线，不要拿不同时间点的两次跑分对比。
+
+---
+
+## 6. 编码与补丁约定
+
+- **注释**：函数级写「功能 / 参数 / 返回」；体内只写「这步在干嘛 / 为什么」，协议字段偏移、边界条件、临时绕过的原因必须写。不复述代码，HTML 模板（`views/` 里的模板字符串）不写体内注释——里面的 `//` 会发给浏览器。
+- **类**：只有**独占跨请求可变状态**的模块才配类（`VerdictTable`、`Pool`、`Scorer`、`Store`、`RelayHealth`…）。纯计算/纯渲染保持自由函数，不要为了「OOP」把 `util.ts` 变成类。
+- **批量改代码**：不要按行号定位。用**整行 `trim()` 锚点 + 命中数必须为 1** 的脚本，命中数不对就 `process.exit(1)`；重复锚点用「连续多行」组合。写得好的范本：`.tmp-sim/steps*.mjs`。
+- **CRLF**：仓库里 CRLF/LF 混排（`test/test_score.mjs` 尤其严重）。锚点匹配前先 `s.includes("\r\n")` 探测，写回统一 `lines.join("\r\n")`；用 `"\n"` 硬拼锚点会一直 `anchor miss`。
+- **提交**：PowerShell 5.1 不支持 heredoc 管道进 `git commit -F -`；把提交信息写到 `.tmp-sim/msg*.txt`，再 `git -c i18n.commitEncoding=UTF-8 commit -F .tmp-sim/msg*.txt`。
+
+---
+
+## 7. 环境坑
+
+- 依赖安装要用 `npm install --cache .npm-cache`（系统 npm 缓存会 EPERM）；`esbuild` 需 `npm install esbuild --ignore-scripts`，跑 `bundle.js` 时给足文件权限。
+- PowerShell 5.1 里 `R`/`r` 是 `Invoke-History` 的别名，别拿它当函数名；`curl.exe` 会因为 `*` 和空格拆参，改用 `Invoke-RestMethod` 或 Node 的 `fetch`。
+- `?tfb=` `?tlsnow=` 这类调试端点在 `/<uuid>/debug` 下，不在根路径。
+- 请求头名小写化时只小写 key，**不要小写 value**（`X-Admin-Key` 的值会被打乱，管理端点一律 403）。
+
+---
+
+## 8. 凭据政策
+
+- 仓库里**不放** CF API token、account id、zone id、`adminKey`、`uuid`、`pwd`、`kek`、KV namespace id。
+- 需要发版时从 `.tmp-sim/deploy-746.mjs` 读取（该目录已在 `.gitignore` 里）；新写的临时脚本一律放 `.tmp-sim/`。
+- 泄露过的凭据必须轮换，不要「反正是私库」就复用。
+
+---
+
+## 9. 当前状态与未完成
+
+- 线上 **7.47**；工作区 7.48+ 的改动（第 14 轮之后的预算/入口/健康表/日志/探活过期/注释等）**全部未部署**。
+- OOP 还没做完的 4 个模块：`src/nodes/metrics.ts`（错误环 + 域名画像）、`src/px/probe.ts`（源健康度 `SRC_BAD`）、`src/route/edge.ts`（入口偏好 + `EDGE_ERR`）、`src/store/pend.ts`（待上报账本 + flush 定时器）。它们都被 60+ 条单测直接引用，转换时要同步 `src/test-surface.ts`。
+- 待用户验证：`/<uuid>/debug?tlsnow=<host>` 的双栈并排结果（`subtls` 与 `tunnelfetch` 是否给出同一结论），决定是否删除 vendored `subtls`（约 55 KB）。
+- 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
