@@ -17,9 +17,48 @@ const SMALL_MAX = 12000; // 小响应上限：再大就不当封锁证据
 const JUNK_MAX = 6000; // 中继自家默认页的量级
 const BASE_TTL = 6 * 3600_000; // 「站点能出整页」的记忆
 const PX_TTL = 21_600_000; // 下次优先中转的提示位
+const NEG_TTL = 600_000; // 短负面记忆：10 分钟后自动失效（只降权，不写封禁）
 
 /** 判定器：唯一写「流量证据」的地方，纯内存、无 IO */
 export class Judge {
+  /**
+   * 短负面记忆：键 `站点|通道`，值 = 到期时间戳。
+   *
+   * 存在的原因：公开中继背后是一组 egress，部分出口走 IPv6 或质量差，**同一条中继会逐连接漂移**；
+   * 选路层只按健康度/证据时间排序治不了它。这里用「刚刚这条通道对该站点回了异常小的响应」
+   * 作为 10 分钟的软降权依据，让突发流量中的下一条连接自动绕开它，但绝不写封禁
+   * （不放进判定表，因此不影响「无 2xx 不写封禁」的纪律，也不会污染 blockedRatio）。
+   */
+  private neg = new Map<string, number>();
+
+  /**
+   * 功能：记录一条短负面记忆（10 分钟），供选路层把该通道排到后面。
+   * @param host 目标站
+   * @param ip 中继出口 IP
+   * @param now 当前时间戳
+   * @returns 无
+   */
+  markNeg(host: string, ip: string, now: number): void {
+    if (!host || !ip) return;
+    this.neg.set(host + "|r:" + ip, now + NEG_TTL);
+  }
+
+  /**
+   * 功能：查询该（站点, 中继）是否仍在负面记忆期内。
+   * @param host 目标站
+   * @param ip 中继出口 IP
+   * @param now 当前时间戳
+   * @returns 在期内返回 true（调用方应把它排到后面，而不是禁用它）
+   */
+  negOn(host: string, ip: string, now = Date.now()): boolean {
+    const k = host + "|r:" + ip;
+    const until = this.neg.get(k);
+    if (!until) return false;
+    if (until > now) return true;
+    this.neg.delete(k); // 过期即清，避免表随流量无限长
+    return false;
+  }
+
   /** 连接收尾的观测 */
   onTraffic(e: TrafficEvt): void {
     if (e.host === S.site) return; // 探自己域名必 522（CF 自环），不构成任何通道证据
@@ -60,6 +99,12 @@ export class Judge {
     const httpOk = cfHttpCode(e.host) === 200;
     const bigDiff = (S.bigByHost.get(e.host) || 0) > now - BASE_TTL && S.bigChan.get(e.host) !== ck;
     const known = httpOk || bigDiff;
+    // 短负面记忆：只要「站点确实能出整页」的旁证成立，就把这条通道对该站点软降权 10 分钟。
+    // 它是选路层的排序依据，不是封锁结论 —— 突发负载下一条连接就会换别的通道。
+    if (known && e.via === "node") {
+      const nip = e.node ? e.node.slice(0, e.node.lastIndexOf(":")) : "";
+      this.markNeg(e.host, nip, now);
+    }
     if (!known) {
       queueVerify(e.host, chan); // 复核队列（PROBE_REQ=0 时只排队）
       if (n >= 2 || e.cf) S.needPx.set(e.host, now + PX_TTL); // 只提醒「下次优先中转」，不下判定

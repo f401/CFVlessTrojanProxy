@@ -65,8 +65,16 @@ export class Policy {
       const nonCf0 = usable.filter((ip) => !isCfIp(ip));
       return { chan: { kind: "r", ip: (nonCf0[0] || usable[0]) as string }, why: "dir-blocked" };
     }
-    const nonCf = usable.filter((ip) => !isCfIp(ip));
-    const okOnes = usable.filter((ip) => vOk(c.host, "r:" + ip) || vOk("*", "r:" + ip));
+    // 粘性：最近对该站点留下过证据的通道排前面（vAt 为最后证据时间，没证据的为 0 排最后）。
+    // 突发场景下「每条连接都按健康度盲选」会分散到少数 v6 出口/质量差的中继；按站点证据排序能让
+    // 已经证明「这个站点走它能成」的同一条中继被反复复用 —— 普适规则，不含站点特判。
+    // 短负面记忆（10 分钟）优先于粘性：刚回过异常小响应的通道先让开一条连接，过期自动恢复。
+    const negOf = (ip: string): number => (JUDGE.negOn(c.host, ip) ? 1 : 0);
+    const stick = usable
+      .slice()
+      .sort((a, b) => negOf(a) - negOf(b) || vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a));
+    const nonCf = stick.filter((ip) => !isCfIp(ip));
+    const okOnes = stick.filter((ip) => vOk(c.host, "r:" + ip) || vOk("*", "r:" + ip));
 
     if (c.clientV6 && c.cfHost) {
       // F6：v6 客户端打 CF 目标必 403，只有非 CF 主机能改判
@@ -84,9 +92,9 @@ export class Policy {
       if (okOnes.length) return { chan: { kind: "r", ip: okOnes[0] }, why: "cf-ok-relay" };
       if (nonCf.length) return { chan: { kind: "r", ip: nonCf[0] }, why: "cf-noncf" };
       const code = cfHttpCode(c.host);
-      if (code === 403 && usable.length) return { chan: { kind: "r", ip: usable[0] }, why: "http403" };
+      if (code === 403 && stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "http403" };
       if (code === 200) return { chan: DIRECT, why: "http200" };
-      if (usable.length) return { chan: { kind: "r", ip: usable[0] }, why: "cf-any" };
+      if (stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "cf-any" };
     }
     return { chan: DIRECT, why: "direct" };
   }
