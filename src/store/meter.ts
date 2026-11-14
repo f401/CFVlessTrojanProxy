@@ -286,6 +286,18 @@ export class Meter {
       const out = await probeTls(hh, pp, rr);
       return Response.json(out);
     }
+    if (p.endsWith("/burn")) {
+      // 诊断：量 DO 自己的 CPU 预算（用 digest 循环烧 CPU，返回完成了多少次）
+      const ms = Math.max(1, Math.min(5000, Number(url.searchParams.get("ms") || 50)));
+      const t0 = Date.now();
+      let n = 0;
+      const buf = new Uint8Array(256);
+      while (Date.now() - t0 < ms) {
+        await crypto.subtle.digest("SHA-256", buf);
+        n++;
+      }
+      return Response.json({ ok: true, n, ms: Date.now() - t0 });
+    }
     if (p.endsWith("/cl")) {
       return Response.json({ cl: this.cl });
     }

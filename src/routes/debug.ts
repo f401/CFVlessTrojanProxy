@@ -332,6 +332,20 @@ export async function debug(c: UserCtx): Promise<Response> {
       return json({ ok: false, error: errMsg(e) });
     }
   }
+  // 诊断：量 DO 的 CPU 预算（不涉及 TLS）
+  if (url.searchParams.get("burn")) {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    if (!env.METER) return json({ ok: false, error: "no METER" });
+    const ms = Number(url.searchParams.get("burn") || 50);
+    try {
+      const stub = env.METER.get(env.METER.idFromName(id));
+      const resp = await withTimeout(stub.fetch(`https://meter/burn?ms=${ms}`), 15000);
+      return json({ ok: true, burn: await resp.json() });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
   if (url.searchParams.get("restore") === "1") {
     const deny = await adminOnly(c);
     if (deny) return deny;
