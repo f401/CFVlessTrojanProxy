@@ -17,7 +17,7 @@ const stub0 = (c: RouteCtx) => c.env.METER.get(c.env.METER.idFromName("tf-probe"
 /** 判定收敛：200 与 403 并存才升级为 IP 级封锁证据；全 403 说明是站点级，不写封禁。 */
 export function tfVerdict(rows: Array<{ ok: boolean; status?: number }>): "ok" | "chan" | "site" | "unknown" {
   const okN = rows.filter((x) => x.ok && x.status === 200).length;
-  const badN = rows.filter((x) => x.status === 403).length;
+  const badN = rows.filter((x) => (x.status || 0) >= 400).length;
   return okN > 0 && badN > 0 ? "chan" : okN > 0 ? "ok" : badN > 0 ? "site" : "unknown";
 }
 
@@ -41,7 +41,7 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
   const rows = (body.rows || []) as Array<{ relay: string; ok: boolean; status?: number; ms?: number }>;
   if (direct.ok || (direct as { status?: number }).status) rows.unshift({ relay: "direct", ok: !!direct.ok, status: direct.status, ms: direct.ms });
   const okN = rows.filter((x) => x.ok && x.status === 200).length;
-  const badN = rows.filter((x) => x.status === 403).length;
+  const badN = rows.filter((x) => (x.status || 0) >= 400).length;
   const verdict = tfVerdict(rows);
   for (const row of rows) {
     const ip = row.relay.split(":")[0];

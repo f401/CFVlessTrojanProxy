@@ -72,6 +72,7 @@ export class AppState {
     "eCloseD",
     "eCloseP",
     "px4",
+    "tfb",
     "pxf",
     "sw",
     "noCand",

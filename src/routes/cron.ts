@@ -1,7 +1,8 @@
-import { eachLimit, errMsg } from "../core/util";
+﻿import { eachLimit, errMsg } from "../core/util";
 
 import { logErr } from "../nodes/metrics";
 import { S } from "../core/state";
+import { cnt } from "../core/counter";
 import { cronScan, flushPx } from "../px/pool";
 import { planRound } from "../route/budget";
 import { runRound } from "../route/round";
@@ -43,6 +44,7 @@ async function tfbRound(env: Env): Promise<void> {
     if (until <= now) continue;
     if (now - (TFB_AT.get(host) || 0) < 600000) continue;
     TFB_AT.set(host, now);
+    cnt("tfb");
     await runTfb({ env } as unknown as Parameters<typeof runTfb>[0], host, 2);
     return;
   }
