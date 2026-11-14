@@ -2162,5 +2162,29 @@ console.log("\n71) 错误日志限流");
   ok("灌满没把限流表清空", W.errDup() - d1 === 1, String(W.errDup() - d1));
 }
 
+// 72) 探活失败记录的时效
+console.log("\n72) 探活失败过期");
+{
+  const key = "198.51.100.77:443";
+  const t0 = 1_700_000_000_000;
+  ok("阈值是 3", W.SC.SCAN_BAD_MAX === 3, String(W.SC.SCAN_BAD_MAX));
+  ok("过期时长 30 分钟", W.SC.PROBE_BAD_TTL === 1800000, String(W.SC.PROBE_BAD_TTL));
+  ok("没失败过不跳过", W.probeBadSkip(key, t0) === false, "false");
+  W.bumpProbeBad(key, false, t0);
+  ok("失败 1 次不跳过", W.probeBadSkip(key, t0) === false, "false");
+  W.bumpProbeBad(key, false, t0 + 1000);
+  W.bumpProbeBad(key, false, t0 + 2000);
+  ok("连续 3 次后跳过", W.probeBadSkip(key, t0 + 3000) === true, "true");
+  ok("30 分钟后自动作废", W.probeBadSkip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 1) === false, "false");
+  // 真正过了 TTL 之后再失败，才算新一轮
+  W.bumpProbeBad(key, false, t0 + 2000 + W.SC.PROBE_BAD_TTL + 5000);
+  ok("过期后再失败从 1 重新数（还不跳过）", W.probeBadSkip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 5000) === false, "false");
+  W.bumpProbeBad(key, false, t0 + 2000 + W.SC.PROBE_BAD_TTL + 6000);
+  W.bumpProbeBad(key, false, t0 + 2000 + W.SC.PROBE_BAD_TTL + 7000);
+  ok("重新数满 3 次又跳过", W.probeBadSkip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 7000) === true, "true");
+  W.bumpProbeBad(key, true, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000);
+  ok("探活成功立刻清除", W.probeBadSkip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000) === false, "false");
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -31,7 +31,8 @@ export class AppState {
   // 探活结果按原因分类：区分"连不上"（可能是地区/线路）和"连上了但不是 CF 反代"（节点事实）
   probeWhy: Record<string, number> = {};
   // 候选池的本地探活结论（只在本 isolate 有效，不写 KV）：连续失败的候选不再占探测名额
-  probeBad: Map<string, number> = new Map();
+  /** 探活连续失败次数 + 最后一次失败时间（带时间戳，超时自动作废） */
+  probeBad: Map<string, { n: number; at: number }> = new Map();
   probeColo = "";
   /** 待复测：上一轮探活比同 /24 邻居慢一大截的节点（探活抖动一次不该定生死） */
   reProbe: string[] = [];

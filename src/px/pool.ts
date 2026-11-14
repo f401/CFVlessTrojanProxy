@@ -213,6 +213,26 @@ export async function aliveList(env: Env) {
   return [...S.alive.values()];
 }
 
+/**
+ * 这个候选是否暂时不占探活名额。
+ * 「连续失败」必须带时间戳：公开池里失败的绝大多数是临时抖动（限流、被墙、机房负载），
+ * 以前只记次数、永不衰减，一个节点冷启动时被拒 3 次就永远排在候选之外。
+ */
+export function probeBadSkip(k: string, now = Date.now()): boolean {
+  const e = S.probeBad.get(k);
+  if (!e || e.n < SC.SCAN_BAD_MAX) return false;
+  return now - e.at <= SC.PROBE_BAD_TTL;
+}
+/** 记一次探活失败（由 cronScan 与测试共用，保证「过期重置」只写一遍） */
+export function bumpProbeBad(k: string, ok: boolean, now = Date.now()): void {
+  if (ok) {
+    S.probeBad.delete(k);
+    return;
+  }
+  const cur = S.probeBad.get(k);
+  const n = cur && now - cur.at <= SC.PROBE_BAD_TTL ? cur.n + 1 : 1;
+  S.probeBad.set(k, { n: Math.min(9, n), at: now });
+}
 export async function cronScan(env: Env, adm = 0) {
   await pxGet(env);
   let pool = await ensurePool(env);
@@ -259,7 +279,7 @@ export async function cronScan(env: Env, adm = 0) {
   // 不再占名额。公开池里九成以上是死的，纯轮转时它们每轮都被重复探一遍，好候选永远排不上。
   const open = pool.filter((c) => {
     const k = c.h + ":" + c.p;
-    return !S.alive.has(k) && (S.probeBad.get(k) || 0) < SC.SCAN_BAD_MAX;
+    return !S.alive.has(k) && !probeBadSkip(k);
   });
   // 全都有结论时退回"没进池的候选"做低频复检（能在池里的靠 ② 复测 + 真实流量，不用再探活）
   const live = pool.filter((c) => !S.alive.has(c.h + ":" + c.p));
@@ -274,8 +294,7 @@ export async function cronScan(env: Env, adm = 0) {
       const x = part[j];
       noteProbe(x);
       const k = seg[j].h + ":" + seg[j].p;
-      if (x && !x.bad) S.probeBad.delete(k);
-      else S.probeBad.set(k, Math.min(9, (S.probeBad.get(k) || 0) + 1));
+      bumpProbeBad(k, !!(x && !x.bad));
     }
     hits.push(...part.filter((x) => x && !x.bad));
   }

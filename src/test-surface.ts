@@ -56,7 +56,7 @@ export {
   freezeNode,
   isFrozen,
 } from "./nodes/score";
-export { nsOf, pxGet, flushPx, noteProbe } from "./px/pool";
+export { nsOf, pxGet, flushPx, noteProbe, probeBadSkip, bumpProbeBad } from "./px/pool";
 export { POOL, Pool } from "./px/pool";
 export { DIALER, Dialer } from "./proxy/dialer";
 export { ATTACHER, Attacher } from "./proxy/attacher";

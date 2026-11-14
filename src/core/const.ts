@@ -64,7 +64,9 @@ export const SC = {
   // 订阅仍靠客户端 url-test；需要人工诊断时打 ?edge=1 手动探。
   EDGE_AUTO: 0,
   SCAN_SUB: 48, // 免费计划每次调用 50 个子请求，留在 48 以内（付费计划可用 env.scanSub 抬到 1000）
-  SCAN_BAD_MAX: 3, // 连续探活失败几次就不再占探测名额（本地记忆，不写 KV）
+  SCAN_BAD_MAX: 3, // 连续失败几次暂时跳过
+  PROBE_BAD_TTL: 1800000, // 「跳过」只保留 30 分钟：临时抖动不该让节点永远排不上
+ // 连续探活失败几次就不再占探测名额（本地记忆，不写 KV）
   // 免费计划每次调用最多 6 个同时打开的 connect()，第 7 个起直接报 too many connections；
   // 探活分段必须按它切，否则被拒的那几个会被当成「节点坏了」写进 probeBad。
   PROBE_CONC: 6,
