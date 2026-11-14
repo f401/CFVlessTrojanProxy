@@ -7,6 +7,7 @@ import { hostRank, logErr } from "../nodes/metrics";
 import { costOf, invalidateRank, scoreParts } from "../nodes/score";
 import { nodeSnapGet } from "../store/index";
 import { cronScan, nsOf, pxGet } from "../px/pool";
+import { POOL_SOURCES, srcHealth, srcRank } from "../px/probe";
 import { SEL } from "../px/selector";
 import { cntView } from "../core/counter";
 import { spdSnapshot } from "../core/node-snapshot";
@@ -41,6 +42,19 @@ export async function proxyip(c: UserCtx): Promise<Response> {
       nodes: nodesSnap,
       local: cntView(),
       localSpd: spdSnapshot(),
+      now: Date.now(),
+    });
+  }
+  // 源健康度：每个源的连续失败次数与冷却截止，以及本轮实际抓取顺序
+  if (url.searchParams.get("src") === "1") {
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const rank = srcRank(env);
+    return json({
+      order: rank.map((x, i) => ({ i, src: x })),
+      health: srcHealth(),
+      total: POOL_SOURCES.length,
+      custom: Boolean(env.poolSrc),
       now: Date.now(),
     });
   }

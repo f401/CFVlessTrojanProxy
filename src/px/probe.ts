@@ -174,7 +174,7 @@ const SRC_BAD = new Map<string, { n: number; until: number }>();
 
 /** 允许 env.poolSrc 覆盖源列表（逗号或空白分隔），默认用内置表 */
 export function poolSources(env: Env): string[] {
-  const custom = String((env as { poolSrc?: string }).poolSrc || "").trim();
+  const custom = String(env.poolSrc || "").trim();
   if (!custom) return POOL_SOURCES;
   const list = custom.split(/[,\s]+/).filter((x) => /^https?:\/\//.test(x));
   return list.length ? list : POOL_SOURCES;
