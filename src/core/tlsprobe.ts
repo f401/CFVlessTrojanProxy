@@ -32,6 +32,8 @@ const EMPTY: TlsProbeResult = { ok: false, code: 0, status: "", server: "", head
 
 export async function probeTls(host: string, path = "/", relay = ""): Promise<TlsProbeResult> {
   const t0 = Date.now();
+  // 硬截止：调用方（DO / 请求路径）都有很紧的 CPU 上限，探测不能把请求拖死
+  const hardEnd = t0 + 3000;
   const [rHost, rPort] = relay ? relay.split(":") : [host, "443"];
   let sock: ReturnType<typeof connect>;
   try {
@@ -79,6 +81,15 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
     const out = new Uint8Array(bytes);
     let got = 0;
     while (got < bytes) {
+      if (Date.now() > hardEnd) {
+        ended = true;
+        try {
+          sock.close();
+        } catch {
+          pumpErr = true;
+        }
+        return undefined;
+      }
       const c = chunks[0];
       if (!c) {
         if (ended) return undefined;
@@ -128,7 +139,7 @@ export async function probeTls(host: string, path = "/", relay = ""): Promise<Tl
   }
 
   let got: Uint8Array = new Uint8Array(0);
-  const deadline = Date.now() + 8000;
+  const deadline = Math.min(Date.now() + 8000, hardEnd);
   while (Date.now() < deadline && got.length < 4096) {
     const part = await Promise.race([
       tls.read().catch(() => undefined),

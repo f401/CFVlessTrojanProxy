@@ -1,4 +1,5 @@
-import { errMsg } from "../core/util";
+import { errMsg, withTimeout } from "../core/util";
+import { probeHttp80 } from "../core/http80";
 import { connect } from "cloudflare:sockets";
 
 import { S } from "../core/state";
@@ -273,9 +274,8 @@ export async function debug(c: UserCtx): Promise<Response> {
     const pp = url.searchParams.get("p") || "/";
     if (!env.METER) return json({ ok: false, error: "no METER" });
     try {
-      const stub = env.METER.get(env.METER.idFromName(id));
-      const q = new URLSearchParams({ h: hh, r: rr, p: pp });
-      const out = (await (await stub.fetch("https://meter/http80?" + q.toString())).json()) as Record<string, unknown>;
+      // 明文探测很便宜（connect + 读 ≤2KB），直接在请求路径做，不绕 DO（DO 那条会等 20s+ 才被重置）
+      const out = await withTimeout(probeHttp80(hh, rr, pp), 6000);
       const chan = rr ? ({ kind: "r", ip: rr.split(":")[0] } as Chan) : DIRECT;
       return json({ ok: true, probe: out, note: "diagnostic only", chan: chanKey(chan), state: vState(hh, chanKey(chan)) });
     } catch (e) {
@@ -294,7 +294,8 @@ export async function debug(c: UserCtx): Promise<Response> {
     try {
       const stub = env.METER.get(env.METER.idFromName(id));
       const q = new URLSearchParams({ h: ph, r: pr, p: pp });
-      const out = (await (await stub.fetch("https://meter/probe?" + q.toString())).json()) as Record<string, unknown>;
+      const resp = await withTimeout(stub.fetch("https://meter/probe?" + q.toString()), 4000);
+      const out = (await withTimeout(resp.json(), 3000)) as Record<string, unknown>;
       return json({ ok: true, probe: out });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
