@@ -112,9 +112,11 @@ export class Connection {
 
     try {
       const now = Date.now();
-      // 采样窗口：至少 800ms 才结算一次（tick 可能比这更密）
+      // 采样窗口：至少 800ms 才结算一次（tick 可能比这更密）。
+      // 两次结算的间隔从 15 秒降到 5 秒：一次十几秒的大文件下载原来只够结算一个样本，
+      // 带宽估计长期停在中继先验上，tput 模式分不出「这条中继有 2MB/s」还是「只有 200KB/s」。
       const dt = now - this.sampleAt;
-      if (this.sampleAt && dt >= 800 && now - this.lastEmit >= 15000) {
+      if (this.sampleAt && dt >= 800 && now - this.lastEmit >= 5000) {
         const bytes = this.down - this.sampleDown;
         if (this.node && bytes >= 65536) {
           let w = this.takeWeight(bytes, dt);

@@ -3,7 +3,7 @@ export const WS_OPEN = 1;
 export const WS_BUFFER_LIMIT = 1024 * 1024; // 下行发送缓冲超过 1MB 就开始背压
 export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给它 60 秒
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐死
-export const VERSION = "7.72";
+export const VERSION = "7.73";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 
@@ -117,13 +117,8 @@ export function uuidFromBytes(b: Uint8Array) {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
 }
 
-/**
- * 通过 WebSocket 发送数据；连接已关闭或发送失败时静默忽略。
- * @param {WebSocket} ws 閻╊喗鐖ｆ潻鐐村复
- * @param {Uint8Array|ArrayBuffer} data 待发送数据
- * @returns {void}
- */
-export const WS_MSG_MAX = 256 * 1024; // 单帧上限：CF 对超大 WS 消息会直接断开
+/** 单帧上限：CF 对超大 WS 消息会直接断开，safeSend 按这个尺寸切片 */
+export const WS_MSG_MAX = 256 * 1024;
 
 /**
  * 功能：安全发送——WS 未开或已关闭时静默丢弃（隧道里对端随时消失，不能因此抛错）。
