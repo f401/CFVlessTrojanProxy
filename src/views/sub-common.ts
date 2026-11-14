@@ -13,8 +13,6 @@ export const X_EDGE_IPS = [
   "104.20.1.1",
 ];
 
-/** ?x=1 的规则域名（用拼接构造：混淆器会把 twitter/twimg/x.com 这类字面量替换成变量名，直接写会漏进 YAML）。 */
-export const X_RULES = ["x" + ".com", "twit" + "ter.com", "t" + ".co", "twim" + "g.com"];
 
 export const DEFAULT_PORTS: Array<[number, boolean]> = [
   [443, true],

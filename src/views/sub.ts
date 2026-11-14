@@ -1,4 +1,4 @@
-import { X_EDGE_IPS, X_RULES, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
+import { X_EDGE_IPS, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
 import { edgeRank } from "../route/edge";
 
 export * from "./sub-common";
@@ -51,7 +51,6 @@ export function renderClash(
   const G_TPUT = "\ud83d\ude80 \u541e\u5410\u4f18\u5148";
   const G_REG = "\ud83c\udf0d \u5730\u533a";
   const G_MAN = "\ud83c\udfaf \u624b\u52a8";
-  const G_X = "\ud83d\udef0 x \u4f18\u9009";
 
   const emit = (
     name: string,
@@ -102,7 +101,6 @@ export function renderClash(
   }
 
   // 钉在具体 CF 边缘 IP 上的入口条目（客户端用它们做「哪个边缘最快」的实测）
-  const optX = url.searchParams.get("x") === "1";
   const edgeNames: string[] = [];
   for (const mode of ["tput", "lat"]) {
     const suffix = mode === "lat" ? "L" : "T";
@@ -162,16 +160,6 @@ export function renderClash(
     groups.push(q(regNames));
   }
 
-  if (tuUrl && edgeNames.length) {
-    groups.push(`  - name: "${G_X}"`);
-    groups.push("    type: url-test");
-    groups.push(`    url: ${tuUrl}`);
-    groups.push("    expected-status: 200");
-    groups.push("    interval: 180");
-    groups.push("    tolerance: 0");
-    groups.push("    lazy: false");
-    groups.push(q([...edgeNames, G_TPUT]));
-  }
 
   const G_TU = "📡 通道实测";
   // 通道实测组：成员是「按中继走」的节点条目，客户端对 tu 指定的 URL 逐条实测，
@@ -190,7 +178,7 @@ export function renderClash(
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
   groups.push(
-    `    proxies: ["${G_TPUT}", "${G_LAT}"${edgeNames.length ? `, "${G_EDGE}"` : ""}${optX && edgeNames.length ? `, "${G_X}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && all.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
+    `    proxies: ["${G_TPUT}", "${G_LAT}"${edgeNames.length ? `, "${G_EDGE}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && all.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
   );
 
   return [
@@ -215,9 +203,6 @@ export function renderClash(
     ...groups,
     "",
     "rules:",
-    ...(optX && edgeNames.length
-      ? X_RULES.map((d) => `  - DOMAIN-SUFFIX,${d},${G_X}`)
-      : []),
     "  - GEOIP,CN,DIRECT",
     `  - MATCH,${G_TPUT}`,
   ].join("\n");
