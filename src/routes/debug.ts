@@ -1,8 +1,5 @@
 import { errMsg, withTimeout } from "../core/util";
 import { probeHttp80 } from "../core/http80";
-import { probeRaw } from "../core/tlsprobe";
-import { probeTls } from "../core/tlsprobe";
-import { probeTf } from "../core/tf";
 import { connect } from "cloudflare:sockets";
 
 import { S } from "../core/state";
@@ -10,7 +7,6 @@ import { json } from "../edge/respond";
 import { diagVerdict, hostKey } from "../nodes/metrics";
 import { nsGet } from "../nodes/score";
 import { cfHttpCode } from "../proxy/cfverdict";
-import { sweepHost } from "../route/sweep";
 import { runTfb } from "../route/tfb";
 import { vAll, vState } from "../route/verdict";
 import { vtDelta, vtLoad } from "../route/verdictsync";
@@ -56,9 +52,8 @@ export async function debug(c: UserCtx): Promise<Response> {
     await vtLoad(env);
   }
   if (vtHost) {
-    // 默认只读表（TLS 探测在免费计划会 1102，只有显式 &probe=1 才做）
-    const wantProbe = url.searchParams.get("probe") === "1";
-    const sw = wantProbe ? await sweepHost(vtHost) : { ips: [], nodes: [], rows: [] };
+    // 只读表：userland TLS 探测已在 7.69 删除（免费计划必然 1102），证据一律来自真实流量与 tfb。
+    const sw = { ips: [], nodes: [], rows: [] };
     const plan = planView(S.pool.length, S.alive.size);
     const pol = { same: S.polSame, diff: S.polDiff, why: S.polWhy };
     return json({ host: vtHost, ips: sw.ips, nodes: sw.nodes, rows: sw.rows, table: vAll(), pol, plan, counters: cntView() });
@@ -286,57 +281,6 @@ export async function debug(c: UserCtx): Promise<Response> {
       const out = await withTimeout(probeHttp80(hh, rr, pp), 6000);
       const chan = rr ? ({ kind: "r", ip: rr.split(":")[0] } as Chan) : DIRECT;
       return json({ ok: true, probe: out, note: "diagnostic only", chan: chanKey(chan), state: vState(hh, chanKey(chan)) });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
-  // 真实 TLS 探测：请求路径只有 10ms CPU，握手交给 DO（DO 也会超限，见 docs/判定验收.md §7）。
-  // 用法：?tls=x.com&r=185.253.117.147:443&p=/
-  if (url.searchParams.get("tls")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    const ph = String(url.searchParams.get("tls"));
-    const pr = url.searchParams.get("r") || "";
-    const pp = url.searchParams.get("p") || "/";
-    if (!env.METER) return json({ ok: false, error: "no METER" });
-    try {
-      const inst = url.searchParams.get("n") || "";
-      const stub = env.METER.get(env.METER.idFromName(inst ? id + "::" + inst : id));
-      const q = new URLSearchParams({ h: ph, r: pr, p: pp });
-      const resp = await withTimeout(stub.fetch("https://meter/probe?" + q.toString()), 26000);
-      const out = (await withTimeout(resp.json(), 3000)) as Record<string, unknown>;
-      return json({ ok: true, probe: out });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
-  // 诊断：只发 ClientHello / 只读首个记录，不碰密码学。
-  // 用来区分「CPU 上限装不下握手」与「stream 读泵本身太贵」。
-  if (url.searchParams.get("raw")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    const rh = String(url.searchParams.get("raw"));
-    const rr = url.searchParams.get("r") || "";
-    const st = url.searchParams.get("stage") || "sh";
-    try {
-      const out = await withTimeout(probeRaw(rh, rr, st), 6000);
-      return json({ ok: true, raw: out });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
-  // 诊断：在**请求路径**里直接跑完整握手（不经 DO），用来看免费额度到底卡在哪
-  if (url.searchParams.get("tlsnow")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    const th = String(url.searchParams.get("tlsnow"));
-    const tr = url.searchParams.get("r") || "";
-    const tp = url.searchParams.get("p") || "/";
-    // 两套 userland TLS 并排比：subtls（vendored，纯 JS）与 tunnelfetch（DO 里的判定用这套）。
-    // 同一个目标/中继各跑一次，用来确认「换了栈结论是否一致」——不一致就说明探测结论依赖实现。
-    try {
-      const [sub, tf] = await Promise.all([probeTls(th, tp, tr), probeTf(th, tr, tp)]);
-      return json({ ok: true, probe: sub, tf });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
     }

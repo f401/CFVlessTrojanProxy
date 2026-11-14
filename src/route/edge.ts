@@ -2,7 +2,6 @@
 // 与 docs/评分机制_final.md 的节点评分无关（那是 CF → 目标），这里量的是用户 → 边缘。
 import { S } from "../core/state";
 import { kvGet, kvSet } from "../store/kv";
-import { probeTls } from "./probe";
 
 // CF anycast 各网段的种子入口（每段 1 个，覆盖不同前缀）
 export const EDGE_SEED: string[] = [
@@ -155,23 +154,11 @@ export class EdgePrefs {
     // 预算可能被 cron 分账压到 0（EDGE_AUTO=0 时恒为 0）：直接返回，别白烧一次握手
     const lim = Math.max(0, Math.min(PER_SCAN, budget));
     if (!lim) return 0;
+    // 入口偏好只能由客户端实测：Worker 探「客户端→边缘」要连自家域名（CF→CF 自环 522），
+    // 而 userland TLS 握手在免费计划里跑不完（DO CPU 几十毫秒，subtls 已整体删除）。
+    // 接口保留、恒返回 0：订阅侧仍用 KV 里的 edge:pref（客户端回传）或内置种子 IP。
     await this.load(env);
-    const now = Date.now();
-    // 待测 = 从没测过 + 超过 TTL 的；排序让最久没测的先上，避免每轮都测同一批
-    const pending = EDGE_SEED.filter((ip) => {
-      const e = S.edge.get(ip);
-      return !e || now - e.at > TTL;
-    });
-    pending.sort((a, b) => (S.edge.get(a)?.at || 0) - (S.edge.get(b)?.at || 0));
-    let n = 0;
-    // 逐个真握手：探的是「入口 IP:443 + SNI=自家域名」，成功与否都记一笔，最后落 KV 给订阅用
-    for (const ip of pending.slice(0, lim)) {
-      const r = await probeTls(site, "/health", ip + ":443");
-      this.add(ip, r.hsMs || r.ms, r.ok, r.err);
-      n++;
-    }
-    if (n) await this.flush(env);
-    return n;
+    return 0;
   }
 
   /**

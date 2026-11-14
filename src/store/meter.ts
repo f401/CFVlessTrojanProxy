@@ -1,7 +1,4 @@
-import ROOTS from "../vendor/roots";
-import { TrustedCert } from "../vendor/subtls";
 import { seal, unseal } from "./index";
-import { probeRaw, probeTls } from "../core/tlsprobe";
 import { probeHttp80 } from "../core/http80";
 import { chClose, chOpen, chRead, chSh } from "./chan";
 import { probeTf } from "../core/tf";
@@ -282,29 +279,6 @@ export class Meter {
     }
     // TLS 探测走 DO：请求路径只有 10ms CPU 预算，DO 有独立且大得多的预算。
     // 一次探测不落盘、不额外写 DO（结果由调用方并入既有批次），不增加 KV 写。
-    if (p.endsWith("/probe")) {
-      const hh = url.searchParams.get("h") || "";
-      const rr = url.searchParams.get("r") || "";
-      const pp = url.searchParams.get("p") || "/";
-      if (!/^[a-z0-9.*-]+(\.[a-z0-9*-]+)+$/i.test(hh)) return Response.json({ ok: false, err: "bad host" }, { status: 400 });
-      // 硬兜底：探测内部任何一步挂住，也要在 5 秒内给出答复，并带上最后到达的阶段
-      let stage = "start";
-      const mark = (x: string) => {
-        stage = x;
-      };
-      const out = await Promise.race([
-        probeTls(hh, pp, rr, mark),
-        new Promise<Record<string, unknown>>((res) => setTimeout(() => res({ ok: false, err: "probe-timeout", stage }), 5000)),
-      ]);
-      return Response.json(out);
-    }
-    if (p.endsWith("/raw")) {
-      // 诊断：DO 里能不能对外 connect（不碰密码学，只发 ClientHello 读首个记录）
-      const hh = String(url.searchParams.get("h") || "github.com");
-      const rr = url.searchParams.get("r") || "";
-      const out = await probeRaw(hh, rr);
-      return Response.json(out);
-    }
     if (p.endsWith("/stage")) {
       const v = await this.st.storage.get("pstage");
       return Response.json({ stage: v || null });
@@ -315,16 +289,6 @@ export class Meter {
       const t0 = Date.now();
       await new Promise((res) => setTimeout(res, ms));
       return Response.json({ ok: true, asked: ms, wall: Date.now() - t0 });
-    }
-    if (p.endsWith("/dbt")) {
-      // 诊断：根库解析（subtls 的 databaseFromPEM）能不能在 DO 里及时返回
-      const t0 = Date.now();
-      try {
-        const db = await TrustedCert.databaseFromPEM(ROOTS);
-        return Response.json({ ok: true, wall: Date.now() - t0, roots: Array.isArray(db) ? db.length : -1 });
-      } catch (e) {
-        return Response.json({ ok: false, wall: Date.now() - t0, err: String(e).slice(0, 80) });
-      }
     }
     if (p.endsWith("/iter")) {
       // 固定迭代次数的纯 CPU 循环：不依赖 Date.now()（Worker 里同步段内时间冻结）

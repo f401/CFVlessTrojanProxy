@@ -7,9 +7,8 @@
 //   两条都 403               → 是站点/业务层拒绝所有人（站点级，不 veto 任何通道）
 //   通道 A 200               → 之前的怀疑是误判，记 ok
 
-import { probeTls } from "./probe";
-import { Chan, chanKey, nodeKeyOf } from "./channel";
-import { vSetState, vState, vAt } from "./verdict";
+import { Chan, chanKey } from "./channel";
+import { vAt } from "./verdict";
 import { S } from "../core/state";
 
 export type VJudge = "chan" | "site" | "ok" | "unknown";
@@ -88,57 +87,15 @@ export class VerifyQueue {
   }
 
   /**
-   * 功能：私有——选一条参照通道：优先已判 ok 的非 CF 中继，其次任意未判死的中继。
-   * @param host 目标主机
-   * @param skip 要跳过的通道键（就是可疑通道自己）
-   * @returns 中继 IP；没有可用参照时返回空串
-   */
-  private pickRef(host: string, skip: string): string {
-    let okOne = "";
-    let freeOne = "";
-    // 优先找同站点「有成功记录」的中继当参照（state=1）；没有就退回一条既非 blocked 也非 dead 的——
-    // 它不证明站点可达，只证明「请求能出去」，够用来做差分
-    for (const [k] of S.alive) {
-      const ip = k.slice(0, k.lastIndexOf(":"));
-      const ck = "r:" + ip;
-      if (ck === skip) continue;
-      const st = vState(host, ck);
-      if (st === 1) {
-        okOne = ip;
-        break;
-      }
-      if (st !== 2 && st !== 3 && !freeOne) freeOne = ip;
-    }
-    // 一个参照都没有时返回空串：judge 会当成「无法差分」，这一轮不写任何封禁
-    return okOne || freeOne;
-  }
-
-  /**
    * 功能：执行一轮复核：可疑通道 + 参照通道各探一次，按差分结论落判定。
    * @returns 实际复核的条数
    */
   async runVerify(): Promise<number> {
-    const items = this.takeVerify();
-    let n = 0;
-    for (const q of items) {
-      const ch = q.ck;
-      const isD = ch === "d";
-      const ip = isD ? "" : ch.slice(2);
-      const ref = this.pickRef(q.host, isD ? "d" : ch);
-      if (!ref) continue;
-      // 直连也照此办理：可疑通道 = 直连（relay 传空），参照 = 一条中继。
-      // 「直连 403 + 中继 200」就是「直连被这个站点封、中继可用」的确切证据。
-      const a = await probeTls(q.host, "/head", isD ? "" : nodeKeyOf({ kind: "r", ip }));
-      const b = await probeTls(q.host, "/", nodeKeyOf({ kind: "r", ip: ref }));
-      const v = this.judge(a.code, b.code);
-      n++;
-      if (v === "chan") vSetState(q.host, ch, 2, 1);
-      else if (v === "site") vSetState(q.host, "*", 2, 1);
-      else if (v === "ok") vSetState(q.host, ch, 1, 1);
-      S.vtLast = { host: q.host, ck: ch, a: a.code, b: b.code, v, at: Date.now() };
-      if (v === "chan" || v === "site") S.needPx.set(q.host, Date.now() + 21600000);
-    }
-    return n;
+    // userland TLS 握手在免费计划里跑不完（DO CPU 只有几十毫秒，一次握手就 1102 超限），
+    // vendored subtls 已整体删除；判定证据改成「真实流量 + tunnelfetch 探测」两条路，
+    // 这里只把队列取空，保持旧接口与单测契约（没有参照通道时不做任何判定）。
+    this.takeVerify();
+    return 0;
   }
 
   /**
