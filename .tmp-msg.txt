@@ -1,1 +1,1 @@
-feat(tools): 本地验证链 preflight.mjs + 请求模拟器 simrun.mjs，默认不发版
+fix(cron): plan.edge 真正参与额度（edgeScan 接受预算），预算三项之和不超 cap 且入口不再被压成 0

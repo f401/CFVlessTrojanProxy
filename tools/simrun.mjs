@@ -40,7 +40,7 @@ const env = {
 
 const mk = (path, headers = {}) => {
   const u = new URL(`https://${HOST}${path}`);
-  const h = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), String(v).toLowerCase()]));
+  const h = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), String(v)]));
   return {
     url: u.toString(),
     headers: { get: (k) => h[String(k).toLowerCase()] ?? null },
@@ -75,6 +75,7 @@ function brief(res) {
   return `status=${res.status} body=${b.length}B title="${title}" proxies=${proxies}`;
 }
 
+const full = process.argv.includes("--full");
 const call = process.argv.slice(2).filter((x) => !x.startsWith("--"));
 const suite = call.length
   ? call

@@ -24,7 +24,7 @@ import { aliveList, commitPool, flushPx, pxSet } from "../px/pool";
 import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
 import { clSnapshot, restoreUsage } from "../store/index";
 import { adminOnly } from "../edge/auth";
-import { edgeFlush, edgeLoad, edgeNodes, edgeRank, edgeScan } from "../route/edge";
+import { EDGE_ERR, edgeFlush, edgeLoad, edgeNodes, edgeRank, edgeScan } from "../route/edge";
 
 import type { Chan } from "../route/channel";
 import type { RouteCtx } from "../edge/types";
@@ -265,7 +265,11 @@ export async function debug(c: UserCtx): Promise<Response> {
     await edgeLoad(env);
     const probed = await edgeScan(env);
     await edgeFlush(env, true);
-    return json({ ok: true, probed, rank: edgeRank(5), nodes: edgeNodes(5) });
+    const rows = [...S.edge.values()]
+      .sort((a, b) => b.at - a.at)
+      .slice(0, 8)
+      .map((x) => ({ ip: x.h, ms: x.ms, ok: x.ok, fail: x.fail, at: x.at }));
+    return json({ ok: true, probed, rank: edgeRank(5), nodes: edgeNodes(5), rows, err: EDGE_ERR.s });
   }
   // 明文 HTTP 诊断：?http=x.com&r=185.253.117.147:80（r 省略=直连）。
   // :80 的状态码语义因站而异（x.com 直连回 500、经中继常回中继自己的 404），只诊断、不写判定。

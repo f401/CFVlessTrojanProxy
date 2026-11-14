@@ -42,7 +42,11 @@ const LOAD_MS = 5 * 60_000;
 const WRITE_GAP = 90 * 60_000;
 const PER_SCAN = 2;
 
-export function edgeAdd(ip: string, ms: number, ok: boolean): void {
+/** 最近一次入口探测失败原因（供 /debug?edge=1 观察；空串=没失败过） */
+export const EDGE_ERR = { s: "" };
+
+export function edgeAdd(ip: string, ms: number, ok: boolean, err = ""): void {
+  if (!ok && err) EDGE_ERR.s = err.slice(0, 80);
   const now = Date.now();
   const e = S.edge.get(ip);
   if (!e) {
@@ -117,7 +121,7 @@ export async function edgeScan(env: Env, budget = PER_SCAN): Promise<number> {
   let n = 0;
   for (const ip of pending.slice(0, lim)) {
     const r = await probeTls(site, "/health", ip + ":443");
-    edgeAdd(ip, r.hsMs || r.ms, r.ok);
+    edgeAdd(ip, r.hsMs || r.ms, r.ok, r.err);
     n++;
   }
   if (n) await edgeFlush(env);
