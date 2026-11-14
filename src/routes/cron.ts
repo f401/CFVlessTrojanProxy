@@ -66,7 +66,7 @@ async function cronOnce(env: Env): Promise<void> {
     const plan = planRound(S.pool.length, S.alive.size);
     await cronScan(env, plan.adm);
     await runRound(plan);
-    await edgeScan(env);
+    await edgeScan(env, plan.edge);
     await tfbRound(env);
     SEL.afterScan(env);
   } catch (e) {

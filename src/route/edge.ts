@@ -102,9 +102,11 @@ export async function edgeFlush(env: Env, force = false): Promise<void> {
 }
 
 /** cron 每轮探 ≤2 个入口（未测过优先，其次最久未测），对自家域名 /health 做 TLS + GET */
-export async function edgeScan(env: Env): Promise<number> {
+export async function edgeScan(env: Env, budget = PER_SCAN): Promise<number> {
   const site = S.site;
   if (!site) return 0;
+  const lim = Math.max(0, Math.min(PER_SCAN, budget));
+  if (!lim) return 0;
   await edgeLoad(env);
   const now = Date.now();
   const pending = EDGE_SEED.filter((ip) => {
@@ -113,7 +115,7 @@ export async function edgeScan(env: Env): Promise<number> {
   });
   pending.sort((a, b) => (S.edge.get(a)?.at || 0) - (S.edge.get(b)?.at || 0));
   let n = 0;
-  for (const ip of pending.slice(0, PER_SCAN)) {
+  for (const ip of pending.slice(0, lim)) {
     const r = await probeTls(site, "/health", ip + ":443");
     edgeAdd(ip, r.hsMs || r.ms, r.ok);
     n++;

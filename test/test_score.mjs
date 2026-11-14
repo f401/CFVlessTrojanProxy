@@ -2037,5 +2037,24 @@ console.log("\n64) 错误分类直方图");
   ok("直方图最多 8 条", W.errHist().length <= 8, String(W.errHist().length));
 }
 
+// 65) 子请求预算：三项之和不得超过 cap，且入口至少留 1
+console.log("\n65) 子请求预算");
+{
+  const pools = [0, 3, 10, 64, 400, 1600, 3000];
+  const alives = [0, 1, 8, 64, 400, 1500];
+  let worst = 0;
+  for (const poolN of pools) {
+    for (const aliveN of alives) {
+      const q = W.planRound(poolN, Math.min(aliveN, poolN));
+      const sum = q.adm + q.vt + q.edge;
+      if (sum > worst) worst = sum;
+      ok(`总和不超 cap（pool ${poolN} alive ${aliveN}）`, sum <= q.cap, `${sum} > ${q.cap}`);
+      ok(`入口预算非负（pool ${poolN} alive ${aliveN}）`, q.edge >= 0, String(q.edge));
+      ok(`准入不超 SCAN_MAX（pool ${poolN}）`, q.adm <= 400, String(q.adm));
+    }
+  }
+  ok("最坏情况也没超 48", worst <= 48, String(worst));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

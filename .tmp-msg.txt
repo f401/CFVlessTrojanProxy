@@ -1,1 +1,1 @@
-fix(logs): 错误环去重按 t+m+tag、过滤 48h 残留、同类前缀限 8 条（7.46）
+feat(tools): 本地验证链 preflight.mjs + 请求模拟器 simrun.mjs，默认不发版

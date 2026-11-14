@@ -37,9 +37,17 @@ export function planRound(poolN: number, aliveN: number): Plan {
   const wVt = staleR * 2 + 0.3;
   const wEdge = 0.2;
   const wSum = wAdm + wVt + wEdge;
-  const adm = admMin + Math.round((rest * wAdm) / wSum);
-  const vt = vtMin + Math.round((rest * wVt) / wSum);
-  const edge = Math.max(0, cap - adm - vt);
+  let adm = admMin + Math.round((rest * wAdm) / wSum);
+  let vt = vtMin + Math.round((rest * wVt) / wSum);
+  // 四舍五入可能把总和顶到 cap 之上：多出来的先退判定（每轮本来只探 1 个），再退准入。
+  // 之前这里是 `Math.max(0, cap - adm - vt)`，总和一旦超 cap 就只是把 edge 压成 0，
+  // 实际子请求数仍然超额。
+  while (adm + vt > cap - edgeMin) {
+    if (vt > vtMin) vt--;
+    else if (adm > admMin) adm--;
+    else break;
+  }
+  const edge = cap - adm - vt;
   return { adm: Math.min(adm, SC.SCAN_MAX), vt, edge: Math.min(edge, 4), cap };
 }
 
