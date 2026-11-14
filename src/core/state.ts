@@ -119,6 +119,7 @@ export class AppState {
   poolGen = 0;
   poolBuilt = 0;
   poolAt = 0; // 上次「按需加载候选池」的尝试时间（冷 isolate 首次连接用，节流 60 秒）
+  aliveAt = 0; // 上次「按需起搏探活」的时间（冷 isolate 一条中继都没有时用，节流 5 分钟）
 
   // —— 计量 ——
   stats: Map<string, StatsLocal> = new Map();

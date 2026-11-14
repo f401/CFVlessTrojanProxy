@@ -14,6 +14,7 @@ import { hostKey, hostRank, hostUntried, logErr } from "../nodes/metrics";
 import { MODES, keyOf } from "./const";
 import { pickThom } from "./ts";
 import { aliveList, ensurePool, pxGet } from "./pool";
+import { seedAlive } from "./warm";
 import { cnt } from "../core/counter";
 import { pxPolicy } from "./probe";
 import {
@@ -364,6 +365,10 @@ export class Selector {
       S.poolAt = Date.now();
       await ensurePool(env);
     }
+    // 池子有了但一条都没探活过：就地起搏几个（5 分钟节流），否则 relays() 只能回空，
+    // CF 托管目标会一路直连下去。**不 await**：探活会占 300–2200ms，挡在首字节前面
+    // 会把 p50 拖到 6 秒（实测 7.63）；让它和拨号并行跑，这一条连接先按池子里的候选走。
+    if (!S.alive.size) void seedAlive(env).catch(() => {});
     await pxGet(env);
     const vet = HOOK.veto;
     const bad = (k: string): boolean => (vet && host ? vet(host, k.slice(0, k.lastIndexOf(":"))) : false);

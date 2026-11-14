@@ -220,6 +220,7 @@ export async function aliveList(env: Env) {
   return [...S.alive.values()];
 }
 
+
 /**
  * 这个候选是否暂时不占探活名额。
  * 「连续失败」必须带时间戳：公开池里失败的绝大多数是临时抖动（限流、被墙、机房负载），
