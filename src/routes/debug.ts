@@ -14,7 +14,7 @@ import { cntView } from "../core/counter";
 import { planView } from "../route/budget";
 import { prefsJson } from "../route/prefs";
 import { REL_TTL, relSnap } from "../route/relperf";
-import { EG, probeEg } from "../route/egfacts";
+import { EG } from "../route/egfacts";
 import { psSnap } from "../route/psfacts";
 import { DEAD } from "../route/deadfacts";
 import { DIRECT, chanKey } from "../route/channel";
@@ -57,7 +57,7 @@ export async function debug(c: UserCtx): Promise<Response> {
   if (url.searchParams.get("dd")) return json({ rows: DEAD.snap() }); // 判死的会挪到队尾，30 分钟复活
   // 站点 × 中继的成功率事实（本 isolate）：样本越多越可信，因子越靠近 1
   if (url.searchParams.get("pss")) return json({ host: String(url.searchParams.get("pss")), rows: psSnap(String(url.searchParams.get("pss"))) });
-  if (url.searchParams.get("eg")) return json({ rows: EG.snap(), probe: await probeEg(String(url.searchParams.get("eg") || "").split(",").map((x) => x.trim()).filter(Boolean)) });
+  if (url.searchParams.get("eg")) return json({ rows: EG.snap() });
   if (url.searchParams.get("rt")) return json({ host: String(url.searchParams.get("rt") || "").slice(0, 80), rows: relSnap(String(url.searchParams.get("rt") || "").slice(0, 80)), alive: S.alive.size, ttl: REL_TTL });
   if (vtHost) {
     // 只读表：userland TLS 探测已在 7.69 删除（免费计划必然 1102），证据一律来自真实流量与 tfb。

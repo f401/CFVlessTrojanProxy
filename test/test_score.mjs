@@ -2850,5 +2850,22 @@ console.log("\n94) 四类事实门面：一次取齐增量，ack 后清空");
   W.FACTS.clear();
 }
 
+
+// 95) 出口族从响应推导（不再用主动探测：探测器会连到自己的出口，见清单 §I）
+{
+  W.EG.clear();
+  const A = "203.0.113.21";
+  const B = "203.0.113.22";
+  eq("整页 45KB 判 v4", W.egDerive(A, 45000, false), 4);
+  eq("写进去以后能查到 4", W.EG.famOf(A), 4);
+  eq("737B 小页 + 同窗口整页对照 判 v6", W.egDerive(B, 737, true), 6);
+  eq("没有整页对照的小页不写", W.egDerive("203.0.113.23", 737, false), 0);
+  eq("零字节不写", W.egDerive("203.0.113.24", 0, true), 0);
+  eq("5KB 既不整页也不 tiny，不写", W.egDerive("203.0.113.25", 5000, true), 0);
+  eq("空 IP 不写", W.egDerive("", 45000, false), 0);
+  eq("整页证据会把 v6 改回 v4", W.egDerive(B, 40000, true), 4);
+  eq("改回后查得到 4", W.EG.famOf(B), 4);
+  W.EG.clear();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -13,7 +13,7 @@ import path from "node:path";
 const NEED = [
   { sym: "EG.bias", own: "src/route/egfacts.ts", why: "选路读取出口族" },
   { sym: "PS.note", own: "src/route/psfacts.ts", why: "成功率事实的写入点（judge 按 commitFact 裁决）" },
-  { sym: "EG.note", own: "src/route/egfacts.ts", why: "出口族写入点（在 probeEg 内）", via: "probeEg" },
+  { sym: "EG.note", own: "src/route/egfacts.ts", why: "出口族写入点（在 egDerive 内）", via: "egDerive" },
   { sym: "psFactor", own: "src/route/psfacts.ts", why: "选路读取成功率" },
   { sym: "deadNote", own: "src/route/deadfacts.ts", why: "连不上事实的写入点" },
   { sym: "isDead", own: "src/route/deadfacts.ts", why: "选路读取判死" },
@@ -22,7 +22,7 @@ const NEED = [
   { sym: "FO.note", own: "src/core/firstobs.ts", why: "冷启动观测写入点" },
   { sym: "DNS.penOf", own: "src/route/dnsfacts.ts", why: "选路读取 AAAA 事实" },
   { sym: "probeFam", own: "src/proxy/dial.ts", why: "AAAA 探测的生产调用点" },
-  { sym: "probeEg", own: "src/route/egfacts.ts", why: "出口族探测的生产调用点" },
+  { sym: "egDerive", own: "src/route/egfacts.ts", why: "出口族推导的生产调用点（judge.onTraffic）" },
   { sym: "commitFact", own: "src/route/commitfact.ts", why: "写入决策器被真实链路调用" },
   { sym: "CAP.note", own: "src/route/capfacts.ts", why: "吞吐容量写入点（经 HOOK.capNote 的薄包装 capNote）", via: "capNote" },
   { sym: "capFactor", own: "src/route/capfacts.ts", why: "选路读取容量比" },

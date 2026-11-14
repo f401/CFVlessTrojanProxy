@@ -9,10 +9,8 @@ import { planRound } from "../route/budget";
 import { runRound } from "../route/round";
 import { edgeScan } from "../route/edge";
 import { runTfb } from "../route/tfb";
-import { EG, egCounts, egQuota, probeEg } from "../route/egfacts";
 import { DNS } from "../route/dnsfacts";
 import { probeFam } from "../proxy/dial";
-import { aliveList } from "../px/pool";
 import { SEL } from "../px/selector";
 import { flushSnap, pendFlush, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
 import { loadUsers } from "../proxy/protocol";
@@ -71,29 +69,6 @@ async function tfbRound(env: Env): Promise<void> {
 }
 
 
-/**
- * 功能：出口族探测 —— 每轮最多 2 条中继，把「这条中继走 v4 还是 v6」写进 `eg` 事实。
- * 为什么必须单独探：`eg` 是 v8 里唯一能把首请求成功率从 40% 抬到 90%+ 的事实，而它只能靠
- * 回显服务回答（`icanhazip.com` 回一个 IP 字面量）。只探还没测过的中继，避免重复烧 connect 名额。
- * @returns {Promise<void>}
- */
-
-async function egRound(env: Env): Promise<void> {
-  try {
-    const list = await aliveList(env);
-    // aliveList 返回的是条目；eg 的键是出口 IP 字面量，取 h
-    const ips = list.map((x) => String(x.h || "")).filter(Boolean);
-    const now = Date.now();
-    // 出口族是 v8 的一等预算项：知道几条 v4 出口，才知道该不该多花探测名额（§7.3）
-    const cnts = egCounts(ips, now);
-    const todo = ips.filter((ip) => !EG.famOf(ip, now)).slice(0, egQuota(cnts.v4));
-    if (!todo.length) return;
-    cnt("egProbe", todo.length);
-    await probeEg(todo, 2);
-  } catch {
-    /* 探测失败不影响 cron 其它环节 */
-  }
-}
 
 /**
  * 功能：为待决策站点确证「有没有 AAAA」—— 纯 v4 站点在 v6 出口上结构性过不去，
@@ -132,7 +107,6 @@ async function cronOnce(env: Env): Promise<void> {
     await runRound(plan);
     await edgeScan(env, plan.edge);
     await tfbRound(env);
-    await egRound(env);
     await dnsRound();
     SEL.afterScan(env);
   } catch (e) {

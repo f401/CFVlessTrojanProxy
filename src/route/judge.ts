@@ -14,6 +14,7 @@ import { HEALTH } from "./relay-health";
 import { FACT } from "./factshadow";
 import { commitFact } from "./commitfact";
 import { PS } from "./psfacts";
+import { egDerive } from "./egfacts";
 import { BLK } from "./blkfacts";
 
 const BIG = 20000; // 整页（含握手）的下限
@@ -186,6 +187,8 @@ export class Judge {
       // 学一次就能惠及所有 CF 托管目标（仍只在本 isolate 生效、10 分钟过期）。
       if (nip && e.cf) this.markNeg(CF_NEG, nip, now);
     }
+    // 出口族只能从「这次真拿到了什么」反推：整页 ⇒ v4；同类小页且有整页对照 ⇒ v6。
+    if (e.via === "node" && e.node) egDerive(e.node.slice(0, e.node.lastIndexOf(":")), e.down, bigDiff, now);
     if (!known) {
       queueVerify(e.host, chan); // 复核队列（PROBE_REQ=0 时只排队）
       if (n >= 2 || e.cf) S.needPx.set(e.host, now + PX_TTL); // 只提醒「下次优先中转」，不下判定

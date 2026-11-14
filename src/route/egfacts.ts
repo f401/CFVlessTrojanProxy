@@ -8,7 +8,6 @@
 // 一个 `eg=6` 的中继仍然可能在别的站点头等好使，把它从候选里删掉就是 7.57 的老路
 // （通配硬封锁 → 可用池变薄 → 失败率 10%→50%）。
 import { cnt } from "../core/counter";
-import { probeTf } from "../core/tf";
 
 /** 一条出口族事实：`i` 中继 IP，`f` 族（4 或 6），`at` 观测时间 */
 export interface EgRow {
@@ -162,27 +161,37 @@ export class EgFacts {
 /** 进程内唯一的出口族事实表（每个 isolate 一份，读到的远端事实会在冷启动时灌进来） */
 export const EG = new EgFacts();
 
-/** 回显服务：它把请求方看到的出口 IP 原样写回来，是最好的出口族证据（v8 §13.6） */
-export const EG_ECHO = "icanhazip.com";
+/** 「整页」门槛：CF 托管站点对 v6 出口一律回 737B 左右的小页，能出 20KB 说明这条通道确实走了 v4 */
+export const EG_BIG = 20000;
+
+/** `tiny` 上限：与 `commitfact` 的 `TINY_ABS` 同源，避免两处口径漂移 */
+export const EG_TINY = 2048;
 
 /**
- * 功能：探测若干中继的出口族（走回显服务，经中继转发），命中的结果直接记进事实表。
- * @param {string[]} ips 中继 IP 列表（不带端口）
- * @param {number} max 最多探几条（免费计划每次调用只有 6 个并发 connect，别贪）
- * @returns {Promise<Array<{ ip: string; fam: number; ms: number; head: string }>>} 每条的结果
+ * 功能：从一次真实连接的响应推导中继出口族，并写进事实表（`eg` 的**唯一**生产来源）。
+ * 为什么不用主动探测：实测 `probeTf` 的自定义 `dial` 连到的是探测器自己的出口（本机返回本机公网 IP、
+ * 生产 DO 返回 Cloudflare 自有网段），据此判族会把 v4 中继反向加权，比不判更差（清单 §I 有完整证据）。
+ * @param {string} ip 中继 IP（不带端口）
+ * @param {number} down 本次下行字节数
+ * @param {boolean} peerBig 同窗口是否另有通道出过 ≥20KB 整页（tiny 判 v6 的必要对照）
+ * @param {number} now 观测时间
+ * @returns {number} 本次写入的族（4 或 6），没写返回 0
  */
-export async function probeEg(ips: string[], max = 4): Promise<Array<{ ip: string; fam: number; ms: number; head: string }>> {
-  const out: Array<{ ip: string; fam: number; ms: number; head: string }> = [];
-  for (const ip of ips.slice(0, max)) {
-    const r = await probeTf(EG_ECHO, ip + ":443", "/");
-    const head = String(r.head || "").trim();
-    // 回显正文就是一个 IP 字面量：带冒号是 v6，纯点分四段是 v4，其余当「没测到」
-    const fam = head.includes(":") ? 6 : /^(\d{1,3}\.){3}\d{1,3}$/.test(head) ? 4 : 0;
-    if (fam) EG.note(ip, fam);
-    out.push({ ip, fam, ms: Number(r.ms || 0), head: head.slice(0, 40) });
+export function egDerive(ip: string, down: number, peerBig: boolean, now = Date.now()): number {
+  if (!ip) return 0;
+  // 整页是硬证据：v6 出口在 737B 的小页上就停住了，拿不到 20KB 以上
+  if (down >= EG_BIG) {
+    EG.note(ip, 4, now);
+    return 4;
   }
-  return out;
+  // 小页只在「同窗口另外的通道确实能出整页」时才算族级拒绝，否则可能只是这个站点本来就这么小
+  if (peerBig && down > 0 && down <= EG_TINY) {
+    EG.note(ip, 6, now);
+    return 6;
+  }
+  return 0;
 }
+
 
 /**
  * 功能：统计一组中继的出口族分布 —— `alive` 里到底有几条 v4 出口，是 v8 的一等预算项。
