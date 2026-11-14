@@ -1806,5 +1806,25 @@ W.vClear();
 W.S.smCnt.clear();
 for (let i = 0; i < 3; i++) W.HOOK.traffic({ host: "z.com", via: "node", node: "6.6.6.6:443", down: 4300, ok: true, life: 900, up: 200 });
 eq("假 200 攒 3 次判该中继不可用", W.vBad("z.com", "r:6.6.6.6"), true);
+// 第 44 组：1 次请求感知 + 站点自愈（判定只改路由，永不断路）
+W.vClear(); W.S.needPx.clear(); W.S.smCnt.clear(); W.S.bigByHost.clear(); W.S.bigChan.clear(); W.S.cfHttp.clear();
+// 1) 本出口 fetch 根路径 200（站点活着）+ 小响应 → 一次即判该通道被封
+W.S.cfHttp.set("x.com", { code: 200, colo: "VIE", t: Date.now() });
+W.HOOK.traffic({ host: "x.com", via: "node", node: "5.5.5.5:443", down: 4200, ok: false, life: 900, up: 300 });
+eq("1 次请求即可判定 IP 级封锁", W.vBad("x.com", "r:5.5.5.5"), true);
+// 2) 站点自愈：所有中继都被判死时，决策仍给出中继，且该站点的结论被清空
+W.vClear();
+W.S.cfHttp.clear();
+W.vSetState("y.com", "r:1.1.1.1", 2, 1);
+W.vSetState("y.com", "d", 2, 1);
+const dHeal = W.decide({ host: "y.com", cfHost: true, clientV6: false, relays: ["1.1.1.1"], legacyWantsRelay: true });
+eq("没有通道可走时仍然给出中继（不断路）", dHeal.chan.kind, "r");
+eq("自愈后该站点的封禁结论被清掉", W.vBad("y.com", "r:1.1.1.1"), false);
+// 3) 业务 403（站点根路径本身就不是 200）不会被单次判死
+W.vClear();
+W.S.smCnt.clear();
+W.S.cfHttp.set("api.biz.com", { code: 403, colo: "AMS", t: Date.now() });
+W.HOOK.traffic({ host: "api.biz.com", via: "node", node: "8.8.8.8:443", down: 4200, ok: false, life: 900, up: 300 });
+eq("业务 403 站点不被单次判死", W.vBad("api.biz.com", "r:8.8.8.8"), false);
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
