@@ -133,6 +133,12 @@ export function renderClash(
   const relayIps: string[] = [];
   if (!noEdge) {
     // 用本 isolate 已判活的中继（S.alive 里是 ip:port），不走 KV —— 订阅渲染是同步的
+    // 先用**事实层已知的 v4 出口**（跨 isolate 共享过，钉住它们实测 9/9 能过），
+    // 再用本 isolate 已判活的中继补齐 —— 只发 S.alive 会在冷 isolate 里发出空组。
+    for (const ip of S.eg4Top) {
+      if (relayIps.length >= 8) break;
+      if (!relayIps.includes(ip)) relayIps.push(ip);
+    }
     for (const k of S.alive.keys()) {
       const ip = k.includes(":") ? k.slice(0, k.lastIndexOf(":")) : k;
       if (/^[0-9.]{7,15}$/.test(ip) && !relayIps.includes(ip)) relayIps.push(ip);

@@ -1739,6 +1739,13 @@ W.vClear();
   eq("中继条目钉住具体中继", yr.includes("rx=203.0.113.7") && yr.includes("px=1"), true);
   eq("中继优选组按 /health 实测", yr.includes('name: "\ud83d\udd01 \u4e2d\u7ee7\u4f18\u9009"'), true);
   const y0r = W.renderClash(envR, new URL("https://example.com/x?e=0"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
+  // 冷 isolate 里 S.alive 是空的，但事实层（跨 isolate 共享）知道哪些中继是 v4 出口 —— 必须先发它们
+  const keepTop = S.eg4Top;
+  S.alive = new Map();
+  S.eg4Top = ["192.0.2.44"];
+  const yt = W.renderClash(envR, new URL("https://example.com/x"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
+  eq("冷 isolate：中继条目来自事实层的 v4 出口", yt.includes("r-192.0.2.44-") && yt.includes("rx=192.0.2.44"), true);
+  S.eg4Top = keepTop;
   eq("?e=0 时不发中继条目", (y0r.match(/name: "r-/g) || []).length, 0);
   S.alive = keep;
 }

@@ -4,6 +4,7 @@ import { S } from "../core/state";
 import { vAll, vImport } from "./verdict";
 import { HEALTH } from "./relay-health";
 import { FACTS } from "./factsstore";
+import { EG } from "./egfacts";
 import type { EgRow } from "./egfacts";
 import { cnt } from "../core/counter";
 
@@ -130,6 +131,8 @@ async function vtFetch(env: Env): Promise<void> {
   } catch {
     // 读不到就当没有：不阻塞连接
   } finally {
+    // 订阅层（views）不能 import route，所以把「哪些中继已知是 v4 出口」放进 S，供渲染直接取用
+    S.eg4Top = EG.v4List().slice(0, 8);
     S.vtLoaded = true;
     S.vtFlight = null;
   }
