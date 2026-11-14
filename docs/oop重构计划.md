@@ -128,3 +128,16 @@
 | 回归 | test_v3 的 UDP/DNS 用例全过（186），smoke 30 / sim 22 / test_score 401 / golden 8 | 同上 |
 
 验收：tsc 0 error；`check-arch` **80 文件**；bundle 333.7/336.8 KB；线上 7.07：`x.com` 200（MXP）、`api.x.com` 404（业务响应透传）、`/health` 7.07。
+## P5-4（7.08）：上游挂载与补救链收成 Attacher —— P5 完成，session.ts 232 行（目标 <300）
+
+| 项 | 改法 | 位置 |
+| --- | --- | --- |
+| Attacher | `export class Attacher { async run(o: AttachOpts, sock: Socket) }` + `ATTACHER`：首包写入、`pipeBack` 双向搬运、0 字节关闭的补救链（中转再试一次 → 可选 IPv6 兜底 → proxyip → 放弃）整段收进方法，递归用 `this.run(o, s2)` | `src/proxy/attacher.ts`（新） |
+| session 瘦身 | 118 行 `attach` 闭包 → `if (!sock) throw new Error("skip-direct"); await ATTACHER.run({...}, sock);`，并清掉 12 个多余 import 与一段悬空注释 | `src/proxy/session.ts` |
+| 测试 | 第 50 组 2 条（ATTACHER 实例与 run()、Attacher 可构造） | `test/test_score.mjs` |
+
+行数轨迹：**556 → 494（7.05）→ 463（7.06）→ 356（7.07）→ 232（7.08）**，P5 目标达成。
+
+验收：tsc 0 error（`NODE_OPTIONS=--max-old-space-size=2048`，否则 tsc 偶发 Zone Allocation OOM）；`check-arch` **81 文件**；bundle 333.6/336.7 KB；
+test_v3 186 / smoke 30 / test_score **403** / sim_v3 22 / golden 8；
+线上 7.08：`x.com` 2/2 200（MXP）、`api.x.com` 403（业务透传）、`www.google.com` 200、`github.com` 200。

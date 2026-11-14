@@ -2,31 +2,21 @@ import { errMsg } from "../core/util";
 import type { Socket } from "cloudflare:sockets";
 import { Connection } from "./connection";
 import { wsToStream } from "./ws-in";
-import { dialAnother } from "./fallback";
-import { pipeBack } from "./tunnel";
-import { logErr, rttLearn, rttMark } from "../nodes/metrics";
-import { checkTarget, expandV6, isV6Literal, parseProxyIp } from "./dial";
+import { logErr, rttLearn } from "../nodes/metrics";
+import { checkTarget, parseProxyIp } from "./dial";
 import { DIALER } from "./dialer";
 import { REGION } from "./region";
 import { handleDns } from "./dns";
+import { ATTACHER } from "./attacher";
+import { dialAnother } from "./fallback";
 import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./protocol";
 import { cnt } from "../core/counter";
 import { SC } from "../core/const";
 import { kickFlush } from "../store/index";
-import { nsEmptyClose } from "../nodes/score";
 import { SEL } from "../px/selector";
-import { S } from "../core/state";
 import { flushSnap, pendFlush, statBump } from "../store/index";
-import { WS_OPEN, closeQuietly, enc, safeSend, toU8 } from "../core/util";
+import { closeQuietly, enc, safeSend, toU8 } from "../core/util";
 import { connect } from "cloudflare:sockets";
-
-/**
- * 换一个中转节点重连（"这个节点不通就换下一个"）。
- * @param {object} env Worker 环境
- * @param {object} st 连接状态（会被更新 node/via/pxTries）
- * @param {string} mode 模式
- * @returns {Promise<Socket|null>} 新连接，没有可换或连不上返回 null
- */
 
 /**
  * WebSocket 数据面主流程：鉴权 → 解析目标 → 直连/降级 proxyip → 双向转发。
@@ -197,126 +187,12 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
 
           // 把客户端首个载荷（TLS ClientHello 含目标 SNI）写给目标/中转，
           // 目标是 CF 托管站点时首个连接会被静默丢弃，此时靠 onClose 重试到 proxyip
-          const attach = async (s2: Socket) => {
-            st.syncInflight();
-            st.sock = s2;
-            st.writer = s2.writable.getWriter();
-            st.headerSent = false;
-            st.tAttach = Date.now(); // 首字节耗时从这里起算
-            st.ttfb = 0;
-            if (payload.length) await st.writer!.write(payload).catch(() => {});
-
-            pipeBack(s2, serverWS, st, async (gotData) => {
-              // 客户端已经走了（取消下载 / 切网 / 切节点）：别再替它开新中转，
-              // 否则每次取消都会白烧一次拨号 + 一次探测不到的失败记录。
-              if (serverWS.readyState !== WS_OPEN) {
-                closeQuietly(st.sock);
-                return;
-              }
-              if (gotData) SEL.resetFail(env, st.node); // 能通就说明链路健康，别乱切
-              if (!gotData && !st.markedFail) {
-                st.markedFail = true;
-                rttMark(st.id, st.ipTag, false);
-              }
-              if (gotData) {
-                try {
-                  serverWS.close(1000, "done");
-                } catch (e) {}
-                return;
-              }
-
-              // 已经走 proxyip 了还是 0 字节关闭 → 这次中转失败，必须计数
-              if (st.retried) {
-                cnt("eCloseP"); // 中转后仍空关闭：才算节点的问题
-                nsEmptyClose(st.node, true);
-                // 这个中转不通，换一个再试一次；直接放弃就是用户看到的"下载失败"
-                if ((st.pxTries || 1) < 2) {
-                  const s2 = await dialAnother(env, st, st.mode, r.host, ipRegion || undefined);
-                  if (s2) {
-                    await attach(s2);
-                    return;
-                  }
-                }
-                cnt("dead");
-                kickFlush(env, st.id); // 换节点也不通 → 这个目标走不了中转
-                // 站点侧失败：连上了中转，但目标 0 字节关闭 —— 不当作节点故障
-                st.failed = true;
-                st.siteFail = true;
-                if (st.hostTrial) await SEL.softFail(st.node);
-                else await SEL.bumpFail(env, st.mode, st.node, st.trial, "site");
-                try {
-                  serverWS.close(1000, "done");
-                } catch (e) {}
-                return;
-              }
-
-              // 直连这一跳 0 字节关闭：记成"直连不通"，用来和节点做对照
-              st.directFail = true;
-
-              // ① 先试 IPv6：CF 只隔离 IPv4 到自家网段，走 IPv6 能通
-              // 可选：IPv6 兜底（实测对 CF 托管站点无效，默认关闭，配了 env.cfIpv6 才启用）
-              if (!ipRegion && !st.triedV6 && env.cfIpv6 && !isV6Literal(r.host)) {
-                st.triedV6 = true;
-                for (const raw of String(env.cfIpv6).split(",")) {
-                  const v6 = raw.trim();
-                  if (!v6) continue;
-                  try {
-                    logErr(`empty close -> retry via IPv6 ${v6}`, r.host);
-                    const s6 = await connect({ hostname: expandV6(v6), port: r.port });
-                    st.via = "v6";
-                    await attach(s6);
-                    return;
-                  } catch (e) {
-                    /* 试下一个 */
-                  }
-                }
-              }
-
-              // ② 再试 proxyip（第三方中转，最后兜底）
-              const px = parseProxyIp(await SEL.current(env, mode, st, r.host, st.cf));
-              if (!px || st.retried) {
-                cnt("dead");
-                kickFlush(env, st.id);
-                cnt("eCloseD"); // 直连空关闭：目标站的问题，不算节点
-                nsEmptyClose(st.node, false);
-                try {
-                  serverWS.close(1000, "done");
-                } catch (e) {}
-                return;
-              }
-              st.retried = true;
-              st.pxTries = 1;
-              if (S.needPx.size >= 300) {
-                const now2 = Date.now();
-                for (const [h2, t2] of S.needPx) if (t2 <= now2) S.needPx.delete(h2);
-                if (S.needPx.size >= 300) S.needPx.delete(S.needPx.keys().next().value as string);
-              }
-              // 记住"这个站必须走中转"。
-              // 10 分钟太短：x.com 这种一次开几十条连接的站点，过期后每条新连接
-              // 又要先撞一次注定失败的直连（多 0.3~1s），表现就是"能上但一直转圈"。
-              // 6 小时足够覆盖一次浏览会话；真变回可直连也只是多走一跳，不会坏。
-              S.needPx.set(r.host, Date.now() + 6 * 3600e3);
-              logErr(`empty close -> proxyip ${px.host}`, r.host);
-              if (checkTarget(px.host, px.port)) {
-                try {
-                  serverWS.close(1011, "proxyip blocked");
-                } catch (e) {}
-                return;
-              }
-              try {
-                const s3 = await connect({ hostname: px.host, port: px.port });
-                st.node = px.host + ":" + px.port;
-                st.via = "node";
-                await attach(s3);
-              } catch (e) {
-                try {
-                  serverWS.close(1011, "proxyip failed");
-                } catch (err) {}
-              }
-            });
-          };
-
-          await attach(sock);
+          // 首包写入 + 双向搬运 + 0 字节关闭的补救链都在 Attacher 里（P5-4）
+          if (!sock) throw new Error("skip-direct");
+          await ATTACHER.run(
+            { env, ws: serverWS, st, mode, host: r.host, port: r.port, region: ipRegion, payload },
+            sock,
+          );
         },
         close() {
           st.release();

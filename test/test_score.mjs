@@ -1872,5 +1872,8 @@ ok("Dialer 与 Connection 解耦（不持有 session 状态）", typeof W.Dialer
 // ═══ 第 49 组：RegionPicker（P5-2）═══
 ok("RegionPicker 是类实例且可 open()", typeof W.REGION === "object" && typeof W.REGION.open === "function", "REGION");
 ok("RegionPicker 可构造", typeof W.RegionPicker === "function", "RegionPicker");
+// ═══ 第 50 组：Attacher（P5-4）═══
+ok("Attacher 是类实例且可 run()", typeof W.ATTACHER === "object" && typeof W.ATTACHER.run === "function", "ATTACHER");
+ok("Attacher 可构造", typeof W.Attacher === "function", "Attacher");
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
