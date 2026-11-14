@@ -69,16 +69,21 @@ export class EgFacts {
   }
 
   /**
-   * 功能：把出口族折算成代价乘数（选路时乘在代价上，越小越优先）。
-   * @param {string} ip 中继 IP
-   * @param {number} now 当前时间
-   * @returns {number} v4 → 0.95，v6 → 1.05，未知 → 1（只做同分打破：实测 ×0.8/×1.15 会把流量压到少数慢中继上，见清单 H5）
+   * 功能：按出口族给代价乘数。**CF 托管站点按族分层**，其余站点只做轻微偏置。
+   * 为什么分层：同一分钟的钉中继实测是 3 条 v4 全 200（9/9）、3 条 v6 全 403（0/9），族几乎完全决定能否通过；
+   * 而 0.95/1.05 这种「轻微偏置」会被 relCost/psFactor 的差异淹没，等于没上线（三轮 A/B 差异都在噪声内）。
+   * 为什么未知族不能压太狠：未知里也可能有 v4，压到最底会让探索永远学不到新 v4（`egUnk` 一直是 5/8）。
+   * 为什么是乘数不是过滤：v8 §15 的 I1 —— `eg` 只改排序，永不剔除候选；唯一硬排除是 `dead`。
+   * @param ip 中继 IP
+   * @param cf 目标是否 CF 托管（只有这类站点对出口族敏感）
+   * @param now 当前时间
+   * @returns {number} 代价乘数
    */
-  bias(ip: string, now = Date.now()): number {
+  bias(ip: string, cf = false, now = Date.now()): number {
     const f = this.famOf(ip, now);
-    if (f === 4) return 0.95;
-    if (f === 6) return 1.05;
-    return 1;
+    if (f === 4) return cf ? 1 : 0.95;
+    if (f === 6) return cf ? 40 : 1.05;
+    return cf ? 3 : 1;
   }
 
   /**

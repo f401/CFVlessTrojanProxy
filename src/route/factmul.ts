@@ -27,11 +27,12 @@ function pick(on: ReadonlySet<string>, name: string, v: number): number {
  * @param host 目标站点
  * @param ip 中继 IP
  * @param mode 模式（`lat` 不看带宽）
+ * @param cf 目标是否 CF 托管（出口族只对这类站点敏感）
  * @returns {number} 合计乘数
  */
-export function factMul(on: ReadonlySet<string>, host: string, ip: string, mode: string): number {
+export function factMul(on: ReadonlySet<string>, host: string, ip: string, mode: string, cf = false): number {
   let m = 1;
-  m *= pick(on, "eg", EG.bias(ip));
+  m *= pick(on, "eg", EG.bias(ip, cf));
   m *= pick(on, "dns", DNS.penOf(host, EG.famOf(ip)));
   m *= pick(on, "ps", psFactor(host, ip));
   m *= pick(on, "cap", capFactor(ip, mode));
