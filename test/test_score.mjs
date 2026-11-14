@@ -2056,5 +2056,18 @@ console.log("\n65) 子请求预算");
   ok("最坏情况也没超 48", worst <= 48, String(worst));
 }
 
+// 66) 入口探测默认关闭：服务端不再定时烧一次 TLS 握手
+console.log("\n66) 入口探测默认关闭");
+{
+  ok("EDGE_AUTO 默认 0", W.SC.EDGE_AUTO === 0, String(W.SC.EDGE_AUTO));
+  for (const poolN of [0, 64, 1600, 3000]) {
+    const q = W.planRound(poolN, Math.floor(poolN / 2));
+    eq(`不给入口留额度（pool ${poolN}）`, q.edge, 0);
+    ok(`额度仍不超额（pool ${poolN}）`, q.adm + q.vt + q.edge <= q.cap, String(q.adm + q.vt + q.edge));
+  }
+  const big = W.planRound(3000, 0);
+  ok("省下来的额度分给准入/判定", big.adm + big.vt >= 40, `${big.adm} + ${big.vt}`);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

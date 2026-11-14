@@ -1,1 +1,1 @@
-fix(cron): plan.edge 真正参与额度（edgeScan 接受预算），预算三项之和不超 cap 且入口不再被压成 0
+feat(edge): 入口探测失败原因可见（?edge=1 返回 rows+err，/health 加 edge 摘要）

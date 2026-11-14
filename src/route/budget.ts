@@ -29,13 +29,13 @@ export function planRound(poolN: number, aliveN: number): Plan {
   // 保底：池子最饿的时候也别把额度全给判定
   const admMin = aliveN < 64 ? 6 : 4;
   const vtMin = 4;
-  const edgeMin = 1;
+  const edgeMin = SC.EDGE_AUTO ? 1 : 0;
   let rest = cap - admMin - vtMin - edgeMin;
   if (rest < 0) rest = 0;
 
   const wAdm = cover * 2 + 0.3;
   const wVt = staleR * 2 + 0.3;
-  const wEdge = 0.2;
+  const wEdge = SC.EDGE_AUTO ? 0.2 : 0;
   const wSum = wAdm + wVt + wEdge;
   let adm = admMin + Math.round((rest * wAdm) / wSum);
   let vt = vtMin + Math.round((rest * wVt) / wSum);
@@ -48,7 +48,7 @@ export function planRound(poolN: number, aliveN: number): Plan {
     else break;
   }
   const edge = cap - adm - vt;
-  return { adm: Math.min(adm, SC.SCAN_MAX), vt, edge: Math.min(edge, 4), cap };
+  return { adm: Math.min(adm, SC.SCAN_MAX), vt, edge: SC.EDGE_AUTO ? Math.min(edge, 4) : 0, cap };
 }
 
 /** 供调试端点与日志用的快照（不参与决策） */
