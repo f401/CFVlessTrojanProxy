@@ -1909,5 +1909,8 @@ ok("未知子路径返回 undefined（404）", W.ROUTES.route("nope") === undefi
   Math.random = rndBak;
   W.vClear();
 }
+// ═══ 第 54 组：PageView（P6-3）═══
+ok("PageView 是类实例且五个视图都在", typeof W.PAGES === "object" && ["panel", "stats", "login", "admin", "adminHint"].every((k) => typeof W.PAGES[k] === "function"), "PAGES");
+ok("PageView 可构造", typeof W.PageView === "function", "PageView");
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

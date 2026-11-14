@@ -1,4 +1,4 @@
-import { renderAdmin, renderAdminHint, renderLogin } from "../views/panel";
+import { PAGES } from "../views/pageview";
 import { adminAuthed, newNonce, randomPwd, rlReset, rlTake, sessionToken, sha256Hex } from "../edge/auth";
 import { loadUsers, saveUsers } from "../proxy/protocol";
 import { eachLimit } from "../core/util";
@@ -14,7 +14,7 @@ export async function admin(c: RouteCtx): Promise<Response> {
     const adminKey = String(env.adminKey || "");
     const safeHtml = (body: string, status = 200) => html(body, status);
 
-    if (!adminKey) return safeHtml(renderAdminHint(), 503);
+    if (!adminKey) return safeHtml(PAGES.adminHint(), 503);
     if (adminKey.length < 12) {
       return new Response("adminKey 太短：请改用 16 位以上随机字符", { status: 503 });
     }
@@ -37,20 +37,20 @@ export async function admin(c: RouteCtx): Promise<Response> {
       const ip = request.headers.get("cf-connecting-ip") || "unknown";
       // 内存计数优先（同一 isolate 内精确），KV 只做跨 isolate 的粗粒度兜底
       if (!rlTake(ip, 10)) {
-        return safeHtml(renderLogin(newNonce(), "尝试次数过多，请 10 分钟后再试"), 429);
+        return safeHtml(PAGES.login(newNonce(), "尝试次数过多，请 10 分钟后再试"), 429);
       }
 
       const f = await request.formData();
       const n = String(f.get("n") || "");
       const p = String(f.get("p") || "").toLowerCase();
       const ts = parseInt(n.split(".")[0], 16);
-      if (!n || !p) return safeHtml(renderLogin(newNonce(), "缺少参数"), 400);
+      if (!n || !p) return safeHtml(PAGES.login(newNonce(), "缺少参数"), 400);
       if (!ts || Date.now() - ts > 300000) {
-        return safeHtml(renderLogin(newNonce(), "登录已过期，请重试"), 400);
+        return safeHtml(PAGES.login(newNonce(), "登录已过期，请重试"), 400);
       }
       const want = await sha256Hex(`${n}:${adminKey}`);
       if (p !== want) {
-        return safeHtml(renderLogin(newNonce(), "密码错误"), 401);
+        return safeHtml(PAGES.login(newNonce(), "密码错误"), 401);
       }
       rlReset(ip);
 
@@ -67,7 +67,7 @@ export async function admin(c: RouteCtx): Promise<Response> {
     // 其余都要已登录
     if (!(await adminAuthed(request, url, env))) {
       if (request.method === "POST") return new Response("Forbidden", { status: 403 });
-      return safeHtml(renderLogin(newNonce(), ""));
+      return safeHtml(PAGES.login(newNonce(), ""));
     }
 
     // 用户操作
@@ -128,7 +128,7 @@ export async function admin(c: RouteCtx): Promise<Response> {
         /* 单个用户读失败不影响整页 */
       }
     });
-    return safeHtml(renderAdmin(url, users, statsMap, pageKey));
+    return safeHtml(PAGES.admin({ url, users, statsMap, pageKey }));
   }
 
   return new Response("Not Found", { status: 404 });
