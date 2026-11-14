@@ -73,6 +73,7 @@ export class AppState {
     "eCloseD",
     "eCloseP",
     "px4",
+    "e4retry",
     "tfb",
     "pxf",
     "sw",
@@ -166,7 +167,6 @@ export class AppState {
   // —— DNS 缓存 ——
   dnsCache: Map<string, { ip: string; t: number }> = new Map();
   v4AllCache: Map<string, { ips: string[]; t: number }> = new Map();
-  /** 命中过 Cloudflare 托管的目标（host → 过期时间），省掉重复解析 */
   /** 命中过 Cloudflare 托管的目标（host → 过期时间），省掉重复解析 */
   cfHost: Map<string, number> = new Map();
   cfHttp: Map<string, { code: number; colo: string; t: number }> = new Map();

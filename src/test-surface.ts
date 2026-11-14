@@ -1,4 +1,4 @@
-// 测试专用出口：只在 dist/_test.js 里存在，生产包不含此文件
+﻿// 娴嬭瘯涓撶敤鍑哄彛锛氬彧鍦?dist/_test.js 閲屽瓨鍦紝鐢熶骇鍖呬笉鍚鏂囦欢
 export { sha224Bytes, toHex, VERSION, shadowRate, eachLimit, withTimeout } from "./core/util";
 export { detectProtocol, parseVLESS, parseTrojan, loadUsers } from "./proxy/protocol";
 export { checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";

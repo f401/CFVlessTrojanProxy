@@ -2207,5 +2207,25 @@ console.log("\n73) 业务 4xx 不被误升级成封锁");
   eq("软降权 10 分钟后失效", W.JUDGE.negOn("www.example.com", "198.51.100.9", Date.now() + 601000), false);
 }
 
+// 74) 正记忆：刚出过整页的中继优先复用
+console.log("\n75) 正记忆优先复用");
+{
+  const host = "shop.example.com";
+  const a = "198.51.100.11";
+  const b = "198.51.100.12";
+  const t0 = Date.now();
+  W.vClear();
+  W.JUDGE.markPos(host, b, t0);
+  eq("正记忆写入后命中", W.JUDGE.posOn(host, b, t0 + 1000), true);
+  eq("正记忆 10 分钟后失效", W.JUDGE.posOn(host, b, t0 + 601000), false);
+  W.JUDGE.markPos(host, b, Date.now());
+  // 故意让「另一条」的证据更新：只按证据时间排序会选 a，只有正记忆能把 b 顶到队首
+  W.vSetState(host, "r:" + b, 1, 1);
+  W.vSetState(host, "r:" + a, 1, 1);
+  const ctx = { host, cfHost: true, clientV6: false, relays: [a, b], legacyWantsRelay: true };
+  eq("站点级选择优先正记忆中继", W.decide(ctx).chan.ip, b);
+  eq("普通目标不受正记忆影响", W.decide({ ...ctx, cfHost: false }).chan.kind, "d");
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

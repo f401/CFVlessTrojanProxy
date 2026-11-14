@@ -97,9 +97,15 @@ export class Policy {
     // CF 托管目标额外参考「这条中继对 CF 站点普遍不友好」的通用记录（站点无关，但只在本 isolate）。
     const negOf = (ip: string): number =>
       JUDGE.negOn(c.host, ip) || (c.cfHost && JUDGE.negOn(CF_NEG, ip)) ? 1 : 0;
+    // 正记忆（10 分钟）：这条中继刚给本站出过整页 → 排在同类之前。
+    // 冷 isolate 的盲选是主要残差来源，把「刚证明能成的那条」钉在队首是最省的修法（不跨 isolate 共享）。
+    const posOf = (ip: string): number => (JUDGE.posOn(c.host, ip) ? 0 : 1);
     const stick = usable
       .slice()
-      .sort((a, b) => negOf(a) - negOf(b) || vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a));
+      .sort(
+        (a, b) =>
+          negOf(a) - negOf(b) || posOf(a) - posOf(b) || vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a),
+      );
     const nonCf = stick.filter((ip) => !isCfIp(ip));
     const okOnes = stick.filter((ip) => vOk(c.host, "r:" + ip) || vOk("*", "r:" + ip));
 

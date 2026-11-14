@@ -18,6 +18,8 @@ const JUNK_MAX = 6000; // 中继自家默认页的量级
 const BASE_TTL = 6 * 3600_000; // 「站点能出整页」的记忆
 const PX_TTL = 21_600_000; // 下次优先中转的提示位
 const NEG_TTL = 600_000; // 短负面记忆：10 分钟后自动失效（只降权，不写封禁）
+/** 正记忆：刚出过整页的中继在 10 分钟内优先复用；冷 isolate 的「每连接盲选」是主要残差来源 */
+const POS_TTL = 600_000;
 // 「这条中继出口对 CF 托管站点不友好」的通用键：只用在本 isolate 的软降权里，
 // 不进判定表、不跨 isolate 共享 —— 它是一条统计倾向，不是封锁事实。
 export const CF_NEG = "*cf";
@@ -33,6 +35,8 @@ export class Judge {
    * （不放进判定表，因此不影响「无 2xx 不写封禁」的纪律，也不会污染 blockedRatio）。
    */
   private neg = new Map<string, number>();
+  /** 正记忆：`站点|r:ip` → 到期时间戳（有界，见 markPos） */
+  private pos = new Map<string, number>();
 
   /**
    * 功能：记录一条短负面记忆（10 分钟），供选路层把该通道排到后面。
@@ -62,6 +66,35 @@ export class Judge {
     return false;
   }
 
+  /**
+   * 功能：记录一条「该中继刚给本站出过整页」的正记忆（10 分钟），供选路层优先复用。
+   * @param host 目标站
+   * @param ip 中继出口 IP
+   * @param now 当前时间戳
+   * @returns 无
+   */
+  markPos(host: string, ip: string, now: number): void {
+    if (!host || !ip) return;
+    if (this.pos.size > 400) this.pos.clear(); // 有界：满了整表清空（正记忆丢了只是回到盲选，不致命）
+    this.pos.set(host + "|r:" + ip, now + POS_TTL);
+  }
+
+  /**
+   * 功能：查询该（站点, 中继）是否仍在正记忆期内。
+   * @param host 目标站
+   * @param ip 中继出口 IP
+   * @param now 当前时间戳
+   * @returns 在期内返回 true（调用方应优先复用它）
+   */
+  posOn(host: string, ip: string, now = Date.now()): boolean {
+    const k = host + "|r:" + ip;
+    const until = this.pos.get(k);
+    if (!until) return false;
+    if (until > now) return true;
+    this.pos.delete(k);
+    return false;
+  }
+
   /** 连接收尾的观测 */
   onTraffic(e: TrafficEvt): void {
     if (e.host === S.site) return; // 探自己域名必 522（CF 自环），不构成任何通道证据
@@ -77,6 +110,9 @@ export class Judge {
       S.smCnt.delete(ck);
       recordTraffic({ target: e.host, chan, down: e.down, ok: true });
       recordPass({ target: e.host, chan, down: e.down, ok: true });
+      // 正记忆：这条中继刚给本站出过整页 —— 10 分钟内优先复用它。
+      // 依据只有本 isolate 的观测，不跨 isolate 共享（各 isolate 的出口质量不同）。
+      if (e.via === "node" && e.node) this.markPos(e.host, e.node.slice(0, e.node.lastIndexOf(":")), now);
       return;
     }
     if (e.down <= 0 || e.down >= SMALL_MAX || e.life > 8000 || e.up > 16384) return;
