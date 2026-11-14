@@ -5,7 +5,7 @@ import { S } from "../core/state";
 import { isCfIp } from "../core/net";
 import { Chan, DIRECT } from "./channel";
 import { DecisionIn, DecisionOut, HOOK, TrafficEvt } from "../core/hook";
-import { vAll, vBad, vClearHost, vOk, vSet } from "./verdict";
+import { vAll, vAt, vBad, vClearHost, vOk, vSet, vSetState } from "./verdict";
 import { cfHttpCode } from "../proxy/cfverdict";
 import { vtDelta, vtLoad } from "./verdictsync";
 import { chanPref } from "./prefs";
@@ -35,6 +35,14 @@ export class Policy {
 
   decide(c: Ctx): Choice {
     let usable = c.relays.filter((ip) => this.chanOk(ip, c.host));
+    // 比例兜底：被判死的通道超过 3/4 时，只保留最近判死的两条，其余解除 ——
+    // 一次机房级风控不该让整池永久出局（复检 5% 太慢，这里直接放开多数）。
+    const blockedRatio = c.relays.length ? (c.relays.length - usable.length) / c.relays.length : 0;
+    if (blockedRatio > 0.75 && usable.length < 2) {
+      const sorted = c.relays.slice().sort((a, b) => vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a));
+      for (const ip of sorted.slice(2)) vSetState(c.host, "r:" + ip, 0, 1);
+      usable = c.relays.filter((ip) => this.chanOk(ip, c.host));
+    }
     // 自愈：全部通道都被判死 → 清掉该站点的结论（宁可再试一次，也不能让站点没路可走）
     if (!usable.length && c.relays.length) {
       vClearHost(c.host);

@@ -1912,5 +1912,15 @@ ok("未知子路径返回 undefined（404）", W.ROUTES.route("nope") === undefi
 // ═══ 第 54 组：PageView（P6-3）═══
 ok("PageView 是类实例且五个视图都在", typeof W.PAGES === "object" && ["panel", "stats", "login", "admin", "adminHint"].every((k) => typeof W.PAGES[k] === "function"), "PAGES");
 ok("PageView 可构造", typeof W.PageView === "function", "PageView");
+// ═══ 第 55 组：整池被判死时的比例兜底（P6-4）═══
+{
+  W.vClear();
+  const relays = ["7.7.7.1", "7.7.7.2", "7.7.7.3", "7.7.7.4"];
+  for (const ip of relays) W.vSetState("x.com", "r:" + ip, 2, 1);
+  const d = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true });
+  ok("整池判死时仍有可用通道", d.chan.kind !== "d" && relays.includes(d.chan.ip), d.why);
+  ok("只保留最近两条判死，其余被解除", relays.filter((ip) => W.vState("x.com", "r:" + ip) === 2).length <= 2, relays.map((ip) => W.vState("x.com", "r:" + ip)).join(","));
+  W.vClear();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
