@@ -3,7 +3,7 @@ export const WS_OPEN = 1;
 export const WS_BUFFER_LIMIT = 1024 * 1024; // 娑撳顢戦崣鎴︹偓浣虹处閸愯尪绉存潻?1MB 鐏忓崬绱戞慨瀣剹閸?
 export const WS_STALL_MS = 60000; // 鐎广垺鍩涚粩顖欑閺冭埖鏁规稉宥呭З瀵板牆鐖剁憴渚婄礉缂佹瑥鍩?60 缁?
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 绾兛绗傞梽鎰剁窗閸掝偄娲滄稉鍝勵吂閹撮顏幈銏犳皑閹跺﹣绗呮潪鑺ュ笌娴?
-export const VERSION = "7.22";
+export const VERSION = "7.23";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 

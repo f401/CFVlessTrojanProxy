@@ -391,6 +391,25 @@ export async function debug(c: UserCtx): Promise<Response> {
       return json({ ok: false, error: errMsg(e) });
     }
   }
+  // 握手分片骨架：?ch=<host>&gap=<ms> 建连 → 等 gap → 回来读（验证 socket 跨请求存活）
+  if (url.searchParams.get("ch")) {
+    const denyCh = await adminOnly(c);
+    if (denyCh) return denyCh;
+    const chHost = String(url.searchParams.get("ch") || "");
+    const gap = Math.max(0, Math.min(15000, Number(url.searchParams.get("gap") || 800)));
+    const cid = "c" + Date.now().toString(36);
+    const stub = c.env.METER.get(c.env.METER.idFromName("chan-probe"));
+    const t0 = Date.now();
+    const o1 = (await withTimeout(stub.fetch(`https://meter/chopen?id=${cid}&h=${encodeURIComponent(chHost)}&p=443`), 8000)) as Response | undefined;
+    const j1 = o1 ? await o1.json() : { ok: false, err: "open-timeout" };
+    await new Promise((r) => setTimeout(r, gap));
+    const o2 = (await withTimeout(stub.fetch(`https://meter/chread?id=${cid}&w=2000`), 9000)) as Response | undefined;
+    const j2 = o2 ? await o2.json() : { ok: false, err: "read-timeout" };
+    const o3 = (await withTimeout(stub.fetch(`https://meter/chclose?id=${cid}`), 5000)) as Response | undefined;
+    const j3 = o3 ? await o3.json() : { ok: false };
+    return Response.json({ gap, ms: Date.now() - t0, open: j1, read: j2, close: j3 });
+  }
+
   // 跨请求 socket 存活实验：?hold=<host> 建连并发 hello，?cont=1 在下一个请求里读
   if (url.searchParams.get("hold")) {
     const deny = await adminOnly(c);

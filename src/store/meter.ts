@@ -3,6 +3,7 @@ import { TrustedCert } from "../vendor/subtls";
 import { seal, unseal } from "./index";
 import { probeRaw, probeTls } from "../core/tlsprobe";
 import { probeHttp80 } from "../core/http80";
+import { chClose, chOpen, chRead } from "./chan";
 
 /* do */
 export class Meter {
@@ -397,6 +398,9 @@ export class Meter {
       }
       return Response.json(out);
     }
+    if (p.endsWith("/chopen")) return Response.json(await chOpen(url.searchParams.get("id") || "", url.searchParams.get("h") || "", Number(url.searchParams.get("p") || 443)));
+    if (p.endsWith("/chread")) return Response.json(await chRead(url.searchParams.get("id") || "", Number(url.searchParams.get("w") || 800)));
+    if (p.endsWith("/chclose")) return Response.json(chClose(url.searchParams.get("id") || ""));
     if (p.endsWith("/cl")) {
       return Response.json({ cl: this.cl });
     }
