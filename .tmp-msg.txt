@@ -1,1 +1,1 @@
-feat(edge): 入口探测失败原因可见（?edge=1 返回 rows+err，/health 加 edge 摘要）
+perf(cron): 入口探测默认关闭（SC.EDGE_AUTO=0），额度转给准入/判定；?edge=1 仍可手动探

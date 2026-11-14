@@ -2,6 +2,7 @@ import { errMsg, withTimeout } from "../core/util";
 import { probeHttp80 } from "../core/http80";
 import { probeRaw } from "../core/tlsprobe";
 import { probeTls } from "../core/tlsprobe";
+import { probeTf } from "../core/tf";
 import { connect } from "cloudflare:sockets";
 
 import { S } from "../core/state";
@@ -331,9 +332,11 @@ export async function debug(c: UserCtx): Promise<Response> {
     const th = String(url.searchParams.get("tlsnow"));
     const tr = url.searchParams.get("r") || "";
     const tp = url.searchParams.get("p") || "/";
+    // 两套 userland TLS 并排比：subtls（vendored，纯 JS）与 tunnelfetch（DO 里的判定用这套）。
+    // 同一个目标/中继各跑一次，用来确认「换了栈结论是否一致」——不一致就说明探测结论依赖实现。
     try {
-      const out = await probeTls(th, tp, tr);
-      return json({ ok: true, probe: out });
+      const [sub, tf] = await Promise.all([probeTls(th, tp, tr), probeTf(th, tr, tp)]);
+      return json({ ok: true, probe: sub, tf });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
     }
