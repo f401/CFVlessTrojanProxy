@@ -1,5 +1,6 @@
 import { P_T, VERSION } from "../core/util";
 import { S } from "../core/state";
+import { errHist } from "../nodes/metrics";
 import { cntView } from "../core/counter";
 import { json, forbidden } from "../edge/respond";
 import type { RouteCtx } from "../edge/types";
@@ -17,6 +18,7 @@ export function health(c: RouteCtx): Response {
     hostPrefs: S.hostNode.size,
     candidates: S.candN,
     errors: S.errs.length,
+    errsByKind: errHist(),
     colo: (c.cf && c.cf.colo) || "",
     cnt: cntView(),
     kvWrites: S.kvw,

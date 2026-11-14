@@ -226,8 +226,40 @@ export function hostUntried(host: string, mode: Mode) {
  * @param {string} [tag] 关联标签（域名或入口）
  * @returns {void}
  */
+/** 错误分类：取消息前两个词，例如 "tfb x.com" / "forced _Rd" / "cron:" */
+export function errKind(msg: unknown): string {
+  return String(msg).split(/\s+/).filter(Boolean).slice(0, 2).join(" ").slice(0, 40) || "?";
+}
+
+/** 每类的近 10 分钟计数（每 isolate 独立；不写 KV，供 /health 观察） */
+const ERR_BUCKET = new Map<string, { win: number; n: number }>();
+
+/** 记录一次分类计数：窗口跨过 10 分钟就把该类清零，避免无限增长 */
+export function errCount(msg: unknown): void {
+  const k = errKind(msg);
+  const win = Math.floor(Date.now() / 600000);
+  const cur = ERR_BUCKET.get(k);
+  if (!cur || cur.win !== win) ERR_BUCKET.set(k, { win, n: 1 });
+  else cur.n++;
+  if (ERR_BUCKET.size > 64) {
+    for (const [kk, v] of ERR_BUCKET) if (v.win !== win) ERR_BUCKET.delete(kk);
+  }
+}
+
+/** 当前窗口内的错误分类计数（按次数降序） */
+export function errHist(): Array<{ k: string; n: number }> {
+  const win = Math.floor(Date.now() / 600000);
+  const out: Array<{ k: string; n: number }> = [];
+  for (const [k, v] of ERR_BUCKET) if (v.win === win) out.push({ k, n: v.n });
+  out.sort((a, b) => b.n - a.n);
+  return out.slice(0, 8);
+}
+
 export function logErr(msg: unknown, tag?: string | null) {
   const m = String(msg).slice(0, 200);
+  try {
+    errCount(m);
+  } catch (e) {}
   // 同一个错误 5 秒内只记一次：节点大面积抖动时，每条连接都刷一行
   // console.error 既费 CPU 又把真正有用的日志冲掉（面板也只留 50 条）。
   const now0 = Date.now();

@@ -72,6 +72,9 @@ export {
   hostScore,
   hostKey,
   hostUntried,
+  errKind,
+  errCount,
+  errHist,
 } from "./nodes/metrics";
 export { tlsHello, refillPool, srcNote, srcRank, srcHealth, poolSources, POOL_SOURCES } from "./px/probe";
 export { regionListAsync } from "./px/regions";

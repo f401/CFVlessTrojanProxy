@@ -2016,5 +2016,26 @@ eq("tfClass 带内容体 → site", W.tfClass([
   eq("health 记录了该源", typeof W.srcHealth()["https://a.example/x.txt"], "object");
 }
 
+// 64) 错误分类直方图（/health 的 errsByKind）
+console.log("\n64) 错误分类直方图");
+{
+  eq("errKind 取前两个词", W.errKind("tfb x.com site ok=0 bad=3 esc=rotate n=3"), "tfb x.com");
+  eq("errKind 第二类", W.errKind("forced proxyip 1.2.3.4:443"), "forced proxyip");
+  eq("空消息给占位", W.errKind(""), "?");
+  const before = W.errHist().find((x) => x.k === "tfb x.com");
+  const n0 = before ? before.n : 0;
+  W.errCount("tfb x.com chan ok=1 bad=1 esc=none n=2");
+  W.errCount("tfb x.com ok ok=3 bad=0 esc=none n=3");
+  const after = W.errHist().find((x) => x.k === "tfb x.com");
+  eq("同类两次累加", after.n, n0 + 2);
+  const other = W.errHist().find((x) => x.k === "cron: scan");
+  eq("别的类不受影响", other, undefined);
+  W.errCount("cron: scan start");
+  eq("跨前缀独立成立", W.errKind("cron: scan start"), "cron: scan");
+  ok("直方图键不含正文", W.errHist().every((x) => !/bad=|ok=\d/.test(x.k)));
+  W.errHist().forEach((x) => ok("直方图项非空", x.k.length > 0 && x.n > 0));
+  ok("直方图最多 8 条", W.errHist().length <= 8, String(W.errHist().length));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
