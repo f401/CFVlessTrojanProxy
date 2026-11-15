@@ -1,7 +1,6 @@
 // 中继存活度（OOP）：按中继 IP 记「整页 / 小响应 / 零字节」，用来把废中继排到后面。
 // 与判定表的区别：判定表回答「这条中继对这个站点行不行」，这里回答「这条中继本身还活着吗」。
 // 跨 isolate：计数走 /add 搭车上 DO，冷启动从 /hl 拉一次（与判定表的 vt 同一套路）。
-import { S } from "../core/state";
 
 /** 中继健康记录 */
 export interface RelayStat {
@@ -186,11 +185,5 @@ export function ipOf(node: string): string {
   if (!node) return "";
   const i = node.lastIndexOf(":");
   return i > 0 ? node.slice(0, i) : node;
-}
-
-/** 便利函数：从存活表取中继 IP 并按健康度排序 */
-export function healthyRelays(limit = 16): string[] {
-  const ips = Array.from(S.alive.keys()).map(ipOf);
-  return HEALTH.rank(ips).slice(0, limit);
 }
 

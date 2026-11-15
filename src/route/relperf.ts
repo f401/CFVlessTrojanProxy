@@ -88,14 +88,31 @@ export class RelPerfTable {
       this.m.set(k, {
         n: Math.min(8, old.n + 1),
         ttfb: old.ttfb * 0.5 + ttfb * 0.5,
-        kbs: old.kbs * 0.65 + kbs * 0.35,
+        kbs: this.mixKbs(old.kbs, kbs),
         at: now,
       });
     }
     // 站点无关的聚合：新站点第一次命中时才有底可用（见 costFor 的说明）
     const a = this.by.get(ip);
     if (!a || now - a.at > REL_TTL) this.by.set(ip, { n: 1, ttfb, kbs, at: now });
-    else this.by.set(ip, { n: Math.min(8, a.n + 1), ttfb: a.ttfb * 0.5 + ttfb * 0.5, kbs: a.kbs * 0.65 + kbs * 0.35, at: now });
+    else this.by.set(ip, { n: Math.min(8, a.n + 1), ttfb: a.ttfb * 0.5 + ttfb * 0.5, kbs: this.mixKbs(a.kbs, kbs), at: now });
+  }
+
+  /**
+   * 功能：把一次吞吐样本并进 EWMA，但把「没量到吞吐」当成没有证据而不是 0。
+   * @param {number} oldK 表里已有的速率（KB/s，`<= 0` 表示还没量到过）
+   * @param {number} k 这次的速率（KB/s，`<= 0` 表示这次没量到：小响应 / 只量到首字节）
+   * @returns {number} 合并后的速率（KB/s，可能仍是 0）
+   */
+  private mixKbs(oldK: number, k: number): number {
+    // `Connection` 只在真正传了 ≥1MB 时才给出速率，其余一律记 0（见 connection.ts 的注释）。
+    // 如果把 0 当测量值参与加权，一次大下载之后每来一个普通页面就会把速率往下拽：
+    // 800 → 520 → 338 → 220（三次小响应）→ 8 次之后贴着 32KB/s 的下限，
+    // 代价从「ttfb+640」变成「ttfb+16000」，tput 模式的吞吐维度就被静默关掉了。
+    if (k <= 0) return oldK;
+    // 反过来，第一次量到吞吐时也不能拿旧的 0 去稀释（0.35 权重会让 800 变成 280）
+    if (oldK <= 0) return k;
+    return oldK * 0.65 + k * 0.35;
   }
 
   /**

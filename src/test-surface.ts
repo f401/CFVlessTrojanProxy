@@ -99,7 +99,7 @@ export { pxDecision } from "./proxy/pxhook";
 export { HOOK } from "./core/hook";
 export { planRound, planView } from "./route/budget";
 export { chanPref, prefsOf, prefsJson, PREFS } from "./route/prefs";
-export { HEALTH, RelayHealth, ipOf, healthyRelays } from "./route/relay-health";
+export { HEALTH, RelayHealth, ipOf } from "./route/relay-health";
 export { STORE, Store } from "./store/store";
 export { VT, VerdictTable } from "./route/verdict";
 export { JUDGE, Judge } from "./route/judge";

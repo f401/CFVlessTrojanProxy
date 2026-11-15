@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.147**（自举审计二十七批、共 44 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.148**（自举审计二十八批、共 45 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -182,6 +182,14 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   而 AGENTS 与旧文档都宣称封锁要两批。同一处还有三张顶层可变 Map（`TFB_AT`/`TFB_N`/`TFB_V` + `lastV`）住在 `S` 之外、无上限，
   键还是客户端 ClientHello 带来的站点名。修法：`S.tfbV` 收编（256 条上限 + 从头部淘汰），新增 `tfBlockOk(prevTag, verdict)`
   （只有上一批也是 `chan` 才落封锁）与 `tfRemember(host, tag)`；`runTfb` 同时用 `S.tfbV` 做日志去重；锁：第 109 组（单批不落封锁 + 灌 300 个站点只剩 256 条）。
+
+- **7.148 自举审计（第 45 条）**：`src/route/relperf.ts` 的 EWMA 把 `kbs = 0` 当测量值参与加权，
+  而 `Connection` 只在真正传了 ≥1MB 时才给出速率（其余一律记 0，含义是「这次没量到」）——
+  于是「一次大下载 + 几个普通页面」这种最常见的序列会把吞吐记忆一路拽到 32KB/s 的下限：
+  800 → 520 → 338 → 220（三次小响应），八次之后贴着下限，`relCostOf` 算出 `ttfb + 16000` 而不是 `ttfb + 640`，
+  `tput` 模式的「按吞吐排序」退化成「只看首字节」，而 `relCostOf` 里 `kbs <= 0` 那条「只罚 2000ms」的兜底也随之失效。
+  修法：新增 `RelPerfTable.mixKbs(oldK, k)`——这次没量到就沿用旧值、旧值是 0 就直接采用这次，两张表（站点×中继、跨站点聚合）共用；
+  顺带删掉零调用点的 `healthyRelays`（`policy.ts` 里两处早就在内联同样的 `HEALTH.rank(...).slice(...)`）；锁：第 110 组（大小样本交替后仍是 740 / 940）。
 
 - **已核查、不是缺陷**（留档免得再查一遍）：`refillPool` 抓源用的是 `fetch`（占 50 子请求额度），`cronScan` 的探活用的是 `connect()`；两者虽共用 `SCAN_SUB` 这个数字，但线上 `/<uuid>/logs` 里从未出现 subrequest 超限（`count 24 / persisted 22` 全是 `forced _Rd` 这类中继日志），说明探活并不吃抓源那份额度 —— 把 `SCAN_SUB` 再减一个「固定开销」会让冷启动发现速度直接砍半，所以不改。三条属于「短路/顺序」类，
   按函数行为写的单测永远测不到（分支没被执行）——这类缺陷只能靠端到端闭环证明或真实流量发现。

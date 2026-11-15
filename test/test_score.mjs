@@ -3275,6 +3275,39 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   eq("最旧的站点已被挤掉", W.S.tfbV.has("h0.test"), false);
   eq("最新的站点仍在", [W.S.tfbV.get("h299.test"), W.S.tfbV.has("h44.test")], ["chan/none", true]);
 }
+{
+  // 110. relperf：kbs=0 是「这次没量到吞吐」，不是「吞吐为 0」
+  W.RELPERF.clear();
+  const H = "tput.example";
+  const A = "203.0.113.140";
+  // 一次 1MB 以上的下载：800KB/s，首字节 100ms
+  W.relNote(H, A, 100, 800);
+  // 随后三个普通页面（都不足 1MB，Connection 记 kbs=0）
+  W.relNote(H, A, 100, 0);
+  W.relNote(H, A, 100, 0);
+  W.relNote(H, A, 100, 0);
+  eq("小响应样本不会把吞吐拽下去（100 + 512000/800）", Math.round(W.relCostMode("tput", H, A)), 740);
+  eq("调试快照里的速率也还是 800", Math.round(W.relSnap(H)[0].kbs), 800);
+  // 反过来：先只有小响应（没量到吞吐），再来一次大下载
+  W.RELPERF.clear();
+  const B = "203.0.113.141";
+  W.relNote(H, B, 100, 0);
+  W.relNote(H, B, 100, 800);
+  eq("第一次量到吞吐时不被旧的 0 稀释", Math.round(W.relCostMode("tput", H, B)), 740);
+  // 一次都没量到吞吐：走「首字节 + 2000」的兜底，不能落到 32KB/s 的下限
+  W.RELPERF.clear();
+  const C = "203.0.113.142";
+  W.relNote(H, C, 80, 0);
+  W.relNote(H, C, 80, 0);
+  eq("从没量到吞吐的样本按首字节 + 固定罚计", Math.round(W.relCostMode("tput", H, C)), 2080);
+  // 跨站点聚合表同样不能把 0 混进来
+  W.RELPERF.clear();
+  const D = "203.0.113.143";
+  W.relNote("agg-a.example", D, 100, 800);
+  W.relNote("agg-a.example", D, 100, 0);
+  eq("聚合表沿用已量到的容量（+200ms 表示不是本站点亲测）", Math.round(W.relCostMode("tput", "agg-b.example", D)), 940);
+  W.RELPERF.clear();
+}
 
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
