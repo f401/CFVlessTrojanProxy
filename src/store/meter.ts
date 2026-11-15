@@ -192,8 +192,8 @@ export class Meter {
         this.e.sort((a, b) => a.t - b.t);
         if (this.e.length > 50) this.e = this.e.slice(-50);
       }
-            if (Array.isArray(d.cl) && d.cl.length) {
-        // 同节点合并（不同 isolate 各报一段）：计数相加，分位数取最新一段
+      // 连接观测按节点合并（不同 isolate 各报一段）：计数相加，分位数取最新一段
+      if (Array.isArray(d.cl) && d.cl.length) {
         for (const x of d.cl) {
           if (!x || typeof x.n !== "number" || typeof x.k !== "string") continue;
           const old = this.cl.find((r) => r.k === x.k);
@@ -206,45 +206,48 @@ export class Meter {
           } else this.cl.push({ k: x.k, n: x.n, ok: x.ok, p50: x.p50, p95: x.p95, dn: x.dn });
         }
         if (this.cl.length > 60) this.cl = this.cl.slice(-60);
-    // 中继 403 判定搭便车上来：只保留未过期的，最多 200 条
-    if (Array.isArray(d.vt) && d.vt.length) {
-      for (const r of d.vt) {
-        if (!r || typeof r.k !== "string" || typeof r.t !== "number") continue;
-        if (r.t <= Date.now()) continue;
-        this.vt[r.k] = r.t;
       }
-      const ks = Object.keys(this.vt);
-      if (ks.length > 200) {
-        ks.sort((a, b) => this.vt[b] - this.vt[a]);
-        for (const k of ks.slice(200)) delete this.vt[k];
+      // 中继 403 判定搭便车上来：只保留未过期的，最多 200 条。
+      // 下面四段（vt / 事实 / hl / blk）以前被整块嵌在上面那个 d.cl 判断里：
+      // 同一批没有连接观测时，DO 会静默丢掉它们，而发送侧照样 syncAck —— 增量就此蒸发。
+      if (Array.isArray(d.vt) && d.vt.length) {
+        for (const r of d.vt) {
+          if (!r || typeof r.k !== "string" || typeof r.t !== "number") continue;
+          if (r.t <= Date.now()) continue;
+          this.vt[r.k] = r.t;
+        }
+        const ks = Object.keys(this.vt);
+        if (ks.length > 200) {
+          ks.sort((a, b) => this.vt[b] - this.vt[a]);
+          for (const k of ks.slice(200)) delete this.vt[k];
+        }
       }
-    }
-    mergeFacts(this, d);
-    // 中继存活度搭便车：加性合并（只增不减，避免别的 isolate 的旧数据把本地结论冲掉）
-    if (Array.isArray(d.hl) && d.hl.length) {
-      for (const r of d.hl) {
-        if (!r || typeof r.i !== "string") continue;
-        const cur = this.hl[r.i] || { o: 0, b: 0, d: 0 };
-        cur.o = Math.max(cur.o, Number(r.o) || 0);
-        cur.b = Math.max(cur.b, Number(r.b) || 0);
-        cur.d = Math.max(cur.d, Number(r.d) || 0);
-        this.hl[r.i] = cur;
+      mergeFacts(this, d);
+      // 中继存活度搭便车：加性合并（只增不减，避免别的 isolate 的旧数据把本地结论冲掉）
+      if (Array.isArray(d.hl) && d.hl.length) {
+        for (const r of d.hl) {
+          if (!r || typeof r.i !== "string") continue;
+          const cur = this.hl[r.i] || { o: 0, b: 0, d: 0 };
+          cur.o = Math.max(cur.o, Number(r.o) || 0);
+          cur.b = Math.max(cur.b, Number(r.b) || 0);
+          cur.d = Math.max(cur.d, Number(r.d) || 0);
+          this.hl[r.i] = cur;
+        }
+        const hk = Object.keys(this.hl);
+        if (hk.length > 200) for (const k of hk.slice(200)) delete this.hl[k];
       }
-      const hk = Object.keys(this.hl);
-      if (hk.length > 200) for (const k of hk.slice(200)) delete this.hl[k];
-    }
-    if (d.blk && typeof d.blk === "object") {
-      const nowB = Date.now();
-      for (const [bk, exp] of Object.entries(d.blk as Record<string, number>)) {
-        if (typeof exp !== "number" || exp <= nowB) continue;
-        this.blk[bk] = exp;
-      }
-      const ks = Object.keys(this.blk).filter((k) => this.blk[k] > nowB);
-      if (ks.length > 200) {
-        ks.sort((a, b) => this.blk[a] - this.blk[b]);
-        for (const k of ks.slice(0, ks.length - 200)) delete this.blk[k];
-      }
-    }
+      // 被封的中继（带到期时间）：只接受未过期的
+      if (d.blk && typeof d.blk === "object") {
+        const nowB = Date.now();
+        for (const [bk, exp] of Object.entries(d.blk as Record<string, number>)) {
+          if (typeof exp !== "number" || exp <= nowB) continue;
+          this.blk[bk] = exp;
+        }
+        const ks = Object.keys(this.blk).filter((k) => this.blk[k] > nowB);
+        if (ks.length > 200) {
+          ks.sort((a, b) => this.blk[a] - this.blk[b]);
+          for (const k of ks.slice(0, ks.length - 200)) delete this.blk[k];
+        }
       }
       if (d.spd && typeof d.spd === "object") {
         for (const [k, v] of Object.entries(d.spd)) {

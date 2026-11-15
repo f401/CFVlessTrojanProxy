@@ -3132,5 +3132,40 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   eq("超出预算的人数会被计数（而不是静默显示 0）", "admStatsSkip" in W.cntView(), true);
 }
 
+
+// 105) DO 的 /add 必须无条件吸收事实/vt/hl/blk：同一批没有连接观测（cl）时也不能丢
+// 为什么专门测这个：这一段曾经被整块嵌在 if (d.cl) 里，只有带 cl 的那批才进表，
+// 而发送侧不看返回值就 syncAck —— 事实增量会静默蒸发。
+{
+  const do9 = mkDO();
+  const stub9 = { fetch: (u, init) => do9.m.fetch(typeof u === "string" ? new Request(u, init) : u) };
+  const now9 = Date.now();
+  // 故意只带事实与判定表，一条 cl 都不带：这正是缺陷 39 之前的丢数据场景
+  const body9 = {
+    vt: [{ k: "203.0.113.9|443", s: 2, t: now9 + 600000 }],
+    eg: [{ i: "203.0.113.10", f: 4, at: now9 }],
+    dns: [{ h: "d39.example", v: 1, at: now9 }],
+    ps: [{ k: "d39.example|203.0.113.10", q: 200, n: 3, at: now9 }],
+    hl: [{ i: "203.0.113.9", o: 1, b: 0, d: 2 }],
+    blk: { "203.0.113.9|443": now9 + 600000 },
+  };
+  await stub9.fetch("https://meter/add", { method: "POST", body: JSON.stringify(body9) });
+  const j9 = await (await stub9.fetch("https://meter/vt")).json();
+  eq("没有连接观测时 vt 也要落表", (j9.vt || []).some((r) => r.k === "203.0.113.9|443"), true);
+  eq("没有连接观测时出口族事实也要落表", (j9.eg || []).some((r) => r.i === "203.0.113.10" && r.f === 4), true);
+  eq("dns 事实跟着走", (j9.dns || []).some((r) => r.h === "d39.example" && r.v === 1), true);
+  eq("ps 事实跟着走", (j9.ps || []).some((r) => r.k === "d39.example|203.0.113.10"), true);
+  eq("hl 存活度跟着走", (j9.hl || []).some((r) => r.i === "203.0.113.9"), true);
+  const b9 = await (await stub9.fetch("https://meter/blk")).json();
+  eq("被封中继跟着走", Object.keys(b9.blk || {}).includes("203.0.113.9|443"), true);
+  // 带 cl 的那一批仍然按节点累加：搬出 if 不能把 cl 自己弄坏
+  await stub9.fetch("https://meter/add", { method: "POST", body: JSON.stringify({ cl: [{ k: "n1", n: 1, ok: 1, dn: 100, p50: 10, p95: 20 }] }) });
+  await stub9.fetch("https://meter/add", { method: "POST", body: JSON.stringify({ cl: [{ k: "n1", n: 2, ok: 2, dn: 200, p50: 12, p95: 22 }] }) });
+  const c9 = await (await stub9.fetch("https://meter/cl")).json();
+  const row9 = (c9.cl || []).find((r) => r.k === "n1");
+  eq("cl 仍然按节点累加计数", row9 && row9.n, 3);
+  eq("cl 的分位数取最新一段", row9 && row9.p95, 22);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

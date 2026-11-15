@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.141**（自举审计二十一批、共 38 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.142**（自举审计二十二批、共 39 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -166,6 +166,7 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 
 第 24–27 条（v7.137，同一处代码）：`WRITE_GAP` 节流从未生效（`ctx.lastWrite` 没有生产者）⇒ 一次突发把 `ps` 压到下界；批次时钟被每条 tiny 推进 ⇒ 两批确认不可达；「影子先算、生产再算」读到的时钟不同 ⇒ 同一观测两侧结论不同（`cfDiff` 记的是分叉而不是「有人绕过裁决」）；`commitFact` 第 5 条的「两批 → 写 `blk`」在生产路径上不可达（120 秒对照窗口与 3 分钟矛盾窗口互相排除）⇒ 删分支、理由码改名 `R_TINY_PEER`，封锁的唯一写者就是 `BLK.note`。
 - **7.141 自举审计（第 37–38 条）**：`Store.usageSnapWrite(env)` 是门面里唯一**永远不写**的方法——模块函数要用户表（`usageSnapWrite(env, users)`），门面只给 `env` ⇒ `list = []` ⇒ `if (!Object.keys(out.users).length) return;`，却返回一个 resolved 的 Promise（调用方无从察觉），已删掉该门面方法并写明原因；管理面板 `await eachLimit(users.list, 8, …)` 每个用户一次 DO 往返，而并发限制不限制**总量** ⇒ 用户数超过免费计划 50 子请求预算时，后半截用户的 `readStats` 全失败、`catch` 只有一句注释 ⇒ 面板静默显示 0（看着像「这用户没流量」）；改成 `SC.ADMIN_STATS_MAX = 32` 截断并计 `admStatsSkip`。
+- **7.142 自举审计（第 39 条）**：`POST /meter/add` 里 `vt`、五类事实（`mergeFacts`）、`hl`、`blk` 四段**被整块嵌在 `if (Array.isArray(d.cl) && d.cl.length)` 里** —— 同一批没带连接观测（`cl`）时 DO 把这些字段静默丢掉，而发送侧不看返回值就 `syncAck` ⇒ 这批事实增量永久蒸发（静默丢数据，没有任何报错）。修法：把 `cl` 的块就地收口，四段提到 `/add` 顶层；`test/test_score.mjs` 第 105 组用「只带事实、不带 `cl` 的批次」锁住（旧代码上 6 条断言全红）。
 - **已核查、不是缺陷**（留档免得再查一遍）：`refillPool` 抓源用的是 `fetch`（占 50 子请求额度），`cronScan` 的探活用的是 `connect()`；两者虽共用 `SCAN_SUB` 这个数字，但线上 `/<uuid>/logs` 里从未出现 subrequest 超限（`count 24 / persisted 22` 全是 `forced _Rd` 这类中继日志），说明探活并不吃抓源那份额度 —— 把 `SCAN_SUB` 再减一个「固定开销」会让冷启动发现速度直接砍半，所以不改。三条属于「短路/顺序」类，
   按函数行为写的单测永远测不到（分支没被执行）——这类缺陷只能靠端到端闭环证明或真实流量发现。
   · 7.81 `src/px/selector.ts` 冷 isolate 拉池子封顶 700ms（`ensurePool` 能拖 2–4 秒，那是用户等首字节的时间）；
