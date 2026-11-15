@@ -184,8 +184,11 @@ export class Policy {
       // dns：确证「纯 v4 站点」时把 v6 出口乘 2 —— 结构性过不去，不是状态不好。
       return base * factMul(c.facts || FULL_ON, c.host, ip, c.mode || "tput", !!c.cfHost);
     };
-    // 站点级自愈：整池都被同一站点写满 ⇒ 判据失效/站点在拒绝所有人，清空并静默 30 分钟
-    BLK.sweep(c.host, usable);
+    // 站点级自愈：整池都被同一站点写满 ⇒ 判据失效/站点在拒绝所有人，清空并静默 30 分钟。
+    // 分母必须是**整池** `c.relays`，不能是过滤后的 `usable`：一条中继被判「封锁」的同一刻
+    // 就会离开 `usable`，而它的 `blk2` 封锁行要三批（≥3 分钟）才写成 —— 用 `usable` 当分母时，
+    // 分子（有封锁行的通道）恰好被同一个事件剔掉了，覆盖率恒接近 0，这条自愈永远不触发（v7.143）。
+    BLK.sweep(c.host, c.relays);
     const ranked = usable
       .slice()
       .sort(

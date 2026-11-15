@@ -3215,5 +3215,31 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   W.FACTS.clear();
 }
 
+// 107) 站点级自愈（BLK.sweep）：覆盖率的分母必须是整池，不是过滤后的 usable
+// 背景：一条中继被判「封锁」的同一刻就离开了 usable，而它的 blk2 封锁行要三批（≥3 分钟）才写成 ——
+// 旧口径拿 usable 当分母时，分子恰好被同一个事件剔掉，覆盖率恒接近 0，这条自愈在生产上永不触发。
+{
+  const H = "sweep.example";
+  W.FACTS.clear();
+  const rel = [
+    "203.0.113.101", "203.0.113.102", "203.0.113.103", "203.0.113.104",
+    "203.0.113.105", "203.0.113.106", "203.0.113.107", "203.0.113.108",
+  ];
+  const t0 = Date.now();
+  // 六条中继各有一条已确认的封锁行（等效于三批投票的结果，这里按上报格式直接灌表）
+  W.BLK.load(rel.slice(0, 6).map((ip) => ({ k: H + "|" + ip, n: 3, at: t0 })));
+  // 同一批中继在判定表里也已是「封锁」⇒ 它们从 usable 里消失，正是旧口径的病根
+  for (const ip of rel.slice(0, 6)) W.vSetState(H, "r:" + ip, 2, 1);
+  W.decide({ host: H, cfHost: false, clientV6: false, relays: rel, legacyWantsRelay: false });
+  eq("整池 75% 有封锁行 ⇒ 触发站点级自愈", W.BLK.muted(H), true);
+  eq("自愈把封锁行清掉：代价倍数回到 1", W.BLK.penOf(H, rel[0]), 1);
+  // 反例：5/8 = 62.5% 不到 75%，不该自愈
+  const H2 = "sweep2.example";
+  W.BLK.load(rel.slice(0, 5).map((ip) => ({ k: H2 + "|" + ip, n: 3, at: t0 })));
+  for (const ip of rel.slice(0, 5)) W.vSetState(H2, "r:" + ip, 2, 1);
+  W.decide({ host: H2, cfHost: false, clientV6: false, relays: rel, legacyWantsRelay: false });
+  eq("只到 5/8 不触发自愈", W.BLK.muted(H2), false);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
