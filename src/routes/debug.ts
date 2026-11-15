@@ -19,7 +19,6 @@ import { psSnap } from "../route/psfacts";
 import { DEAD } from "../route/deadfacts";
 import { DIRECT, chanKey } from "../route/channel";
 import { HEALTH } from "../route/relay-health";
-import { verifyInfo } from "../route/verify";
 import { checkTarget, dohQuery, expandV6, httpProbe, isCfHost, resolveAAAA, resolveV4All } from "../proxy/dial";
 import { aliveList, commitPool, flushPx, pxSet } from "../px/pool";
 import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
@@ -66,7 +65,6 @@ export async function debug(c: UserCtx): Promise<Response> {
     return json({ host: vtHost, ips: sw.ips, nodes: sw.nodes, rows: sw.rows, table: vAll(), pol, plan, counters: cntView() });
   }
   /* ---------- 站点偏好表：判定表按通道聚合后的「能打通 / 打不通」两栏 ---------- */
-  if (url.searchParams.get("vtq") === "1") return json({ ...verifyInfo() });
   if (url.searchParams.get("hl") === "1") {
     let ring: unknown = [];
     if (url.searchParams.get("do") === "1") {

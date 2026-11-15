@@ -34,7 +34,6 @@ export interface Hooks {
   /** 通道偏好：0 实测能打通 / 1 未测 / 2 实测打不通（按中继或入口 IP） */
   chanPref: ((ip: string, host?: string) => number) | null;
   /** 判定复核：对排队中的可疑组合做同站点双通道实测（由 ctx.waitUntil 触发） */
-  verify: (() => Promise<number>) | null;
   /** 该站点最近哪条通道成功过（弱证据来源）：直连 / 中继 */
   win: ((host: string) => { d: boolean; r: boolean }) | null;
   /** 中继存活度的未上报增量（由 route 注册，store 在上报批次里取用） */
@@ -84,5 +83,5 @@ export interface TrafficEvt {
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,
-  verify: null, vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, factsDelta: null, psNote: null, deadNote: null, syncAck: null, syncNack: null, relPerf: null, capNote: null, facts: null, factsFor: null };
+  vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, factsDelta: null, psNote: null, deadNote: null, syncAck: null, syncNack: null, relPerf: null, capNote: null, facts: null, factsFor: null };
 

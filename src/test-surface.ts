@@ -104,7 +104,6 @@ export { STORE, Store } from "./store/store";
 export { VT, VerdictTable } from "./route/verdict";
 export { JUDGE, Judge } from "./route/judge";
 export { POLICY, Policy } from "./route/policy";
-export { judge, queueVerify, runVerify, verifyInfo, queueLen } from "./route/verify";
 export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, pickFresh } from "./route/tfb";
 export { RELPERF, REL_TTL, relCost, relCostFor, relCostMode, relNote, relSnap } from "./route/relperf";

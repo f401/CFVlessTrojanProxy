@@ -9,7 +9,6 @@ import { vAll, vAt, vBad, vClearHost, vOk, vSet, vSetState } from "./verdict";
 import { cfHttpCode } from "../proxy/cfverdict";
 import { vtAck, vtDelta, vtLoad, vtNack } from "./verdictsync";
 import { chanPref } from "./prefs";
-import { runVerify } from "./verify";
 import { HEALTH, ipOf } from "./relay-health";
 import { CF_NEG, JUDGE } from "./judge";
 import { EG } from "./egfacts";
@@ -354,7 +353,6 @@ HOOK.syncNack = (): void => {
   vtNack();
   FACTS.nack();
 };
-    HOOK.verify = (): Promise<number> => runVerify();
     HOOK.veto = (host: string, ip: string): boolean => {
       if (!ip) return false;
       if (host && vBad(host, "r:" + ip)) return true;

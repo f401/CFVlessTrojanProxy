@@ -46,9 +46,7 @@ export class AppState {
   /** 每个站点见过的最大响应字节数：v8 的 bigTypical（tiny 的相对判据要用） */
   bigTyp: Map<string, number> = new Map();
   /** 复核队列：流量发现「可疑」后排队做同站点两条通道的实测差分 */
-  vtQ: Array<{ host: string; ck: string; t: number }> = [];
   /** 最近一次复核的结果（供 debug 展示） */
-  vtLast: { host: string; ck: string; a: number; b: number; v: string; at: number } | null = null;
   colo = "";
   funnel: Record<string, number> = { direct: 0, node: 0, v6: 0 };
   candN = 0; // 最近一次 candsFor 的候选数（观测用）

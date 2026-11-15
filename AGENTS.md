@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.144**（自举审计二十四批、共 41 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.145**（自举审计二十五批、共 42 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -35,7 +35,7 @@ core  →  store  →  nodes  →  px  →  proxy  →  views  →  edge  →  r
 | `src/proxy/` | WS 入口、协议解析、拨号、连接计量、CF 托管识别 | `session.ts`、`connection.ts`、`dialer.ts`、`dial.ts` |
 | `src/views/` | 订阅（clash / sing-box）与面板 HTML | `sub.ts`、`subview.ts`、`panel.ts` |
 | `src/edge/` | 鉴权（`X-Admin-Key` / Bearer / sha256 摘要）、响应封装 | `auth.ts`、`respond.ts` |
-| `src/route/` | 判定层：verdict / judge / policy / budget / tfb / verify / 事实层 | `policy.ts`、`verdict.ts`、`tfb.ts` |
+| `src/route/` | 判定层：verdict / judge / policy / budget / tfb / 事实层 | `policy.ts`、`verdict.ts`、`tfb.ts` |
 | `src/routes/` | HTTP 路由：health、admin、debug、logs、proxyip、cron、table | `health.ts`、`cron.ts`、`table.ts` |
 
 `src/proxy/session.ts` **不能** import `src/route/*`（会形成 `proxy → route` 反向依赖 + 循环）。跨层通信用 `src/core/hook.ts` 的槽位：`src/route/policy.ts` 在模块顶层注册，`src/index.ts` 用 `import "./route/policy"` 做副作用装配。
@@ -169,6 +169,8 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - **7.142 自举审计（第 39 条）**：`POST /meter/add` 里 `vt`、五类事实（`mergeFacts`）、`hl`、`blk` 四段**被整块嵌在 `if (Array.isArray(d.cl) && d.cl.length)` 里** —— 同一批没带连接观测（`cl`）时 DO 把这些字段静默丢掉，而发送侧不看返回值就 `syncAck` ⇒ 这批事实增量永久蒸发（静默丢数据，没有任何报错）。修法：把 `cl` 的块就地收口，四段提到 `/add` 顶层；`test/test_score.mjs` 第 105 组用「只带事实、不带 `cl` 的批次」锁住（旧代码上 6 条断言全红）。
 - **7.143 自举审计（第 40 条）**：五张事实表的 `delta()` 都有行数上限（`eg` 16、`ps`/`dns`/`dead`/`blk` 各 60），而 `ack()` 一律 `this.pend.clear()` —— **超出上限的行既没发出去、也不会再重发**，每次 flush 都在丢证据，且没有任何计数；典型场景是大池 + 多站点时一次 30 秒窗口攒下上百个 `host|ip`。修法：每张表加 `private sent = new Map<string, number>()`（键 → 发出时的 `at`），`delta()` 记账、`ack()` 只清「发过且值没变新」的行，`nack()`/`clear()` 一并清空；`test/test_score.mjs` 第 106 组按表锁住「一批 60/16 行 → ack 后剩下的仍在待发 → 再 ack 才清空」，并多加一条「值在 delta 与 ack 之间变新时不能被清」（旧代码 8 条断言全红）。注意这与 7.138 删掉的 `sent` 表不是同一件事：那一张只写不读，这一张的唯一读者就是 `ack()`。
 - **7.144 自举审计（第 41 条）**：`Policy.decide` 把**已经过判定表过滤的 `usable`** 传给 `BLK.sweep`，而 `sweep` 的判据是「该站点 ≥75% 的**候选**都写过封锁行」（`docs/v8.md` §15.6 写的就是「候选数」）。两者口径不一致的后果是这条站点级自愈**永不触发**：一条中继被判封锁的同一刻就离开 `usable`，而它的 `blk2` 封锁行要三批（≥3 分钟）才写成 ⇒ 分母与分子被同一个事件同时剔除，覆盖率恒接近 0，`bizSweeps` 成为「看起来在测量」的第二个僵尸计数器。修法：分母改成整池 `c.relays`；`test/test_score.mjs` 第 107 组锁住「6/8 触发自愈、5/8 不触发」（旧代码上 2 条断言红）。
+- **7.145 自举审计（第 42 条）**：差分复核队列是**整条死链** —— `SC.PROBE_REQ` / `SC.PROBE_RND` 在 7.69 删 subtls 后就恒为 `0`，于是 `connection.ts` 的入队闸门 `SC.PROBE_REQ > 0` 恒假、预算里 `vtOn` 恒假（`plan.vt` 恒 0）、`runRound` 立即返回，而 `Judge` 每遇一次可疑小响应仍往 `S.vtQ` 里塞一条（上限 64）⇒ 队列**只进不出**，`?vtq=1` 永远回一份没人处理的积压，`S.vtLast` 更是从来没有写者（永远 `null`）。这不是「功能降级」而是「假仪表」：`bizSweeps`/`cfDiff`/`vtq` 三个计数器都在暗示「有人在复核」。
+  修法：删掉 `src/route/verify.ts`（183 行，含 `VerifyQueue`、`judge` 差分规则、`runVerify` 空实现）、`S.vtQ`/`S.vtLast`、`HOOK.verify` 槽位与 `policy.ts` 的注册、`connection.ts` 的入队闸门、`judge.ts` 的 `queueVerify` 调用、`/<uuid>/debug?vtq=1`、`test-surface.ts` 的 5 个导出；单测第 41 组改成锁「这条链路已不存在」。封锁判定的唯一证据链仍是 `tfb`（两批共识，125 种采样组合的单测覆盖）。
 - **已核查、不是缺陷**（留档免得再查一遍）：`refillPool` 抓源用的是 `fetch`（占 50 子请求额度），`cronScan` 的探活用的是 `connect()`；两者虽共用 `SCAN_SUB` 这个数字，但线上 `/<uuid>/logs` 里从未出现 subrequest 超限（`count 24 / persisted 22` 全是 `forced _Rd` 这类中继日志），说明探活并不吃抓源那份额度 —— 把 `SCAN_SUB` 再减一个「固定开销」会让冷启动发现速度直接砍半，所以不改。三条属于「短路/顺序」类，
   按函数行为写的单测永远测不到（分支没被执行）——这类缺陷只能靠端到端闭环证明或真实流量发现。
   · 7.81 `src/px/selector.ts` 冷 isolate 拉池子封顶 700ms（`ensurePool` 能拖 2–4 秒，那是用户等首字节的时间）；
@@ -188,7 +190,7 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   · **量之前先比直连基线**（`.tmp-sim/netbase.mjs`）：链路拥塞时本机直连也只有 280–465 KB/s，别把 ISP 拥塞算到中继头上。
 - 选路现状：`SC.POLICY = 2`（判定层全生效）；冷 isolate 由 `src/px/warm.ts` 的 `seedAlive` 起搏（不 await）。判定表从 7.134 起**不允许目标 `*` 落表**：写入端 `VerdictTable.blockWild` 直接拒绝并计 `vwild`，`ok/bad` 不再有通配回落，通道类型只有 `d` 与 `r:<ip>`（`e:` 随入口偏好表一起删除）。
 - 正在攻的问题：CF 托管站点（如 x.com）经中继仍会有 ~20–30% 的 4 字节 `IPv6` 403 —— 根因是中继出口地址族，服务端只能「学」（`CF_NEG` 软降权 + 站点级硬封锁）不能改。7.71 起加了「正记忆」（`JUDGE.markPos/posOn`，10 分钟、仅本 isolate）：某条中继刚给该站出过整页就排到队首，突发并发成功率从 ~70% 提到 ~90%（20 并发 × 4 轮 73/80）。注意：**不要在连接内重放 ClientHello 重试**——Worker 只看得见 TLS 密文，首块永远是 ServerHello，识别不了 4xx 页（该实验已回退）。也不要「先缓冲首块、发现是小响应再换中继」：https 里看不到方法，重放会重复投递 POST。7.72 起 `stick` 排序多一层 `HEALTH.rank` 健康度（站点无关），并加了 `smN`/`smD` 归因计数——但**计数器是每 isolate 一份**，跨 isolate 归因只能看 `/<uuid>/stats`（不含 cnt），不要拿单个 `/health` 的数字当全局结论。
-- OOP 收类已完成到「有模块级可变状态就有类」：`Pool`、`Scorer`、`Store`、`SeedStore`、`VerdictTable`、`Judge`、`Policy`、`RelayHealth`、`VerifyQueue`、`SourceHealth`、`PendingLedger`、`HostProfile`、`ErrRing`、`RouteTable`……（清单见 `docs/ARCHITECTURE.md` 的「类与职责」表）。剩下的是纯计算/纯渲染模块，按约定**不**改成类。
+- OOP 收类已完成到「有模块级可变状态就有类」：`Pool`、`Scorer`、`Store`、`SeedStore`、`VerdictTable`、`Judge`、`Policy`、`RelayHealth`、`SourceHealth`、`PendingLedger`、`HostProfile`、`ErrRing`、`RouteTable`……（清单见 `docs/ARCHITECTURE.md` 的「类与职责」表）。剩下的是纯计算/纯渲染模块，按约定**不**改成类。
 - `subtls` 已删除（7.69）：`src/vendor/{subtls.js,subtls.d.ts,roots.js}`、`src/core/tlsprobe.ts`、`src/route/{probe,sweep}.ts` 及其端点（`?tls=`/`?raw=`/`?tlsnow=`/`DO /meter/{probe,raw,dbt}`）全部移除，包体回到 1.4MB 级。
 - **v8 事实层现状（7.88–7.107，均已上线或可开关）**：五类事实 `eg`/`ps`/`dead`/`blk`/`dns` + `cap` 噪声门 + `first/lat` 观测全部在仓库，
   由 `src/route/factflags.ts` 的 plain_text 绑定 `facts` 统一开关（`none`/`eg`/`eg,ps`/`all`，未配置=全开）；

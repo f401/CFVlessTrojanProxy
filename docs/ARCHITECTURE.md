@@ -214,7 +214,6 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Judge`（`JUDGE`） | `src/route/judge.ts` | 流量侧弱证据的累加与落判定 |
 | `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级 |
 | `RelayHealth`（`HEALTH`） | `src/route/relay-health.ts` | 中继健康表（sent/pending 语义） |
-| `VerifyQueue`（`VERIFY`） | `src/route/verify.ts` | 复核队列与差分判定 |
 | `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps） |
 | `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |
 | `Budget`（`planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核），纯函数入口 |
