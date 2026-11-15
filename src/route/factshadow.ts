@@ -94,7 +94,10 @@ export function shadowCtx(o: FactObs, now: number, prev: Record<string, { at: nu
     .map((x) => ({
       kind: "relay" as const,
       host: o.host,
-      relay: x.ck.slice(x.ck.lastIndexOf(":") + 1),
+      // 键的形态是 `host|relay`（直连是 `host|d`）：按第一个 `|` 切开。
+            // 不能按最后一个 `:` —— IPv4 中继名里没有冒号，`lastIndexOf(":")` 返回 -1，
+            // 会把整个 `host|ip` 当成中继名（当前只有 `down` 被用到，属于潜伏缺陷）。
+            relay: x.ck.slice(x.ck.indexOf("|") + 1),
       at: x.at,
       down: x.down,
       status: 200,
