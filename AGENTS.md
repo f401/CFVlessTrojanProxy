@@ -120,7 +120,10 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - **注释**：函数级写「功能 / 参数 / 返回」；体内只写「这步在干嘛 / 为什么」，协议字段偏移、边界条件、临时绕过的原因必须写。不复述代码，HTML 模板（`views/` 里的模板字符串）不写体内注释——里面的 `//` 会发给浏览器。
 - **类**：只有**独占跨请求可变状态**的模块才配类（`VerdictTable`、`Pool`、`Scorer`、`Store`、`RelayHealth`…）。纯计算/纯渲染保持自由函数，不要为了「OOP」把 `util.ts` 变成类。
 - **批量改代码**：不要按行号定位。用**整行 `trim()` 锚点 + 命中数必须为 1** 的脚本，命中数不对就 `process.exit(1)`；重复锚点用「连续多行」组合。写得好的范本：`.tmp-sim/steps*.mjs`。
-- **CRLF**：仓库里 CRLF/LF 混排。`test/test_score.mjs` 过去是「每行 `\r\r\n`」的畸形行尾（等于每行后面跟着一个空行），7.134 已归一成纯 CRLF；其余文件仍是混排。锚点匹配前先 `s.includes("\r\n")` 探测，写回统一 `lines.join("\r\n")`；用 `"\n"` 硬拼锚点会一直 `anchor miss`。
+- **CRLF**：仓库里 CRLF/LF 混排。`test/test_score.mjs` 过去是「每行 `\r\r\n`」的畸形行尾（等于每行后面跟着一个空行），
+  7.134 已归一成纯 CRLF；其余文件仍是混排。锚点匹配前先 `s.includes("\r\n")` 探测（用 `"\n"` 硬拼锚点会一直 `anchor miss`）；
+  **改写时按行保留各自的结尾**（由 `line.endsWith("\r")` 决定，新行沿用邻行）—— 写回时统一 `lines.join("\r\n")` 会把纯 LF 文件整体翻成 CRLF，
+  7.163 的文档脚本就是这样在 `AGENTS.md` 与 `src/core/util.ts` 上造了 1200 行纯行尾 diff（内容一字未改）。
 - **提交**：PowerShell 5.1 不支持 heredoc 管道进 `git commit -F -`；把提交信息写到 `.tmp-sim/msg*.txt`，再 `git -c i18n.commitEncoding=UTF-8 commit -F .tmp-sim/msg*.txt`。
 
 ---
