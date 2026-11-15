@@ -18,9 +18,11 @@ export function renderAdmin(
   const opAction = "/admin/op" + (ak ? "?k=" + encodeURIComponent(ak) : "");
   const rows = users.list
     .map((u: UserRec) => {
-      const s = statsMap[u.id] || {};
-      const used = fmtBytes((s.up || 0) + (s.down || 0));
-      const today = fmtBytes((s.todayUp || 0) + (s.todayDown || 0));
+      // 没读到用量与「用量为 0」是两件事：前者显示「—」，别编一个 0 出来
+      const s = statsMap[u.id];
+      const has = !!s;
+      const used = has ? fmtBytes((s.up || 0) + (s.down || 0)) : "—";
+      const today = has ? fmtBytes((s.todayUp || 0) + (s.todayDown || 0)) : "—";
       const dis = u.enabled === false;
       const ops = u.managed
         ? `<form method="post" action="${escapeHtml(opAction)}" style="display:inline">
@@ -56,6 +58,11 @@ export function renderAdmin(
     .join("");
 
   const total = users.list.filter((x) => x.enabled !== false).length;
+  // 有谁没读到：在标题下给一句说明，否则「—」会被当成坏了
+  const missing = users.list.filter((u: UserRec) => !statsMap[u.id]).length;
+  const missNote = missing
+    ? `<div class="mu" style="font-size:12.5px;margin:-10px 0 14px">其中 ${missing} 个用户这次没读到用量（本次预算或 DO 抖动），用量列显示「—」</div>`
+    : "";
 
   return `<!doctype html><html lang="zh"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -81,6 +88,7 @@ code{background:#f3f4f6;padding:1px 5px;border-radius:4px}
 </style>
 <h1>用户管理</h1>
 <div class="sub">共 ${users.list.length} 个用户，启用 ${total} 个 · 数据存于 KV，面板改动立即生效</div>
+${missNote}
 
 <form class="add" method="post" action="${escapeHtml(opAction)}">
   <input type="hidden" name="op" value="add">

@@ -1,6 +1,7 @@
 import { S } from "../core/state";
-import { RTT_MAX } from "../core/const";
+import { RTT_MAX, SC } from "../core/const";
 import { eachLimit } from "../core/util";
+import { cnt } from "../core/counter";
 import { kvGet, kvGetStrict, kvSet } from "./kv";
 import { meterGet } from "./meter-client";
 
@@ -44,6 +45,13 @@ export async function usageSnapWrite(env: Env, users?: UserRec[]) {
   // 灾备快照，2 小时一次足够（cron 是 30 分钟一轮，别每轮都写一遍）
   if (Date.now() - (prev.ts || 0) < 2 * 3600e3) return;
   const list = users || [];
+  // 读一个用户就是一次 DO 子请求，而一次调用总共只有 50 个（cron 还要花在 refill / restore 上）。
+  // 超出的那批不读，但**必须把上一次快照里的数值原样搬过来** —— 直接跳过会让它们从灾备
+  // 快照里消失，DO 重建之后再也恢复不回来（v7.174 之前就是这样：用户一多，尾部的
+  // meterGet 全部失败，那些人的历史用量永远停在某一天，且没有任何计数）。
+  const head = list.slice(0, SC.SNAP_MAX);
+  const tail = list.slice(SC.SNAP_MAX);
+  if (tail.length) cnt("snapSkip", tail.length);
   const out: UsageSnap = { ts: Date.now(), users: {} };
   // 同一个 num 不要每个用户重新建一次闭包
   const num = (x: unknown) => {
@@ -51,7 +59,7 @@ export async function usageSnapWrite(env: Env, users?: UserRec[]) {
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
   };
   const today = new Date().toISOString().slice(0, 10);
-  await eachLimit(list, 8, async (u) => {
+await eachLimit(head, 8, async (u) => {
     const v = await meterGet(env, u.id);
     const old = (prev.users || {})[u.id];
     // 只增不减：DO 被重置（重建脚本）时不能把历史快照写回 0。
@@ -77,6 +85,12 @@ export async function usageSnapWrite(env: Env, users?: UserRec[]) {
       };
     }
   });
+  // 没读的那批只搬旧值：不给它们编新数字（恢复路径读的也是「上次真的读到的」）
+  for (const u of tail) {
+    const old = (prev.users || {})[u.id];
+    if (!old) continue;
+    out.users[u.id] = { ...old };
+  }
   if (!Object.keys(out.users).length) return;
   try {
     await kvSet(env, USAGE_SNAP_KEY, out, { expirationTtl: 86400 * 90 });

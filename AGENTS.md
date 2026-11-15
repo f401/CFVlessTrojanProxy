@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.173**（自举审计五十三批、共 95 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.174**（自举审计五十四批、共 97 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -336,6 +336,23 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   `\`noSuchFn()\` → 符号不存在`、exit=1；撤掉后 exit=0。
 - 锁：第 164 组 5 条（类型里没有 `src?`、池子与 `warm` 四处写入都不带来源、`pxSet` 没有 `patch.alive`、
   签名只剩 `cur`、`LIVING` 含 `LIMITS.md`）。A/B：旧代码 1138 通过 / 4 失败，改后 1142/0。
+
+### 7.174 自举审计（第 96–97 条，用量快照与面板口径）
+
+- **第 96 条：灾备快照逐个用户读 DO，没有上限。** `usageSnapWrite` 对整份用户表各发一次
+  `meterGet`（每人一个 DO 子请求），而一次调用总共只有 50 个额度 —— cron 一轮还要花在
+  `refillPool`（≤6 个源）与 `restoreUsage`（≤12 人）上。用户一多，排在后面的读全部失败；
+  `meterGet` 失败时返回 `null` 而不是抛错，而 `out.users` 是每次从空表重建的 ⇒ 那批人直接
+  从快照里消失，DO 重建后再也恢复不回来，且没有任何计数。修法：只读前 `SC.SNAP_MAX = 24` 个，
+  其余把上一次快照里的记录**原样搬过来**并记 `cnt("snapSkip")` —— 「这次没读」不等于「没有」。
+- **第 97 条：面板把「没读到」画成 `0 B`。** `renderAdmin` 原来 `const s = statsMap[u.id] || {}`，
+  超出 `ADMIN_STATS_MAX` 或读失败的用户显示 `0 B`，与「这个用户没流量」无法区分（7.142 只把它
+  记进 `admStatsSkip`，页面照旧说谎）。改成缺数据时显示「—」，并在标题下写明「其中 N 个用户
+  这次没读到用量」。
+- 锁：第 165 组 9 条（只读 SNAP_MAX 个、`snapSkip` 计数、没读的人保留旧值、读到的人换新值、
+  快照不丢人、面板显示「—」、不假装 `0 B`、页面说明、`SNAP_MAX = 24`）。
+  A/B 时先用 `const SNAPMAX = W.SC.SNAP_MAX || 24;` 兜住常量缺失，否则旧代码上会抛 TypeError
+  而不是干净地红（本次实测旧代码 7 条 FAIL）。
 
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。

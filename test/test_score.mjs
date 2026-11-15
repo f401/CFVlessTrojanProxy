@@ -3790,5 +3790,57 @@ console.log("\n【164】池子侧的死状态");
   ok("活文档体检把 LIMITS.md 也算上了", /LIVING = \[[^\]]*"docs\/LIMITS\.md"/.test(wSrc));
 })();
 
+// 灾备快照：读的人有上限，没读的人不能被从快照里抹掉
+{
+  const SNAPMAX = W.SC.SNAP_MAX || 24;
+  eq("SNAP_MAX 是 24（每人一次 DO 往返的预算）", W.SC.SNAP_MAX, 24);
+  const box = new Map();
+  const old = { ts: Date.now() - 3 * 3600 * 1000, users: {} };
+  const list = [];
+  for (let i = 0; i < 30; i++) {
+    const id = "aaaaaaaa-0000-4000-8000-" + String(i).padStart(12, "0");
+    list.push({ id, pwd: "", note: "", enabled: true, managed: true });
+    old.users[id] = { up: 111 + i, down: 222 + i, conns: 1, first: 0, d: "2000-01-01", dU: 7, dD: 8 };
+  }
+  box.set("usage:snap", JSON.stringify(old));
+  let calls = 0;
+  const envS = {
+    STATS: { get: async (k) => box.get(k) || null, put: async (k, v) => { box.set(k, v); } },
+    METER: {
+      idFromName: (id) => id,
+      get: () => ({
+        fetch: async () => {
+          calls++;
+          return { ok: true, json: async () => ({ up: 999, down: 999, conns: 2, first: 0 }) };
+        },
+      }),
+    },
+  };
+  W.S.meterCache.clear();
+  const beforeSkip = W.cntView().snapSkip || 0;
+  await W.usageSnapWrite(envS, list);
+  eq("灾备快照只读 SNAP_MAX 个人的用量（每人一次 DO 子请求）", calls, SNAPMAX);
+  eq("超过预算的人被计数（snapSkip）", (W.cntView().snapSkip || 0) - beforeSkip, 30 - SNAPMAX);
+  const doc = JSON.parse(box.get("usage:snap"));
+  eq("没读的那个人仍是上次的数值", doc.users[list[SNAPMAX].id].up, 111 + SNAPMAX);
+  eq("读到的那个人换成了新数值", doc.users[list[0].id].up, 999);
+  eq("快照里没有丢人", Object.keys(doc.users).length, 30);
+}
+
+// 面板：没读到用量与「用量为 0」必须能看出来
+{
+  const u1 = { id: "aaaaaaaa-0000-4000-8000-00000000000a", pwd: "", note: "n1", enabled: true, managed: true };
+  const u2 = { id: "aaaaaaaa-0000-4000-8000-00000000000b", pwd: "", note: "n2", enabled: true, managed: true };
+  const page = W.renderAdmin(new URL("https://h.example/admin"), { list: [u1, u2] }, {
+    [u1.id]: { up: 1, down: 2, todayUp: 0, todayDown: 0 },
+  });
+  const row1 = page.slice(page.indexOf(u1.id), page.indexOf(u2.id));
+  const row2 = page.slice(page.indexOf(u2.id));
+  ok("读到的用户那行是真数字", /<td>\d/.test(row1), row1.slice(0, 60));
+  ok("没读到的用户那行是「—」", row2.includes("<td>—</td>"));
+  ok("没读到的用户那行不会假装 0 B", !row2.includes("0 B"));
+  ok("页面说明有几个用户这次没读到", page.includes("1 个用户这次没读到用量"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
