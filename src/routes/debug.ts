@@ -8,7 +8,7 @@ import { diagVerdict, hostKey } from "../nodes/metrics";
 import { nsGet } from "../nodes/score";
 import { cfHttpCode } from "../proxy/cfverdict";
 import { runTfb } from "../route/tfb";
-import { vAll, vState } from "../route/verdict";
+import { VT_TTL_MS, vAll, vState } from "../route/verdict";
 import { vtDelta, vtLoad } from "../route/verdictsync";
 import { cntView } from "../core/counter";
 import { planView } from "../route/budget";
@@ -59,10 +59,11 @@ export async function debug(c: UserCtx): Promise<Response> {
   if (url.searchParams.get("rt")) return json({ host: String(url.searchParams.get("rt") || "").slice(0, 80), rows: relSnap(String(url.searchParams.get("rt") || "").slice(0, 80)), alive: S.alive.size, ttl: REL_TTL });
   if (vtHost) {
     // 只读表：userland TLS 探测已在 7.69 删除（免费计划必然 1102），证据一律来自真实流量与 tfb。
-    const sw = { ips: [], nodes: [], rows: [] };
+    // 这里曾经还回三个恒空字段（ips / nodes / rows）——它们来自已删除的扫描器，
+    // 于是「扫描结果为空」和「根本没有扫描」在响应里长得一模一样（v7.154 删掉）。
     const plan = planView(S.pool.length, S.alive.size);
     const pol = { same: S.polSame, diff: S.polDiff, why: S.polWhy };
-    return json({ host: vtHost, ips: sw.ips, nodes: sw.nodes, rows: sw.rows, table: vAll(), pol, plan, counters: cntView() });
+    return json({ host: vtHost, table: vAll(), pol, plan, counters: cntView() });
   }
   /* ---------- 站点偏好表：判定表按通道聚合后的「能打通 / 打不通」两栏 ---------- */
   if (url.searchParams.get("hl") === "1") {
@@ -226,7 +227,7 @@ export async function debug(c: UserCtx): Promise<Response> {
     const relayBlocked: Array<{ node: string; state: number; src: number; left: number }> = [];
     for (const v of vAll()) {
       if (!v.c.startsWith("r:") || v.state < 2) continue;
-      relayBlocked.push({ node: v.c.slice(2) + ":443", state: v.state, src: v.src, left: Math.round((v.at + 1800000 - Date.now()) / 1000) });
+      relayBlocked.push({ node: v.c.slice(2) + ":443", state: v.state, src: v.src, left: Math.round((v.at + VT_TTL_MS - Date.now()) / 1000) });
     }
     // &do=1：把 DO 里跨 isolate 的那份判定也拉出来看（否则只能看到本 isolate 学到的）
     let ringBlk: Array<{ node: string; left: number }> = [];

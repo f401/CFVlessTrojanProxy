@@ -143,6 +143,12 @@ export class Policy {
       vClearHost(c.host);
       usable = c.relays.slice();
     }
+    // 站点级自愈：整池都被同一站点写满 ⇒ 判据失效/站点在拒绝所有人，清空并静默 30 分钟。
+    // 分母必须是**整池** `c.relays`（用 `usable` 时分子会被同一个事件剔掉，见 v7.143）。
+    // 位置必须在**所有早返回之前**：下面的 5% 复检与「直连被判死」两条路径都不会走到排序，
+    // 把维护动作挂在它们后面就等于「每次请求有 5% 的概率跳过自愈」——
+    // 这是在单测偶发失败（4 次跑 1 次红）里发现的（v7.154）。
+    BLK.sweep(c.host, c.relays);
     // 探索：被判死的通道按 5% 概率复检 —— 判死只是「当前证据」，网络会变，不试就永远好不了。
     // 成功的大响应会经 Judge 把它改回 ok；失败只会刷新 TTL，代价是一次连接的尝试。
     const blocked = c.relays.filter((ip) => !this.chanOk(ip, c.host));
@@ -183,11 +189,6 @@ export class Policy {
       // dns：确证「纯 v4 站点」时把 v6 出口乘 2 —— 结构性过不去，不是状态不好。
       return base * factMul(c.facts || FULL_ON, c.host, ip, c.mode || "tput", !!c.cfHost);
     };
-    // 站点级自愈：整池都被同一站点写满 ⇒ 判据失效/站点在拒绝所有人，清空并静默 30 分钟。
-    // 分母必须是**整池** `c.relays`，不能是过滤后的 `usable`：一条中继被判「封锁」的同一刻
-    // 就会离开 `usable`，而它的 `blk2` 封锁行要三批（≥3 分钟）才写成 —— 用 `usable` 当分母时，
-    // 分子（有封锁行的通道）恰好被同一个事件剔掉了，覆盖率恒接近 0，这条自愈永远不触发（v7.143）。
-    BLK.sweep(c.host, c.relays);
     const ranked = usable
       .slice()
       .sort(

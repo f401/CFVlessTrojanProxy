@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import * as W from "./_bundle.mjs";
 import { webcrypto } from "node:crypto";
 
@@ -3311,5 +3312,41 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
 /* ---------- 111. 死字段与孤儿文档（v7.151） ---------- */
 eq("Thompson 的成员表缓存字段已删除（v6.42 删采样器时留下的死字段）", W.S.tsMem, undefined);
 ok("状态表里不再有 tsMem 的键", !Object.prototype.hasOwnProperty.call(W.S, "tsMem"));
+
+/* ---------- 112. 假字段与魔数（第 54–56 条） ---------- */
+{
+  const g = "112";
+  eq(`[${g}] 判定表 TTL 只有一个来源（调试端点不再抄裸魔数）`, W.VT_TTL_MS, 30 * 60 * 1000);
+  eq(`[${g}] 预算快照只回 adm/cap（判定额度那一维 7.149 已删）`, Object.keys(W.planView(400, 20)).join(","), "adm,cap,verds,site");
+  const src = fs.readFileSync("test/_bundle.mjs", "utf8");
+  ok(`[${g}] 调试端点不再回恒空字段 ips/nodes/rows`, !src.includes("ips: sw.ips") && !src.includes("nodes: sw.nodes"));
+}
+
+
+// 113) 站点级自愈必须在所有早返回之前（否则 5% 复检命中时这一轮就不自愈）
+// 背景：sweep 原来排在「5% 复检」与「直连被判死」两条 return 之后 ⇒ 每次请求有 5% 概率跳过自愈，
+//       单测因此偶发失败（同一份代码 4 次跑 1 次红）。
+{
+  const g = "113";
+  const H = "sweep3.example";
+  W.FACTS.clear();
+  const rel = ["203.0.113.111", "203.0.113.112", "203.0.113.113", "203.0.113.114", "203.0.113.115", "203.0.113.116", "203.0.113.117", "203.0.113.118"];
+  const t0 = Date.now();
+  W.BLK.load(rel.slice(0, 6).map((ip) => ({ k: H + "|" + ip, n: 3, at: t0 })));
+  for (const ip of rel.slice(0, 6)) W.vSetState(H, "r:" + ip, 2, 1);
+  // 把随机数钉成 0，强制走「探索」那条早返回（Math.random() < 0.05 必然成立）
+  const rnd = Math.random;
+  Math.random = () => 0;
+  let ch;
+  try {
+    ch = W.decide({ host: H, cfHost: false, clientV6: false, relays: rel, legacyWantsRelay: false });
+  } finally {
+    Math.random = rnd;
+  }
+  eq(`[${g}] 早返回走的是 5% 复检`, ch.why, "explore");
+  eq(`[${g}] 复检早返回时自愈仍然做了`, W.BLK.muted(H), true);
+  eq(`[${g}] 自愈清掉了封锁行`, W.BLK.penOf(H, rel[0]), 1);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -1,4 +1,4 @@
-// 娴嬭瘯涓撶敤鍑哄彛锛氬彧鍦?dist/_test.js 閲屽瓨鍦紝鐢熶骇鍖呬笉鍚鏂囦欢
+// 测试专用出口：只在 dist/_test.js 里存在，生产包不含此文件
 export { sha224Bytes, toHex, VERSION, shadowRate, eachLimit, withTimeout } from "./core/util";
 export { detectProtocol, parseVLESS, parseTrojan, loadUsers } from "./proxy/protocol";
 export { checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
@@ -89,7 +89,7 @@ export { renderAdmin } from "./views/panel";
 export { adminAuthed, sha256Hex, sessionToken } from "./edge/auth";
 export { html, CSP_STATIC } from "./edge/respond";
 export { wsToStream } from "./proxy/ws-in";
-export { vSet, vSetState, vState, vOk, vBad, vDead, vAll, vClear, vImport } from "./route/verdict";
+export { VT_TTL_MS, vSet, vSetState, vState, vOk, vBad, vDead, vAll, vClear, vImport } from "./route/verdict";
 export { vtDelta, vtLoad, vtAck, vtNack } from "./route/verdictsync";
 export { recordTraffic } from "./route/observe";
 export { DIRECT, chanKey, nodeKeyOf } from "./route/channel";

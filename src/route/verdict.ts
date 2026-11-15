@@ -18,6 +18,15 @@ export interface Verdict {
 }
 
 /**
+ * 判定表的过期时间（毫秒）。
+ *
+ * 为什么导出：`/<uuid>/debug?diag=` 要算「这条封锁还剩多少秒」，它必须与表里的 `ttl`
+ * 是**同一个数**。7.153 删掉零读取点的 `SC.VT_TTL` 之后，那条诊断路径曾自己抄了一份
+ * `1800000` 裸魔数——表一改就静默错报剩余时间。
+ */
+export const VT_TTL_MS = 30 * 60_000;
+
+/**
  * 判定表：站点 × 通道的结论集合。
  *
  * 为什么按 IP 而不是按节点名：同一个中继的出口 IP 才是被封锁的对象，
@@ -31,7 +40,7 @@ export interface Verdict {
  */
 export class VerdictTable {
   private m = new Map<string, Verdict>();
-  private ttl = 30 * 60_000;
+  private ttl = VT_TTL_MS;
   private max = 600;
 
   /**

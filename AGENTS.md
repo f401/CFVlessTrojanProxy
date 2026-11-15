@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.153**（自举审计三十三批、共 53 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.154**（自举审计三十四批、共 57 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -208,6 +208,13 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - **第 52 条（v7.152）** 设计稿 `docs/判定模块设计.md` 的分层清单仍在描述三个已删模块（`route/probe.ts` 与 `route/sweep.ts` 7.69 删除、`route/edge.ts` 7.133 删除）与三个预算维度（判定 7.149 删、入口 7.133 删，只剩准入），退场对照表与结尾原则还把内存判定表叫 `ChanTable`（那个类在 `src/store/chan.ts`，7.130 就删了，真实类名是 `VerdictTable`），并把 `facts` 的同步表数写成「六种 kind」（实际五张：`eg`/`ps`/`dead`/`blk`/`dns`）。逐行改正，表头加一条「下表是 7.69 之前的分层」的现状说明。
 
 - **第 53 条（v7.153）** 17 个 `SC` 常量零读取点：`PROBE_REQ`/`PROBE_RND`（7.145 删复核链后就没有闸门读它们）、`VT_TTL`、`MIN_BYTES`、`TRIAL_LAT`/`TRIAL_TPUT`/`ROUTE_T_LAT`/`ROUTE_T_TPUT`/`ROUTE_K`（v6.42 删抽签器）、`WATCH_N`/`WATCH_BONUS`/`REHAB_N`/`REHAB_MS`（删 watchlist）、`LAT_TS`、`FAIL_GATE`、`TS_ALL`、`SEED_CONF`。它们是「关着的旋钮」：改值不会有任何行为变化，注释与历史条目却都在拿它们解释决策（`budget.ts` 甚至写「`PROBE_RND/PROBE_REQ > 0` 时有意义」）。已全删，并改掉引用它们的注释与两条断言（第 41/67 组改成锁「这两个开关不存在」）。
+- **第 54 条（v7.154）** `/<uuid>/debug?vt=` 里 `ips`/`nodes`/`rows` 三个字段恒为空数组（扫描器 7.69 就删了），
+  于是「扫了、什么也没扫到」与「根本没有扫描能力」在响应里长得一模一样 —— 删掉三个字段，只留 `table`/`pol`/`plan`/`counters`。
+- **第 55 条（v7.154）** 同一处 `left`（这条封锁还剩几秒）自己抄了一份 `1800000` 裸魔数，而 7.153 刚把 `SC.VT_TTL` 删掉；
+  判定表的真实 TTL 在 `VerdictTable` 里 ⇒ 导出 `VT_TTL_MS` 两处共用（改表就改一处）。
+- **第 56 条（v7.154）** `src/test-surface.ts` 首行注释是双重编码的乱码（`娴嬭瘯涓撶敤…`）—— 文件头一句话，读的人只能猜；已改回中文。
+- **第 57 条（v7.154）** 站点级自愈 `BLK.sweep` 排在「5% 复检」「直连被判死」两条早返回**之后** ⇒ 每次请求有 5% 概率跳过自愈；
+  单测因此偶发失败（同一份代码 4 次跑 1 次红）——把 sweep 上移到所有早返回之前，并用 `Math.random = () => 0` 锁住「早返回时自愈仍发生」。
 
 - **第 48 条（7.150）`eq` 对函数是空断言**：`eq` 用 `JSON.stringify(a) === JSON.stringify(b)` 比较，而 `JSON.stringify(函数)` 与 `JSON.stringify(undefined)` 都返回 `undefined` ⇒ 历史上所有「某函数已删除」的锁（7.133 的 `edgeAdd`/`p90Local`/`relAgg`/`vGet`、7.141 的 `STORE.usageSnapWrite`、7.145 的 `judge`/`queueLen`/`HOOK.verify`、7.149 的 `pickHosts`/`SWEEP_COST`/`runRound`）都是**永远为真**的空断言 —— 这次是 A/B 在旧代码上仍然 0 失败才暴露。修法：`const strict = b === undefined || typeof a === "function" || typeof b === "function";` 后走 `Object.is`。
 - **已核查、不是缺陷**（留档免得再查一遍）：`refillPool` 抓源用的是 `fetch`（占 50 子请求额度），`cronScan` 的探活用的是 `connect()`；两者虽共用 `SCAN_SUB` 这个数字，但线上 `/<uuid>/logs` 里从未出现 subrequest 超限（`count 24 / persisted 22` 全是 `forced _Rd` 这类中继日志），说明探活并不吃抓源那份额度 —— 把 `SCAN_SUB` 再减一个「固定开销」会让冷启动发现速度直接砍半，所以不改。三条属于「短路/顺序」类，
