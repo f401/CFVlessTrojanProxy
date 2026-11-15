@@ -55,7 +55,11 @@ async function adminDigest(env: Env): Promise<string> {
 export async function adminAuthed(request: Request, url: URL, env: Env) {
   // 优先用请求头：URL 里的 k= 会留在访问日志、浏览器历史、Referer 里，等于明文外泄
   const hdr = request.headers.get("x-admin-key") || "";
-  const bearer = (request.headers.get("authorization") || "").replace(/^Bearers+/i, "");
+  // 剥 "Bearer " 前缀：这里曾经写成 /^Bearers+/i（`\s` 掉了反斜杠），于是只匹配
+  // 「Bearer」后面跟一串字母 s 的怪串，真正的 `Authorization: Bearer <key>` 原样带着
+  // 前缀去比较、永远不相等 —— 文档宣称支持的 Bearer 鉴权从来没生效过，只是静默落到
+  // Cookie 分支（表现为「我明明带了 Bearer 还是 403」）。
+  const bearer = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
   const given = hdr || bearer || url.searchParams.get("k") || "";
   if (given && env.adminKey) {
     if (given === env.adminKey) return true; // 兼容旧用法

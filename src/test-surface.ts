@@ -86,7 +86,7 @@ export { statsNodeRows } from "./nodes/stats-rows";
 export { randomPwd } from "./edge/auth";
 
 export { renderAdmin } from "./views/panel";
-export { adminAuthed, sessionToken } from "./edge/auth";
+export { adminAuthed, sha256Hex, sessionToken } from "./edge/auth";
 export { html, CSP_STATIC } from "./edge/respond";
 export { wsToStream } from "./proxy/ws-in";
 export { pickHosts, SWEEP_COST } from "./route/round";

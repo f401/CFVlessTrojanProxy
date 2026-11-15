@@ -2998,5 +2998,17 @@ eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
   W.S.pool = []; W.S.poolGen = 0; W.S.seed.poolGen = 0; W.S.colo = "";
 }
 
+
+// 第 101 组：管理端 Bearer 头（前缀是用 /^Bearer\s+/ 剥的，别写成 s+）
+{
+  const ae = { adminKey: "K#1" };
+  const u = new URL("https://x/");
+  const h = (v) => new Request(u, { headers: { authorization: v } });
+  ok("Bearer 明文密钥可用", await W.adminAuthed(h("Bearer K#1"), u, ae));
+  ok("Bearer 小写也认", await W.adminAuthed(h("bearer K#1"), u, ae));
+  ok("Bearer 摘要等价凭证可用", await W.adminAuthed(h("Bearer " + (await W.sha256Hex("K#1"))), u, ae));
+  ok("错误 Bearer 不通过", !(await W.adminAuthed(h("Bearer nope"), u, ae)));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
