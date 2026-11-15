@@ -182,6 +182,10 @@ export class Judge {
     }
     const n = (S.smCnt.get(ck) || 0) + 1;
     S.smCnt.set(ck, n);
+    // 键是「站点|通道」，两个维度都会涨（站点名来自客户端、中继来自池子），不裁剪就是
+    // 一张只增不减的表。这里删「计数最小」的那些：这张表的值是次数而不是时间戳，
+    // 真在刷垃圾页的通道计数会涨上去（判死要看 n>=3），所以留大删小反而是想要的语义。
+    if (S.smCnt.size > SC.SM_CNT_MAX) trimAged(S.smCnt, SC.SM_CNT_MAX);
 
     // 中继把自家默认页（nginx）当响应回：这个中继对任何站点都是废的，攒 3 次判死
     if (e.ok && e.via === "node" && e.down < JUNK_MAX && n >= 3) {

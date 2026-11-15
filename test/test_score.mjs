@@ -3448,5 +3448,24 @@ ok(`[${g}] 设计阶段的临时名只在「更正」那句里出现`, !v8.inclu
   ok("verdictsync 不再自己抄 TTL", !vtSrc.includes("v.at + 1800000"));
 }
 
+
+// ---- 148. smCnt 必须有上限：键是「站点|通道」，两个维度都会涨 ----
+for (let i = 0; i < 700; i += 1) {
+  W.JUDGE.onTraffic({ host: "sm" + i + ".test", via: "node", node: "198.51.100.9:443", down: 737, ok: true, life: 80, up: 400, cf: false, at: 1700000000000 + i });
+}
+ok("700 个「站点|通道」之后 smCnt 仍被压在上限内", W.S.smCnt.size <= W.SC.SM_CNT_MAX);
+ok("上限就是 512", W.SC.SM_CNT_MAX === 512);
+// 计数大的行必须活下来：真在刷垃圾页的通道计数会涨上去，判死要看 n>=3
+W.S.smCnt.clear();
+W.S.smCnt.set("keep.test|r:198.51.100.9", 50);
+for (let i = 0; i < 700; i += 1) W.S.smCnt.set("flood" + i + ".test|r:198.51.100.9", 1);
+W.trimAged(W.S.smCnt, W.SC.SM_CNT_MAX);
+eq("裁剪后正好等于上限", W.S.smCnt.size, 512);
+ok("计数大的那行还在（这张表留大删小）", W.S.smCnt.has("keep.test|r:198.51.100.9"));
+ok("计数最小的那些先被删", !W.S.smCnt.has("flood0.test|r:198.51.100.9"));
+const judgeSrc = fs.readFileSync("src/route/judge.ts", "utf8");
+ok("judge 写入 smCnt 后就地裁剪（源码断言，防止被悄悄删掉）", judgeSrc.includes("trimAged(S.smCnt"));
+W.S.smCnt.clear();
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

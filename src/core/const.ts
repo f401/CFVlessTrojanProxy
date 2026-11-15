@@ -43,9 +43,9 @@ export const SC = {
   SCAN_SUB: 48, // 免费计划每次调用 50 个子请求，留在 48 以内（付费计划可用 env.scanSub 抬到 1000）
   ADMIN_STATS_MAX: 32, // 管理面板一次最多读多少人的用量：每人是 1 次 DO 子请求，超过预算的部分只能显示 0
   HOST_MEM_MAX: 512, // 按站点记的内存表（pin/seq/bigByHost/cfHost/vtSent）最多留多少行：站点名来自客户端，不是有限集合
+  SM_CNT_MAX: 512, // 「站点|通道」→ 小响应次数（nginx 默认页判死要看它）最多留多少行：键是站点×中继，两个维度都会涨
   SCAN_BAD_MAX: 3, // 连续失败几次暂时跳过
-  PROBE_BAD_TTL: 1800000, // 「跳过」只保留 30 分钟：临时抖动不该让节点永远排不上
- // 连续探活失败几次就不再占探测名额（本地记忆，不写 KV）
+  PROBE_BAD_TTL: 1800000, // 「跳过」只保留 30 分钟：临时抖动不该让节点永远排不上（只在本 isolate 记忆，不写 KV）
   // 免费计划每次调用最多 6 个同时打开的 connect()，第 7 个起直接报 too many connections；
   // 探活分段必须按它切，否则被拒的那几个会被当成「节点坏了」写进 probeBad。
   PROBE_CONC: 6,

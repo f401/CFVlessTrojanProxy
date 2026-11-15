@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.158**（自举审计三十八批、共 62 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.159**（自举审计三十九批、共 64 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -250,6 +250,13 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - **7.157 自举审计（第 61 条）**：`PendingLedger.flush()` 挂上 `clSnap(40)` 之后，成功后调 `S.cagg.clear()` —— 整表清空会连带抹掉两种**还没发出去**的观测：① 被 40 行上限挤掉的键（`src/proxy/connection.ts` 允许 `S.cagg` 涨到 400 条聚合键），② `await stub.fetch()` 在途期间新结束的连接（生产者照常往 `S.cagg` 里加）。行语义是「自上次确认以来的增量」、DO 侧按加法合并，所以修法不是抄 7.143 的 `sent` 表（那套是「值没变才清」），而是**按已发数量相减**：新增 `PendingLedger.clAck(sent)` 逐行 `g.n -= s.n; g.ok -= s.ok; g.dn -= s.dn;`，减到 0 才删键；失败时什么都不做（这批没进 DO，行原样留到下一轮重发）。`test/test_score.mjs` 第 146 组锁住「45 个键只发 40 行、剩 5 个原样留着」与「在途期间新增的 2 条不会被抹掉」。顺带确认 `?ed=2560` **不是**死参数：它只写给客户端（把首包塞进 WS 握手），服务端解的是 `Sec-WebSocket-Protocol`（`src/proxy/session.ts` → `src/proxy/ws-in.ts` 的 `wsToStream`）。
 - **7.158 自举审计（第 62 条）**：四张按站点记账的内存表**没有任何裁剪** —— `S.bigByHost`/`S.bigChan`（`judge.ts` 每见到一次整页就写）、`S.cfHost`（`dialer.ts` 写 30 分钟缓存）、`S.vtSent`（`verdictsync.ts` 的 `vtAck` 只增不删）。键全是客户端请求里的目标站点名（`CONNECT`/ClientHello 带来的），不是有限集合：一个长期存活的 isolate 见够几万个站点就一直涨，而且没有任何读路径会因此报错。实测（600 个不同站点各打一次整页）旧代码 `bigByHost`/`bigChan` 都是 600 行、上限是 0；`S.cfHost` 与 `S.vtSent` 同理，过期行也不会被清（`vtSent` 的值是过期时刻，读端只做数值比较）。修法：新增 `src/core/hostmem.ts` 的 `trimAged()`（值=最早使用时间，按升序删到上限）与 `dropExpired()`（值=过期时刻，删 `<= now`），上限收进 `SC.HOST_MEM_MAX = 512`（`policy.ts` 原来的私有常量改成引用它，避免第二份真源）；`judge` 裁剪时同步删 `bigChan` 里落单的键（`bigDiff` 同时读两张表，落单会让判定读到别站点的通道）；`cfHost`/`vtSent` 先过期再压上限。顺带把 `verdictsync` 里自己抄的 `v.at + 1800000` 改成 `VT_TTL_MS`（7.154 删 `SC.VT_TTL` 之后这就是第二份 TTL）。锁：第 147 组 12 条（600→512、最旧被删、`bigChan` 与 `bigByHost` 同尺寸、`vtAck` 清过期、三处调用点的源码断言）。
 - **已核查、不是缺陷**（留档免得再查一遍）：`refillPool` 抓源用的是 `fetch`（占 50 子请求额度），`cronScan` 的探活用的是 `connect()`；两者虽共用 `SCAN_SUB` 这个数字，但线上 `/<uuid>/logs` 里从未出现 subrequest 超限（`count 24 / persisted 22` 全是 `forced _Rd` 这类中继日志），说明探活并不吃抓源那份额度 —— 把 `SCAN_SUB` 再减一个「固定开销」会让冷启动发现速度直接砍半，所以不改。三条属于「短路/顺序」类，
+- **7.159 自举审计（第 63–64 条）**：`S.smCnt`（`站点|通道` → 小响应次数，nginx 默认页判死要看 `n>=3`）的键是
+  「客户端带来的站点名 × 池子里的中继」，两个维度都会涨，却只在整页/判死时才删那一行 —— 长命 isolate 里只增不减。
+  修法是在写入后就地 `trimAged(S.smCnt, SC.SM_CNT_MAX = 512)`，且**留大删小**（这张表的值是次数不是时间戳，
+  正刷垃圾页的通道计数会涨上去，删掉计数最小的那些反而是想要的语义）。
+  同一批还修掉 `src/core/const.ts` 里「连续探活失败几次就不再占探测名额」那句：它落在 `PROBE_CONC` 头顶，
+  读起来像在解释并发上限，实际说的是上面两个 `SCAN_BAD_MAX`/`PROBE_BAD_TTL` —— 已并进 `PROBE_BAD_TTL` 的行内注释。
+  锁：第 148 组 6 条（700 个「站点|通道」后仍 ≤512、`trimAged` 留大删小、judge 源码里那句裁剪还在）。
   按函数行为写的单测永远测不到（分支没被执行）——这类缺陷只能靠端到端闭环证明或真实流量发现。
   · 7.81 `src/px/selector.ts` 冷 isolate 拉池子封顶 700ms（`ensurePool` 能拖 2–4 秒，那是用户等首字节的时间）；
   · 7.83 `src/route/relperf.ts` 代价函数纠偏：只有 ≥1MB 的传输才记吞吐，小样本按 `ttfb + 2000ms` 计
