@@ -204,7 +204,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Store` / `Seal` | `src/store/store.ts`、`crypto.ts` | KV 写入节流、AES 密钥缓存 |
 | `Snapshot` | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存 |
 | `PendingLedger`（`PEND`） | `src/store/pend.ts` | 待上报账本、自适应退避与 flush 定时器 |
-| `ChanTable` / `StatsTable` | `src/store/chan.ts`、`stats.ts` | 通道会话、用量读缓存 |
+| `StatsTable` | `src/store/stats.ts` | 用量读缓存 |
 | `Pool` | `src/px/pool.ts` | 池子、准入复测游标、探活坏点表 |
 | `SourceHealth`（`SOURCES`） | `src/px/probe.ts` | 池子源健康度（连续失败降权、1 小时冷却、不删源） |
 | `SeedStore` | `src/px/seed.ts` | 跨 isolate 的种子表（只存名字） |

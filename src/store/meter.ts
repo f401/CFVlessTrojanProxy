@@ -1,7 +1,6 @@
 import { mergeFacts } from "./factmerge";
 import { seal, unseal } from "./index";
 import { probeHttp80 } from "../core/http80";
-import { chClose, chOpen, chRead, chSh } from "./chan";
 import { probeTf } from "../core/tf";
 
 /* do */
@@ -396,10 +395,6 @@ export class Meter {
       return Response.json(
         await probeTf(url.searchParams.get("h") || "", url.searchParams.get("r") || "", url.searchParams.get("p") || "/"),
       );
-    if (p.endsWith("/chopen")) return Response.json(await chOpen(url.searchParams.get("id") || "", url.searchParams.get("h") || "", Number(url.searchParams.get("p") || 443)));
-    if (p.endsWith("/chread")) return Response.json(await chRead(url.searchParams.get("id") || "", Number(url.searchParams.get("w") || 800)));
-    if (p.endsWith("/chsh")) return Response.json(await chSh(url.searchParams.get("id") || "", Number(url.searchParams.get("w") || 2000)));
-    if (p.endsWith("/chclose")) return Response.json(chClose(url.searchParams.get("id") || ""));
     if (p.endsWith("/cl")) {
       return Response.json({ cl: this.cl });
     }
