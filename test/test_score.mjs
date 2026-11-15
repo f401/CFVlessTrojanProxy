@@ -2366,7 +2366,7 @@ console.log("\n76) 出口族事实（v8 的 eg）");
   eq("新学到的进待发队列", T.delta().length, 2);
   T.nack();
   eq("nack 只丢待发标记，事实还在", T.famOf("2001:db8::1", t0 + 1000), 6);
-  eq("nack 后不会重复登记", T.delta().length, 0);
+  eq("nack 后同一批仍会重发（pending 语义：失败≠送达）", T.delta().length, 2);
   eq("更旧的远端观测被忽略", T.load([{ i: "2001:db8::1", f: 4, at: t0 - 1 }]), 0);
   eq("更新的远端观测被采纳", T.load([{ i: "2001:db8::1", f: 4, at: t0 + 5 }]), 1);
   eq("合并后族跟着翻", T.famOf("2001:db8::1", t0 + 10), 4);
@@ -2948,5 +2948,18 @@ eq("开 eg 时 v6 出口被重罚", W.factMul(new Set(["eg"]), "x.com", "203.0.1
 eq("关 eg 时完全不罚", W.factMul(new Set(), "x.com", "203.0.113.9", "tput", true), 1);
 W.EG.clear();
 
+
+// 97) 事实读失败必须能重试：失败一次不该把这个 isolate 的事实层永久关掉
+W.S.vtLoaded = false; W.S.vtCool = 0; W.S.vtFlight = null;
+let factsCalls = 0;
+const badEnv = { uuid: "00000000-0000-0000-0000-000000000000", METER: { idFromName: () => "id", get: () => { factsCalls++; return { fetch: async () => { throw new Error("boom"); } }; } } };
+await W.vtLoad(badEnv);
+eq("读失败不置 vtLoaded", W.S.vtLoaded, false);
+eq("读失败开启 60 秒冷却", W.S.vtCool > Date.now(), true);
+await W.vtLoad(badEnv);
+eq("冷却期内不再重试", factsCalls, 1);
+W.S.vtCool = 0;
+await W.vtLoad(badEnv);
+eq("冷却过后允许重试", factsCalls, 2);
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

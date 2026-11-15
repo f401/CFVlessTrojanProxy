@@ -100,7 +100,8 @@ export class DeadFacts {
 
   /** 功能：上报失败（丢弃待发，事实本身保留）。@returns {void} */
   nack(): void {
-    this.pend.clear();
+    // 保留 pending：上报失败时下一轮 delta() 会把同一批原样再给一次（重发 = 重试，幂等靠 at）。
+    // 清掉它就等于「这条证据从此不会送到 DO」—— 与 v8 §3 的 pending 语义相反（只有 ack 才清）。
   }
 
   /**

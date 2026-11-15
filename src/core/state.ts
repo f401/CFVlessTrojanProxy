@@ -121,6 +121,8 @@ export class AppState {
   vtPend: Map<string, number> = new Map();
   vtSent: Map<string, number> = new Map();
   vtLoaded = false;
+  /** 事实读失败后的冷却截止时间：失败一次不该把这个 isolate 的事实层永久关掉（v8 §20.5 允许 60 秒后重试） */
+  vtCool = 0;
   /** 最近一次从事实层读到的 v4 出口（订阅渲染要把它们发成可实测的中继条目） */
   eg4Top: string[] = [];
   /** 本 isolate 解析过的事实开关（`env.facts`，见 `src/route/factflags.ts`）。 */

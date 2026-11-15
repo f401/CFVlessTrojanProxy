@@ -69,6 +69,8 @@ export function vtNack(): void {
  */
 export async function vtLoad(env: Env): Promise<void> {
   if (S.vtLoaded) return;
+  // 失败后 60 秒内不重试（一次抖动不该让首字节为坏运气反复排队），过期后允许再试一次
+  if (S.vtCool > Date.now()) return;
   if (S.vtFlight) {
     cnt("factsJoin");
     return S.vtFlight;
@@ -123,6 +125,8 @@ async function vtFetch(env: Env): Promise<void> {
       cnt("vtDO", rows.length);
     }
     if (Array.isArray(jj.hl)) HEALTH.merge(jj.hl);
+    // 只有真的拿到 DO 的回答才算「读过」：否则失败的 isolate 会一直带着空事实选路
+    S.vtLoaded = true;
     const nf = FACTS.load(jj);
     cnt("egDO", nf.eg);
     cnt("psDO", nf.ps);
@@ -130,11 +134,11 @@ async function vtFetch(env: Env): Promise<void> {
     cnt("blkDO", nf.blk2);
     cnt("dnsDO", nf.dns);
   } catch {
-    // 读不到就当没有：不阻塞连接
+    // 读不到就当作没有事实（不阻塞连接），但记下冷却时间，60 秒后允许重试
+    S.vtCool = Date.now() + 60000;
   } finally {
     // 订阅层（views）不能 import route，所以把「哪些中继已知是 v4 出口」放进 S，供渲染直接取用
     S.eg4Top = EG.v4List().slice(0, 8);
-    S.vtLoaded = true;
     S.vtFlight = null;
   }
 }
