@@ -15,7 +15,12 @@ export class Meter {
   cl: ClRec[];
   /** 键 `host|node` → 到期时间：这条中继对这个站点被按 IP 拒（403）的判定，跨 isolate 共享 */
   blk: Record<string, number>;
-  vt: Record<string, number>;
+  /**
+   * 判定表的强证据：`站点|通道` → `{ s: 状态, t: 到期时间 }`。
+   * 老数据里是裸数字（只有到期时间，状态默认 2）—— v7.164 前 DO 只存到期时间，
+   * 于是 `state=3`（dead，硬排除）读回来会变成 2（blocked，软降权），硬排除在跨 isolate 后消失。
+   */
+  vt: Record<string, number | { s: number; t: number }>;
   /** 中继存活度：ip → { o: ok, b: bad, d: dead, t: 最后观测时间 }（`t` 缺省表示 7.160 之前写入的老行） */
   hl: Record<string, { o: number; b: number; d: number; t?: number }>;
   /** 出口族事实：ip → { f: 4|6, at }。v8 §3 的 eg：只用于选路代价偏置，永不剔除候选 */
@@ -65,7 +70,8 @@ export class Meter {
           if (Array.isArray(o.e)) this.e = o.e;
           if (Array.isArray(o.cl)) this.cl = o.cl as ClRec[];
     if (o.blk && typeof o.blk === "object") this.blk = o.blk as Record<string, number>;
-    if (o.vt && typeof o.vt === "object") this.vt = o.vt as unknown as Record<string, number>;
+    if (o.vt && typeof o.vt === "object")
+      this.vt = o.vt as unknown as Record<string, number | { s: number; t: number }>;
     if (o.hl && typeof o.hl === "object") this.hl = o.hl as unknown as Record<string, { o: number; b: number; d: number; t?: number }>;
     if (o.eg && typeof o.eg === "object") this.eg = o.eg as unknown as Record<string, { f: number; at: number }>;
     if (o.ps && typeof o.ps === "object") this.ps = o.ps as unknown as Record<string, { q: number; n: number; at: number; top?: number }>;
@@ -218,11 +224,23 @@ export class Meter {
         for (const r of d.vt) {
           if (!r || typeof r.k !== "string" || typeof r.t !== "number") continue;
           if (r.t <= Date.now()) continue;
-          this.vt[r.k] = r.t;
+          // 状态必须一起存（v7.164）：只存到期时间的话，`dead` 读回来一律变 `blocked`，
+          // `policy` 里的硬排除退化成 ×6 降权，一条连不上的中继会继续占 `connect()` 名额。
+          // 合并口径：更晚到期的那条胜；同一时刻取更严格的状态（3 > 2）。
+          const s = r.s === 3 ? 3 : 2;
+          const old = this.vt[r.k];
+          const oldT = typeof old === "number" ? old : old ? old.t : 0;
+          const oldS = typeof old === "number" ? 2 : old ? old.s : 0;
+          const t = Math.max(oldT, r.t);
+          this.vt[r.k] = { s: t > oldT ? s : Math.max(oldS, s), t };
         }
         const ks = Object.keys(this.vt);
         if (ks.length > 200) {
-          ks.sort((a, b) => this.vt[b] - this.vt[a]);
+          const expOf = (k: string): number => {
+            const v = this.vt[k];
+            return typeof v === "number" ? v : v.t;
+          };
+          ks.sort((a, b) => expOf(b) - expOf(a));
           for (const k of ks.slice(200)) delete this.vt[k];
         }
       }
@@ -419,7 +437,12 @@ const rows = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.
     if (p.endsWith("/vt")) {
       const out: Array<{ k: string; s: number; t: number }> = [];
       const now = Date.now();
-      for (const [k, t] of Object.entries(this.vt)) if (t > now) out.push({ k, s: 2, t });
+      // 状态跟着存、跟着发（v7.164）：以前这里硬写 `s: 2`，任何 `dead` 证据跨一次 isolate 就降级。
+      for (const [k, v] of Object.entries(this.vt)) {
+        const t = typeof v === "number" ? v : v.t;
+        const s = typeof v === "number" ? 2 : v.s === 3 ? 3 : 2;
+        if (t > now) out.push({ k, s, t });
+      }
 const hl = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d, t: Number(x.t) || 0 }));
       const eg = Object.entries(this.eg).map(([i, x]) => ({ i, f: x.f, at: x.at }));
       eg.sort((a, b) => b.at - a.at);

@@ -3600,5 +3600,33 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   // 源码锁：增量必须把 top 放进线格式
   ok("增量带 top（源码）", fs.readFileSync("src/route/psfacts.ts", "utf8").includes("top: r.top ?? r.q"));
 }
+// 154. DO 必须把判定表的状态一起存下来：只存到期时间的话，dead（硬排除）读回来变成 blocked（软降权）
+{
+  const now = Date.now();
+  const K = "vt154.test|r:203.0.113.91";
+  const d4 = mkDO();
+  const POST = (b) => d4.m.fetch(new Request("https://meter/add", { method: "POST", body: JSON.stringify(b) }));
+  const VT = async () => ((await (await d4.m.fetch(new Request("https://meter/vt"))).json()).vt || []);
+  POST({ vt: [{ k: K, s: 3, t: now + 600000 }] });
+  const r1 = (await VT()).find((x) => x.k === K) || {};
+  eq("dead（state=3）跨 DO 一圈仍是 dead", Number(r1.s), 3);
+  // 更晚到期的证据胜出：新观测说 blocked 就接受 blocked（不是「状态只升不降」）
+  POST({ vt: [{ k: K, s: 2, t: now + 900000 }] });
+  const r2 = (await VT()).find((x) => x.k === K) || {};
+  eq("更晚的观测决定状态", Number(r2.s), 2);
+  eq("到期时间跟着更晚的那条", Number(r2.t), now + 900000);
+  // 同一时刻：更严格的状态胜（宁可多排除，不可少排除）
+  const K3 = "vt154b.test|r:203.0.113.92";
+  POST({ vt: [{ k: K3, s: 2, t: now + 600000 }] });
+  POST({ vt: [{ k: K3, s: 3, t: now + 600000 }] });
+  const r3 = (await VT()).find((x) => x.k === K3) || {};
+  eq("同一到期时刻取更严格的状态", Number(r3.s), 3);
+  // 老数据（裸数字，只有到期时间）仍要能读：按 blocked 处理
+  const K4 = "vt154c.test|r:203.0.113.93";
+  d4.m.vt[K4] = now + 600000;
+  const r4 = (await VT()).find((x) => x.k === K4) || {};
+  eq("老格式（裸到期时间）读成 blocked", Number(r4.s), 2);
+  ok("DO 侧存状态（源码）", fs.readFileSync("src/store/meter.ts", "utf8").includes("r.s === 3 ? 3 : 2"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

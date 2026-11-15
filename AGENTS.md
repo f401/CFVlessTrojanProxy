@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.163**（自举审计四十三批、共 72 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.164**（自举审计四十四批、共 73 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -307,6 +307,12 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   D29 的死锁在每个新 isolate 里复发（那段代码的注释还写着「宁可低估」，把缺陷说成了取舍）。
   修法：`PsWire` 加 `top?`、`delta()` 带上 `top: r.top ?? r.q`、DO 侧 `mergeFacts` 按「远端 / 当前均值 / 已有」取最大、
   `/vt` 也发 `top`；旧行仍按当前均值起算（不能假装曾经行过）。锁：第 153 组 6 条（远端 top 不被均值覆盖、旧格式行不能把已知最好改小、增量带 top、DO 两次写入取最大、源码里有 `top: r.top ?? r.q`）。
+- **第 73 条（v7.164）DO 把判定表的状态丢了**：`Meter.vt` 只存到期时间（`vt[k] = r.t`），`/vt` 又硬写 `s: 2`，
+  而 v7.162 刚在发送侧修掉同一个形状（`vtPend` 只存到期时间 ⇒ 重发把 `dead` 降级成 `blocked`）。
+  存储层这一跳漏得更彻底：`state=3`（dead，硬排除）只要被任何冷 isolate 读回去就变 `state=2`（blocked，×6 降权），
+  一条连不上的中继会继续留在候选链里占 `connect()` 名额（免费计划全局 6 个）。
+  修法：`vt` 存 `{ s, t }`，合并口径「更晚到期的胜、同一时刻取更严格的状态」，老数据（裸数字）按 `blocked` 读；
+  `/vt` 发真实状态。锁：第 154 组 6 条（dead 往返仍是 dead、更晚的观测决定状态、同刻取更严、老格式读成 2、源码断言）。
 - **v8 事实层现状（7.88–7.107，均已上线或可开关）**：五类事实 `eg`/`ps`/`dead`/`blk`/`dns` + `cap` 噪声门 + `first/lat` 观测全部在仓库，
   由 `src/route/factflags.ts` 的 plain_text 绑定 `facts` 统一开关（`none`/`eg`/`eg,ps`/`all`，未配置=全开）；
   `FACTS`（`src/route/factsstore.ts`）是五张同步表唯一的上行/合并门面（v7.139 才把第五类 `dns` 的 `ack/nack/snap` 接上）；`tools/check-wire.mjs` 静态保证「有定义必有生产调用」。
