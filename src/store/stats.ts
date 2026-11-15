@@ -56,21 +56,6 @@ export function statBump(id: string, up: number, down: number, isNewConn?: boole
 }
 
 /**
- * 功能：带 60 秒本地缓存的用量读取（页面与订阅都走这里，避免每请求读 KV）。
- * @param env 环境变量
- * @param id 用户 id
- * @returns 用量记录
- */
-export async function readStatsCached(env: Env, id: string) {
-  const hit = S.statCache.get(id);
-  if (hit && Date.now() - hit.t < 60000) return hit.v;
-  const v = await readStats(env, id);
-  S.statCache.set(id, { v, t: Date.now() });
-  if (S.statCache.size > 200) S.statCache.clear();
-  return v;
-}
-
-/**
  * 功能：读用量：合并持久值 + 本地增量 + 待上报增量。
  * @param env 环境变量
  * @param id 用户 id

@@ -71,7 +71,7 @@ app.ts    ← 组装根：export default { fetch, scheduled }
 | `Nodes` | alive / nstat / curs / prev / lastSwitch / switchHits |
 | `Pool` | pool / poolIdx / poolGen / scanN |
 | `Seed` | seed / gcnt / seedAt / seedDirty |
-| `MeterState` | stats / pend / pendAt / meterCache / statCache / snapCache / kvw |
+| `MeterState` | stats / pend / pendAt / meterCache / snapCache / kvw |
 | `Profile` | hostNode / hostDirect / hostRankCache |
 | `Runtime` | cnt / cntSent / errs / rtt / dnsCache / usersCache |
 

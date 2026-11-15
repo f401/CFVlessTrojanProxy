@@ -3,7 +3,7 @@
 import { kvGet, kvGetStrict, kvSet } from "./kv";
 import { clSnapshot, kickFlush, pendAdd, pendFlush, primaryId, scheduleFlush } from "./pend";
 import { flushSnap, getSnap, restoreUsage, usageSnapGet, usageSnapWrite } from "./snapshot";
-import { nodeSnapGet, readStats, readStatsCached, statBump } from "./stats";
+import { nodeSnapGet, readStats, statBump } from "./stats";
 
 export class Store {
   // —— KV ——
@@ -53,8 +53,8 @@ export class Store {
   }
 
   // —— 快照 ——
-  /** 功能：snap 是薄包装，直接委托 getSnap。@param env Env。@param fresh? boolean。@returns 无（getSnap 无返回值） */
-  snap(env: Env, fresh?: boolean) {
+  /** 功能：snap 是薄包装，直接委托 getSnap。@param env Env。@param fresh? boolean。@returns 合并后的快照文档（SnapDoc，缓存在 S.snapCache） */
+  snap(env: Env, fresh?: boolean): Promise<SnapDoc> {
     return getSnap(env, fresh);
   }
 
@@ -63,18 +63,18 @@ export class Store {
     return flushSnap(env, force);
   }
 
-  /** 功能：usageSnap 是薄包装，直接委托 usageSnapGet。@param env Env。@returns 无（usageSnapGet 无返回值） */
-  usageSnap(env: Env) {
+  /** 功能：usageSnap 是薄包装，直接委托 usageSnapGet。@param env Env。@returns 灾备用量的快照，读不到为 null */
+  usageSnap(env: Env): Promise<UsageSnap | null> {
     return usageSnapGet(env);
   }
 
-  /** 功能：usageSnapWrite 是薄包装，直接委托 usageSnapWrite。@param env Env。@returns 无（usageSnapWrite 无返回值） */
-  usageSnapWrite(env: Env) {
+  /** 功能：usageSnapWrite 是薄包装，直接委托 usageSnapWrite。@param env Env。@returns 无（写完就返回，写失败也不抛） */
+  usageSnapWrite(env: Env): Promise<void> {
     return usageSnapWrite(env);
   }
 
-  /** 功能：restore 是薄包装，直接委托 restoreUsage。@param env Env。@param id string。@param snap? UsageSnap。@returns 无（restoreUsage 无返回值） */
-  restore(env: Env, id: string, snap?: UsageSnap) {
+  /** 功能：restore 是薄包装，直接委托 restoreUsage。@param env Env。@param id string。@param snap? UsageSnap。@returns 恢复进 DO 后的用量记录；没快照或写失败为 null */
+  restore(env: Env, id: string, snap?: UsageSnap): Promise<UsageMeter | null> {
     return restoreUsage(env, id, snap);
   }
 
@@ -83,12 +83,8 @@ export class Store {
     return readStats(env, id) as Promise<T>;
   }
 
-  statsCached<T = unknown>(env: Env, id: string): Promise<T> {
-    return readStatsCached(env, id) as Promise<T>;
-  }
-
-  /** 功能：nodeSnap 是薄包装，直接委托 nodeSnapGet。@param env Env。@param id string。@returns 无（nodeSnapGet 无返回值） */
-  nodeSnap(env: Env, id: string) {
+  /** 功能：nodeSnap 是薄包装，直接委托 nodeSnapGet。@param env Env。@param id string。@returns 该用户的节点快照表（键是节点，值含存活/延迟/吞吐） */
+  nodeSnap(env: Env, id: string): Promise<Record<string, NodeSnap>> {
     return nodeSnapGet(env, id);
   }
 

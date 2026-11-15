@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.134**（自举审计十三批、共 20 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.135**（自举审计十四批、共 22 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -144,14 +144,16 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 ## 9. 当前状态与未完成
 
 - 线上 **7.123**（`facts=eg`，仓库同版）。7.122 把 `dns` 事实接到跨 isolate（`FactsStore` + `mergeFacts`），7.123 修掉「`HOOK.facts` 从未注册 → `facts=none` 不影响选路」这个洞，并加 `?fx=` 单请求开关与「HOOK 槽位必须有人注册」的接线门禁。7.80–7.85 修的是「中继那一跳到底值不值」：
-- **7.124–7.134 自举审计**（`tools/exp-v8proof.mjs` 挂进 preflight，N=400 闭环证明）：共修 20 个缺陷 —— `cf-ok-relay` 短路、`nack` 丢待发（pending 语义）、事实读失败后永久关闭（改 60 秒冷却重试）、cron 恢复用量不限量扇出（改 `restorePick` 每轮 ≤12）、`backpressure` 把客户端主动断开记成节点头上的 `cut`（改 `ccut`）、`cnt` 字面量漏登记会静默丢计数（补静态门禁）、`Pool` 门面的 9 条自指文档且错报返回类型（重写 + 修 `doc-gen` 根因）、
+- **7.124–7.135 自举审计**（`tools/exp-v8proof.mjs` 挂进 preflight，N=400 闭环证明）：共修 22 个缺陷 —— `cf-ok-relay` 短路、`nack` 丢待发（pending 语义）、事实读失败后永久关闭（改 60 秒冷却重试）、cron 恢复用量不限量扇出（改 `restorePick` 每轮 ≤12）、`backpressure` 把客户端主动断开记成节点头上的 `cut`（改 `ccut`）、`cnt` 字面量漏登记会静默丢计数（补静态门禁）、`Pool` 门面的 9 条自指文档且错报返回类型（重写 + 修 `doc-gen` 根因）、
   未知族 ×40 死锁（改 ×2）、`direct-ok` 不可达、`egDerive` 跨站点污染（加 `cf` 门）、`ps` 负样本从未写入（S3 零边际的结构性原因）、
   `eg-pin` 挑已判死的中继、`clientV6 && cfHost` 分支回退到含死通道的 `usable` 且排在 `direct-ok` 之前、
   握手分片实验的 `src/store/chan.ts` 与 `/meter/ch*` 端点残留（持有一套无 TTL 的 socket 表，且是第二份 userland TLS）、
   `commitPool` 用本地代际号 +1（落后半小时时会覆盖别人更新的那一代，缩水判断也拿本地过期的池子大小比）——改成写前严格读 KV 锚点、取三者最大 +1、锚点写失败重试并留证据、
   `src/edge/auth.ts` 剥 Bearer 前缀的正则写成 `/^Bearers+/i`（`\s` 掉了反斜杠）——文档宣称支持的 Bearer 鉴权从来没生效，带 `Authorization: Bearer <key>` 一律 403、
   **入口偏好整条服务端链路是僵尸**：`EdgePrefs.add` 没有任何生产调用点（只有死包装 `edgeAdd` 调它），`scan` 恒返回 0（Worker 探自家域名必 522 自环），KV `edge:pref` 既无写者也无读者，可是 `/health` 的 `edge.seen/ranked`、`?edge=1` 的空表、订阅里「有实测排名就用」的分支都在暗示「这张表在测量」——已整条删除（`src/route/edge.ts` 240 行、`S.edge` 四件套、`SC.EDGE_AUTO`、cron 与预算里的入口份额），订阅只用 `X_EDGE_IPS` 种子（golden 零变化）；同时删掉 6 个零调用点的导出（`p90Local`/`relayChans`/`edgeAdd`/`markProbeOk`/`relAgg`/`vGet`），其中 `markProbeOk` 会写 `*|` 通配行，是 7.57 事故的同款地雷、
-  **判定表的通配（`*`）与入口（`e:<ip>`）两个通道概念都是僵尸**：`*|通道` 的读端还在四处（`VerdictTable.ok/bad` 的通配回落、`Policy.chanOk`、`policy.ts` 的 `okOnes`、`Prefs.chan`），写端从 7.57 起一个都没有；`ChanKind` 里的 `"e"` 更是全仓没有构造点，`parseChan` 零调用点。危害是「看起来有通配兜底」：任何人想接一条 IP 级封锁，照抄现成的读取端就能一步复现 97% → 2/20。修法是**把不变量放进写入端**（`VerdictTable.blockWild` 直接拒绝 `*` 并计 `vwild`，`import` 也过同一道闸），再删掉所有读端回落与 `"e"` 类型、`parseChan`，顺手修掉 `verdictsync.ts` 里两段叠在一起的孤儿文档。
+  **判定表的通配（`*`）与入口（`e:<ip>`）两个通道概念都是僵尸**：`*|通道` 的读端还在四处（`VerdictTable.ok/bad` 的通配回落、`Policy.chanOk`、`policy.ts` 的 `okOnes`、`Prefs.chan`），写端从 7.57 起一个都没有；`ChanKind` 里的 `"e"` 更是全仓没有构造点，`parseChan` 零调用点。危害是「看起来有通配兜底」：任何人想接一条 IP 级封锁，照抄现成的读取端就能一步复现 97% → 2/20。修法是**把不变量放进写入端**（`VerdictTable.blockWild` 直接拒绝 `*` 并计 `vwild`，`import` 也过同一道闸），再删掉所有读端回落与 `"e"` 类型、`parseChan`，顺手修掉 `verdictsync.ts` 里两段叠在一起的孤儿文档、
+  **统计读缓存被自己的失效点架死**：`readStatsCached` 的 60 秒 `S.statCache` 在 `pendFlush`/`statBump`/`writeSnap` 三条写路径上都不失效，而 `src/index.ts` 的**两段**前置块每次统计类请求都先把它删掉 ⇒ 命中分支在 DO 后端永不成立，`pend.ts` 里「刚推过增量，缓存立即失效」被上层动作架空；同一处硬编码子路径列表与路由表的 `stats` 标志是两份真源——已删缓存与副本，只留路由表驱动的单段前置块，路由表成为唯一真源（`ROUTES.needsStats`）、
+  **`doc-gen` 对没有显式返回类型的薄包装一律写「@returns 无」**：`Store` 的 `snap`/`usageSnap`/`usageSnapWrite`/`restore`/`nodeSnap` 被错报「无返回值」，实际都转发返回值——根因改成看函数体（`return` 打头就写「转发目标返回值」），并给这 5 个方法补上显式返回类型。
 - **已核查、不是缺陷**（留档免得再查一遍）：`refillPool` 抓源用的是 `fetch`（占 50 子请求额度），`cronScan` 的探活用的是 `connect()`；两者虽共用 `SCAN_SUB` 这个数字，但线上 `/<uuid>/logs` 里从未出现 subrequest 超限（`count 24 / persisted 22` 全是 `forced _Rd` 这类中继日志），说明探活并不吃抓源那份额度 —— 把 `SCAN_SUB` 再减一个「固定开销」会让冷启动发现速度直接砍半，所以不改。三条属于「短路/顺序」类，
   按函数行为写的单测永远测不到（分支没被执行）——这类缺陷只能靠端到端闭环证明或真实流量发现。
   · 7.81 `src/px/selector.ts` 冷 isolate 拉池子封顶 700ms（`ensurePool` 能拖 2–4 秒，那是用户等首字节的时间）；

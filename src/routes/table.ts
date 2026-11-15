@@ -8,7 +8,7 @@ export interface SubRoute {
   name: string;
   /** 能匹配的子路径（空串 = 裸 /<uuid>） */
   subs: string[];
-  /** 处理前把本 isolate 的增量推给 DO，并跳过统计读缓存 */
+  /** 处理前把本 isolate 的增量推给 DO，并作废 DO 读缓存（订阅/统计类路由才需要） */
   stats: boolean;
   /** 处理前加载 RTT 学习表与地区列表（只有订阅/统计需要） */
   rtt: boolean;

@@ -71,25 +71,17 @@ export default {
       const sub = (seg[1] || "").toLowerCase();
       const base = { request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf };
 
-      // 订阅 / 看用量之前：把本 isolate 还没送达的增量推给 DO，并跳过 60s 读缓存。
-      // 用 pendFlush 自带的 30 秒节流，不再 force —— 订阅刷新再快也不该每 10 秒打一次 DO；
-      // 而且 readStats 会把尚未推上去的 S.pend 直接加回来，数字本来就是准的。
-      if (env.METER && ["", "cl", "pcl", "sb", "psb", "ty", "pty", "stats"].includes(sub)) {
-        await pendFlush(env);
-        S.statCache.delete(id);
-        S.meterCache.delete(id);
-      }
-
       // 路由表分发：表决定「要不要先推增量 / 读 RTT」，组装根只负责按表调用
       const def = ROUTES.route(sub);
       if (!def) return new Response("Not Found", { status: 404 });
 
-      // 订阅 / 看用量之前：把本 isolate 还没送达的增量推给 DO，并跳过 60s 读缓存。
+      // 订阅 / 看用量之前：把本 isolate 还没送达的增量推给 DO，并把 DO 读缓存作废。
       // 用 pendFlush 自带的 30 秒节流，不再 force —— 订阅刷新再快也不该每 10 秒打一次 DO；
       // 而且 readStats 会把尚未推上去的 S.pend 直接加回来，数字本来就是准的。
+      // 只以路由表的 stats 标志为准：这里以前还抄了一份硬编码子路径列表，两处一旦漂移
+      // 就会出现「表里标了 stats、装配根没推增量」的静默陈旧读数（v7.135 删掉那份副本）。
       if (env.METER && def.stats) {
         await pendFlush(env);
-        S.statCache.delete(id);
         S.meterCache.delete(id);
       }
 

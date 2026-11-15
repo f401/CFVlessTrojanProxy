@@ -3014,5 +3014,34 @@ eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
   ok("错误 Bearer 不通过", !(await W.adminAuthed(h("Bearer nope"), u, ae)));
 }
 
+
+/* ---------- 102. 统计读路径：flush 前后不倒退（v7.135 删掉 60 秒读缓存） ---------- */
+{
+  const doS = mkDO();
+  // Meter 收的是 Request；真实运行时由 DO 桩转换，这里补一层字符串 URL 适配
+  const stubOf = { fetch: (u, init) => doS.m.fetch(typeof u === "string" ? new Request(u, init) : u) };
+  const envS = { uuid: "u-test", METER: { idFromName: (x) => x, get: () => stubOf } };
+  const id = "u-flush-view";
+  // 干净起点：账本、DO 读缓存、本地即时视图都清空
+  S.pend.clear();
+  S.meterCache.clear();
+  S.stats.clear();
+  W.STORE.addUsage(id, 100, 200, true);
+  const before = await W.readStats(envS, id);
+  eq("flush 前：还没上报的增量直接算进读数", [before.up, before.down], [100, 200]);
+  await W.STORE.flush(envS, true);
+  eq("flush 后：待上报账本已清空", S.pend.has(id), false);
+  const after = await W.readStats(envS, id);
+  eq("flush 后读数不倒退", [after.up, after.down], [100, 200]);
+  // 这两条守的是「同一个数不要有两个真源」：旧的 60 秒读缓存被它自己的失效点架死了
+  eq("统计读缓存已删除（不再有 60 秒陈旧窗口）", S.statCache, undefined);
+  eq("门面不再暴露 statsCached", W.STORE.statsCached, undefined);
+  // 「要不要先推增量」只认路由表：装配根里那份硬编码子路径列表已删（v7.135）
+  eq("路由表是 stats 的唯一真源：订阅要推增量", W.ROUTES.needsStats("cl"), true);
+  eq("调试路由不推增量", W.ROUTES.needsStats("debug"), false);
+  S.pend.clear();
+  S.meterCache.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -7,7 +7,7 @@ import { fmtBytes } from "../views/html";
 import { effectiveQuota, subHeaders } from "../core/quota";
 import { trojanPasswordOf } from "../views/sub";
 import { SUBVIEW } from "../views/subview";
-import { readStatsCached, nodeSnapGet } from "../store/index";
+import { readStats, nodeSnapGet } from "../store/index";
 import { statsNodeRows } from "../nodes/stats-rows";
 import { aliveList, nsOf, pxGet } from "../px/pool";
 import { cntView } from "../core/counter";
@@ -29,7 +29,7 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
       // 注意：不要写成 (await pxGet(env)).cur —— 那会在数组字面量里
       // 先串行 await 一次，Promise.all 就只剩两个成员了。
       const px0 = pxGet(env).then((x) => x.cur);
-      const [st, curPx, alive] = await Promise.all([readStatsCached(env, id), px0, aliveList(env)]);
+      const [st, curPx, alive] = await Promise.all([readStats(env, id), px0, aliveList(env)]);
       const f: Record<string, number> = S.funnel || {};
       const ftot = (f.direct || 0) + (f.node || 0) + (f.v6 || 0);
       const pctOf = (x: number) => (ftot > 0 ? Math.round((x / ftot) * 1000) / 10 + "%" : "-");
@@ -54,27 +54,27 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
 
     case "cl":
     case "pcl": {
-      const s = await readStatsCached(env, id);
+      const s = await readStats(env, id);
       await aliveList(env); // 中继优选条目要列本机房存活中继（冷 isolate 从这里恢复）
       return text(SUBVIEW.render({ env, url, id, host, learned, regions, auth: c.auth }, "clash"), subHeaders(env, s));
     }
 
     case "sb":
     case "psb": {
-      const s = await readStatsCached(env, id);
+      const s = await readStats(env, id);
       await aliveList(env);
       return json(SUBVIEW.render({ env, url, id, host, learned, regions, auth: c.auth }, "singbox"), subHeaders(env, s));
     }
 
     case "ty":
     case "pty": {
-      const s = await readStatsCached(env, id);
+      const s = await readStats(env, id);
       await aliveList(env);
       return text(SUBVIEW.render({ env, url, id, host, learned, regions, auth: c.auth }, "links"), subHeaders(env, s));
     }
 
     case "stats": {
-      const s = await readStatsCached(env, id);
+      const s = await readStats(env, id);
       if (url.searchParams.get("format") === "html") {
         const alive = await aliveList(env);
         // 明细只算要展示的节点（以前是为整张 nstat 生成，能到几千条）
