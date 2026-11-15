@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.166**（自举审计四十六批、共 78 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.167**（自举审计四十七批、共 79 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -345,6 +345,11 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   而 `Policy.decide` 有一条「5% 概率挑一条被判封锁的中继去复检」的探索早返回 —— 20 次跑挂 1 次（5.0%），
   与探索概率完全吻合。这在 preflight 里表现为「随机档期随机失败」，最容易被当成噪声重跑掉。
   修法：断言前把 `Math.random` 钉成 0.99（不进探索），另加一条锁住探索语义（`Math.random = () => 0` ⇒ `why === "explore"` 且返回被封锁的那条）。
+### 7.167 自举审计（第 79 条）
+
+- **链接订阅是三种格式里唯一没把入口钉成 IPv4 的**：Clash 用 `server: <边缘 IPv4>` + `servername: <域名>` + `ip-version: ipv4`，sing-box 用 `domain_strategy: "ipv4_only"`，而 `src/views/sub-links.ts` 的 `vless://<uuid>@<域名>:<port>` 两样都没有 ⇒ 双栈网络上客户端把域名解析成 AAAA，CF→CF 把 v6 出口原样透传给目标，正是 7.49 之前 FlClash 打开 X 拿到 4 字节 `IPv6` 403 的那条路径。链接格式没有 `ip-version` 这类字段，所以钉法与 Clash 相同：`@<边缘 IP>` + `host=`/`sni=` 指回域名。
+- 修法：`manual`（`env.nodes` 非空）或 `?e=0` 时不钉（与 Clash 的 `noEdge` 同义）；否则 `edgeIps = X_EDGE_IPS.slice(0, 8)`，主循环与地区条目都按 `ei++ % edgeIps.length` 轮转取 IP，`n.host` / `host` 作为无 IP 时的回退。
+- 验收：`test/test_score.mjs` 第 157 组 7 条（每条都是 IP 字面量、`host=`/`sni=` 仍是域名、IP 至少三种、`?e=0` 退回域名、手动节点不钉、地区条目也钉、源码里有 `X_EDGE_IPS.slice(0, 8)`）；golden 8 项不变（golden 的 `env.nodes` 非空 ⇒ 走手动分支，输出与改前一致）。A/B：旧代码 1107 通过 4 失败 → 新 1111/0。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

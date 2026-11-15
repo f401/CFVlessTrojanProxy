@@ -3688,5 +3688,28 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   ok("同一条不会试第二次", dsrc.includes("if (tried.has(key)) break;"));
 }
 
+{
+  // 第 157 组：链接订阅的 IPv4 钉住（7.167）。链接格式没有 ip-version 字段，
+  // 唯一能让客户端不用 AAAA 的办法就是把 server 写成 IP 字面量。
+  const lSrv = (line) => {
+    const m = /^[a-z]+:\/\/[^@]*@([^:]+):/.exec(line);
+    return m ? m[1] : "";
+  };
+  const lDec = (s) => atob(s).split("\n");
+  const lId = "4241b903-8d39-4a17-8f4c-bb33b1630c33";
+  const lHost = "sub.example.com";
+  const lUrl = new URL("https://" + lHost + "/" + lId + "/links");
+  const lAuto = lDec(W.renderLinks({}, lUrl, lId, lHost, {}, []));
+  ok("链接订阅每条都把入口写成 IPv4 字面量（双栈网络上域名会解析成 AAAA）", lAuto.every((l) => /^\d{1,3}(\.\d{1,3}){3}$/.test(lSrv(l))));
+  ok("钉住入口之后 host= 与 sni= 仍指回域名（TLS 与 WS 路由都不变）", lAuto[0].includes("host=" + encodeURIComponent(lHost)) && lAuto[0].includes("sni=" + encodeURIComponent(lHost)));
+  ok("入口 IP 在几个边缘之间轮转（用户手动切有得挑）", new Set(lAuto.map(lSrv)).size >= 3);
+  const lOff = lDec(W.renderLinks({}, new URL("https://" + lHost + "/" + lId + "/links?e=0"), lId, lHost, {}, []));
+  ok("?e=0 时退回域名入口", lOff.every((l) => lSrv(l) === lHost));
+  const lMan = lDec(W.renderLinks({ nodes: "custom.example.com:443:true:mine" }, lUrl, lId, lHost, {}, []));
+  ok("手动配了节点就按手动入口走（和 Clash 的 manual 一致）", lMan.every((l) => lSrv(l) === "custom.example.com"));
+  const lReg = lDec(W.renderLinks({}, lUrl, lId, lHost, {}, ["HK"]));
+  ok("地区条目同样钉入口 IP", lReg.length > lAuto.length && /^\d{1,3}(\.\d{1,3}){3}$/.test(lSrv(lReg[lReg.length - 1])));
+  ok("实现里确实读了边缘 IP 表", fs.readFileSync("src/views/sub-links.ts", "utf8").includes("X_EDGE_IPS.slice(0, 8)"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
