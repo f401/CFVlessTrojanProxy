@@ -14,6 +14,19 @@ export const X_EDGE_IPS = [
 ];
 
 
+/**
+ * 功能：订阅里发几个入口 IP（?ei=）。
+ * 上限就是这个种子表的长度：再要更多也只能重复同样的地址，没有意义。
+ * @param url 请求 URL
+ * @returns 入口数（默认 8，允许 4 到种子数之间）
+ */
+export function edgeCount(url: URL): number {
+  const s = url.searchParams.get("ei");
+  const raw = Number(s);
+  if (!s || !Number.isFinite(raw)) return X_EDGE_IPS.length;
+  return Math.max(4, Math.min(X_EDGE_IPS.length, Math.floor(raw)));
+}
+
 export const DEFAULT_PORTS: Array<[number, boolean]> = [
   [443, true],
   [8443, true],

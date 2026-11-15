@@ -18,6 +18,7 @@ export {
   loadNodes,
   COLO_CITY,
   trojanPasswordOf,
+  edgeCount,
 } from "./views/sub";
 export { SUBVIEW, SubscriptionView } from "./views/subview";
 export { ROUTES, RouteTable } from "./routes/table";

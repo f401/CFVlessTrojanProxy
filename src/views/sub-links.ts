@@ -1,4 +1,4 @@
-import { X_EDGE_IPS, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
+import { X_EDGE_IPS, edgeCount, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
 
 /**
  * 功能：渲染「链接列表」形式的订阅（每行一条 vless/trojan URL）。
@@ -24,7 +24,7 @@ export function renderLinks(
   // 会把域名解析成 AAAA，CF→CF 把 v6 出口原样透传给目标，直接吃 4 字节 403。
   const manual = String(env.nodes || "").trim();
   const noEdge = Boolean(manual) || url.searchParams.get("e") === "0";
-  const edgeIps = noEdge ? [] : X_EDGE_IPS.slice(0, 8);
+  const edgeIps = noEdge ? [] : X_EDGE_IPS.slice(0, edgeCount(url));
   // 轮转分配：同一个入口的 443/8443 落到不同边缘 IP 上，用户手动切就有得挑
   let ei = 0;
   const pickEdge = (fallback: string) => (edgeIps.length ? String(edgeIps[ei++ % edgeIps.length]) : fallback);

@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.189**（自举审计六十九批、共 130 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.190**（自举审计七十批、共 133 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -430,6 +430,21 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - 锁：第 179 组 15 条（`CAP_MAX === 256`、上限在插入路径上、寿命用 `Math.max(row.at, row.seen)`、不再有 `if (!row || !row.at) return 1;` 的早退；
   行为面 300 条不超上限、未确认的行到期后从表里删掉、真过门的那条仍被记住且 `factor` 在 `tput` 给 0.5 / `lat` 给 1；`hook.ts` 无 `psNote`、`HOOK` 上无该键、`psfacts` 文档指向 `judge.ts`）。
 - A/B：`capfacts.ts` 退回 HEAD → **5 红**（其中一条直接打印 `size=300`）；`hook.ts` 退回 HEAD → **2 红**。
+
+### 7.190 自举审计（第 131–133 条，三个写在文档里、代码从没读过的订阅参数）
+
+- **D131 入口数参数没有任何代码在读**：`docs/v8.md` 与实现清单都写着「`?ei=4..16` 控制发几个入口 IP」，但全仓 `searchParams.get("ei")` 零命中 ——
+  `src/views/sub.ts` 与 `src/views/sub-links.ts` 各自硬编码 `X_EDGE_IPS.slice(0, 8)`。修法：`src/views/sub-common.ts` 新增
+  `edgeCount(url)`（空值/非数字回落到种子表长度，夹在 4 与 8 之间；`Number("")` 是 0 不是 `NaN`，第一版就栽在这里），两处渲染都用它。
+- **D132 关中继块的参数同样没人读**：中继条目是「入口 × 协议 × 模式」的笛卡尔积，是客户端列表里最占地方的一块，文档说 `?r=0` 可以关掉，
+  实现里却只认 `?e=0`。修法：`const noRelay = url.searchParams.get("r") === "0";` + 中继块条件改成 `!noEdge && !noRelay`。
+- **D133 目标实测组的成员根本不是中继条目**：组的注释写着「成员是按中继走的节点条目」、v8 §7 也按 10 条中继算出 97.4%，实现却是
+  `q(pick(all, 64))` —— 把入口/域名/地区条目一起塞进去，测出来的是「CF 自己的出口能不能过这个站」，与 `?tu=` 想回答的问题正交；
+  而 64 条成员意味着客户端每隔 180 秒对目标站打 64 次。修法：`const tuMembers = relayNames.length ? pick(relayNames, 10) : noRelay ? [] : pick(all, 10);`
+  （冷 isolate 里可能一条存活中继都没有，退化到前 10 个条目，否则 `?tu=` 会静默失效），四处判据全部改用它。
+- 锁：第 180 组 17 条（`edgeCount` 五个边界；`?ei=4` 只出 8 个入口条目且第 5 个 IP 不出现；`?r=0` 无 `r-` 条目、无中继优选组、入口条目仍在；
+  `?tu=` 的成员**全部**以 `r-` 开头且 ≤10；`?r=0` 时实测组不退化；冷 isolate 下仍出组）。第 38 组那条源文本断言跟着改成新写法。
+- A/B：三个视图文件退回 HEAD 后 `W.edgeCount` 不存在，第 180 组直接抛错（这本身就是证据）；恢复后 1331 全绿。
 
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。

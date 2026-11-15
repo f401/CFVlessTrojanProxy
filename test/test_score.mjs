@@ -3725,7 +3725,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   ok("手动配了节点就按手动入口走（和 Clash 的 manual 一致）", lMan.every((l) => lSrv(l) === "custom.example.com"));
   const lReg = lDec(W.renderLinks({}, lUrl, lId, lHost, {}, ["HK"]));
   ok("地区条目同样钉入口 IP", lReg.length > lAuto.length && /^\d{1,3}(\.\d{1,3}){3}$/.test(lSrv(lReg[lReg.length - 1])));
-  ok("实现里确实读了边缘 IP 表", fs.readFileSync("src/views/sub-links.ts", "utf8").includes("X_EDGE_IPS.slice(0, 8)"));
+  ok("实现里确实读了边缘 IP 表（入口数可调）", fs.readFileSync("src/views/sub-links.ts", "utf8").includes("X_EDGE_IPS.slice(0, edgeCount(url))"));
 }
 {
   // 第 158 组：错误的标签与被打乱的缩进（v7.168）
@@ -4410,5 +4410,63 @@ console.log("\n176) 预算账本与续回边界");
   ok("HOOK 对象上没有 psNote", !("psNote" in W.HOOK), "HOOK");
   ok("psfacts 的文档指向真正的调用方", psSrc179.indexOf("src/route/judge.ts") >= 0 && psSrc179.indexOf("HOOK.psNote") < 0, "psfacts.ts");
 }
+
+// 第 180 组：订阅参数（?ei= 入口数 / ?r=0 关中继块 / ?tu= 成员必须是中继条目）
+{
+  const U = (q) => new URL("https://example.com/x" + q);
+  eq("默认发满种子表（8 个入口）", W.edgeCount(U("")), 8);
+  eq("?ei=5 就发 5 个", W.edgeCount(U("?ei=5")), 5);
+  eq("少于 4 个没意义（下限夹到 4）", W.edgeCount(U("?ei=2")), 4);
+  eq("超过种子表只会重复地址（上限夹到 8）", W.edgeCount(U("?ei=99")), 8);
+  eq("不是数字按默认", W.edgeCount(U("?ei=abc")), 8);
+  eq("空的 ?ei= 也按默认（Number(\"\") 是 0 不是 NaN）", W.edgeCount(U("?ei=")), 8);
+
+  const envA = { uuid: "u", nodes: "", proxyip: "auto" };
+  const idA = "4241b903-8d39-4a17-8f4c-bb33b1630c33";
+  const keepAlive = S.alive;
+  const keepTop = S.eg4Top;
+  S.alive = new Map();
+  S.eg4Top = [];
+  const y4 = W.renderClash(envA, U("?ei=4"), idA, "example.com");
+  eq("?ei=4 只发 4 个入口 × 2 个模式", (y4.match(/name: "e-/g) || []).length, 8);
+  eq("第 4 个入口仍在", y4.includes("104.26.0.1"), true);
+  eq("第 5 个入口不该出现", y4.includes("104.20.2.1"), false);
+
+  S.alive = new Map([
+    ["203.0.113.7:443", { h: "203.0.113.7", p: 443, cc: "", ms: 120, src: "pool" }],
+    ["198.51.100.9:443", { h: "198.51.100.9", p: 443, cc: "", ms: 180, src: "pool" }],
+  ]);
+  const yR = W.renderClash(envA, U(""), idA, "example.com");
+  ok("默认发中继条目", (yR.match(/name: "r-/g) || []).length > 0, "r- 条目数 " + (yR.match(/name: "r-/g) || []).length);
+  const yNoR = W.renderClash(envA, U("?r=0"), idA, "example.com");
+  eq("?r=0 时不发中继条目", (yNoR.match(/name: "r-/g) || []).length, 0);
+  eq("?r=0 时也不发中继优选组", yNoR.includes("\u{1F501} \u4e2d\u7ee7\u4f18\u9009"), false);
+  ok("?r=0 仍发入口条目", (yNoR.match(/name: "e-/g) || []).length > 0, "e- 条目数 " + (yNoR.match(/name: "e-/g) || []).length);
+
+  const tuQ = "?tu=" + encodeURIComponent("https://probe.example.org/");
+  const yTu = W.renderClash(envA, U(tuQ), idA, "example.com");
+  // 按行取组定义后面的 proxies 行：直接对整段做正则会被 emoji 转义和非贪婪量词坑到
+  const gLines = yTu.split("\n");
+  const gi = gLines.findIndex((l) => l.startsWith('  - name: "\u{1F4E1} \u901a\u9053\u5b9e\u6d4b"'));
+  const pi = gi >= 0 ? gLines.findIndex((l, k) => k > gi && l.trim().startsWith("proxies: [")) : -1;
+  const members =
+    pi >= 0
+      ? JSON.parse("[" + gLines[pi].slice(gLines[pi].indexOf("[") + 1, gLines[pi].lastIndexOf("]")) + "]")
+      : [];
+  eq("?tu= 有实测组", gi >= 0 && pi > gi, true);
+  ok("成员全部是按中继走的条目", members.length > 0 && members.every((x) => x.startsWith("r-")), "成员 " + members.join("/"));
+  ok("成员上限 10（每条都是一次对目标站的真实请求）", members.length > 0 && members.length <= 10, "成员数 " + members.length);
+  const yTuNoR = W.renderClash(envA, U(tuQ + "&r=0"), idA, "example.com");
+  eq("?r=0 时实测组不退化到入口条目", yTuNoR.includes("\u{1F4E1} \u901a\u9053\u5b9e\u6d4b"), false);
+
+  // 冷 isolate：一条中继都还没判活时，实测组退化成前 10 个条目，否则 ?tu= 会静默失效
+  S.alive = new Map();
+  const yCold = W.renderClash(envA, U(tuQ), idA, "example.com");
+  eq("冷 isolate 下 ?tu= 仍然出组", yCold.includes("\u{1F4E1} \u901a\u9053\u5b9e\u6d4b"), true);
+
+  S.alive = keepAlive;
+  S.eg4Top = keepTop;
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

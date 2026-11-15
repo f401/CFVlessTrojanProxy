@@ -1,4 +1,4 @@
-import { X_EDGE_IPS, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
+import { X_EDGE_IPS, edgeCount, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
 import { S } from "../core/state";
 
 export * from "./sub-common";
@@ -31,11 +31,14 @@ export function renderClash(
   // 入口 IP 只用内置种子：入口质量（用户 → 边缘）只能由客户端实测，服务端测不了
   // （Worker 打自家域名必 522 自环），所以这里不再读什么"实测排名"。
   const noEdge = Boolean(manual) || url.searchParams.get("e") === "0";
+  // 中继块可以单独关掉（?r=0）：它的成员数是 8 个入口 × 协议数 × 模式数，
+  // 客户端列表里最占地方的一块；关掉之后模式组只剩入口/节点/域名三层。
+  const noRelay = url.searchParams.get("r") === "0";
   // 通道实测：客户端对该 URL 逐条中继做 url-test（expected-status 200），把「哪条中继真能打通」
   // 变成端到端实测，而不是服务端靠流量推断（免费计划跑不动 TLS 客户端）。
   const tuRaw = url.searchParams.get("tu") || "";
   const tuUrl = /^https:\/\/[^\s"]+$/.test(tuRaw) ? tuRaw : "";
-  const edgeIps: string[] = noEdge ? [] : X_EDGE_IPS.slice(0, 8);
+  const edgeIps: string[] = noEdge ? [] : X_EDGE_IPS.slice(0, edgeCount(url));
   const nodes = orderNodes(loadNodes(env, host), learned);
   const pass = trojanPasswordOf(env, id, auth);
   const protos = pickProtos(env, url, Boolean(pass));
@@ -120,7 +123,7 @@ export function renderClash(
   // 只有客户端自己逐条试才稳；路径里的 px=1&rx=<ip> 由服务端钉住该中继。
   const relayNames: string[] = [];
   const relayIps: string[] = [];
-  if (!noEdge) {
+  if (!noEdge && !noRelay) {
     // 用本 isolate 已判活的中继（S.alive 里是 ip:port），不走 KV —— 订阅渲染是同步的
     // 先用**事实层已知的 v4 出口**（跨 isolate 共享过，钉住它们实测 9/9 能过），
     // 再用本 isolate 已判活的中继补齐 —— 只发 S.alive 会在冷 isolate 里发出空组。
@@ -174,6 +177,15 @@ export function renderClash(
 
   const q = (arr: string[]) => `    proxies: [${arr.map((x) => `"${x}"`).join(", ")}]`;
   const pick = (arr: string[], n: number) => arr.slice(0, Math.max(1, Math.min(n, arr.length)));
+  // 目标实测组（?tu=）的成员只能是「按中继走」的条目，两个理由：
+  //   ① 只有把中继那一跳包含进来，测出来的才是「这条中继的出口族能不能过这个站」；
+  //      入口/节点条目走的是 CF 自己的出口，测它等于测 CF，和 ?tu= 想回答的问题无关。
+  //   ② 成员数就是真实请求数：客户端每隔 interval 秒对目标站发「成员数」条 HTTPS。
+  //      上限取 10 —— v8 §7 的结论是「10 成员 + 连测 2 次 = 97.4%」，再往上只是拿
+  //      目标站的限流换一点点精度。
+  //   ③ 冷 isolate 里可能一条存活中继都没有，这时退化成前 10 个条目 —— 至少还能回答
+  //      「哪条入口能过这个站」；?r=0 明确要求关中继块，就不退化了。
+  const tuMembers = relayNames.length ? pick(relayNames, 10) : noRelay ? [] : pick(all, 10);
 
   const G_EDGE = "\ud83c\udf10 \u5165\u53e3\u4f18\u9009";
   const groups = [];
@@ -216,7 +228,7 @@ export function renderClash(
   groups.push(`    lazy: false`);
   groups.push(
     q([
-      ...(tuUrl && all.length ? [G_TU] : []),
+      ...(tuUrl && tuMembers.length ? [G_TU] : []),
       ...(edgeNames.length ? [G_EDGE] : []),
       ...(relayNames.length ? [G_RELAY] : []),
       ...pick(byMode.tput, 5),
@@ -232,7 +244,7 @@ export function renderClash(
   groups.push(`    lazy: false`);
   groups.push(
     q([
-      ...(tuUrl && all.length ? [G_TU] : []),
+      ...(tuUrl && tuMembers.length ? [G_TU] : []),
       ...(edgeNames.length ? [G_EDGE] : []),
       ...(relayNames.length ? [G_RELAY] : []),
       ...pick(byMode.lat, 5),
@@ -249,7 +261,7 @@ export function renderClash(
 
   // 通道实测组：成员是「按中继走」的节点条目，客户端对 tu 指定的 URL 逐条实测，
   // 只有真能打通（expected-status 200）的通道才算健康 —— 端到端证据，零服务端开销。
-  if (tuUrl && all.length) {
+  if (tuUrl && tuMembers.length) {
     groups.push(`  - name: "${G_TU}"`);
     groups.push("    type: url-test");
     groups.push(`    url: ${tuUrl}`);
@@ -257,13 +269,13 @@ export function renderClash(
     groups.push("    interval: 180");
     groups.push("    tolerance: 0");
     groups.push("    lazy: false");
-    groups.push(q(pick(all, 64)));
+    groups.push(q(tuMembers));
   }
 
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
   groups.push(
-    `    proxies: ["${G_TPUT}", "${G_LAT}"${domNames.length ? `, "${G_DOM}"` : ""}${edgeNames.length ? `, "${G_EDGE}"` : ""}${relayNames.length ? `, "${G_RELAY}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && all.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
+    `    proxies: ["${G_TPUT}", "${G_LAT}"${domNames.length ? `, "${G_DOM}"` : ""}${edgeNames.length ? `, "${G_EDGE}"` : ""}${relayNames.length ? `, "${G_RELAY}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && tuMembers.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
   );
 
   return [
