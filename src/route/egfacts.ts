@@ -133,10 +133,6 @@ export class EgFacts {
   }
 
   /**
-   * 功能：调试快照（按 `at` 降序）。
-   * @returns {EgRow[]} 未过期的行，最多 64 条
-   */
-  /**
    * 功能：列出已知 v4 出口，最近的在前。
    * 用途：冷 isolate 里 `S.alive` 还是空的时候，用它兜底挑一条「已验证能把页面送回来」的中继，
    * 而不是退回直连（CF→CF 直连几乎必被自家边缘拒）。
@@ -260,15 +256,4 @@ export function egCounts(ips: string[], now = Date.now()): { v4: number; v6: num
     else unk += 1;
   }
   return { v4, v6, unk };
-}
-
-/**
- * 功能：这一轮该花几个 connect 名额去测「出口族未知」的中继。
- * 依据（v8 §7.3）：v4 出口 <3 条时把更多预算给未知项 —— 每轮 4 条；够 3 条就回到 2 条，
- * 因为再多的 v4 出口只值 0.9 个点，而 connect 名额是全局 6 个的硬上限。
- * @param v4 当前已知 v4 出口条数
- * @returns {number} 本轮探测条数
- */
-export function egQuota(v4: number): number {
-  return v4 < 3 ? 4 : 2;
 }

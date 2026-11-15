@@ -108,7 +108,7 @@ export { judge, queueVerify, runVerify, verifyInfo, queueLen } from "./route/ver
 export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, pickFresh } from "./route/tfb";
 export { RELPERF, REL_TTL, relCost, relCostFor, relCostMode, relNote, relSnap } from "./route/relperf";
-export { EG, EG_BIG, EG_TINY, EG_TTL, EgFacts, egCounts, egDerive, egQuota } from "./route/egfacts";
+export { EG, EG_BIG, EG_TINY, EG_TTL, EgFacts, egCounts, egDerive } from "./route/egfacts";
 export { CAP, CAP_TTL, CapFacts, capFactor } from "./route/capfacts";
 export { ALIVE_MIN, ALIVE_TARGET, alivePlan, srcStat } from "./px/aliveplan";
 export { FACT_ALL, factList, factOn, factParse } from "./route/factflags";

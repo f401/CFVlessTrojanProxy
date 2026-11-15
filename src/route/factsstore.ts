@@ -13,7 +13,7 @@ export interface FactsBody {
   dns?: DnsWire[];
 }
 
-/** 上行增量的形状：四类事实各自可能为空。 */
+/** 上行增量的形状：五类事实各自可能为空。 */
 export interface FactsDelta {
   eg?: EgRow[];
   ps?: PsWire[];
@@ -23,11 +23,15 @@ export interface FactsDelta {
 }
 
 /**
- * 功能：四类会同步的事实表的门面 —— 收口「冷启动合并 → 上行增量 → ack/nack」三段生命周期。
+ * 功能：五类会同步的事实表的门面 —— 收口「冷启动合并 → 上行增量 → ack/nack」三段生命周期。
  *
- * 为什么要这个门面：这四类事实的读写以前散在 `verdictsync`（4 个 if 块）、`pend`（4 个 HOOK 槽位）、
- * `policy`（4 组 ack/nack 注册）。任何一类新增或退场，都要改三处且容易漏 —— 漏了的表现是
+ * 为什么要这个门面：这几类事实的读写以前散在 `verdictsync`（每类一个 if 块）、`pend`（每类一个 HOOK 槽位）、
+ * `policy`（每组一份 ack/nack 注册）。任何一类新增或退场，都要改三处且容易漏 —— 漏了的表现是
  * 「事实在本地学得很好，但别的 isolate 永远收不到」，而单测与链路验收都发现不了（它们测函数本身）。
+ *
+ * 历史教训（v7.139）：`dns` 是后加的第五类，`load`/`delta`/`clear` 都接上了，`ack`/`nack` 漏了 ——
+ * `DNS.pend` 只进不出，于是每次上报都把同一批最多 60 行 DNS 事实重发一遍，DO 侧一直在合并重复的旧观测。
+ * 结论：门面的方法表要按「新增一类就要逐个方法点名」核对，不要只加一个新 if 就算接完。
  *
  * 分层：`src/store/pend.ts` 不能 import route（反向依赖），所以它只认 `HOOK.factsDelta` 一个槽位，
  * 具体是哪几类由这里决定。
@@ -67,28 +71,40 @@ export class FactsStore {
     return out;
   }
 
-  /** 功能：上报成功 —— 四张表的 pending 全部转正。 */
+  /**
+   * 功能：上报成功 —— 五张表的 pending 全部转正。
+   *
+   * 必须逐个点名：`dns` 当初就是漏在这里，pending 永不转正，每轮上报都重发同一批。
+   * @returns {void}
+   */
   ack(): void {
     EG.ack();
     PS.ack();
     DEAD.ack();
     BLK.ack();
+    DNS.ack();
   }
 
-  /** 功能：上报失败 —— 丢弃 pending，下一轮按当前状态重新登记。 */
+  /**
+   * 功能：上报失败 —— 保留 pending，下一轮原样重发（重发 = 重试，不是重复计数）。
+   *
+   * 五张表统一走这里：`nack` 在各表里都是「不动 pending」的显式声明，不是清空。
+   * @returns {void}
+   */
   nack(): void {
     EG.nack();
     PS.nack();
     DEAD.nack();
     BLK.nack();
+    DNS.nack();
   }
 
   /**
    * 功能：给 `/health` 用的四类事实概览。
-   * @returns {{ eg: unknown; ps: unknown; dead: unknown; blk: unknown }} 各自快照
+   * @returns {{ eg: unknown; ps: unknown; dead: unknown; blk: unknown; dns: unknown }} 各自快照
    */
-  snap(): { eg: unknown; ps: unknown; dead: unknown; blk: unknown } {
-    return { eg: EG.snap(), ps: PS.snap(), dead: DEAD.snap(), blk: BLK.snap() };
+  snap(): { eg: unknown; ps: unknown; dead: unknown; blk: unknown; dns: unknown } {
+    return { eg: EG.snap(), ps: PS.snap(), dead: DEAD.snap(), blk: BLK.snap(), dns: DNS.snap() };
   }
 
   /** 功能：清空四张表（测试用）。 */

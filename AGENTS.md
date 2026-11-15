@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.138**（自举审计十七批、共 31 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.139**（自举审计十八批、共 34 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -145,9 +145,13 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 
 - 线上 **7.123**（`facts=eg`，仓库同版）。7.122 把 `dns` 事实接到跨 isolate（`FactsStore` + `mergeFacts`），7.123 修掉「`HOOK.facts` 从未注册 → `facts=none` 不影响选路」这个洞，并加 `?fx=` 单请求开关与「HOOK 槽位必须有人注册」的接线门禁。7.80–7.85 修的是「中继那一跳到底值不值」：
 - **7.138 自举审计（第 28–31 条，同一张事实表族）**：`psfacts`/`dnsfacts` 的 `sent` 表只写不读（ack 里 set、`clear` 里 clear，没有任何读端；`relay-health.ts` 的同名表有读端，所以这不是统一模式）⇒ 长跑只增不减，删掉；康复通道闸门用会衰减的 `psOk` 判「历史上有过整页」⇒ 成过一次、连败十条的通道永远进不了康复名单（v8 §3.2 D12 的死锁仍在）⇒ `PsRow.top` 记历史最好 + `psBest`；`BlkFacts.batch/mute` 无上限无过期 ⇒ 新增 `trim()`；`blkfacts` 换批分支的 `if (b.n < BLK_MIN)` 恒真（死分支）。
-- **7.124–7.137 自举审计**（`tools/exp-v8proof.mjs` 挂进 preflight，N=400 闭环证明）：共修 27 个缺陷 —— `cf-ok-relay` 短路、`nack` 丢待发（pending 语义）、事实读失败后永久关闭（改 60 秒冷却重试）、cron 恢复用量不限量扇出（改 `restorePick` 每轮 ≤12）、`backpressure` 把客户端主动断开记成节点头上的 `cut`（改 `ccut`）、`cnt` 字面量漏登记会静默丢计数（补静态门禁）、`Pool` 门面的 9 条自指文档且错报返回类型（重写 + 修 `doc-gen` 根因）、
+- **7.124–7.139 自举审计**（`tools/exp-v8proof.mjs` 挂进 preflight，N=400 闭环证明）：共修 34 个缺陷 —— `cf-ok-relay` 短路、`nack` 丢待发（pending 语义）、事实读失败后永久关闭（改 60 秒冷却重试）、cron 恢复用量不限量扇出（改 `restorePick` 每轮 ≤12）、`backpressure` 把客户端主动断开记成节点头上的 `cut`（改 `ccut`）、`cnt` 字面量漏登记会静默丢计数（补静态门禁）、`Pool` 门面的 9 条自指文档且错报返回类型（重写 + 修 `doc-gen` 根因）、
   未知族 ×40 死锁（改 ×2）、`direct-ok` 不可达、`egDerive` 跨站点污染（加 `cf` 门）、`ps` 负样本从未写入（S3 零边际的结构性原因）、
   `eg-pin` 挑已判死的中继、`clientV6 && cfHost` 分支回退到含死通道的 `usable` 且排在 `direct-ok` 之前、
+  只写不读的 `sent` 表（`ps`/`dns`）、康复闸门用会衰减的当前均值判「历史上有过整页」（改 `psBest` 看 `PsRow.top`）、
+  无界批表/静默表（补 `trim`）、恒真死分支（`b.n = 1` 后判 `< BLK_MIN`）、
+  **`FACTS.ack()` 漏了第五类 `dns`（pending 只进不出，每轮重发同一批）**、`v4List` 上方叠着属于 `snap` 的孤儿文档、
+  `egQuota()` 零生产调用点且前提不成立（探测看不出出口族）、
   握手分片实验的 `src/store/chan.ts` 与 `/meter/ch*` 端点残留（持有一套无 TTL 的 socket 表，且是第二份 userland TLS）、
   `commitPool` 用本地代际号 +1（落后半小时时会覆盖别人更新的那一代，缩水判断也拿本地过期的池子大小比）——改成写前严格读 KV 锚点、取三者最大 +1、锚点写失败重试并留证据、
   `src/edge/auth.ts` 剥 Bearer 前缀的正则写成 `/^Bearers+/i`（`\s` 掉了反斜杠）——文档宣称支持的 Bearer 鉴权从来没生效，带 `Authorization: Bearer <key>` 一律 403、
@@ -181,7 +185,7 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - `subtls` 已删除（7.69）：`src/vendor/{subtls.js,subtls.d.ts,roots.js}`、`src/core/tlsprobe.ts`、`src/route/{probe,sweep}.ts` 及其端点（`?tls=`/`?raw=`/`?tlsnow=`/`DO /meter/{probe,raw,dbt}`）全部移除，包体回到 1.4MB 级。
 - **v8 事实层现状（7.88–7.107，均已上线或可开关）**：五类事实 `eg`/`ps`/`dead`/`blk`/`dns` + `cap` 噪声门 + `first/lat` 观测全部在仓库，
   由 `src/route/factflags.ts` 的 plain_text 绑定 `facts` 统一开关（`none`/`eg`/`eg,ps`/`all`，未配置=全开）；
-  `FACTS`（`src/route/factsstore.ts`）是四张同步表唯一的上行/合并门面；`tools/check-wire.mjs` 静态保证「有定义必有生产调用」。
+  `FACTS`（`src/route/factsstore.ts`）是五张同步表唯一的上行/合并门面（v7.139 才把第五类 `dns` 的 `ack/nack/snap` 接上）；`tools/check-wire.mjs` 静态保证「有定义必有生产调用」。
   **当前线上 `facts=eg`**（只开出口族）：`eg` 已改成**从真实响应推导**（`egDerive`：整页 ⇒ v4；有对照的小页 ⇒ v6），
   不再依赖保真度存疑的 `probeEg`（它测到的是探测器自己的出口）。7.116–7.120：冷 isolate 用 `eg` 里的 v4 出口兜底、
   CF 站点按族分层（v4 1 / 未知 40 / v6 40）、订阅的中继条目改用事实层 v4 出口铺底；实测 tput 38/40 = 95%、钉 v4 18/18。

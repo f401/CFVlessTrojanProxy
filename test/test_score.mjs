@@ -2804,12 +2804,10 @@ console.log("\n89) 出口族预算：几条 v4 出口决定探测名额");
   eq("v4 计数", c1.v4, 1);
   eq("v6 计数", c1.v6, 1);
   eq("未知计数", c1.unk, 2);
-  eq("v4 不足 3 条时每轮探 4 条", W.egQuota(c1.v4), 4);
+  eq("出口族配额函数已删除：探测看不出出口族，配额从来不可达", W.egQuota, undefined);
   W.EG.note(C, 4);
   W.EG.note(D, 4);
-  eq("v4 够 3 条回到 2 条", W.egQuota(W.egCounts([A, B, C, D]).v4), 2);
-  eq("配额边界：2 条仍要多探", W.egQuota(2), 4);
-  eq("配额边界：3 条不再加钱", W.egQuota(3), 2);
+  eq("v4 三票后计数跟着走", W.egCounts([A, B, C, D]).v4, 3);
 }
 
 
@@ -2907,7 +2905,7 @@ console.log("\n93) 事实开关：五类乘数可单独回滚");
 }
 
 
-console.log("\n94) 四类事实门面：一次取齐增量，ack 后清空");
+console.log("\n94) 五类事实门面：一次取齐增量，ack 后清空");
 {
   const H = "gate.example.com";
   const IP = "203.0.113.77";
@@ -2921,9 +2919,13 @@ console.log("\n94) 四类事实门面：一次取齐增量，ack 后清空");
   eq("增量里 ps 有 1 行", (d1.ps || []).length, 1);
   eq("增量里 eg 有 1 行", (d1.eg || []).length, 1);
   eq("增量里 dead 有 1 行（连续两次失败）", (d1.dead || []).length, 1);
+  W.DNS.note(H, false, Date.now());
+  eq("增量里 dns 有 1 行", (W.FACTS.delta().dns || []).length, 1);
   eq("未 ack 前再取仍然是同一批", (W.FACTS.delta().ps || []).length, 1);
   W.FACTS.ack();
   eq("ack 后增量清空", (W.FACTS.delta().ps || []).length, 0);
+  eq("ack 后 dns 增量也清空（门面必须点名五张表）", (W.FACTS.delta().dns || []).length, 0);
+  eq("快照里有 dns 一类", W.FACTS.snap().dns !== undefined, true);
   W.FACTS.clear();
   const n = W.FACTS.load({ eg: [{ i: "203.0.113.9", f: 4, at: Date.now() }], ps: [{ k: H + "|203.0.113.9", q: 128, n: 8, at: Date.now() }], dead: [{ i: "203.0.113.10", n: 3, at: Date.now() }], blk2: [{ k: H + "|203.0.113.9", n: 3, at: Date.now() }] });
   eq("load 四类都并入", [n.eg, n.ps, n.dead, n.blk2].join(","), "1,1,1,1");
