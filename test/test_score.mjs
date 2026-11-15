@@ -3237,5 +3237,32 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   eq("只到 5/8 不触发自愈", W.BLK.muted(H2), false);
 }
 
+// 108) 落盘失败必须回滚连接观测（cl 是加法合并，重发同一批会把 n/ok/dn 加两遍）
+// 背景：pendFlush 只在 DO 回 200 后才清 S.cagg，save() 失败时 DO 回 500 ⇒ 下一轮回放同一批 cl。
+// 旧代码只回滚 c/g/s/e 四个结构，cl 的计数留在内存里 ⇒ 被加两遍（面板的 n 与可用率因此偏移）。
+{
+  const d = mkDO();
+  // 让 put 失败一次：模拟 DO 存储写入被拒（免费计划上偶发）
+  const put0 = d.m.st.storage.put;
+  let failPut = true;
+  d.m.st.storage.put = async (k, v) => {
+    if (failPut) throw new Error("storage down");
+    return put0(k, v);
+  };
+  const body = { up: 100, down: 200, cl: [{ k: "1.2.3.4:443", n: 4, ok: 3, dn: 1, p50: 120, p95: 300 }] };
+  const r1 = await d.m
+    .fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify(body) }))
+    .then(() => "ok", () => "rejected");
+  eq("落盘失败时 /add 返回失败（让发送侧重发这一批）", r1, "rejected");
+  eq("失败后连接观测没有留在内存里", d.m.cl.length, 0);
+  eq("失败后用量也没有留在内存里", [d.m.c.up, d.m.c.down], [0, 0]);
+  failPut = false;
+  await d.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify(body) }));
+  eq("重发同一批后连接观测只算一次", [d.m.cl.length, d.m.cl[0].n, d.m.cl[0].ok], [1, 4, 3]);
+  const j108 = await (await d.m.fetch(new Request("https://m/get"))).json();
+  eq("用量也只算一次", [j108.up, j108.down], [100, 200]);
+}
+
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

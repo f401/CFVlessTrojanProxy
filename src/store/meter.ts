@@ -167,7 +167,11 @@ export class Meter {
       const oldC = { ...this.c },
         oldG = { ...this.g },
         oldS = Object.assign(Object.create(null), this.s),
-        oldE = this.e.slice();
+        oldE = this.e.slice(),
+        // 连接观测是**加法**合并（同一个键的 n/ok/dn 直接相加），不像事实表那样按 `at` 幂等：
+        // 落盘失败后 pendFlush 会原样重发这一批（`S.cagg` 只在成功后清），只回滚用量的话
+        // `cl` 的计数会被加两遍。这一份因此必须深拷（行对象就地累加），其余结构要么整体替换、要么按时间戳幂等。
+        oldCl = this.cl.map((r) => ({ ...r }));
       // 计数搭便车：同一次 /add 请求把 isolate 的日计数也带上来，0 额外请求
       if (d.c && typeof d.c === "object" && !Array.isArray(d.c)) {
         const d0 = String(d.c.d || new Date().toISOString().slice(0, 10));
@@ -287,6 +291,7 @@ export class Meter {
         this.g = oldG;
         this.s = oldS;
         this.e = oldE;
+        this.cl = oldCl;
         throw e;
       }
       return this.json();

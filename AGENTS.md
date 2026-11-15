@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.145**（自举审计二十五批、共 42 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.146**（自举审计二十六批、共 43 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -171,6 +171,10 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - **7.144 自举审计（第 41 条）**：`Policy.decide` 把**已经过判定表过滤的 `usable`** 传给 `BLK.sweep`，而 `sweep` 的判据是「该站点 ≥75% 的**候选**都写过封锁行」（`docs/v8.md` §15.6 写的就是「候选数」）。两者口径不一致的后果是这条站点级自愈**永不触发**：一条中继被判封锁的同一刻就离开 `usable`，而它的 `blk2` 封锁行要三批（≥3 分钟）才写成 ⇒ 分母与分子被同一个事件同时剔除，覆盖率恒接近 0，`bizSweeps` 成为「看起来在测量」的第二个僵尸计数器。修法：分母改成整池 `c.relays`；`test/test_score.mjs` 第 107 组锁住「6/8 触发自愈、5/8 不触发」（旧代码上 2 条断言红）。
 - **7.145 自举审计（第 42 条）**：差分复核队列是**整条死链** —— `SC.PROBE_REQ` / `SC.PROBE_RND` 在 7.69 删 subtls 后就恒为 `0`，于是 `connection.ts` 的入队闸门 `SC.PROBE_REQ > 0` 恒假、预算里 `vtOn` 恒假（`plan.vt` 恒 0）、`runRound` 立即返回，而 `Judge` 每遇一次可疑小响应仍往 `S.vtQ` 里塞一条（上限 64）⇒ 队列**只进不出**，`?vtq=1` 永远回一份没人处理的积压，`S.vtLast` 更是从来没有写者（永远 `null`）。这不是「功能降级」而是「假仪表」：`bizSweeps`/`cfDiff`/`vtq` 三个计数器都在暗示「有人在复核」。
   修法：删掉 `src/route/verify.ts`（183 行，含 `VerifyQueue`、`judge` 差分规则、`runVerify` 空实现）、`S.vtQ`/`S.vtLast`、`HOOK.verify` 槽位与 `policy.ts` 的注册、`connection.ts` 的入队闸门、`judge.ts` 的 `queueVerify` 调用、`/<uuid>/debug?vtq=1`、`test-surface.ts` 的 5 个导出；单测第 41 组改成锁「这条链路已不存在」。封锁判定的唯一证据链仍是 `tfb`（两批共识，125 种采样组合的单测覆盖）。
+- **7.146 自举审计（第 43 条）**：`/meter/add` 落盘失败时只回滚了 `c`/`g`/`s`/`e` 四个结构，而**连接观测 `cl` 是加法合并**
+  （同一个键 `old.n += x.n`，不像事实表那样按 `at` 幂等）⇒ `save()` 抛错后 `pendFlush` 会原样回放这一批（`S.cagg` 只在成功后清），
+  于是 `cl` 的 `n`/`ok`/`dn` 被加两遍，面板上的连接数与可用率偏高。修法：`oldCl = this.cl.map((r) => ({ ...r }))` 并在 `catch` 里还原；
+  `test/test_score.mjs` 第 108 组用「put 失败一次 → 500 → 重发同一批」锁住（旧代码上 2 条断言红）。
 - **已核查、不是缺陷**（留档免得再查一遍）：`refillPool` 抓源用的是 `fetch`（占 50 子请求额度），`cronScan` 的探活用的是 `connect()`；两者虽共用 `SCAN_SUB` 这个数字，但线上 `/<uuid>/logs` 里从未出现 subrequest 超限（`count 24 / persisted 22` 全是 `forced _Rd` 这类中继日志），说明探活并不吃抓源那份额度 —— 把 `SCAN_SUB` 再减一个「固定开销」会让冷启动发现速度直接砍半，所以不改。三条属于「短路/顺序」类，
   按函数行为写的单测永远测不到（分支没被执行）——这类缺陷只能靠端到端闭环证明或真实流量发现。
   · 7.81 `src/px/selector.ts` 冷 isolate 拉池子封顶 700ms（`ensurePool` 能拖 2–4 秒，那是用户等首字节的时间）；
