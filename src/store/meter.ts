@@ -13,8 +13,6 @@ export class Meter {
   e: ErrItem[];
   /** 连接记录环形：最近 60 条，离线标定用 */
   cl: ClRec[];
-  /** 键 `host|node` → 到期时间：这条中继对这个站点被按 IP 拒（403）的判定，跨 isolate 共享 */
-  blk: Record<string, number>;
   /**
    * 判定表的强证据：`站点|通道` → `{ s: 状态, t: 到期时间 }`。
    * 老数据里是裸数字（只有到期时间，状态默认 2）—— v7.164 前 DO 只存到期时间，
@@ -48,7 +46,6 @@ export class Meter {
     this.s = Object.create(null) as Record<string, NodeSnap>;
     this.e = []; // 跨 isolate 的错误环形（最多 50 条）
     this.cl = []; // 连接记录环形（最多 60 条）：离线标定 ttfb/抖动用
-    this.blk = {};
     this.vt = {};
     this.hl = {};
     this.eg = {};
@@ -69,7 +66,6 @@ export class Meter {
           if (o.s && typeof o.s === "object") this.s = Object.assign(Object.create(null), o.s);
           if (Array.isArray(o.e)) this.e = o.e;
           if (Array.isArray(o.cl)) this.cl = o.cl as ClRec[];
-        if (o.blk && typeof o.blk === "object") this.blk = o.blk as Record<string, number>;
         if (o.vt && typeof o.vt === "object")
           this.vt = o.vt as unknown as Record<string, number | { s: number; t: number }>;
         if (o.hl && typeof o.hl === "object") this.hl = o.hl as unknown as Record<string, { o: number; b: number; d: number; t?: number }>;
@@ -132,7 +128,7 @@ export class Meter {
     // 一次 put = 一行。四个字段塞进一个对象，行写入直接 ÷4。
     await this.st.storage.put(
       "a",
-      await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl, blk: this.blk, vt: this.vt, hl: this.hl, eg: this.eg, ps: this.ps, dead: this.dead, blk2: this.blk2, dns: this.dns }),
+      await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl, vt: this.vt, hl: this.hl, eg: this.eg, ps: this.ps, dead: this.dead, blk2: this.blk2, dns: this.dns }),
     );
   }
 
@@ -271,19 +267,6 @@ export class Meter {
           // 新中继的健康证据永远进不了表（同 7.177 的 pend 星形饥饿）。
           hk.sort((x, y) => (Number(this.hl[y].t) || 0) - (Number(this.hl[x].t) || 0));
           for (const k of hk.slice(200)) delete this.hl[k];
-        }
-      }
-      // 被封的中继（带到期时间）：只接受未过期的
-      if (d.blk && typeof d.blk === "object") {
-        const nowB = Date.now();
-        for (const [bk, exp] of Object.entries(d.blk as Record<string, number>)) {
-          if (typeof exp !== "number" || exp <= nowB) continue;
-          this.blk[bk] = exp;
-        }
-        const ks = Object.keys(this.blk).filter((k) => this.blk[k] > nowB);
-        if (ks.length > 200) {
-          ks.sort((a, b) => this.blk[a] - this.blk[b]);
-          for (const k of ks.slice(0, ks.length - 200)) delete this.blk[k];
         }
       }
       if (d.spd && typeof d.spd === "object") {
@@ -431,18 +414,12 @@ export class Meter {
       return Response.json({ cl: this.cl });
     }
     if (p.endsWith("/hl")) {
-const rows = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d, t: Number(x.t) || 0 }));
+      const rows = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d, t: Number(x.t) || 0 }));
       rows.sort((a, b) => b.d + b.b - (a.d + a.b));
       return Response.json({ hl: rows.slice(0, 120) });
     }
     // 七张表的出站形状与切片顺序都在 src/store/factout.ts（v7.187）
     if (p.endsWith("/vt")) return Response.json(factsOut(this));
-    if (p.endsWith("/blk")) {
-      const nowB = Date.now();
-      const out: Record<string, number> = {};
-      for (const [k, v] of Object.entries(this.blk)) if (v > nowB) out[k] = v;
-      return Response.json({ blk: out });
-    }
     if (p.endsWith("/cnt")) {
       return Response.json({ g: this.g, c: this.c, s: this.s, e: this.e });
     }

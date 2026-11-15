@@ -9,6 +9,7 @@ import { diagVerdict, hostKey } from "../nodes/metrics";
 import { nsGet } from "../nodes/score";
 import { cfHttpCode } from "../proxy/cfverdict";
 import { runTfb } from "../route/tfb";
+import { BLK_TTL } from "../route/commitfact";
 import { VT_TTL_MS, vAll, vState } from "../route/verdict";
 import { vtDelta, vtLoad } from "../route/verdictsync";
 import { cntView } from "../core/counter";
@@ -231,16 +232,19 @@ export async function debug(c: UserCtx): Promise<Response> {
       relayBlocked.push({ node: v.c.slice(2) + ":443", state: v.state, src: v.src, left: Math.round((v.at + VT_TTL_MS - Date.now()) / 1000) });
     }
     // &do=1：把 DO 里跨 isolate 的那份判定也拉出来看（否则只能看到本 isolate 学到的）
-    let ringBlk: Array<{ node: string; left: number }> = [];
+    let ringBlk: Array<{ node: string; n: number; left: number }> = [];
     if (url.searchParams.get("do") === "1" && env.METER) {
       try {
-        const id = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
-        const rr = await env.METER.get(env.METER.idFromName(id)).fetch("https://meter/blk");
-        const jj = (await rr.json()) as { blk?: Record<string, number> };
+        // 读的是 blk2 事实（host|relay → { n, at }），不是计量表里那张早已没有生产者的旧封锁表：
+        // 那张表从 7.124 起就没有写者了，诊断会一直显示「DO 里没有封锁」，把空表当成了「没被封锁」。
+        const rr = await env.METER.get(env.METER.idFromName(id)).fetch("https://meter/vt");
+        const jj = (await rr.json()) as { blk2?: Array<{ k: string; n: number; at: number }> };
         const now2 = Date.now();
-        for (const [bk, exp] of Object.entries(jj.blk || {})) {
-          if (exp <= now2 || !bk.startsWith(diagHost + "|")) continue;
-          ringBlk.push({ node: bk.slice(diagHost.length + 1), left: Math.round((exp - now2) / 1000) });
+        for (const r of jj.blk2 || []) {
+          if (!r || !r.k.startsWith(diagHost + "|")) continue;
+          const left = Math.round((r.at + BLK_TTL - now2) / 1000);
+          if (left <= 0) continue;
+          ringBlk.push({ node: r.k.slice(diagHost.length + 1), n: r.n, left });
         }
         ringBlk.sort((a, b) => b.left - a.left);
       } catch (e) {

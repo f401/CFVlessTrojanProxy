@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.187**（自举审计六十七批、共 126 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.188**（自举审计六十八批、共 128 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -403,6 +403,19 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   `freshTop` 直接按时间戳降序；`meter.ts` 用 `factsOut(this)` 且不再自己拼 `blk2`）。
   A/B：切片退回插入序 → **7 红**；`debug.ts` 退回 HEAD → **2 红**（两条都是源码锁）。
 
+### 7.188 自举审计（第 127–128 条，没有生产者的旧表与热路径三次扫描）
+
+- **D127 旧封锁表没有生产者，诊断把「空表」当成了「没被封锁」**：`Meter` 里那张 `blk: Record<string, number>`（键 `host|node` → 到期时间）从 7.124 起就没有写者了 —— 封锁事实改走 `blk2`
+  （`host|relay` → `{ n, at }`）。但字段、`save()` 序列化、`/add` 的合并段、`GET /blk` 全留着，`/<uuid>/debug?do=1` 还在读它：`ringBlk` 永远是 `[]`，看起来像「跨 isolate 没有封锁记录」，
+  而真数据在 `blk2` 里。同一批里 `?diag` 的 `relayBlocked`（来自 `vAll()`）是真的，所以这个假仪表不会误导到选路，但会误导排查。
+  修法：字段 / 初始化 / `unseal` / `save` / `/add` 合并段 / `/blk` 端点整体删除（`src/store/meter.ts` 540 → 517 行）；`src/routes/debug.ts` 的 `ringBlk` 改读 `https://meter/vt` 的 `blk2`，
+  用 `at + BLK_TTL` 算剩余寿命，并多给一个 `n`（批数）。
+- **D128 决策里同一张实测表扫了三遍**：`src/route/policy.ts` 的 CF 托管目标分支连着调 `relSnap(c.host)` 三次（`fresh`、`seen`、冷启动闸门的 `length === 0`），
+  每次都是「遍历 512 条 + 排序」。而这条分支是热路径（`tools/exp-v8proof.mjs` 的 400 条请求里 379 条走它）。
+  修法：`const relRows = relSnap(c.host); const fresh = relRows.length; const seen = new Set(relRows.map((r) => r.ip));`，冷启动闸门复用 `fresh === 0`。
+- 锁：第 178 组 8 条（计量表没有 `this.blk`、没有 `/blk` 端点、出站仍走 `factsOut`；诊断读 `/vt` 的 `blk2`、用 `at + BLK_TTL` 算寿命；决策里 `relSnap(c.host)` 只出现一次、冷启动复用 `fresh === 0`；
+  再加「量过的那条照旧进表、样本数只累加不重置」）。第 105 组原来那条读 `/meter/blk` 的断言改到 `blk2` 上。
+- A/B：`meter.ts` + `debug.ts` 退回 HEAD → 4 红；`policy.ts` 退回 HEAD → 2 红。两条都先 `bundle` + `mk_test` 再跑（否则测的是旧包，见 7.185 的教训）。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

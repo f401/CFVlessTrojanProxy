@@ -253,11 +253,14 @@ export class Policy {
       // 为什么：中继容量实测差 3–4 倍（1103 vs 300 KB/s），钉住一条时其余中继永远没有样本，
       // 「按站点 × 中继挑最快」就永远学不出来；轮换几条后样本足够，再交给下面的排序去利用。
       const coldSite = !stick.some((ip) => vAt(c.host, "r:" + ip) > 0) && !stick.some((ip) => JUDGE.posOn(c.host, ip));
-      const fresh = relSnap(c.host).length;
+      // 一次扫描同时拿到「量过几条」与「量过哪些」：7.188 之前这里把同一张表扫了三遍（每遍还要排序），
+      // 而 CF 托管目标是热路径（闭环证明里 400 条请求有 379 条走这条分支）。
+      const relRows = relSnap(c.host);
+      const fresh = relRows.length;
       // 只给「本站点一次都没量过」的中继采样机会，而且必须已经有 1 条样本做锚：
       // 全池轮换会把 0/4、2/4 全 403 的中继塞给用户（实测 tput 2/8），
       // 完全不轮换又永远学不出容量差异（只剩一条中继有样本）。小步、只朝没试过的走。
-      const seen = new Set(relSnap(c.host).map((r) => r.ip));
+      const seen = new Set(relRows.map((r) => r.ip));
       const unmeasured = stick.filter((ip) => !JUDGE.negOn(c.host, ip) && !seen.has(ip));
       if (c.mode !== "lat" && coldSite && fresh >= 1 && unmeasured.length > 0) {
         const ip = unmeasured[this.rot++ % unmeasured.length] as string;
@@ -265,7 +268,7 @@ export class Policy {
       }
       // 冷启动：该站点没有任何通道证据、本出口也没拿到状态码、也还没有「站点×中继」样本
       // → 钉住单条中继 60 秒（理由见 pinFor）。一旦有了样本就交给 stick 排序，避免钉住覆盖实测结论。
-      if (!code && coldSite && relSnap(c.host).length === 0) {
+      if (!code && coldSite && fresh === 0) {
         // 钉住的那条一旦进了负面记忆就立刻换下一条：否则一次坏 egress 会在 60 秒里吞掉整个站点
         const pool = (nonCf.length ? nonCf : stick).filter((ip) => !JUDGE.negOn(c.host, ip));
         const cip = this.pinFor(c.host, pool.length ? pool : nonCf.length ? nonCf : stick);

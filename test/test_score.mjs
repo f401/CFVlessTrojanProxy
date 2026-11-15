@@ -3167,7 +3167,7 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
     dns: [{ h: "d39.example", v: 1, at: now9 }],
     ps: [{ k: "d39.example|203.0.113.10", q: 200, n: 3, at: now9 }],
     hl: [{ i: "203.0.113.9", o: 1, b: 0, d: 2 }],
-    blk: { "203.0.113.9|443": now9 + 600000 },
+    blk2: [{ k: "203.0.113.9|443", n: 3, at: now9 }],
   };
   await stub9.fetch("https://meter/add", { method: "POST", body: JSON.stringify(body9) });
   const j9 = await (await stub9.fetch("https://meter/vt")).json();
@@ -3176,8 +3176,7 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   eq("dns 事实跟着走", (j9.dns || []).some((r) => r.h === "d39.example" && r.v === 1), true);
   eq("ps 事实跟着走", (j9.ps || []).some((r) => r.k === "d39.example|203.0.113.10"), true);
   eq("hl 存活度跟着走", (j9.hl || []).some((r) => r.i === "203.0.113.9"), true);
-  const b9 = await (await stub9.fetch("https://meter/blk")).json();
-  eq("被封中继跟着走", Object.keys(b9.blk || {}).includes("203.0.113.9|443"), true);
+  eq("封锁事实跟着走（走 blk2，不是计量表里那张没有生产者的旧表）", (j9.blk2 || []).some((r) => r.k === "203.0.113.9|443" && r.n === 3), true);
   // 带 cl 的那一批仍然按节点累加：搬出 if 不能把 cl 自己弄坏
   await stub9.fetch("https://meter/add", { method: "POST", body: JSON.stringify({ cl: [{ k: "n1", n: 1, ok: 1, dn: 100, p50: 10, p95: 20 }] }) });
   await stub9.fetch("https://meter/add", { method: "POST", body: JSON.stringify({ cl: [{ k: "n1", n: 2, ok: 2, dn: 200, p50: 12, p95: 22 }] }) });
@@ -4352,5 +4351,26 @@ console.log("\n176) 预算账本与续回边界");
   ok("诊断默认分支把 connect 包成 Promise", dbgSrc177.includes("Promise.resolve(connect("), "debug.ts");
 }
 
+
+/** 第 178 组（v7.188）：没有生产者的旧封锁表删净、热路径一张表只扫一遍 */
+{
+  const mS = fs.readFileSync("src/store/meter.ts", "utf8");
+  ok("计量表里不再有旧封锁表字段", !/this\.blk\b/.test(mS), "meter.ts");
+  ok("计量表不再提供 /blk 端点", mS.indexOf('endsWith("/blk")') < 0, "meter.ts");
+  ok("七张事实表的出站仍走 factsOut", mS.indexOf("Response.json(factsOut(this))") >= 0, "meter.ts");
+  const dS = fs.readFileSync("src/routes/debug.ts", "utf8");
+  ok("诊断的跨 isolate 封锁改读 /vt 的 blk2", dS.indexOf('fetch("https://meter/vt")') >= 0 && dS.indexOf("jj.blk2") >= 0, "debug.ts");
+  ok("诊断用 blk2 的 at 与 BLK_TTL 算剩余寿命", dS.indexOf("r.at + BLK_TTL - now2") >= 0, "debug.ts");
+  const pS = fs.readFileSync("src/route/policy.ts", "utf8");
+  eq("决策里同一张实测表只扫一遍", pS.split("relSnap(c.host)").length - 1, 1);
+  ok("冷启动闸门复用同一个计数", pS.indexOf("fresh === 0") >= 0, "policy.ts");
+  // 行为面：量过的那条照旧进表，样本数只累加不重置
+  W.RELPERF.clear();
+  W.RELPERF.note("rel188.example", "203.0.113.21", 300, 900);
+  eq("量过的那条被记进站点 × 中继表", W.relSnap("rel188.example").length, 1);
+  W.RELPERF.note("rel188.example", "203.0.113.21", 320, 950);
+  eq("样本数照样累加（只增不重置）", W.relSnap("rel188.example")[0].n, 2);
+  W.RELPERF.clear();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
