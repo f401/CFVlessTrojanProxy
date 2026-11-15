@@ -5,7 +5,7 @@
 import { S } from "../core/state";
 import { TrafficEvt } from "../core/hook";
 import { Chan, DIRECT, chanKey } from "./channel";
-import { vBad, vOk, vSetState } from "./verdict";
+import { vBad, vOk } from "./verdict";
 import { recordBlock, recordPass, recordTraffic } from "./observe";
 import { cfHttpCode } from "../proxy/cfverdict";
 import { cnt } from "../core/counter";
@@ -243,10 +243,4 @@ export class Judge {
 
 /** 进程内唯一判定器 */
 export const JUDGE = new Judge();
-
-/** 供 probe 通道的结论写回判定表（弱→强升级） */
-export function markProbeOk(host: string, ip: string, ms: number): void {
-  vSetState(host, "r:" + ip, 1, 1);
-  if (ms > 0) vSetState("*", "r:" + ip, 1, 1);
-}
 

@@ -11,11 +11,7 @@ export class AppState {
   /** 通道策略影子统计：建议与现状一致的次数 / 不一致次数 / 原因分布 */
   polSame = 0;
   polDiff = 0;
-  polWhy: Record<string, number> = {}; // 最近一次请求的 hostname（cron 探入口时用）
-  edge: Map<string, { h: string; p: number; ms: number; ok: number; fail: number; at: number }> = new Map();
-  edgeAt = 0;
-  edgeDirty = false;
-  edgeWrittenAt = 0;
+  polWhy: Record<string, number> = {}; // 策略建议的原因分布：polWhy[reason]++
   // —— 节点与选择 ——
   alive: Map<string, NodeEntry> = new Map();
   nstat: Map<string, NodeStats> = new Map();

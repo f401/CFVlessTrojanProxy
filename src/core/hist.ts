@@ -29,11 +29,6 @@ export function pctOf(s: NodeStats, q: number) {
   return HIST_BASE * Math.pow(2, HIST_N - 0.5);
 }
 
-/** 本地直方图的 p90（落盘用；导入值不能再写回去，否则自我强化） */
-export function p90Local(s: NodeStats) {
-  return pctOf(s, 0.9);
-}
-
 /**
  * 一次遍历同时得到 p50 / p90 / cap，避免三次重复扫描直方图
  * @param {object} s 统计对象

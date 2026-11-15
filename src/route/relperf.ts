@@ -244,12 +244,3 @@ export function relSnap(host: string) {
 export function relCostMode(mode: string, host: string, ip: string): number {
   return RELPERF.costFor(mode, host, ip);
 }
-
-/**
- * 薄包装：站点无关的聚合样本（跨站点学到的中继容量）。
- * @param ip 中继出口
- * @returns 样本；没量过返回 null
- */
-export function relAgg(ip: string) {
-  return RELPERF.agg(ip);
-}

@@ -1,6 +1,6 @@
 import { SC } from "../core/const";
 import { pcts } from "../core/hist";
-export { capOf, p90Of, pctOf, p90Local, pcts } from "../core/hist";
+export { capOf, p90Of, pctOf, pcts } from "../core/hist";
 import { S } from "../core/state";
 export * from "./stat";
 import { TEN_MB, ZERO_STAT, availOf, effView, invalidateRank, nsGet, pFailFast, pFailOf, pStallOf } from "./stat";

@@ -1,7 +1,6 @@
 import { P_T, VERSION } from "../core/util";
 import { S } from "../core/state";
 import { errDup, errHist } from "../nodes/metrics";
-import { EDGE_ERR, edgeRank } from "../route/edge";
 import { cntView } from "../core/counter";
 import { FACT } from "../route/factshadow";
 import { json, forbidden } from "../edge/respond";
@@ -46,7 +45,6 @@ cf: FACT.snap(),
     facts: factList(c.env),
     relays: (() => { const ips = [...S.alive.values()].map((x) => String(x.h || "")).filter(Boolean); const c = egCounts(ips); return { alive: ips.length, eg4: c.v4, eg6: c.v6, egUnk: c.unk }; })(),
     blk: BLK.snap(),
-    edge: { seen: S.edge.size, ranked: edgeRank(8).length, err: EDGE_ERR.s },
     colo: (c.cf && c.cf.colo) || "",
     cnt: cntView(),
     kvWrites: S.kvw,

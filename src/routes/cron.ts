@@ -7,7 +7,6 @@ import { cronScan, flushPx } from "../px/pool";
 import { alivePlan } from "../px/aliveplan";
 import { planRound } from "../route/budget";
 import { runRound } from "../route/round";
-import { edgeScan } from "../route/edge";
 import { runTfb } from "../route/tfb";
 import { DNS } from "../route/dnsfacts";
 import { probeFam } from "../proxy/dial";
@@ -100,12 +99,11 @@ async function dnsRound(): Promise<void> {
  */
 async function cronOnce(env: Env): Promise<void> {
   try {
-    // 一轮 cron 的子请求预算先算清：准入（池子）、判定（目标 x 通道）、入口（客户端→边缘）
+    // 一轮 cron 的子请求预算先算清：准入（池子）、判定（目标 x 通道）
     const plan = planRound(S.pool.length, S.alive.size);
     // 活跃池不够 16 条时加码扫描：8 条池「好出口 <2」概率 28.5%，16 条只有 3.4%
     await cronScan(env, alivePlan(S.alive.size, plan.adm));
     await runRound(plan);
-    await edgeScan(env, plan.edge);
     await tfbRound(env);
     await dnsRound();
     SEL.afterScan(env);

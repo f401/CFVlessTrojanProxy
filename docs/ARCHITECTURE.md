@@ -215,10 +215,9 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级 |
 | `RelayHealth`（`HEALTH`） | `src/route/relay-health.ts` | 中继健康表（sent/pending 语义） |
 | `VerifyQueue`（`VERIFY`） | `src/route/verify.ts` | 复核队列与差分判定 |
-| `EdgePrefs`（`EDGE`） | `src/route/edge.ts` | 入口偏好表（探测结果、KV 落盘、订阅条目） |
 | `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps） |
 | `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |
-| `Budget`（`planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核/入口），纯函数入口 |
+| `Budget`（`planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核），纯函数入口 |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表 |
 | `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |

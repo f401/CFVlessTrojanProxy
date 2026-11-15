@@ -1623,7 +1623,7 @@ eq("影子模式统计一致", W.S.polSame, 1);
 W.shadow({ ...rCtx, legacyWantsRelay: false });
 eq("影子模式统计不一致", W.S.polDiff, 1);
 const pl = W.planRound(1600, 8);
-ok("预算不超过子请求硬上限", pl.adm + pl.vt + pl.edge <= pl.cap, JSON.stringify(pl));
+  ok("预算不超过子请求硬上限", pl.adm + pl.vt <= pl.cap, JSON.stringify(pl));
 ok("池子很饿时优先给准入", pl.adm >= 4, JSON.stringify(pl));
 // 7.62 起策略全生效（level 2）：判定层已有 660+ 条断言与线上实测背书，
 // 且「隧道直连成功证据 / 中继软降权」这些判据只有全生效时才真正影响选路。
@@ -2071,37 +2071,37 @@ console.log("\n64) 错误分类直方图");
   ok("直方图最多 8 条", W.errHist().length <= 8, String(W.errHist().length));
 }
 
-// 65) 子请求预算：三项之和不得超过 cap，且入口至少留 1
-console.log("\n65) 子请求预算");
-{
-  const pools = [0, 3, 10, 64, 400, 1600, 3000];
-  const alives = [0, 1, 8, 64, 400, 1500];
-  let worst = 0;
-  for (const poolN of pools) {
-    for (const aliveN of alives) {
-      const q = W.planRound(poolN, Math.min(aliveN, poolN));
-      const sum = q.adm + q.vt + q.edge;
-      if (sum > worst) worst = sum;
-      ok(`总和不超 cap（pool ${poolN} alive ${aliveN}）`, sum <= q.cap, `${sum} > ${q.cap}`);
-      ok(`入口预算非负（pool ${poolN} alive ${aliveN}）`, q.edge >= 0, String(q.edge));
-      ok(`准入不超 SCAN_MAX（pool ${poolN}）`, q.adm <= 400, String(q.adm));
-    }
-  }
-  ok("最坏情况也没超 48", worst <= 48, String(worst));
-}
+// 65) 子请求预算：两项之和不得超过 cap（入口那一份已随「入口偏好表」一起删除）
+console.log("\n65) 子请求预算");
+{
+  const pools = [0, 3, 10, 64, 400, 1600, 3000];
+  const alives = [0, 1, 8, 64, 400, 1500];
+  let worst = 0;
+  for (const poolN of pools) {
+    for (const aliveN of alives) {
+      const q = W.planRound(poolN, Math.min(aliveN, poolN));
+      const sum = q.adm + q.vt;
+      if (sum > worst) worst = sum;
+      ok(`总和不超 cap（pool ${poolN} alive ${aliveN}）`, sum <= q.cap, `${sum} > ${q.cap}`);
+      eq(`预算里没有入口这一项（pool ${poolN} alive ${aliveN}）`, q.edge, undefined);
+      ok(`准入不超 SCAN_MAX（pool ${poolN}）`, q.adm <= 400, String(q.adm));
+    }
+  }
+  ok("最坏情况也没超 48", worst <= 48, String(worst));
+}
 
-// 66) 入口探测默认关闭：服务端不再定时烧一次 TLS 握手
-console.log("\n66) 入口探测默认关闭");
-{
-  ok("EDGE_AUTO 默认 0", W.SC.EDGE_AUTO === 0, String(W.SC.EDGE_AUTO));
-  for (const poolN of [0, 64, 1600, 3000]) {
-    const q = W.planRound(poolN, Math.floor(poolN / 2));
-    eq(`不给入口留额度（pool ${poolN}）`, q.edge, 0);
-    ok(`额度仍不超额（pool ${poolN}）`, q.adm + q.vt + q.edge <= q.cap, String(q.adm + q.vt + q.edge));
-  }
-  const big = W.planRound(3000, 0);
-  ok("省下来的额度分给准入/判定", big.adm + big.vt >= 40, `${big.adm} + ${big.vt}`);
-}
+// 66) 入口偏好不在服务端做：整条探测链（EDGE_AUTO / edgeScan / edge:pref）已删除，
+// 订阅里的入口只来自客户端 url-test 与内置种子 IP。
+console.log("\n66) 入口偏好整条服务端链路已删除");
+{
+  eq("EDGE_AUTO 常量已删除", W.SC.EDGE_AUTO, undefined);
+  for (const poolN of [0, 64, 1600, 3000]) {
+    const q = W.planRound(poolN, Math.floor(poolN / 2));
+    ok(`额度不超额（pool ${poolN}）`, q.adm + q.vt <= q.cap, String(q.adm + q.vt));
+  }
+  const big = W.planRound(3000, 0);
+  ok("省下来的额度分给准入/判定", big.adm + big.vt >= 40, `${big.adm} + ${big.vt}`);
+}
 
 // 67) 探测全关时，判定扫描不占额度
 console.log("\n67) 探测全关时的预算");
@@ -2111,7 +2111,7 @@ console.log("\n67) 探测全关时的预算");
     const q = W.planRound(poolN, 0);
     eq(`判定额度为 0（pool ${poolN}）`, q.vt, 0);
     ok(`准入吃满（pool ${poolN}）`, q.adm >= 40, String(q.adm));
-    ok(`不超额（pool ${poolN}）`, q.adm + q.vt + q.edge <= q.cap, String(q.adm + q.vt + q.edge));
+    ok(`不超额（pool ${poolN}）`, q.adm + q.vt <= q.cap, String(q.adm + q.vt));
   }
   const big = W.planRound(3000, 0);
   ok("准入拿到 48 上限附近", big.adm >= 44 && big.adm <= big.cap, String(big.adm));

@@ -1,5 +1,4 @@
 import { X_EDGE_IPS, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
-import { edgeRank } from "../route/edge";
 import { S } from "../core/state";
 
 export * from "./sub-common";
@@ -39,14 +38,14 @@ export function renderClash(
   const manual = String(env.nodes || "").trim();
   // 服务端测不到「客户端 → 边缘」这条路径（Worker 访问自己的域名是 522 回环），
   // 所以入口偏好交给客户端的 url-test 组实测：这里只提供候选 CF 边缘 IP，
-  // 有实测排名（edge:pref）时用它排序，否则用内置的 8 个种子 IP。
+  // 入口 IP 只用内置种子：入口质量（用户 → 边缘）只能由客户端实测，服务端测不了
+  // （Worker 打自家域名必 522 自环），所以这里不再读什么"实测排名"。
   const noEdge = Boolean(manual) || url.searchParams.get("e") === "0";
   // 通道实测：客户端对该 URL 逐条中继做 url-test（expected-status 200），把「哪条中继真能打通」
   // 变成端到端实测，而不是服务端靠流量推断（免费计划跑不动 TLS 客户端）。
   const tuRaw = url.searchParams.get("tu") || "";
   const tuUrl = /^https:\/\/[^\s"]+$/.test(tuRaw) ? tuRaw : "";
-  const ranked = noEdge ? [] : edgeRank(8);
-  const edgeIps: string[] = noEdge ? [] : ranked.length ? ranked : X_EDGE_IPS.slice(0, 8);
+  const edgeIps: string[] = noEdge ? [] : X_EDGE_IPS.slice(0, 8);
   const nodes = orderNodes(loadNodes(env, host), learned);
   const pass = trojanPasswordOf(env, id, auth);
   const protos = pickProtos(env, url, Boolean(pass));

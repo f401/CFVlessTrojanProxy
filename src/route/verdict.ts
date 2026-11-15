@@ -287,16 +287,6 @@ export function vSetState(t: string, c: string, state: VState, src: VSrc): void 
 }
 
 /**
- * 功能：读状态码。
- * @param t 目标站
- * @param c 通道键
- * @returns 状态码，无记录为 0
- */
-export function vGet(t: string, c: string): number {
-  return VT.get(t, c);
-}
-
-/**
  * 功能：读证据来源。
  * @param t 目标站
  * @param c 通道键
