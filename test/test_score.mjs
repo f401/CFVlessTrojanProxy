@@ -4215,5 +4215,72 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   );
 }
 
+/* 175：探活 RTT 不能写进真实首字节的矩；冷却中的源要真的跳过（7.185） */
+{
+  const pSrc = fs.readFileSync("src/px/pool.ts", "utf8");
+  eq(
+    "pool.ts 里没有任何 nsLatency 调用（探活 RTT 不是真实首字节）",
+    (pSrc.match(/^\s*nsLatency\(/gm) || []).length,
+    0,
+  );
+  ok(
+    "pool.ts 仍然把探活写进样本数（nsProbe）",
+    (pSrc.match(/^\s*nsProbe\(/gm) || []).length >= 4,
+    true,
+  );
+  const pk = "11.9.9.9:443";
+  W.S.nstat.delete(pk);
+  W.nsProbe(pk, 40, 38, 2);
+  W.nsProbe(pk, 44, 40, 4);
+  const st175 = W.nsGet(pk);
+  eq("探活只累加样本数", st175.pN, 2);
+  ok(
+    "探活不写首字节矩（pSum 仍是 0）",
+    st175.pSum === 0 && st175.pSumSq === 0,
+    true,
+  );
+  const u1 = "https://a185.example/x.txt";
+  const u2 = "https://b185.example/x.txt";
+  const u3 = "https://c185.example/x.txt";
+  W.SOURCES.note(u1, true);
+  ok("抓成功一次不算冷却", W.SOURCES.cooling(u1) === false);
+  W.SOURCES.note(u1, false);
+  ok("失败一次还不算冷却（要求连续两次）", W.SOURCES.cooling(u1) === false);
+  W.SOURCES.note(u1, false);
+  ok("连续两次失败进冷却", W.SOURCES.cooling(u1), true);
+  W.SOURCES.note(u1, true);
+  ok("成功之后立刻退出冷却", W.SOURCES.cooling(u1) === false);
+  const realFetch185 = globalThis.fetch;
+  const fetched185 = [];
+  const mkLines185 = (n, base) =>
+    Array.from({ length: n }, (_, i) => `${base}.${Math.floor(i / 250) + 1}.${(i % 250) + 1}:443`).join("\n");
+  globalThis.fetch = async (u) => {
+    fetched185.push(String(u));
+    const body = mkLines185(400, String(u).includes("c185") ? "13.9" : "12.9");
+    return { ok: true, status: 200, text: async () => body };
+  };
+  W.SOURCES.note(u2, false);
+  W.SOURCES.note(u2, false);
+  W.SOURCES.note(u3, false);
+  W.SOURCES.note(u3, false);
+  const c0 = W.cntView().srcSkip || 0;
+  const r1 = await W.refillPool({ poolSrc: [u1, u2, u3].join(",") }, 0);
+  eq("健康源已经抓到 400 条 → 两个冷却源被跳过，只发一次请求", fetched185.length, 1);
+  eq("被跳过的源在结果里带 skip 标记", [!!r1.sources[u2].skip, !!r1.sources[u3].skip], [true, true]);
+  ok("跳过的次数记进 srcSkip", (W.cntView().srcSkip || 0) - c0 >= 2, true);
+  ok("跳过的这一轮池子仍然有足够条目", r1.pool.length >= 300, true);
+  fetched185.length = 0;
+  globalThis.fetch = async (u) => {
+    fetched185.push(String(u));
+    const body = mkLines185(10, "14.7");
+    return { ok: true, status: 200, text: async () => body };
+  };
+  const r2 = await W.refillPool({ poolSrc: [u1, u2, u3].join(",") }, 1600);
+  eq("健康源只给 10 条时不许跳过冷却源（否则整轮刷新会被缩水守卫拒掉）", fetched185.length, 3);
+  ok("这一轮没有 skip 标记", !r2.sources[u2].skip && !r2.sources[u3].skip);
+  globalThis.fetch = realFetch185;
+  ok("POOL_ENOUGH 是 300（低于它就照旧全抓）", W.POOL_ENOUGH, 300);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

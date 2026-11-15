@@ -5,7 +5,7 @@ import { SC } from "../core/const";
 import { HOOK } from "../core/hook";
 import { logErr } from "../nodes/metrics";
 import { POOL_TTL_MS, chunks, geoLabel, probeProxy, probeSni, refillPool } from "./probe";
-import { candsFor, capOf, invalidateRank, scoreParts, nsLatency, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, isBlack, isFrozen } from "../nodes/score";
+import { candsFor, capOf, invalidateRank, scoreParts, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, isBlack, isFrozen } from "../nodes/score";
 import { BUCKET_DEF, SEEDS } from "./seed";
 import { MODES, keyOf } from "./const";
 import { S } from "../core/state";
@@ -210,7 +210,7 @@ export async function cronScan(env: Env, adm = 0) {
   await pxGet(env);
   let pool = await ensurePool(env);
   if (!pool.length || Date.now() - S.poolBuilt > POOL_TTL_MS) {
-    const { pool: fresh } = await refillPool(env);
+    const { pool: fresh } = await refillPool(env, S.pool.length);
     if (fresh.length) {
       const c = await commitPool(env, fresh);
       if (c.ok) pool = fresh;
@@ -308,7 +308,9 @@ export async function cronScan(env: Env, adm = 0) {
       cc: (x as { cc?: string }).cc || ((S.alive.get(k) || {}) as NodeEntry).cc || "",
       ms: x.ms,
     });
-    nsLatency(k, x.ms);
+    // 探活 RTT 是「ClientHello → ServerHello」，与真实请求的首字节（含 TLS 握手）不是同一个量：
+    // 写进 nsLatency 会让 pSum 停在 40ms 量级，第一条真实请求就 cus += 330 > CUSUM_H 把它冻 60 秒
+    // （7.183 在 warm.ts 修过同一处）。探活只贡献样本数 pN 与 tcp/tls 的 EWMA。
     nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
   }
 
@@ -330,7 +332,6 @@ export async function cronScan(env: Env, adm = 0) {
   for (const { k, r } of rres) {
     noteProbe(r);
     if (r && !r.bad) {
-      nsLatency(k, r.ms);
       nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
       const a = S.alive.get(k);
       if (a) a.ms = r.ms;
@@ -354,7 +355,6 @@ export async function cronScan(env: Env, adm = 0) {
     for (const { k, r } of rres2) {
       noteProbe(r);
       if (r && !r.bad) {
-        nsLatency(k, r.ms);
         nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
         const a = S.alive.get(k);
         if (a) a.ms = r.ms;

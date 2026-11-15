@@ -1,5 +1,6 @@
 import type { Socket } from "cloudflare:sockets";
 import { logErr } from "../nodes/metrics";
+import { cnt } from "../core/counter";
 import { checkTarget } from "../core/net";
 import { dec, enc, timeoutSignal, toHex, withTimeout } from "../core/util";
 import { connect } from "cloudflare:sockets";
@@ -62,6 +63,12 @@ export function takePoolLine(line: string, src: string, seen: Map<string, PoolEn
 
 export const POOL_TTL_MS = 24 * 3600e3; // 候选池重建周期（上游源每天都会变）
 export const POOL_MAX = 1600; // 候选池硬上限
+
+/**
+ * 功能：冷却中的源可以被跳过的最小已有条目数（冷启动兜底）。
+ * 低于它就照旧全抓：宁可多花几个子请求，也不能让池子在建池阶段变小。
+ */
+export const POOL_ENOUGH = 300;
 // 换节点策略（可用环境变量覆盖；驻留时间见 selector.dwellOf）
 //   pxFailMax  : 连续失败多少次才允许换（默认 3）
 //   pxForceAt  : 失败到这个数就无视驻留强制换（默认 5）
@@ -160,7 +167,7 @@ export async function probeProxy(h: string, p: number) {
 /** 一次抓取的结果：池子 + 每个源的行数/新增数（/proxyip?refill=1 直接展示） */
 export interface PoolRefill {
   pool: PoolEntry[];
-  sources: Record<string, { lines: number; ok: number }>;
+  sources: Record<string, { lines: number; ok: number; skip?: boolean }>;
 }
 
 /**
@@ -183,7 +190,7 @@ export class SourceHealth {
     return poolSources(env)
       .map((src, i) => {
         const h = this.bad.get(src);
-        const bad = !!h && h.n >= 2 && h.until > now;
+        const bad = this.cooling(src, now);
         return { src, i, bad, until: h ? h.until : 0 };
       })
       .sort((a, b) => (a.bad === b.bad ? (a.bad ? a.until - b.until : a.i - b.i) : a.bad ? 1 : -1))
@@ -201,6 +208,17 @@ export class SourceHealth {
     // 失败只影响「先抓谁」的顺序，不清空计数就无从判断冷却是否该结束
     if (ok) this.bad.set(src, { n: 0, until: 0 });
     else this.bad.set(src, { n: h.n + 1, until: Date.now() + 3600_000 });
+  }
+
+  /**
+   * 功能：这个源是否在冷却期（连续失败 ≥2 且冷却未到期）。
+   * @param src 源 URL
+   * @param now 当前时间（测试里注入假时间）
+   * @returns 在冷却期返回 true
+   */
+  cooling(src: string, now = Date.now()): boolean {
+    const h = this.bad.get(src);
+    return !!h && h.n >= 2 && h.until > now;
   }
 
   /**
@@ -272,13 +290,28 @@ export function srcHealth(): Record<string, { n: number; until: number }> {
 
 /**
  * 功能：按源健康度顺序抓取并合并去重（失败的源排到最后，不删除）。
+ *
+ * 冷却中的源在已经抓到足够条目时会**直接跳过**（`skip: true`，记 `srcSkip`）：
+ * 只调顺序、照抓不误的话，冷却从来没省下过子请求（免费计划一次调用只有 50 个）。
+ * `keep` 是当前池子大小，跳过之后新池子不能比它小太多，否则 `commitPool` 的缩水守卫会拒掉整轮刷新。
+ *
  * @param env 环境变量
- * @returns 本次抓取统计：新增数、总数、每源行数
+ * @param keep 当前池子大小（0 表示冷启动，只要够 `POOL_ENOUGH` 就可以跳过冷却源）
+ * @returns 本次抓取统计：新增数、总数、每源行数（被跳过的源带 `skip`）
  */
-export async function refillPool(env: Env): Promise<PoolRefill> {
+export async function refillPool(env: Env, keep = 0): Promise<PoolRefill> {
   const seen = new Map<string, PoolEntry>();
-  const sources: Record<string, { lines: number; ok: number }> = Object.create(null);
+  const sources: Record<string, { lines: number; ok: number; skip?: boolean }> = Object.create(null);
+  // 冷却中的源在「已经抓到足够条目」时直接跳过：rank 只决定先抓谁，
+  // 全部照抓的话冷却等于没做（每轮仍然白烧 5 个子请求）。keep 是当前池子大小，
+  // 跳过之后新池子不能比它小太多，否则 commitPool 的缩水守卫会拒掉整轮刷新。
+  const enough = Math.max(POOL_ENOUGH, Math.ceil(keep * 0.75));
   for (const src of srcRank(env)) {
+    if (seen.size >= enough && SOURCES.cooling(src)) {
+      sources[src] = { lines: 0, ok: 0, skip: true };
+      cnt("srcSkip");
+      continue;
+    }
     let lines = 0;
     const before = seen.size;
     try {

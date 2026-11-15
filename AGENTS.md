@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.184**（自举审计六十四批、共 121 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.185**（自举审计六十五批、共 123 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -355,6 +355,16 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - **D120 五类事实的寿命有两处真源**：`src/store/factmerge.ts` 里 eg=21600000 / ps=2700000 / dead=1800000 / blk=90×60000 / dns=86400000 是裸数字，而 `src/route/{eg,ps,dns}facts.ts` 与 `commitfact.ts` 各有一份同名常量。两处漂移的症状是「本地已经当它过期、DO 还当它是新鲜证据」，不报错、单测也测不出来 —— 7.154 的 `VT_TTL` 就是这么分裂成两份的。修法：`FACT_TTL`（`src/core/facts.ts`，core 层，store 与 route 都能取）做唯一真源，`factmerge` 与五个 TTL 全部改成 `FACT_TTL.xxx`（导出名保持不变，调用点与单测零改动）。
 - **D121 IPv6 中继地址被拆成两截**：`src/core/tf.ts` 的 `probeTf` 用 `lastIndexOf(":")` 拆 `host:port`、`src/route/tfb.ts` 用 `split(":")[0]` 取 IP，`2a06:98c0::1:443` 会被拆成 host=`2a06`、port=`98c0` ⇒ 探测打到完全不相干的主机上，判定键还会被写成 `r:2a06`（写进判定表的键从此对不上真实中继）。7.180 在 `http80.ts` 修过同一处，这两处漏改。修法：两处都走 `core/http80.ts` 的 `splitRelay`（认 `[v6]:port` / 裸 IPv6 / 缺端口），拼地址用新增的 `relayAddr`（IPv6 加方括号）。
 - 锁：第 174 组 12 条（`FACT_TTL` 五个数字、route 五个 TTL 与它相等、`factmerge` 不再含裸数字、400 个站点后 `bucket.size <= 64` 且高频类保留、`errlog` 的 `cold.length - 64`、`splitRelay` 的两种 IPv6 写法、`tf.ts`/`tfb.ts` 的源码接线）。A/B 只 stash `errlog.ts`/`tf.ts`/`tfb.ts`（`facts.ts` 与五个 TTL 别名是等价改写，留着才能解析）→ 旧代码 **1243 通过 / 4 失败**，恢复后 **1247 / 0**。
+### 7.185 自举审计（第 122–123 条，探活又写回首字节矩与冷却源没真跳过）
+
+- **D122 探活 RTT 第三次被写进真实首字节**：`src/px/pool.ts` 的三条探活路径（`refreshOne` 与 `probeAlive` 两支）都在 `nsProbe` 之后又调了 `nsLatency(k, x.ms)`。探活是「ClientHello → ServerHello」（40ms 量级），真实请求的首字节含 TLS 握手（400ms 量级）——`nsLatency` 的 `cus` 按 `ms - base` 累加，`base ≈ 40ms` 时第一条真实请求就 `+330 > CUSUM_H(300)`，把刚被扫出来的中继冻 60 秒、站点排行整份作废。同一处的对照组是 `reProbe` 分支，它本来只有 `nsProbe`。
+- 修法：三处 `nsLatency` 全删（样本数仍由 `nsProbe` 累加），`nsLatency` 从 import 里去掉。
+- **D123 冷却中的源从来没有被跳过**：`SourceHealth.rank(env)` 只把冷却源排到最后，`refillPool` 仍无条件 `fetch` 每一个源 ⇒ 文档声称的「避免白烧子请求预算」从未成立（免费计划一轮 48 个子请求）。
+- 修法：`SourceHealth` 新增 `cooling(src, now)`（`n >= 2 && until > now`，`rank` 里那句判断改成调它，保持单一真源）；`refillPool(env, keep = 0)` 在池子够多（`Math.max(POOL_ENOUGH, ceil(keep * 0.75))`，`POOL_ENOUGH = 300`）时 `skip` 冷却源并记 `cnt("srcSkip")`，不够就照旧全抓（否则缩水守卫会拒掉整轮刷新，池子反而变薄）；`cronScan` 传 `S.pool.length` 当 `keep`。
+- 锁：第 175 组 12 条（`pool.ts` 里 `nsLatency(` 计数为 0 而 `nsProbe(` ≥ 4；两次 `nsProbe` 后 `pN === 2` 且 `pSum === 0`；`cooling` 的四条状态迁移；池子够多时只发 1 次 `fetch` 且带 `skip`；只给 10 条时 3 次 `fetch` 且不跳；`POOL_ENOUGH === 300`）。A/B：`pool.ts` 退回旧版 → 红 1；删掉跳过判据 → 红 3。
+- 教训一：`test/test_score.mjs` 的 `ok(n, c, info)` 第三参是**失败信息**不是 `want`，`ok("…", cond, false)` 永远是红的；要比较就用 `eq` 或写成 `cond === false`。
+- 教训二：源码回退后不重新 `bundle` + `mk_test`，行为断言两边全绿（第一版 A/B 就这样假通过）——只有「读源码文本」的断言会红。
+
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

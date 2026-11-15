@@ -71,6 +71,7 @@ export class AppState {
     "restoreSkip",
   "admStatsSkip",
     "snapSkip",
+    "srcSkip",
     "pendSkip",
     "egSent",
     "rgFail",
