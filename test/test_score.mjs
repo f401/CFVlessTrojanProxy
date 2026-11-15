@@ -3123,5 +3123,14 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   eq("过期钉住被清掉（trim 传未来时间）", W.POLICY.pinSize(), 0);
   W.FACTS.clear();
 }
+/** 第 97 组（v7.142）：门面不再提供「永远不写」的快照入口 + 管理面板的子请求预算 */
+{
+  // usageSnapWrite 需要用户表：门面只给 env 时 list=[] 会立刻 return，永远不写却返回 resolved
+  eq("门面不再暴露 usageSnapWrite（模块函数要求用户表）", W.STORE.usageSnapWrite, undefined);
+  // 管理面板每人一次 DO 往返：免费计划一次调用 50 个子请求，必须留出固定开销的余量
+  eq("管理面板一次最多读 32 人的用量", W.SC.ADMIN_STATS_MAX, 32);
+  eq("超出预算的人数会被计数（而不是静默显示 0）", "admStatsSkip" in W.cntView(), true);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

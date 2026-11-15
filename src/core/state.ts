@@ -69,6 +69,7 @@ export class AppState {
   cntKeys = [
     "restore",
     "restoreSkip",
+  "admStatsSkip",
     "egSent",
     "psNote",
     "psDO",

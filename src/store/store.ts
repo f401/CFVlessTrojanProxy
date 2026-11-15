@@ -2,7 +2,7 @@
 // 上层只跟 STORE 打交道，换实现（KV→DO、快照格式）不用改调用方。
 import { kvGet, kvGetStrict, kvSet } from "./kv";
 import { clSnapshot, kickFlush, pendAdd, pendFlush, primaryId, scheduleFlush } from "./pend";
-import { flushSnap, getSnap, restoreUsage, usageSnapGet, usageSnapWrite } from "./snapshot";
+import { flushSnap, getSnap, restoreUsage, usageSnapGet } from "./snapshot";
 import { nodeSnapGet, readStats, statBump } from "./stats";
 
 export class Store {
@@ -68,10 +68,10 @@ export class Store {
     return usageSnapGet(env);
   }
 
-  /** 功能：usageSnapWrite 是薄包装，直接委托 usageSnapWrite。@param env Env。@returns 无（写完就返回，写失败也不抛） */
-  usageSnapWrite(env: Env): Promise<void> {
-    return usageSnapWrite(env);
-  }
+  // 这里原本有一个 usageSnapWrite 门面方法，v7.142 删掉：模块函数要求传入用户表
+  // （`usageSnapWrite(env, users)`），门面只给 env ⇒ `list = []` ⇒ 立刻走到
+  // `if (!Object.keys(out.users).length) return;`，**永远不会写任何东西**，
+  // 却返回一个 resolved 的 Promise，调用方无从察觉。想写快照就直接调模块函数并给出用户表。
 
   /** 功能：restore 是薄包装，直接委托 restoreUsage。@param env Env。@param id string。@param snap? UsageSnap。@returns 恢复进 DO 后的用量记录；没快照或写失败为 null */
   restore(env: Env, id: string, snap?: UsageSnap): Promise<UsageMeter | null> {

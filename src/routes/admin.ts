@@ -2,6 +2,8 @@ import { PAGES } from "../views/pageview";
 import { adminAuthed, newNonce, randomPwd, rlReset, rlTake, sessionToken, sha256Hex } from "../edge/auth";
 import { loadUsers, saveUsers } from "../proxy/protocol";
 import { eachLimit } from "../core/util";
+import { cnt } from "../core/counter";
+import { SC } from "../core/const";
 import { readStats } from "../store/index";
 import { html } from "../edge/respond";
 import type { RouteCtx } from "../edge/types";
@@ -115,7 +117,13 @@ export async function admin(c: RouteCtx): Promise<Response> {
     const statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }> = {};
     // 并行读：用户一多，串行 await 会把面板拖到几秒（每次都是一次 DO 往返）。
     // 限 8 并发：不把 50 个用户同时打出去，也不至于一个个排队。
-    await eachLimit(users.list, 8, async (u) => {
+    // 但并发限制不限制**总量**：免费计划一次调用只有 50 个子请求，每个用户一次 DO 往返，
+    // 用户数超过预算时排在后面的读数会全部失败，而这里的 catch 只留一句注释 ⇒
+    // 面板上那些人静默显示 0（看起来像「这用户没流量」，实际是没读到）。
+    // 所以按 ADMIN_STATS_MAX 截断，并把被截掉的人数记进计数器（v7.142）。
+    const head = users.list.slice(0, SC.ADMIN_STATS_MAX);
+    if (users.list.length > head.length) cnt("admStatsSkip", users.list.length - head.length);
+    await eachLimit(head, 8, async (u) => {
       try {
         const s = await readStats(env, u.id);
         statsMap[u.id] = {
