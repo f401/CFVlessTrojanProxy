@@ -4135,5 +4135,27 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   ok("「暂无数据」跨满 RTT 表的 5 列", pSrc.includes("<td colspan=5>暂无数据</td>"));
 }
 
+{
+  console.log("\n第173组：派生密钥的缓存、起搏样本、补救链的候选过滤");
+  const eA = { kek: "kek-alpha" };
+  const eB = { kek: "kek-beta" };
+  const kA = await W.aesKey(eA);
+  const kB = await W.aesKey(eB);
+  ok("换 kek 之后重新派生密钥（否则旧 isolate 一直用旧密钥解新数据）", !!kA && !!kB && kA !== kB);
+  eq("同一个 kek 复用缓存", await W.aesKey({ kek: "kek-alpha" }), kA);
+  eq("没有 kek 时不派生（seal 于是按明文存）", await W.aesKey({}), null);
+  const ct = await W.seal(eA, { x: 1 });
+  ok("密文带 ENC1 前缀", String(ct).startsWith("ENC1:"));
+  eq("换 kek 之后解不开（不是静默返回旧值）", await W.unseal(eB, ct), null);
+  eq("原来的 kek 解得开", (await W.unseal(eA, ct)).x, 1);
+  eq("没有 kek 时按明文 JSON 存（刻意的降级，不是加密）", await W.seal({}, { y: 2 }), JSON.stringify({ y: 2 }));
+  const warmSrc = fs.readFileSync("src/px/warm.ts", "utf8");
+  ok("起搏不把探活 RTT 写进真实首字节矩（否则第一条真请求就被 CUSUM 冻结）", !/nsLatency\s*\(/.test(warmSrc));
+  ok("起搏仍然记探活样本（pN / tcp / tls）", /nsProbe\s*\(/.test(warmSrc));
+  const fbSrc = fs.readFileSync("src/proxy/fallback.ts", "utf8");
+  ok("补救链跳过一个被污染的条目，而不是整条放弃", /checkTarget\(host, port\)\)\s*continue;/.test(fbSrc));
+  ok("补救链也跳过本站点已判封锁的中继", /HOOK\.chanPref\(host, st\.host\) === 2/.test(fbSrc));
+  ok("补救链的候选上限仍是 4（每个都是一次 connect）", /const ALT_TRIES = 4;/.test(fbSrc));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

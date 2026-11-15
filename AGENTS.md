@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.182**（自举审计六十二批、共 114 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.183**（自举审计六十三批、共 118 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -449,6 +449,12 @@ A/B：把 `src/proxy/cfverdict.ts` 换回旧版跑同一份测试 → **1198 通
 教训：前三条都是「同一条规则只在一个调用点成立」——上限、淘汰、口径写在某处，别的调用点绕过去，
 不产生错误，只产生缓慢漂移。
 
+### 7.183 自举审计（第 115–118 条，起搏样本与补救链）
+
+- **115 `seedAlive` 把探活 RTT 写进真实首字节矩**（`src/px/warm.ts`）：它探完立刻 `nsLatency(k, x.ms)`，而探活的 ms 是「ClientHello→ServerHello 到中继」，比经中继的 TTFB 小一个数量级（40ms vs 400ms）。后果不是「估计偏低」这么温和 —— `nsLatency` 里的 CUSUM 拿它当基线，第一条真实请求就 `cus += 400-40-30`，越过 `CUSUM_H = 300` 立刻冻结 60 秒并 `invalidateRank()`，而冷启动时它往往是唯一能用的中继（`seedAlive` 只在 `S.alive.size === 0` 时才跑）。7.165 已经因为同一条理由把 `nsProbe` 的 `ms` 参数改名 `_ms`（「探活首字节与真实请求不是同一个量」），但漏掉了这条调用方。修法：删掉 `nsLatency` 这一行，排序不缺这个数 —— 优先延迟读 `a.ms`（`S.alive` 条目里的探活延迟），`tcp/tls` 由 `nsProbe` 记。
+- **116 派生密钥的缓存不记 kek**（`src/store/crypto.ts`）：`if (KEY_BOX.aek) return KEY_BOX.aek;` 之后才读 `env.kek`，所以换 kek（面板改 secret）以后旧 isolate 一直用旧密钥解新数据。表现：`kvGetStrict` 抛 `kv unseal failed`（池子锚点写不进去、`SEEDS.write` 返回 false）、`kvGet` 返回 null（快照被当成空表），要等 isolate 回收才恢复，且没有任何日志指向「密钥换了」。修法：缓存带 `raw`，不一致就重新派生。同一处还有一句假文档「kek 缺失时给出可用的降级密钥」——实际是返回 null、`seal` 按**明文 JSON** 存，改成实话（这属于第 113 条那族「文档在替代码撒谎」）。
+- **117 补救链遇到一个坏条目就整条放弃**（`src/proxy/fallback.ts`）：`if (checkTarget(host, port)) return null;` —— 池子只要有一条被污染（内网地址/禁用端口），补救链直接放弃，调用方回落直连、白丢这次请求。改成 `continue`。
+- **118 补救链不过滤已判封锁的中继**（同一文件）：主路径 `Dialer.open → Selector.current → HOOK.chanPref` 会跳过「本站点 × 该中继已被实测判为封锁」的候选，补救链只用 `nextNode`（只看分数）。走到补救链时客户端已经等了两三秒，再花 4 × 2.5 秒拨一遍已知会 403 的中继没有任何收益。改成同一个口径：`HOOK.chanPref(host, st.host) === 2` 就跳过。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

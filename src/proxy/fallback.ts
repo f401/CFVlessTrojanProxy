@@ -4,6 +4,7 @@ import { withTimeout } from "../core/util";
 import { logErr } from "../nodes/metrics";
 import { isCfIp } from "../core/net";
 import { checkTarget } from "./dial";
+import { HOOK } from "../core/hook";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 
@@ -36,8 +37,13 @@ export async function dialAnother(
     const i = alt.lastIndexOf(":");
     const host = alt.slice(0, i);
     const port = Number(alt.slice(i + 1)) || 443;
-    if (checkTarget(host, port)) return null; // 池子可能被污染：内网/禁用端口一律不拨
+    // 池子可能被污染：内网/禁用端口一律不拨。这里是 continue 不是 return ——
+    // 一条被污染的条目不该让整条补救链放弃（调用方回落到直连，等于白丢这次请求）。
+    if (checkTarget(host, port)) continue;
     if (st.cf && isCfIp(host)) continue; // 见上：CF 托管目标必须换到非 CF 出口
+    // 与主路径（Dialer.open → Selector.current → HOOK.chanPref）同一个口径：这个站点到这个中继
+    // 已经被实测判为封锁的，别再花 2.5 秒拨一次 —— 走到补救链时客户端已经等了两三秒。
+    if (HOOK.chanPref && HOOK.chanPref(host, st.host) === 2) continue;
     // 与 Dialer.open 的主路径同一个口径：connect() 自己没有超时，挂死的中继会把请求拖到
     // 客户端放弃为止。补救链更怕这个——走到这里时客户端已经等了两三秒。
     const pk = Promise.resolve(connect({ hostname: host, port }));

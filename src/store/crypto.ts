@@ -2,7 +2,7 @@ import { enc } from "../core/util";
 
 /* 存储加密：AES-GCM 封装 + base64 */
 
-const KEY_BOX: { aek: CryptoKey | null } = { aek: null };
+const KEY_BOX: { aek: CryptoKey | null; raw: string } = { aek: null, raw: "" };
 
 /**
  * 功能：Uint8Array → base64（分块处理，避免大数组爆栈）。
@@ -30,16 +30,25 @@ export function b64d(str: string) {
 }
 
 /**
- * 功能：由 env.kek 派生 AES-GCM 密钥（进程内缓存，kek 缺失时给出可用的降级密钥）。
+ * 功能：由 env.kek 派生 AES-GCM 密钥（进程内缓存；没有 kek 时返回 null，调用方按明文 JSON 存）。
  * @param env 环境变量
- * @returns CryptoKey
+ * @returns CryptoKey；env.kek 为空时返回 null
  */
 export async function aesKey(env: Env) {
-  if (KEY_BOX.aek) return KEY_BOX.aek;
   const raw = String((env && env.kek) || "");
-  if (!raw) return null;
+  // 缓存必须记住它是用哪一份 kek 派生的。换 kek（面板改了 secret）之后，旧 isolate 里
+  // 缓存的 aek 会继续拿旧密钥去解新数据，表现为「所有 KV 读都解不开」：kvGetStrict 抛错
+  //（写路径被拒，池子锚点写不进去）、kvGet 返回 null（快照被当成空表）——直到 isolate
+  // 被回收为止，而且没有任何日志能看出是密钥换了。
+  if (KEY_BOX.aek && KEY_BOX.raw === raw) return KEY_BOX.aek;
+  if (!raw) {
+    KEY_BOX.aek = null;
+    KEY_BOX.raw = "";
+    return null;
+  }
   const dig = await crypto.subtle.digest("SHA-256", enc.encode(raw));
   KEY_BOX.aek = await crypto.subtle.importKey("raw", dig, "AES-GCM", false, ["encrypt", "decrypt"]);
+  KEY_BOX.raw = raw;
   return KEY_BOX.aek;
 }
 
