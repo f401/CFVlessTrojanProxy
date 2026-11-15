@@ -1,23 +1,45 @@
 import { S } from "../core/state";
 import { httpProbe } from "./dial";
 
+/** 判定缓存的有效期：3 分钟 */
+const CF_HTTP_TTL = 180000;
+/** 探测失败后的负缓存：20 秒内不再重试（否则每个请求都会再探一次） */
+const CF_HTTP_NEG = 20000;
+
 /** 目标站点的 HTTP 判定缓存：200 = 本出口没被按 IP 拒，403 = 被拒（必须绕中继）。0 = 未知。 */
 export function cfHttpCode(host: string): number {
   const c = S.cfHttp.get(host);
-  return c && Date.now() - c.t < 180000 ? c.code : 0;
+  return c && Date.now() - c.t < CF_HTTP_TTL ? c.code : 0;
 }
 
-/** 过期就后台刷新一次（不进热路径，失败静默）。 */
+/**
+ * 功能：过期就后台刷新一次（不进热路径，失败静默）。
+ *
+ * 去重是必需的：这个函数在 `Dialer.open` 里被**每个** CF 托管目标的连接调用，
+ * 而探测要占一个 `connect()` 名额（免费计划全局 6 个）。冷启动时同一站点来 6 条连接，
+ * 就是 6 次并发探测 —— 会正好把真实拨号的名额吃掉，表现是「所有站点一起变慢/失败」。
+ * 因此：在途的站点只探一次；探失败也记 20 秒负缓存，避免逐请求重试。
+ * @param {string} host 目标主机
+ * @param {{ waitUntil(p: Promise<unknown>): void }} ctx 请求上下文
+ * @returns {void}
+ */
 export function refreshCfHttp(host: string, ctx: { waitUntil(p: Promise<unknown>): void }): void {
   const c = S.cfHttp.get(host);
-  if (c && Date.now() - c.t < 180000) return;
+  if (c && Date.now() - c.t < CF_HTTP_TTL) return;
+  // 在途：已经有人在探这个站点，不要再发一次
+  if (S.cfHttpFlight.has(host)) return;
   if (S.cfHttp.size > 200) S.cfHttp.clear();
+  if (S.cfHttpFlight.size > 200) S.cfHttpFlight.clear();
+  S.cfHttpFlight.add(host);
   ctx.waitUntil(
     httpProbe(host, 2500)
       .then((v) => {
-        if (v.code) S.cfHttp.set(host, { code: v.code, colo: v.colo, t: Date.now() });
+        // 先写负缓存再覆盖：拿到状态码时正缓存覆盖它
+        S.cfHttp.set(host, { code: v.code, colo: v.colo, t: v.code ? Date.now() : Date.now() - CF_HTTP_TTL + CF_HTTP_NEG });
       })
-      .catch(() => {}),
+      .catch(() => {})
+      .finally(() => {
+        S.cfHttpFlight.delete(host);
+      }),
   );
 }
-

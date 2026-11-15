@@ -215,7 +215,6 @@ export class PsFacts {
   delta(): PsWire[] {
     const out: PsWire[] = [];
     for (const [k, r] of this.pend) {
-      // 就退化成「现在还行」—— 康复通道在每个新 isolate 里都要重新攒一次，D29 的死锁复发。
       out.push({ k, q: r.q, n: r.n, at: r.at, top: r.top ?? r.q });
       this.sent.set(k, r.at);
       if (out.length >= 60) break;

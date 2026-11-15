@@ -213,6 +213,8 @@ export class AppState {
   /** 命中过 Cloudflare 托管的目标（host → 过期时间），省掉重复解析 */
   cfHost: Map<string, number> = new Map();
   cfHttp: Map<string, { code: number; colo: string; t: number }> = new Map();
+  /** 正在探测的站点（`refreshCfHttp` 的在途集合）：探测要占 connect 名额，同一站点只能有一条在飞 */
+  cfHttpFlight: Set<string> = new Set();
   aaaaCache: Map<string, { ip: string; t: number }> = new Map();
 
   constructor() {

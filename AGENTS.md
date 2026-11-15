@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.179**（自举审计五十九批、共 102 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.180**（自举审计六十批、共 106 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -407,6 +407,18 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - 锁：第 91 组改成「只作判据」——`ALIVE_MIN`/`alivePlan` 已删除、五种子请求配额下加码都被夹回原值、
   `health.ts` 含 `target: ALIVE_TARGET`/`short: ips.length < ALIVE_TARGET`、`cron.ts` 里不再有 `alivePlan(` 调用
   （按调用判而不是按名字判：注释里要留历史说明）。A/B：旧代码 **1185 通过 / 3 失败** → 新 1188/0。
+### 7.180 自举审计（第 103–106 条，探测路径）
+
+四条合进一个版本（用户要求少迭代）：三条在「探测 / 缓存」的边界上，一条是 7.163 漏掉的类型跟随。
+
+- **第 103 条 `probeTf` 没有自己的时间预算**（`src/core/tf.ts`）：userland TLS 走中继，卡住的那一刻不会自己回来。`runTfb` 虽然用 `withTimeout(..., 8000)` 包住了 DO 调用，但那只是**调用方**不再等 —— DO 里那个请求会一直挂着，而 `/meter/tf`、`/meter/tfb` 与计量端点共用同一个 DO 实例。现在 `probeTf` 内部 `await withTimeout(work, TF_MS, "tf timeout")`（`TF_MS = 8000`，覆盖「请求 + 读体」整段），超时后 `void work.catch(() => {})` 防 unhandled rejection（7.84 那个 1101 的老坑），`finally` 里照旧 `c.close()`。
+- **第 104 条 `probeHttp80` 把 IPv6 中继拆坏**（`src/core/http80.ts`）：原来是 `relay.split(":")`，而 IPv6 字面量本身就带冒号 —— `2a06:98c0::1:443` 会被拆成 host=`2a06`、port=`98c0`（→ 80），探测打到完全不相干的主机上；同一个操作在 `src/core/tf.ts` 里用的是 `lastIndexOf(":")`，两处口径不一致。新增 `splitRelay(raw, defPort)`：认裸 IPv6、`[v6]:port`、端口 0 视作没写。
+- **第 105 条 `refreshCfHttp` 没有在途去重**（`src/proxy/cfverdict.ts`）：它在 `Dialer.open` 里被**每个** CF 托管目标的连接调用，而探测要占一个 `connect()` 名额（免费计划全局 6 个）。冷启动时同一站点来 6 条连接就是 6 次并发探测，正好把真实拨号的名额吃掉 —— 表现是「所有站点一起变慢或失败」，日志里却什么都没有。修法：`S.cfHttpFlight` 在途集合（有界 200）+ 探测失败记 20 秒负缓存（`CF_HTTP_NEG`），否则失败还会逐请求重试。
+- **第 106 条 `FactsBody.ps` 的类型缺 `top`**（`src/route/verdictsync.ts`）：7.163 给 `PsWire` 加了 `top`，DO 的 `/vt` 也在发，但这里只声明 `{ k, q, n, at }` —— 运行时靠 `as PsWire[]` 蒙过去，类型层面已经漂移。与第 72 条（`PsWire.top`）、第 93 条（`NodeEntry.src`）同族。
+- 顺手：`src/route/psfacts.ts` 的 `delta()` 里有一句孤儿注释碎片（7.163 改 `top` 时被切断的半句），删掉。
+
+锁（第 170 组 13 条）：`splitRelay` 六种写法（含裸 IPv6 与 `[v6]:port`）、同一站点在途时只探一次、在途标记会清、探过之后不再立刻重探，外加四条源码断言（`TF_MS` 与 `withTimeout(work, TF_MS`、`relay ? splitRelay(relay, 80)`、`FactsBody.ps` 带 `top?: number`）。
+A/B：把 `src/proxy/cfverdict.ts` 换回旧版跑同一份测试 → **1198 通过 / 3 失败**（正是三条去重断言）；`splitRelay` 在旧版里不存在，整组会崩 —— 这一条按「旧版压根没有这个能力」处理，不做假红。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

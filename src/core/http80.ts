@@ -16,6 +16,37 @@ export interface HttpProbeResult {
 const EMPTY: HttpProbeResult = { ok: false, code: 0, status: "", server: "", bytes: 0, ms: 0, err: "" };
 
 /**
+ * 功能：把 `host:port` 拆成主机与端口，认裸 IPv6 与 `[v6]:port` 两种写法。
+ *
+ * 为什么不能 `split(":")`：IPv6 字面量本身就带冒号，`2a06:98c0::1:443` 会被拆成
+ * host=`2a06`、port=`98c0`（→ 80），探测打到完全不相干的主机上。中继列表里的地址
+ * 来自客户端与公开源，不能假定是 IPv4。
+ * @param {string} raw `host:port` / `[v6]:port` / 裸 host
+ * @param {number} defPort 没写端口时的默认端口
+ * @returns {[string, number]} 主机与端口
+ */
+export function splitRelay(raw: string, defPort: number): [string, number] {
+  const s = String(raw || "").trim();
+  if (!s) return ["", defPort];
+  // 方括号写法：[v6]:port
+  if (s.startsWith("[")) {
+    const br = s.lastIndexOf("]");
+    if (br > 0) {
+      const port = Number(s.slice(br + 1).replace(/^:/, ""));
+      return [s.slice(1, br), port > 0 ? port : defPort];
+    }
+  }
+  const i = s.lastIndexOf(":");
+  if (i < 0) return [s, defPort];
+  const head = s.slice(0, i);
+  const tail = s.slice(i + 1);
+  // 冒号后不是纯数字 = 没有端口；冒号前还有冒号 = 裸 IPv6（整串是主机）
+  if (!/^\d{1,5}$/.test(tail) || head.includes(":")) return [s, defPort];
+  const port = Number(tail);
+  return [head, port > 0 ? port : defPort];
+}
+
+/**
  * 功能：明文 HTTP/80 探目标是否可达（比 TLS 探测便宜，用于判断「IP 层通不通」）。
  * @param host 目标主机名
  * @param relay 中继 host:port，空串表示直连
@@ -24,7 +55,7 @@ const EMPTY: HttpProbeResult = { ok: false, code: 0, status: "", server: "", byt
  */
 export async function probeHttp80(host: string, relay = "", path = "/"): Promise<HttpProbeResult> {
   const t0 = Date.now();
-  const [rh, rp] = relay ? relay.split(":") : [host, "80"];
+  const [rh, rp] = relay ? splitRelay(relay, 80) : [host, 80];
   let sock: ReturnType<typeof connect>;
   try {
     sock = connect({ hostname: rh, port: Number(rp) || 80 });

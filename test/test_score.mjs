@@ -3989,5 +3989,39 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
     globalThis.fetch = realFetch;
   }
 }
+// ── 170. 探测路径的三个边界（7.180）────────────────────────────────────────
+{
+  console.log("\n170. 探测路径");
+  const sr = (x, d) => W.splitRelay(x, d);
+  eq("host:port 正常拆开", sr("104.16.0.1:443", 80), ["104.16.0.1", 443]);
+  eq("没有端口就用默认值", sr("relay.example.com", 80), ["relay.example.com", 80]);
+  eq("裸 IPv6 整串是主机，端口取默认", sr("2a06:98c0::1", 443), ["2a06:98c0::1", 443]);
+  eq("带方括号的 IPv6 + 端口", sr("[2a06:98c0::1]:8443", 443), ["2a06:98c0::1", 8443]);
+  eq("端口 0 当作没写", sr("a.example:0", 80), ["a.example", 80]);
+  eq("空串回空主机", sr("", 80), ["", 80]);
+
+  // 在途去重：同一站点只能有一条探测在飞。探测要占一个 connect 名额（免费计划全局 6 个），
+  // 冷启动时同一站点来 6 条连接就是 6 次并发探测，正好把真实拨号的名额吃掉。
+  const launches = [];
+  const ctx = { waitUntil: (p) => launches.push(p) };
+  W.S.cfHttp.clear();
+  W.S.cfHttpFlight.clear();
+  W.refreshCfHttp("dedupe.test", ctx);
+  W.refreshCfHttp("dedupe.test", ctx);
+  eq("同一站点在途时只探一次", launches.length, 1);
+  ok("在途集合里记着它", W.S.cfHttpFlight.has("dedupe.test"));
+  await Promise.allSettled(launches);
+  ok("探测结束后清掉在途标记", !W.S.cfHttpFlight.has("dedupe.test"));
+  W.refreshCfHttp("dedupe.test", ctx);
+  eq("刚探过一次就不再立刻重探（负缓存 20 秒）", launches.length, 1);
+
+  const tfSrc = fs.readFileSync("src/core/tf.ts", "utf8");
+  ok("probeTf 有自己的时间预算", tfSrc.includes("const TF_MS = 8000;") && tfSrc.includes("withTimeout(work, TF_MS"));
+  const h80 = fs.readFileSync("src/core/http80.ts", "utf8");
+  ok("probeHttp80 用 splitRelay 解析中继", /relay \? splitRelay\(relay, 80\)/.test(h80));
+  const vsSrc = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+  ok("FactsBody.ps 的类型带上 top（7.163 漏的跟随）", vsSrc.includes("at: number; top?: number }>"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
