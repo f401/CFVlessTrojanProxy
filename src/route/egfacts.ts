@@ -34,6 +34,8 @@ export class EgFacts {
   private m = new Map<string, { f: number; at: number }>();
   /** 尚未确认送达的增量：IP → { f, at } */
   private pend = new Map<string, { f: number; at: number }>();
+  // 这一批真正发出去的行（键 → 发出时的 at）：ack 只清它们，见 ack() 的注释
+  private sent = new Map<string, number>();
 
   /**
    * 功能：记一条出口族事实。
@@ -97,6 +99,7 @@ export class EgFacts {
     const out: EgRow[] = [];
     for (const [i, e] of this.pend) {
       out.push({ i, f: e.f, at: e.at });
+      this.sent.set(i, e.at);
       if (out.length >= 16) break;
     }
     if (out.length) cnt("egSent", out.length);
@@ -105,11 +108,19 @@ export class EgFacts {
 
   /** 功能：上报成功 —— 待发增量正式生效。@returns {void} */
   ack(): void {
-    this.pend.clear();
+    // 只清这一批真正发出去的行：delta() 有上限（本表最多 16 行），一次清空全部 pending 会让
+    // 超出上限的行既没发出去、也不再重发 —— 证据就这样永久丢了（v7.143 修）。
+    // 只在值没变新时才清：delta 与 ack 之间可能又记了一条更新的观测，那条还没发过。
+    for (const [k, at] of this.sent) {
+      const cur = this.pend.get(k);
+      if (cur && cur.at <= at) this.pend.delete(k);
+    }
+    this.sent.clear();
   }
 
   /** 功能：上报失败 —— 丢弃待发标记，下一轮重新登记（值仍在 `m` 里，重发不会丢数据）。@returns {void} */
   nack(): void {
+    this.sent.clear();
     // 保留 pending：上报失败时下一轮 delta() 会把同一批原样再给一次（重发 = 重试，幂等靠 at）。
     // 清掉它就等于「这条证据从此不会送到 DO」—— 与 v8 §3 的 pending 语义相反（只有 ack 才清）。
   }
@@ -163,6 +174,7 @@ export class EgFacts {
   clear(): void {
     this.m.clear();
     this.pend.clear();
+    this.sent.clear();
   }
 
   /**

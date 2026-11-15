@@ -3086,8 +3086,17 @@ eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
   // 本轮核心：康复通道给的是「再试一次」的机会，闸门必须问「曾经行过吗」，
   // 不是「现在还好吗」—— 后者恰恰是被降权那批通道最不可能满足的条件。
   eq("但历史最好仍是 100%（康复通道还认它）", W.psBest(rh, rip) > 0.99, true);
-  eq("psfacts 不再保留已上报表（只写不读的内存）", W.PS.sent, undefined);
-  eq("dnsfacts 同上", W.DNS.sent, undefined);
+  // 7.143 起 sent 又回来了，但这次它**有读端**：ack() 靠它只清这一批真正发出去的行
+  // （delta 有上限，一次清空整个 pending 会把超限的行丢掉）。这里锁住「发完即清」这个不变量。
+  W.PS.note("sent.example", "203.0.113.90", true, Date.now());
+  W.PS.delta();
+  eq("psfacts 的已发表在 delta 后非空（ack 要用它）", W.PS.sent instanceof Map && W.PS.sent.size > 0, true);
+  W.PS.ack();
+  eq("ack 之后已发表清空（不会只增不减）", W.PS.sent instanceof Map && W.PS.sent.size === 0, true);
+  W.DNS.note("sent.example", true, Date.now());
+  W.DNS.delta();
+  W.DNS.ack();
+  eq("dnsfacts 的已发表同样在 ack 后清空", W.DNS.sent instanceof Map && W.DNS.sent.size === 0, true);
   W.PS.clear();
   W.DNS.clear();
 
@@ -3165,6 +3174,45 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   const row9 = (c9.cl || []).find((r) => r.k === "n1");
   eq("cl 仍然按节点累加计数", row9 && row9.n, 3);
   eq("cl 的分位数取最新一段", row9 && row9.p95, 22);
+}
+
+
+// 106) 增量有上限，ack 只能清「真正发出去的那一批」
+// 为什么测这个：delta() 有行数上限（eg 16 / 其余 60），而 ack() 过去一次清空整个 pending ——
+// 超出上限的行既没发出去、也不会再重发，等于每条 flush 都在丢证据，且没有任何报错。
+{
+  W.FACTS.clear();
+  const t0 = Date.now();
+  // ps：70 个键，一批只发 60
+  for (let i = 0; i < 70; i++) W.PS.note("a" + i + ".example", "198.51.100." + i, true, t0);
+  eq("ps 一批最多 60 行", W.PS.delta().length, 60);
+  W.PS.ack();
+  eq("ack 之后剩下的 10 行仍在待发里（不是丢掉）", W.PS.delta().length, 10);
+  W.PS.ack();
+  eq("再 ack 一次就清空", W.PS.delta().length, 0);
+  // delta 与 ack 之间又记了一条更新的观测：那条还没发过，不能被清
+  W.PS.note("b.example", "203.0.113.77", false, t0);
+  eq("单条待发正常给出", W.PS.delta().length, 1);
+  W.PS.note("b.example", "203.0.113.77", true, t0 + 5000);
+  W.PS.ack();
+  const d4 = W.PS.delta();
+  eq("ack 不会清掉 delta 之后才变新的观测", d4.length, 1);
+  eq("给出的确实是新的那条", d4[0] && d4[0].at, t0 + 5000);
+  W.PS.ack();
+  // eg：上限 16
+  for (let i = 0; i < 20; i++) W.EG.note("198.51.100." + i, 4, t0);
+  eq("eg 一批最多 16 行", W.EG.delta().length, 16);
+  W.EG.ack();
+  eq("ack 后剩下的 4 行仍待发", W.EG.delta().length, 4);
+  W.EG.ack();
+  eq("eg 待发已清空", W.EG.delta().length, 0);
+  // dns：上限 60
+  for (let i = 0; i < 65; i++) W.DNS.note("h" + i + ".example", true, t0);
+  eq("dns 一批最多 60 行", W.DNS.delta().length, 60);
+  W.DNS.ack();
+  eq("ack 后剩下 5 行仍待发", W.DNS.delta().length, 5);
+  W.DNS.ack();
+  W.FACTS.clear();
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

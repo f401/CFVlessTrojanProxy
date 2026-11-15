@@ -64,6 +64,8 @@ export class BlkFacts {
   private rows = new Map<string, Row>();
   private batch = new Map<string, Batch>();
   private pend = new Map<string, Row>();
+  // 这一批真正发出去的行（键 → 发出时的 at）：ack 只清它们，见 ack() 的注释
+  private sent = new Map<string, number>();
   private mute = new Map<string, number>();
 
   /**
@@ -211,6 +213,7 @@ export class BlkFacts {
     const out: BlkWire[] = [];
     for (const [k, r] of this.pend) {
       out.push({ k, n: r.n, at: r.at });
+      this.sent.set(k, r.at);
       if (out.length >= 60) break;
     }
     return out;
@@ -218,11 +221,19 @@ export class BlkFacts {
 
   /** 功能：上报成功。@returns {void} */
   ack(): void {
-    this.pend.clear();
+    // 只清这一批真正发出去的行：delta() 有上限（本表最多 60 行），一次清空全部 pending 会让
+    // 超出上限的行既没发出去、也不再重发 —— 证据就这样永久丢了（v7.143 修）。
+    // 只在值没变新时才清：delta 与 ack 之间可能又记了一条更新的观测，那条还没发过。
+    for (const [k, at] of this.sent) {
+      const cur = this.pend.get(k);
+      if (cur && cur.at <= at) this.pend.delete(k);
+    }
+    this.sent.clear();
   }
 
   /** 功能：上报失败（丢弃待发，事实保留）。@returns {void} */
   nack(): void {
+    this.sent.clear();
     // 保留 pending：上报失败时下一轮 delta() 会把同一批原样再给一次（重发 = 重试，幂等靠 at）。
     // 清掉它就等于「这条证据从此不会送到 DO」—— 与 v8 §3 的 pending 语义相反（只有 ack 才清）。
   }
@@ -264,6 +275,7 @@ export class BlkFacts {
     this.rows.clear();
     this.batch.clear();
     this.pend.clear();
+    this.sent.clear();
     this.mute.clear();
   }
 
