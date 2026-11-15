@@ -1,4 +1,4 @@
-﻿import { eachLimit, errMsg } from "../core/util";
+import { eachLimit, errMsg } from "../core/util";
 
 import { logErr } from "../nodes/metrics";
 import { S } from "../core/state";
@@ -42,8 +42,6 @@ const TFB_AT: Map<string, number> = new Map();
 /** 站点 → 已轮换批次；30 分钟后重置，最多 3 批（≈6 条通道）。 */
 const TFB_N: Map<string, number> = new Map();
 
-/** 每轮最多挑一个「最近被怀疑」的站点做 2 条中继的实测（1 DO 请求 + 2 子请求）。 */
-const TFB_V: Map<string, string> = new Map();
 /**
  * 功能：每轮挑一个待验站点跑一批 tfb（每站点 30 分钟最多 3 批，不写 KV）。
  * @param env 环境变量
@@ -51,8 +49,8 @@ const TFB_V: Map<string, string> = new Map();
  */
 async function tfbRound(env: Env): Promise<void> {
   const now0 = Date.now();
-  // 站点过期就三张表一起清，避免 TFB_AT/TFB_N 只增不减
-  for (const [h, t] of S.needPx) if (t <= now0) { S.needPx.delete(h); TFB_AT.delete(h); TFB_N.delete(h); TFB_V.delete(h); }
+  // 站点过期就把进度表与「上一批判定」一起清，避免 TFB_AT/TFB_N 只增不减
+  for (const [h, t] of S.needPx) if (t <= now0) { S.needPx.delete(h); TFB_AT.delete(h); TFB_N.delete(h); S.tfbV.delete(h); }
   const now = Date.now();
   for (const [host, until] of S.needPx) {
     if (until <= now) continue;

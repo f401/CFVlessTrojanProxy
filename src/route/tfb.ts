@@ -1,10 +1,39 @@
-﻿/** 只用到 env（DO 存根），不引 edge 层类型，避免 route -> edge 反向依赖。 */
+/** 只用到 env（DO 存根），不引 edge 层类型，避免 route -> edge 反向依赖。 */
 type RouteCtx = { env: Env };
 import { S } from "../core/state";
 import { withTimeout } from "../core/util";
 import { vAt, vSet, vSetState } from "./verdict";
 import { logErr } from "../nodes/metrics";
-const lastV: Map<string, string> = new Map();
+/** 站点 → 上一批判定标签的容量上限：站点名来自客户端 ClientHello，不是有限集合。 */
+const TFB_MEM_MAX = 256;
+
+/**
+ * 功能：判断这一批 `chan` 证据能不能落封锁（两批共识）。
+ * @param {string} prevTag 上一批的判定标签（`verdict/escalate`，空串表示没探过）
+ * @param {string} verdict 这一批的判定
+ * @returns {boolean} true = 上一批也是 `chan`，可以把 403 的通道写进判定表
+ */
+export function tfBlockOk(prevTag: string, verdict: string): boolean {
+  // 单批「有 2xx + 这条 403」可能只是一次限流或页面差异；cron 对同一站点间隔 ≥10 分钟，
+  // 两批都看到同样的分裂才落封锁。这也让 `S.tfbV` 从「只删不写」变成真的有读者。
+  return verdict === "chan" && prevTag.startsWith("chan/");
+}
+
+/**
+ * 功能：记下这一批的判定标签（给「两批共识」与日志去重用），超过上限就丢最旧的键。
+ * @param {string} host 站点
+ * @param {string} tag 判定标签
+ * @returns {void}
+ */
+export function tfRemember(host: string, tag: string): void {
+  S.tfbV.set(host, tag);
+  // Map 保持插入顺序：从头删就是「最久没更新的站点」，不必排序
+  while (S.tfbV.size > TFB_MEM_MAX) {
+    const first = S.tfbV.keys().next();
+    if (first.done) break;
+    S.tfbV.delete(first.value);
+  }
+}
 
 /** 兜底中继：本 isolate 还没跑过 cron 时 S.alive 为空，用几个已知可用的顶一下。 */
 const SEED = ["185.253.117.147", "45.136.117.194", "91.215.154.80"];
@@ -97,15 +126,18 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
   const okN = rows.filter((x) => x.ok && x.status === 200).length;
   const badN = rows.filter((x) => (x.status || 0) >= 400).length;
   const verdict = tfClass(rows as Array<{ ok: boolean; status?: number; bytes?: number }>);
+  const prevTag = S.tfbV.get(host) || "";
+  // 两批共识：单批 `chan` 只当「怀疑」，不写判定表（写进去等于让这条中继 30 分钟不可用）
+  const mayBlock = tfBlockOk(prevTag, verdict);
   for (const row of rows) {
     const ip = row.relay.split(":")[0];
-    if (verdict === "chan" && row.status === 403) vSetState(host, ip === "direct" ? "d" : "r:" + ip, 2, 1);
+    if (verdict === "chan" && row.status === 403 && mayBlock) vSetState(host, ip === "direct" ? "d" : "r:" + ip, 2, 1);
     else if (row.ok && row.status === 200) vSet(host, ip === "direct" ? "d" : "r:" + ip, 200, Number(row.ms || 0), 1);
   }
   const escalate = tfEscalate(verdict);
   const tag = verdict + "/" + escalate;
-  const same = lastV.get(host) === tag;
-  lastV.set(host, tag);
+  const same = prevTag === tag;
+  tfRemember(host, tag);
   if (!same) logErr(`tfb ${host} ${verdict} ok=${okN} bad=${badN} esc=${escalate} n=${rows.length}`);
   return Response.json({ host, probed: rows.length, okN, badN, verdict, escalate, rows });
 }

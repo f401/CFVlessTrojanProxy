@@ -35,6 +35,12 @@ export class AppState {
   /** 复测累计次数：线上用它判断"探活抖动"到底有多频繁（=0 说明这条优化没触发过） */
   reProbeN = 0; // 这批探活是在哪个机房做的（cron 拿不到 colo，记 "cron"）
   needPx: Map<string, number> = new Map();
+  /**
+   * 每个站点上一批 tfb 的判定标签（`verdict/escalate`，例如 `chan/none`）。
+   * 两个用途：① `tfb` 的两批共识（只有上一批也是 `chan` 才落封锁）；
+   * ② 日志去重（标签没变就不重复写 `/logs`）。键是客户端给的站点名，因此必须限量。
+   */
+  tfbV: Map<string, string> = new Map();
   /** 站点最近一次「大响应」时间（用来做跨通道差分：别的通道能打通才算这条被封） */
   bigByHost: Map<string, number> = new Map();
   /** 最近一次大响应来自哪条通道（用于「差分」判封锁：同站点不同通道对比） */

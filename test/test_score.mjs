@@ -3262,6 +3262,19 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   const j108 = await (await d.m.fetch(new Request("https://m/get"))).json();
   eq("用量也只算一次", [j108.up, j108.down], [100, 200]);
 }
+{
+  // 109. tfb：两批共识（单批 403 只是怀疑）+ 记忆表限量
+  const tb = (p, v) => W.tfBlockOk(p, v);
+  eq("首批 chan 证据不落封锁（可能是限流）", tb("", "chan"), false);
+  eq("上一批也是 chan → 两批共识成立", tb("chan/none", "chan"), true);
+  eq("上一批是 ok → 这一批 chan 仍只是怀疑", tb("ok/none", "chan"), false);
+  eq("这一批不是 chan → 不落封锁", tb("chan/none", "ok"), false);
+  W.S.tfbV.clear();
+  for (let i = 0; i < 300; i++) W.tfRemember("h" + i + ".test", "chan/none");
+  eq("记忆表有上限（键来自客户端）", W.S.tfbV.size, 256);
+  eq("最旧的站点已被挤掉", W.S.tfbV.has("h0.test"), false);
+  eq("最新的站点仍在", [W.S.tfbV.get("h299.test"), W.S.tfbV.has("h44.test")], ["chan/none", true]);
+}
 
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
