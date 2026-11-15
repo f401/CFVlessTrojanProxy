@@ -137,7 +137,9 @@ export class Judge {
     if (e.via === "node" && e.node && e.host) {
       const nip = e.node.slice(0, e.node.lastIndexOf(":"));
       const row = S.peers.get(e.host);
-      const peerBig = !!row && row.some((x) => x.down >= 20000 && Date.now() - x.at <= 120000);
+      // 用事件时间 `ty` 而不是 `Date.now()`：回放/聚合的事件按发生时间判窗口，
+      // 否则「同一批事件」在回放时永远看不到对照（与上面归批时钟是同一个坑）。
+      const peerBig = !!row && row.some((x) => x.down >= 20000 && ty - x.at <= 120000);
       if (nip && e.down > 0 && e.down <= 2048 && peerBig) BLK.note({ host: e.host, ip: nip, down: e.down, peerBig: true, at: ty });
       else if (nip && e.down >= 20000) BLK.contra(e.host, nip);
     }
