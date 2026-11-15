@@ -111,7 +111,7 @@ export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, tfBlockOk, tfRemember, pickFresh } from "./route/tfb";
 export { RELPERF, REL_TTL, relCost, relCostFor, relCostMode, relNote, relSnap } from "./route/relperf";
 export { EG, EG_BIG, EG_TINY, EG_TTL, EgFacts, egCounts, egDerive } from "./route/egfacts";
-export { CAP, CAP_TTL, CapFacts, capFactor } from "./route/capfacts";
+export { CAP, CAP_MAX, CAP_TTL, CapFacts, capFactor } from "./route/capfacts";
 export { ALIVE_TARGET, srcStat } from "./px/aliveplan";
 export { FACT_ALL, factList, factOn, factParse } from "./route/factflags";
 export { factMul } from "./route/factmul";

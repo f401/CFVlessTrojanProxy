@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.188**（自举审计六十八批、共 128 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.189**（自举审计六十九批、共 130 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -416,6 +416,21 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - 锁：第 178 组 8 条（计量表没有 `this.blk`、没有 `/blk` 端点、出站仍走 `factsOut`；诊断读 `/vt` 的 `blk2`、用 `at + BLK_TTL` 算寿命；决策里 `relSnap(c.host)` 只出现一次、冷启动复用 `fresh === 0`；
   再加「量过的那条照旧进表、样本数只累加不重置」）。第 105 组原来那条读 `/meter/blk` 的断言改到 `blk2` 上。
 - A/B：`meter.ts` + `debug.ts` 退回 HEAD → 4 红；`policy.ts` 退回 HEAD → 2 红。两条都先 `bundle` + `mk_test` 再跑（否则测的是旧包，见 7.185 的教训）。
+### 7.189 自举审计（第 129–130 条，第五张事实表没跟上，残槽与人）
+
+- **D129 吞吐容量表的上限与寿命只落在成功路径上**：`eg`/`ps`/`dead`/`blk2`/`dns` 五张事实表都是「插入之后立刻限界」，只有 `src/route/capfacts.ts` 的 `trim()` 写在
+  「确认成功」之后。而 R1 要求两次取样一致且与池内中位数差 2 倍 —— 绝大多数中继只会留下 `at = 0` 的行，`trim` 几乎不会被调用：
+  实测 300 个中继各来一条样本 → `rows.size = 300`（`CAP_MAX` 是 256）。更糟的是这些行**永不过期**：`capOf` 里 `if (!row || !row.at) return 1;` 直接早退，连删都不删。
+  修法：行上多一个 `seen`（最后一次取样时刻），`note()` 里 `this.rows.set(ip, row)` 之后立刻 `if (this.rows.size > CAP_MAX) this.trim(now);`；
+  `trim` 与 `capOf` 都用 `Math.max(row.at, row.seen)` 判寿命（未确认的行按取样时间过期，确认过的行仍按确认时间）。
+- **D130 `HOOK.psNote` 是没人注册也没人调用的残槽**：`docs/v8实现清单.md` 第 113 行写着「`connection.ts` 的 `HOOK.psNote` 已删除」—— 调用点确实删了（改成
+  `src/route/judge.ts` 的判定出口直接 `PS.note`，避免两套规则分叉），但槽位本身（`src/core/hook.ts` 的类型行 + `HOOK` 的默认值）留着，
+  `src/route/psfacts.ts` 的文档还写着「供 `HOOK.psNote` 使用」。既有类型、又有默认值、却既无注册点也无调用点 —— 正是 7.123「`HOOK.facts` 从未注册」的同族。
+  修法：类型行与默认值都删，`psNote` 的文档改成指向真正的调用方。
+- 锁：第 179 组 15 条（`CAP_MAX === 256`、上限在插入路径上、寿命用 `Math.max(row.at, row.seen)`、不再有 `if (!row || !row.at) return 1;` 的早退；
+  行为面 300 条不超上限、未确认的行到期后从表里删掉、真过门的那条仍被记住且 `factor` 在 `tput` 给 0.5 / `lat` 给 1；`hook.ts` 无 `psNote`、`HOOK` 上无该键、`psfacts` 文档指向 `judge.ts`）。
+- A/B：`capfacts.ts` 退回 HEAD → **5 红**（其中一条直接打印 `size=300`）；`hook.ts` 退回 HEAD → **2 红**。
+
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

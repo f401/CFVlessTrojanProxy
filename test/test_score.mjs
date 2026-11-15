@@ -4372,5 +4372,43 @@ console.log("\n176) 预算账本与续回边界");
   eq("样本数照样累加（只增不重置）", W.relSnap("rel188.example")[0].n, 2);
   W.RELPERF.clear();
 }
+/* ── 179. 吞吐容量表：上限与寿命必须落在插入路径上；残槽 HOOK.psNote 不该存在 ── */
+{
+  const capSrc = fs.readFileSync("src/route/capfacts.ts", "utf8");
+  const hookSrc179 = fs.readFileSync("src/core/hook.ts", "utf8");
+  const psSrc179 = fs.readFileSync("src/route/psfacts.ts", "utf8");
+  eq("容量比上限是 256", W.CAP_MAX, 256);
+  ok("上限在插入路径上执行", capSrc.indexOf("if (this.rows.size > CAP_MAX) this.trim(now);") >= 0, "capfacts.ts");
+  ok("未确认的行按最后取样时间算寿命", capSrc.indexOf("const last = Math.max(row.at, row.seen);") >= 0, "capfacts.ts");
+  ok("不再有「没确认就早退」的写法", capSrc.indexOf("if (!row || !row.at) return 1;") < 0, "capfacts.ts");
+  // 行为面：300 个中继各只来一条样本（一条都过不了 R1）—— 表不能涨过上限
+  W.CAP.clear();
+  const t189 = 1_000_000;
+  for (let i = 0; i < 300; i += 1) {
+    W.CAP.note(`198.18.${Math.floor(i / 250) + 1}.${(i % 250) + 1}`, 100, t189);
+  }
+  ok("只来一条样本的中继不会把表撑过上限", W.CAP.rows.size <= W.CAP_MAX, `size=${W.CAP.rows.size}`);
+  // 未确认的行也要能过期：10 分钟后再读一次就该消失
+  const sz0 = W.CAP.rows.size;
+  // 用表里还在的一行来验过期：撑到上限时最早插入的那些已经被 trim 删掉了
+  const anyIp = [...W.CAP.rows.keys()][0];
+  eq("没确认过的中继读出来是中性的 1", W.CAP.capOf(anyIp, t189 + 1), 1);
+  eq("还没到期，行还在", W.CAP.rows.size, sz0);
+  eq("过期后照样是中性 1", W.CAP.capOf(anyIp, t189 + W.CAP_TTL + 1), 1);
+  eq("过期后从表里删掉", W.CAP.rows.size, sz0 - 1);
+  // 真过门的那条照旧被记住
+  W.CAP.clear();
+  for (let i = 0; i < 20; i += 1) W.CAP.note(`198.18.2.${i + 1}`, 100, t189);
+  W.CAP.note("203.0.113.60", 5000, t189);
+  W.CAP.note("203.0.113.60", 5000, t189);
+  eq("两次一致且差 2 倍以上就记下来（夹到上限 2）", W.CAP.capOf("203.0.113.60", t189), 2);
+  eq("吞吐模式的代价倍数 = 1 / 容量比", W.CAP.factor("203.0.113.60", "tput", t189), 0.5);
+  eq("延迟模式不乘容量比", W.CAP.factor("203.0.113.60", "lat", t189), 1);
+  W.CAP.clear();
+  // 残槽：HOOK.psNote 没人注册也没人调用，留着会让人以为连接层还在写 ps
+  ok("hook.ts 里没有 psNote 槽位", hookSrc179.indexOf("psNote") < 0, "hook.ts");
+  ok("HOOK 对象上没有 psNote", !("psNote" in W.HOOK), "HOOK");
+  ok("psfacts 的文档指向真正的调用方", psSrc179.indexOf("src/route/judge.ts") >= 0 && psSrc179.indexOf("HOOK.psNote") < 0, "psfacts.ts");
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

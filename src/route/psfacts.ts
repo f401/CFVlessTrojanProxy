@@ -316,7 +316,7 @@ export class PsFacts {
 export const PS = new PsFacts();
 
 /**
- * 功能：薄包装 —— 记一次观测（供 `HOOK.psNote` 使用）。
+ * 功能：薄包装 —— 记一次观测（调用方只有 `src/route/judge.ts` 的判定出口）。
  * @param {string} host 目标站点
  * @param {string} ip 中继 IP
  * @param {boolean} ok 是否拿到完整响应

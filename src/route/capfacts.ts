@@ -55,8 +55,8 @@ function median(xs: number[]): number {
  * 只在本 isolate 内生效（容量与客户端到边缘的路径强相关，跨 isolate 共享没有意义）。
  */
 export class CapFacts {
-  /** 中继 → 最近两次取样与已确认的容量比。 */
-  private rows = new Map<string, { s: number[]; cap: number; at: number }>();
+  /** 中继 → 最近两次取样、最后一次取样时刻与已确认的容量比。 */
+  private rows = new Map<string, { s: number[]; cap: number; at: number; seen: number }>();
   /** 最近取样池，用于算中位数（上限 64 条，先进先出）。 */
   private pool: number[] = [];
 
@@ -72,10 +72,15 @@ export class CapFacts {
     // 取样池只留最近 64 条：中位数要反映"当下的池子"，不是历史全量
     this.pool.push(kbs);
     if (this.pool.length > 64) this.pool.shift();
-    const row = this.rows.get(ip) || { s: [], cap: 1, at: 0 };
+    const row = this.rows.get(ip) || { s: [], cap: 1, at: 0, seen: 0 };
     row.s.push(kbs);
     if (row.s.length > 2) row.s.shift();
+    row.seen = now;
     this.rows.set(ip, row);
+    // 上限必须在这里执行，而不是只在「确认成功」那条路径上：R1 要求两次取样一致
+    // 且与池内中位数差 2 倍，绝大多数中继只会留下 `at = 0` 的行，于是 trim 几乎
+    // 不会被调用 —— 表能一路涨到「本 isolate 见过的中继数」（实测 300 条一条不裁）
+    if (this.rows.size > CAP_MAX) this.trim(now);
     // R1 第一关：样本本身要先自证一致，否则放弃这一次（噪声不进模型）
     if (row.s.length < 2) return false;
     const a = row.s[0];
@@ -111,11 +116,14 @@ export class CapFacts {
    */
   capOf(ip: string, now = Date.now()): number {
     const row = this.rows.get(ip);
-    if (!row || !row.at) return 1;
-    if (now - row.at > CAP_TTL) {
+    if (!row) return 1;
+    // 未确认的行也要能过期：`at` 恒为 0，只按它判寿命的话「试过但没过门」的中继会在 isolate 里永生
+    const last = Math.max(row.at, row.seen);
+    if (!last || now - last > CAP_TTL) {
       this.rows.delete(ip);
       return 1;
     }
+    if (!row.at) return 1;
     return row.cap;
   }
 
@@ -163,10 +171,12 @@ export class CapFacts {
    */
   private trim(now: number): void {
     for (const [ip, row] of this.rows) {
-      if (!row.at || now - row.at > CAP_TTL) this.rows.delete(ip);
+      // 未确认的行按「最后一次取样」算寿命；确认过的行用 `at`（确认时间）
+      const last = Math.max(row.at, row.seen);
+      if (!last || now - last > CAP_TTL) this.rows.delete(ip);
     }
     if (this.rows.size <= CAP_MAX) return;
-    const all = [...this.rows.entries()].sort((x, y) => x[1].at - y[1].at);
+    const all = [...this.rows.entries()].sort((x, y) => Math.max(x[1].at, x[1].seen) - Math.max(y[1].at, y[1].seen));
     for (let i = 0; i < all.length - CAP_MAX; i += 1) this.rows.delete(all[i][0]);
   }
 }

@@ -45,8 +45,6 @@ export interface Hooks {
     blk2?: Array<{ k: string; n: number; at: number }>;
     dns?: Array<{ h: string; v: number; at: number }>;
   }) | null;
-  /** 「站点 × 中继」真实观测（拿到完整响应=成功） */
-  psNote: ((host: string, ip: string, ok: boolean) => void) | null;
   /** 中继连接层结果（连上=true 会清零失败计数） */
   deadNote: ((ip: string, ok: boolean) => void) | null;
   /** 判定/中继增量确认送达（成功）或退回（失败） */
@@ -81,5 +79,5 @@ export interface TrafficEvt {
 }
 
 export const HOOK: Hooks = { decide: null, veto: null, traffic: null, relayProbe: null, prefer: null, chanPref: null,
-  vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, factsDelta: null, psNote: null, deadNote: null, syncAck: null, syncNack: null, relPerf: null, capNote: null, facts: null, factsFor: null };
+  vtDelta: null, vtLoad: null, win: null, nonCfFirst: null, healthDelta: null, factsDelta: null, deadNote: null, syncAck: null, syncNack: null, relPerf: null, capNote: null, facts: null, factsFor: null };
 
