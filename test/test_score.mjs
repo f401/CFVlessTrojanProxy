@@ -3725,5 +3725,21 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   ok("relPerf 那行和同块其它语句同层级（10 空格）", !!relLine && /^ {10}HOOK\.relPerf\?\./.test(relLine));
   ok("closing 块里没有顶格的语句", cLines.filter((l) => /^\S/.test(l) && !/^(import|export|\/\/|\/\*|\}|type |const |function |class )/.test(l)).length === 0);
 }
+{
+  // 第 159 组：补救链上的拨号超时与 socket 释放（v7.169）
+  // 主路径给 connect() 包了 2.5 秒上限，补救链没有：客户端已经等了两三秒，再挂死等于直接放弃。
+  const fSrc = fs.readFileSync("src/proxy/fallback.ts", "utf8");
+  const aSrc = fs.readFileSync("src/proxy/attacher.ts", "utf8");
+  ok("换节点重试也给 connect() 加了超时", fSrc.includes("withTimeout(pk, 2500)"));
+  ok("换节点失败要给这条候选记一笔（否则一直被挑回来）", fSrc.includes("nsFail(alt)"));
+  ok("超时迟到成功的 socket 会被关掉（fallback）", fSrc.includes("pk.then((s) =>"));
+  const iRel = aSrc.indexOf("releaseAll(st)");
+  const iSet = aSrc.indexOf("st.sock = sock;");
+  ok("递归重试前先释放上一跳的 socket 与写锁", iRel >= 0 && iSet > iRel);
+  ok("IPv6 兜底也有超时", aSrc.includes("withTimeout(p6, 2500)"));
+  ok("proxyip 兜底也有超时", aSrc.includes("withTimeout(p3, 2500)"));
+  ok("proxyip 连不上要给中继记账", aSrc.includes('nsFail(px.host + ":" + px.port)'));
+  ok("死条件 !px || st.retried 已经删掉（只判代码行，注释里可以留历史）", !/if \(!px \|\| st\.retried\)/.test(aSrc));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

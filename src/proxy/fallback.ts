@@ -1,5 +1,6 @@
 import { connect } from "cloudflare:sockets";
-import { nextNode } from "../nodes/score";
+import { nextNode, nsFail } from "../nodes/score";
+import { withTimeout } from "../core/util";
 import { logErr } from "../nodes/metrics";
 import { isCfIp } from "../core/net";
 import { checkTarget } from "./dial";
@@ -37,15 +38,20 @@ export async function dialAnother(
     const port = Number(alt.slice(i + 1)) || 443;
     if (checkTarget(host, port)) return null; // 池子可能被污染：内网/禁用端口一律不拨
     if (st.cf && isCfIp(host)) continue; // 见上：CF 托管目标必须换到非 CF 出口
+    // 与 Dialer.open 的主路径同一个口径：connect() 自己没有超时，挂死的中继会把请求拖到
+    // 客户端放弃为止。补救链更怕这个——走到这里时客户端已经等了两三秒。
+    const pk = Promise.resolve(connect({ hostname: host, port }));
     try {
-      const s = await connect({ hostname: host, port });
+      const s = await withTimeout(pk, 2500);
       st.node = alt;
       st.via = "node";
       st.pxTries = (st.pxTries || 1) + 1;
       logErr(`retry another node ${alt}`, tag || "");
       return s;
     } catch (e) {
-      /* 这个节点拨不通，继续试下一个候选 */
+      // 超时之后 connect 仍可能迟到成功：不关掉就会把免费计划的 6 个并发名额慢慢吃掉。
+      void pk.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 本来就没连上 */ });
+      nsFail(alt); // 这条候选连不上：冷却它，下一轮别再挑回来
     }
   }
   return null;

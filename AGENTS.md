@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.168**（自举审计四十八批、共 81 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.169**（自举审计四十九批、共 85 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -356,6 +356,21 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - 修法：两处都改成 `throw new Error("dial returned null")`（如实描述「两条拨号路径都没给出 socket」），并在 `session.ts` 的守卫上方写清「这里只为把类型收窄成 `Socket`，两条路径都不返回 null」以及历史标签的来历。
 - **脚本补丁打乱的缩进**：`src/proxy/connection.ts` 的 `flush(closing)` 里，`HOOK.relPerf?.(…)` 那一行被历次脚本改成了**顶格（缩进 0）**，`HOOK.traffic` 那段与 `nsLatency` 那行少缩进两格（块内层级读起来是断的，且与 `nsStall`/`S.cagg` 两段的缩进不一致）。修法：只改空白（同时验证 `git diff --stat` 里该文件只有缩进变化），并加一条锁：`src/proxy/connection.ts` 里不允许出现顶格的语句、`HOOK.relPerf` 那行必须是 10 空格。
 - 教训：`// 通道证据` 那段注释与代码曾经在 `if (!this.counted)` 里（7.108 前后挪过位置），脚本按行替换时把缩进一起挪丢了；这类改动不会让任何门禁变红，只有人读代码时才会发现。
+### 7.169 自举审计（第 82–85 条）
+
+- **第 82 条：补救链上的 `connect` 没有超时。** 主路径 `Dialer.open`（`src/proxy/dialer.ts:112-132`）给
+  `connect()` 包了 `withTimeout(pk, 2500)`，注释也写明「`connect()` 自己没有超时，挂死的中继会把整个请求拖到
+  客户端放弃为止」；但补救链三处（`src/proxy/fallback.ts:41`、`src/proxy/attacher.ts:98` 的 IPv6 兜底、
+  `src/proxy/attacher.ts:137` 的 proxyip 兜底）都是裸 `await connect({...})`。补救链跑在客户端已经等了两三秒
+  之后，挂死的代价更高；超时迟到成功的 socket 也没人关（7.86 学到的「6 个并发 connect 名额」）。
+- **第 83 条：递归重试覆盖 `st.sock`/`st.writer` 不释放旧的。** `Attacher.run` 只做赋值，而 `releaseAll`
+  只在 `session.ts` 的 `.finally` 里对**当前** socket 调一次 ⇒ 每重试一次漏一个 socket + 一把写锁。现在
+  `run` 开头先 `if (st.sock && st.sock !== sock) releaseAll(st);`。
+- **第 84 条（证伪，记下来免得再查）：`st.syncInflight()` 可以重复调用。** `src/proxy/connection.ts:206-216`
+  按 key 幂等，只有 key 变了才把旧 key 减一、新 key 加一。
+- **第 85 条：死条件与不记账。** `attacher.ts:110` 的 `if (!px || st.retried)` 里 `st.retried` 永远不生效
+  （上面第 ④ 支已经 return）；`catch` 只 `close(1011, "proxyip failed")`，既不 `nsFail` 也不计数 ⇒
+  一条「池子里能解析但连不上」的中继会被无限重复挑中。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

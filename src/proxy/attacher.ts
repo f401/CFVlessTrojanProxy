@@ -3,9 +3,9 @@ import { connect } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 import { S } from "../core/state";
 import { cnt } from "../core/counter";
-import { closeQuietly, WS_OPEN } from "../core/util";
+import { closeQuietly, releaseAll, withTimeout, WS_OPEN } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
-import { nsEmptyClose } from "../nodes/stat";
+import { nsEmptyClose, nsFail } from "../nodes/stat";
 import { SEL } from "../px/selector";
 import { kickFlush } from "../store/pend";
 import { checkTarget, expandV6, isV6Literal, parseProxyIp } from "./dial";
@@ -35,6 +35,9 @@ export class Attacher {
    */
   async run(o: AttachOpts, sock: Socket): Promise<void> {
     const { env, ws, st, host, port, payload, region } = o;
+    // 递归重试时上一跳的 socket 与写锁必须显式释放：下面两行会把字段覆盖掉，
+    // 不关就等于每重试一次漏一个 socket（免费计划的并发 connect 名额全局只有 6 个）。
+    if (st.sock && st.sock !== sock) releaseAll(st);
     st.syncInflight();
     st.sock = sock;
     st.writer = sock.writable.getWriter();
@@ -93,21 +96,26 @@ export class Attacher {
         for (const raw of String(env.cfIpv6).split(",")) {
           const v6 = raw.trim();
           if (!v6) continue;
+          // 与主路径同一个口径：connect() 自己没有超时，挂死会把客户端拖到放弃
+          const p6 = Promise.resolve(connect({ hostname: expandV6(v6), port }));
           try {
             logErr(`empty close -> retry via IPv6 ${v6}`, host);
-            const s6 = await connect({ hostname: expandV6(v6), port });
+            const s6 = await withTimeout(p6, 2500);
             st.via = "v6";
             await this.run(o, s6);
             return;
           } catch (e) {
-            /* 试下一个 */
+            // 超时迟到成功的 socket 也要关掉，否则白占并发名额
+            void p6.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 没连上 */ });
           }
         }
       }
 
       // ② proxyip（第三方中转，最后兜底）
       const px = parseProxyIp(await SEL.current(env, o.mode, st, host, st.cf));
-      if (!px || st.retried) {
+      // 这里只判「没有候选」：st.retried 为真时上面第 ④ 支已经 return，
+      // 以前写成 `!px || st.retried` 的那半截条件永远不生效（7.169 删掉）。
+      if (!px) {
         cnt("dead");
         kickFlush(env, st.id);
         cnt("eCloseD"); // 直连空关闭：目标站的问题，不算节点
@@ -133,12 +141,17 @@ export class Attacher {
         } catch (e) {}
         return;
       }
+      // 与主路径同一个口径：connect() 自己没有超时，挂死会把客户端拖到放弃
+      const p3 = Promise.resolve(connect({ hostname: px.host, port: px.port }));
       try {
-        const s3 = await connect({ hostname: px.host, port: px.port });
+        const s3 = await withTimeout(p3, 2500);
         st.node = px.host + ":" + px.port;
         st.via = "node";
         await this.run(o, s3);
       } catch (e) {
+        // 池子里能解析、但连不上：必须给这条中继记账，否则选择器会一直把它挑回来
+        nsFail(px.host + ":" + px.port);
+        void p3.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 没连上 */ });
         try {
           ws.close(1011, "proxyip failed");
         } catch (err) {}
