@@ -43,6 +43,11 @@ export interface PsWire {
   n: number;
   /** 最后观测时间 */
   at: number;
+  /**
+   * 历史最好（0..255）。旧行没有这个字段（7.163 前不上线）：
+   * 缺省时按 `q` 起算，宁可低估也不能假装「曾经行过」。
+   */
+  top?: number;
 }
 
 /** 样本过期时间：45 分钟没再被观测就当没有样本（v8 §3 表） */
@@ -210,7 +215,8 @@ export class PsFacts {
   delta(): PsWire[] {
     const out: PsWire[] = [];
     for (const [k, r] of this.pend) {
-      out.push({ k, q: r.q, n: r.n, at: r.at });
+      // 就退化成「现在还行」—— 康复通道在每个新 isolate 里都要重新攒一次，D29 的死锁复发。
+      out.push({ k, q: r.q, n: r.n, at: r.at, top: r.top ?? r.q });
       this.sent.set(k, r.at);
       if (out.length >= 60) break;
     }
@@ -254,8 +260,12 @@ export class PsFacts {
       if (!Number.isFinite(q) || !Number.isFinite(cntN) || !Number.isFinite(at)) continue;
       const cur = this.rows.get(r.k);
       if (cur && cur.at >= at) continue;
-      // 远端行没有 `top`（线格式不含它）：按「这一行的当前值」起算，宁可低估历史最好
-      this.rows.set(r.k, { q: Math.max(0, Math.min(255, Math.round(q))), n: Math.max(0, Math.min(N_CAP, cntN)), at, top: Math.max(0, Math.min(255, Math.round(q))) });
+      // 线格式现在带 top（v7.163）：历史最好只升不降，取「远端报的 / 当前均值 / 本地已知」三者最大。
+      // 旧行（或跨版本的 DO 数据）没有 top：按当前均值起算，宁可低估也不能假装「曾经行过」。
+      const qq = Math.max(0, Math.min(255, Math.round(q)));
+      const wTop = Number(r.top);
+      const top = Math.max(cur?.top ?? 0, qq, Number.isFinite(wTop) ? Math.max(0, Math.min(255, Math.round(wTop))) : 0);
+      this.rows.set(r.k, { q: qq, n: Math.max(0, Math.min(N_CAP, cntN)), at, top });
       n += 1;
     }
     if (this.rows.size > PS_MAX) this.drop(0);
@@ -265,13 +275,13 @@ export class PsFacts {
   /**
    * 功能：给 `/health` 与单测看的快照（按样本数降序，最多 12 行）。
    * @param {string} host 只看某个站点时传它的名字，空串表示全部
-   * @returns {Array<{ k: string; q: number; n: number; at: number }>} 快照
+   * @returns {Array<{ k: string; q: number; n: number; at: number; top: number }>} 快照
    */
-  snap(host = ""): Array<{ k: string; q: number; n: number; at: number }> {
-    const out: Array<{ k: string; q: number; n: number; at: number }> = [];
+  snap(host = ""): Array<{ k: string; q: number; n: number; at: number; top: number }> {
+    const out: Array<{ k: string; q: number; n: number; at: number; top: number }> = [];
     for (const [k, r] of this.rows) {
       if (host && !k.startsWith(host + "|")) continue;
-      out.push({ k, q: r.q, n: r.n, at: r.at });
+      out.push({ k, q: r.q, n: r.n, at: r.at, top: r.top ?? r.q });
     }
     out.sort((a, b) => b.n - a.n || b.at - a.at);
     return out.slice(0, 12);
@@ -353,8 +363,8 @@ export function psFactor(host: string, ip: string, now = Date.now()): number {
 /**
  * 功能：薄包装 —— 快照（供调试端点使用）。
  * @param {string} host 只看某个站点时传它的名字
- * @returns {Array<{ k: string; q: number; n: number; at: number }>} 快照
+ * @returns {Array<{ k: string; q: number; n: number; at: number; top: number }>} 快照
  */
-export function psSnap(host = ""): Array<{ k: string; q: number; n: number; at: number }> {
+export function psSnap(host = ""): Array<{ k: string; q: number; n: number; at: number; top: number }> {
   return PS.snap(host);
 }

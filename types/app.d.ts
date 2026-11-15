@@ -398,7 +398,7 @@ interface MeterBody {
   hl?: Array<{ i: string; o: number; b: number; d: number; t?: number }>;
   /** 出口族事实增量：中继 IP + 族（4/6）+ 观测时间（v8 §3 的 eg） */
   eg?: Array<{ i: string; f: number; at: number }>;
-  ps?: Array<{ k: string; q: number; n: number; at: number }>;
+  ps?: Array<{ k: string; q: number; n: number; at: number; top?: number }>;
   dead?: Array<{ i: string; n: number; at: number }>;
   blk2?: Array<{ k: string; n: number; at: number }>;
   dns?: Array<{ h: string; v: number; at: number }>;

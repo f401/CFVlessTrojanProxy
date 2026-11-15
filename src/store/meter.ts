@@ -21,7 +21,7 @@ export class Meter {
   /** 出口族事实：ip → { f: 4|6, at }。v8 §3 的 eg：只用于选路代价偏置，永不剔除候选 */
   eg: Record<string, { f: number; at: number }>;
   /** 「站点 × 中继」成功率事实：`站点|中继IP` → { q 0..255, n 样本数, at }。只折价，永不剔候选 */
-  ps: Record<string, { q: number; n: number; at: number }>;
+  ps: Record<string, { q: number; n: number; at: number; top?: number }>;
   /** 中继「连不上」事实：IP → { n 连续失败次数, at }。判死才会影响选路，仅由连接层触发 */
   dead: Record<string, { n: number; at: number }>;
   /** DNS 事实：站点 → { v: 1 有 AAAA / 0 确证没有, at }。24 小时寿命，只用于代价乘数 */
@@ -68,7 +68,7 @@ export class Meter {
     if (o.vt && typeof o.vt === "object") this.vt = o.vt as unknown as Record<string, number>;
     if (o.hl && typeof o.hl === "object") this.hl = o.hl as unknown as Record<string, { o: number; b: number; d: number; t?: number }>;
     if (o.eg && typeof o.eg === "object") this.eg = o.eg as unknown as Record<string, { f: number; at: number }>;
-    if (o.ps && typeof o.ps === "object") this.ps = o.ps as unknown as Record<string, { q: number; n: number; at: number }>;
+    if (o.ps && typeof o.ps === "object") this.ps = o.ps as unknown as Record<string, { q: number; n: number; at: number; top?: number }>;
     if (o.dead && typeof o.dead === "object") this.dead = o.dead as unknown as Record<string, { n: number; at: number }>;
     if (o.dns && typeof o.dns === "object") this.dns = o.dns as unknown as Record<string, { v: number; at: number }>;
     if (o.blk2 && typeof o.blk2 === "object") this.blk2 = o.blk2 as unknown as Record<string, { n: number; at: number }>;
@@ -423,7 +423,9 @@ const rows = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.
 const hl = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d, t: Number(x.t) || 0 }));
       const eg = Object.entries(this.eg).map(([i, x]) => ({ i, f: x.f, at: x.at }));
       eg.sort((a, b) => b.at - a.at);
-      const ps = Object.entries(this.ps).map(([k, x]) => ({ k, q: x.q, n: x.n, at: x.at }));
+      // top 也要发（v7.163）：只发均值的话，冷启动的 isolate 只能看到「现在还行」——
+      // 康复闸门需要的是「曾经行过」，那条证据必须跨 isolate 活着。
+      const ps = Object.entries(this.ps).map(([k, x]) => ({ k, q: x.q, n: x.n, at: x.at, top: Number(x.top) || 0 }));
       ps.sort((a, b) => b.at - a.at);
       const dd = Object.entries(this.dead).map(([i, x]) => ({ i, n: x.n, at: x.at }));
       dd.sort((a, b) => b.at - a.at);

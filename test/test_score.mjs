@@ -3567,5 +3567,38 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   ok("上限判断在压入之前", vs.indexOf("if (out.length >= 60) break;") < vs.indexOf("S.vtPend.set(k, { s: v.state, t: exp })") + 2000);
 }
 
+// 153. 「历史最好」必须跨 isolate 活着：只发当前均值的话，康复通道在每个新 isolate 里都要重新攒
+{
+  const now = Date.now();
+  const H = "ps153.test";
+  const IP = "203.0.113.63";
+  const K = H + "|" + IP;
+  W.PS.clear();
+  // 远端行带 top：曾经 100%，现在均值只剩 30/255
+  W.PS.load([{ k: K, q: 30, n: 6, at: now, top: 255 }]);
+  eq("远端带来的历史最好不被当前均值覆盖", Math.round(W.PS.bestOf(H, IP) * 255), 255);
+  // 再灌一行更新的、但没有 top 的旧格式：历史最好只升不降
+  W.PS.load([{ k: K, q: 20, n: 7, at: now + 1000 }]);
+  eq("旧格式行按当前均值起算，但不能把已知的历史最好改小", Math.round(W.PS.bestOf(H, IP) * 255), 255);
+  // 第一批上报就要把 top 带上（否则对面永远学不到）
+  W.PS.clear();
+  W.PS.note(H, IP, true, now);
+  W.PS.note(H, IP, false, now + 1);
+  W.PS.note(H, IP, false, now + 2);
+  const dw = W.PS.delta();
+  eq("增量里带历史最好（成过一次、之后连败）", Number(dw[0] && dw[0].top), 255);
+  eq("增量里的当前均值已经被连败拉下来", Number(dw[0] && dw[0].q) < 255, true);
+  // DO 侧：同一行两次写入，较高的 top 留住、q 跟着新观测走
+  const d1 = mkDO();
+  const AD = (b) => d1.m.fetch(new Request("https://meter/add", { method: "POST", body: JSON.stringify(b) }));
+  AD({ ps: [{ k: K, q: 30, n: 4, at: now, top: 200 }] });
+  AD({ ps: [{ k: K, q: 40, n: 5, at: now + 1000, top: 90 }] });
+  const vj = await (await d1.m.fetch(new Request("https://meter/vt"))).json();
+  const prow = (vj.ps || []).find((x) => x.k === K) || {};
+  eq("DO 里当前均值跟着新观测", Number(prow.q), 40);
+  eq("DO 里的历史最好只升不降", Number(prow.top), 200);
+  // 源码锁：增量必须把 top 放进线格式
+  ok("增量带 top（源码）", fs.readFileSync("src/route/psfacts.ts", "utf8").includes("top: r.top ?? r.q"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
