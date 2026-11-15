@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.161**（自举审计四十一批、共 69 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.162**（自举审计四十二批、共 71 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -293,6 +293,12 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
     表外键因此在 `sent` 里永久驻留（`size()` 只看 `m`，泄漏不可见）。补 `pending.delete(k)` 与
     `ack()` 的「只登记表内键」。
   · 69：`delta()` 的上限判断写在 `push` 之后 ⇒ `pending` 已满 40 行时返回 41 行，突破「每批 ≤40 行」契约。判断前移。
+- **第 70–71 条（v7.162，判定表的增量上报）**：
+  · 70：`S.vtPend` 只存到期时间，重发时硬写 `s: 2` ⇒ 一条 `state=3`（dead，硬排除）的证据只要
+    在「已交出、未 ack」期间被再要一次，就会降级成 `blocked`（软降权），硬排除消失。
+    改成待发项记 `{ s, t }`，状态与时间同源；`vtAck` 用 `p.t` 记账。
+  · 71：`vtDelta()` 的上限判断写在 `push` 之后 ⇒ `pending` 已满 60 行时返回 61 行，突破「每批 ≤60 行」
+    （与 7.161 修的 `PendingLedger.delta()` 是同一个 shape）。判断前移。
 - **v8 事实层现状（7.88–7.107，均已上线或可开关）**：五类事实 `eg`/`ps`/`dead`/`blk`/`dns` + `cap` 噪声门 + `first/lat` 观测全部在仓库，
   由 `src/route/factflags.ts` 的 plain_text 绑定 `facts` 统一开关（`none`/`eg`/`eg,ps`/`all`，未配置=全开）；
   `FACTS`（`src/route/factsstore.ts`）是五张同步表唯一的上行/合并门面（v7.139 才把第五类 `dns` 的 `ack/nack/snap` 接上）；`tools/check-wire.mjs` 静态保证「有定义必有生产调用」。

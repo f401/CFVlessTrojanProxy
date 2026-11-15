@@ -20,12 +20,17 @@ export function vtDelta(): VtRow[] {
   const out: VtRow[] = [];
   const now = Date.now();
   // 上次交出去、还没 ack 的强证据：原样再带上（DO 可能没收到）
-  for (const [k, t] of S.vtPend) {
+  // 待发项记的是 `{ s, t }` 而不是只记到期时间：以前只存到期时间、重发时硬写 `s: 2`，
+  // 于是一条 state=3（dead，硬排除）的证据在重试后会被降级成「blocked」，从硬排除变软降权。
+  for (const [k, p] of S.vtPend) {
     const bar = k.indexOf("|");
-    if (bar <= 0 || t <= now) continue;
-    out.push({ k, s: 2, t });
+    if (bar <= 0 || p.t <= now) continue;
+    out.push({ k, s: p.s, t: p.t });
   }
   for (const v of vAll()) {
+    // 上限判断放在压入之前：写在压入之后时，`vtPend` 里已有 60 行就会返回 61 行
+    // （与 7.161 修的 `delta()` 是同一个 shape，车身每多一行都超预算）
+    if (out.length >= 60) break;
     if (v.state < 2) continue;
     // 表里不可能再有通配行：写入入口（`VerdictTable.blockWild`）直接拒绝 `*`。
     // 站点级证据（`站点|通道`）照旧同步 —— 那才是「这个站点这条通道被封」的可信事实。
@@ -35,11 +40,10 @@ export function vtDelta(): VtRow[] {
     const exp = v.at + VT_TTL_MS;
     if (exp <= now) continue;
     if ((S.vtSent.get(k) || 0) >= exp) continue;
-    if ((S.vtPend.get(k) || 0) >= exp) continue;
+    if ((S.vtPend.get(k)?.t || 0) >= exp) continue;
     // 只登记 pending：DO 没收到时由调用方 nack，下轮还能再发一次
-    S.vtPend.set(k, exp);
+    S.vtPend.set(k, { s: v.state, t: exp });
     out.push({ k, s: v.state, t: exp });
-    if (out.length >= 60) break;
   }
   if (out.length) cnt("vtSent", out.length);
   return out;
@@ -48,7 +52,7 @@ export function vtDelta(): VtRow[] {
 
 /** 上报成功：pending 正式生效 */
 export function vtAck(): void {
-  for (const [k, exp] of S.vtPend) S.vtSent.set(k, exp);
+  for (const [k, p] of S.vtPend) S.vtSent.set(k, p.t);
   S.vtPend.clear();
   // 键是「站点|通道」，判定表本身有上限、这张记账表没有：不同站点一路累加，
   // 过期行也永远不会被读端清掉（读端只做数值比较）。先删过期，再压回上限。

@@ -142,7 +142,7 @@ export class AppState {
   seedReadFail = false;
   pool: PoolEntry[] = [];
   /** 已交给上报、等待 ack 的强证据（k → 到期时间） */
-  vtPend: Map<string, number> = new Map();
+  vtPend: Map<string, { s: number; t: number }> = new Map();
   /** 已上报到 DO 的判定（键 `target|chan`，值 = 到期时间） */
   vtSent: Map<string, number> = new Map();
   vtLoaded = false;

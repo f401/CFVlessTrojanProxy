@@ -3433,8 +3433,8 @@ ok(`[${g}] 设计阶段的临时名只在「更正」那句里出现`, !v8.inclu
   // ④ vtAck 顺手清掉过期的记账行
   W.S.vtPend.clear();
   W.S.vtSent.clear();
-  W.S.vtPend.set("old.test|r:1.1.1.1", 1000);
-  W.S.vtPend.set("new.test|r:2.2.2.2", Date.now() + 600000);
+  W.S.vtPend.set("old.test|r:1.1.1.1", { s: 2, t: 1000 });
+  W.S.vtPend.set("new.test|r:2.2.2.2", { s: 2, t: Date.now() + 600000 });
   W.vtAck();
   eq("vtAck 之后过期行没了、新鲜行还在", [W.S.vtSent.has("old.test|r:1.1.1.1"), W.S.vtSent.has("new.test|r:2.2.2.2")].join(","), "false,true");
   W.S.vtSent.clear();
@@ -3530,6 +3530,41 @@ console.log("\n-- 中继健康表的合并口径与死出口（v7.161）");
   ok("markLoaded 已经不存在", typeof W.HEALTH.markLoaded === "undefined");
   const vs = fs.readFileSync("src/route/verdictsync.ts", "utf8");
   ok("远端事实里的中继健康行带时间戳", vs.includes("hl?: Array<{ i: string; o: number; b: number; d: number; t?: number }>"));
+}
+
+console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 行（v7.162）");
+{
+  const T = "d.test", IP = "r:9.9.9.9";
+  W.vClear();
+  W.S.vtPend.clear();
+  W.S.vtSent.clear();
+  // state=3 是 dead（硬排除），比 blocked 更强：重试时必须原样带出去
+  W.vSetState(T, IP, 3, 1);
+  const d1 = W.vtDelta();
+  const row1 = d1.filter((r) => r.k === T + "|" + IP)[0];
+  ok("state=3 的证据首次外发就是 3", !!row1 && row1.s === 3);
+  W.vtNack();
+  const d2 = W.vtDelta();
+  const row2 = d2.filter((r) => r.k === T + "|" + IP)[0];
+  const d1b = W.vtDelta();
+  const row1b = d1b.filter((r) => r.k === T + "|" + IP)[0];
+  ok("同一批没 ack 就再要一次，state 仍是 3（不会降级成 blocked）", !!row1b && row1b.s === 3);
+  W.vtAck();
+  ok("ack 之后这条已经登记成「已上报」", (W.S.vtSent.get(T + "|" + IP) || 0) > Date.now());
+}
+{
+  // 每批严格 ≤60 行：以前上限判断写在 push 之后，pending 满 60 时会返回 61 行
+  W.vClear();
+  W.S.vtPend.clear();
+  W.S.vtSent.clear();
+  for (let i = 0; i < 100; i++) W.vSetState("cap" + i + ".test", "r:198.51.100.7", 2, 1);
+  ok("一批最多 60 行判定证据", W.vtDelta().length === 60);
+  ok("pending 已满时再要一批也不会多出一行", W.vtDelta().length === 60);
+}
+{
+  const vs = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+  ok("待发项记的是 { s, t } 而不是只有到期时间", vs.includes("S.vtPend.set(k, { s: v.state, t: exp })"));
+  ok("上限判断在压入之前", vs.indexOf("if (out.length >= 60) break;") < vs.indexOf("S.vtPend.set(k, { s: v.state, t: exp })") + 2000);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
