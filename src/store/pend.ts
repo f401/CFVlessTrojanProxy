@@ -104,6 +104,8 @@ export class PendingLedger {
     let attached = false;
     let carried = false; // 这一批是否挂了 vt/hl/cl 增量
     let carriedCl = false;
+    // 这一批到底发出了哪些观测：成功后按行相减，而不是把整张表清掉（v7.157）
+    let sentCl: ClRec[] = [];
     await eachLimit(batch, 8, async ([id, d]) => {
       const mine = !primary || String(id).toLowerCase() === primary;
       try {
@@ -135,15 +137,16 @@ export class PendingLedger {
           // 这里以前顺手 S.cagg.clear()，一旦 POST 失败这 40 条观测就永久蒸发。
           carried = true;
           carriedCl = cl.length > 0;
+          sentCl = cl;
         }
         const r = await stub.fetch("https://meter/add", {
           method: "POST",
           body: JSON.stringify(body),
         });
         if (!r.ok) throw new Error("do " + r.status);
-        // 确认送达：判定/中继增量正式生效，连接观测这时才清
+        // 确认送达：判定/中继增量正式生效，连接观测按行相减
         if (carried && HOOK.syncAck) HOOK.syncAck();
-        if (carriedCl) S.cagg.clear();
+        if (carriedCl) this.clAck(sentCl);
         S.doCalls += 1;
         S.meterCache.delete(id); // 刚推过增量，缓存立即失效，避免读数倒退
       } catch (e) {
@@ -176,6 +179,31 @@ export class PendingLedger {
     }
     out.sort((a, b) => b.n - a.n);
     return out.slice(0, max);
+  }
+
+  /**
+   * 功能：确认一批连接观测已进 DO，按「发出去多少」相减，而不是整表清空。
+   *
+   * 为什么不能 clear()：`S.cagg` 里有两种「还没发出去的」东西 —— ① 这一轮被
+   * `clSnap(40)` 的上限挤掉的键（池子可以有 400 个聚合键，每次只发 40 条），
+   * ② POST 在途期间新结束的连接（await 期间生产者还在写）。整表清空会把它们
+   * 一起抹掉，等于每次上报都丢掉一部分观测，且没有任何计数能看出来。
+   * 因为行是「自上次确认以来的增量」、DO 侧按加法合并，所以这里也必须按数量
+   * 相减：减到 0 才删键，剩下的留给下一轮。
+   * @param sent 这一批请求体里实际发出的行（来自 `clSnap`）
+   * @returns 无
+   */
+  clAck(sent: ClRec[]): void {
+    for (const s of sent) {
+      const g = S.cagg.get(s.k);
+      if (!g) continue;
+      g.n -= s.n;
+      g.ok -= s.ok;
+      g.dn -= s.dn;
+      // 计数减到 0 就整键删掉：留着空壳会让 `clSnap` 继续为它算分位，
+      // 也会让 `S.cagg.size` 的 400 上限被死键占满。
+      if (g.n <= 0 && g.dn <= 0) S.cagg.delete(s.k);
+    }
   }
 }
 

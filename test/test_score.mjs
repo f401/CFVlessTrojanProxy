@@ -3380,5 +3380,30 @@ ok(`[${g}] 快照那段不再声称有 Snapshot 类`, !arch.includes("| `Snapsho
 ok(`[${g}] v8 映射表用的是落地名 FACTS.ack()`, v8.includes("`FACTS.ack()`"));
 ok(`[${g}] 设计阶段的临时名只在「更正」那句里出现`, !v8.includes("`factsAck()`"));
 
+// 146. 连接观测的上报确认：按发出去的数量相减，而不是整表清空（v7.157）
+{
+  const cg = W.S.cagg;
+  cg.clear();
+  // 45 个节点键，一次只发 40 行：多出来的 5 个必须留着，不能被清掉
+  for (let i = 0; i < 45; i++) cg.set("n" + i + ":443", { n: 5, ok: 4, dn: 500, v: [100, 120] });
+  const rows = W.PEND.clSnap(40);
+  eq("45 个节点键一次只发 40 行", rows.length, 40);
+  W.PEND.clAck(rows);
+  eq("没被发出去的那 5 个键原样留着（不再被整表清空）", cg.size, 5);
+  ok("发出去的键减到 0 就删掉", !cg.has(rows[0].k));
+  // 在途期间新结束的连接：快照之后 cagg 又涨了 2 条，确认时不能把它一起抹掉
+  cg.clear();
+  cg.set("a:443", { n: 3, ok: 3, dn: 300, v: [90] });
+  const one = W.PEND.clSnap(40);
+  eq("快照这一行是 3 个样本", one[0].n, 3);
+  cg.get("a:443").n += 2;
+  cg.get("a:443").dn += 200;
+  W.PEND.clAck(one);
+  eq("在途期间新增的观测不会被抹掉", cg.get("a:443") && cg.get("a:443").n, 2);
+  W.PEND.clAck(W.PEND.clSnap(40));
+  eq("再确认一次就清干净", cg.size, 0);
+  cg.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

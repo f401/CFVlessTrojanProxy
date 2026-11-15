@@ -79,7 +79,7 @@ export {
 } from "./nodes/metrics";
 export { tlsHello, refillPool, chunks, srcNote, srcRank, srcHealth, poolSources, POOL_SOURCES } from "./px/probe";
 export { regionListAsync } from "./px/regions";
-export { clSnapshot, nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
+export { PEND, clSnapshot, nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
 export { runCron } from "./routes/cron";
 export { renderStatsHtml } from "./views/panel";
 export { statsNodeRows } from "./nodes/stats-rows";
