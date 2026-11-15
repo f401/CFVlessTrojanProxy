@@ -3628,5 +3628,32 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   eq("老格式（裸到期时间）读成 blocked", Number(r4.s), 2);
   ok("DO 侧存状态（源码）", fs.readFileSync("src/store/meter.ts", "utf8").includes("r.s === 3 ? 3 : 2"));
 }
+// ── 第 155 组：空关闭的门槛只该在「跨过那一条」上生效 ──
+{
+  W.S.hostRankCache.clear();
+  for (let i2 = 0; i2 < 4; i2 += 1) W.nsEmptyClose("ec.test:443", true);
+  const ecs = W.S.nstat.get("ec.test:443");
+  W.S.hostRankCache.set("a.example", { t: 1, v: [] });
+  W.nsEmptyClose("ec.test:443", true);   // 第 5 条：这一条把计数推过门槛
+  ok("跨过门槛那一条会作废站点排行缓存", !W.S.hostRankCache.has("a.example"));
+  ok("门槛就是 5 次", Math.round(ecs.eCloseP) >= 5);
+  W.S.hostRankCache.set("b.example", { t: 1, v: [] });
+  W.nsEmptyClose("ec.test:443", true);   // 第 6 条：已经跨过，不该再清
+  ok("跨过之后再空关闭不再清缓存（eCloseP 按 6 小时半衰期挂着，每次清等于关掉缓存）", W.S.hostRankCache.has("b.example"));
+  ok("计数继续累加", Math.round(ecs.eCloseP) >= 6);
+  W.S.hostRankCache.set("c.example", { t: 1, v: [] });
+  W.nsEmptyClose("ec.test:443", false);
+  ok("直连腿的空关闭不清站点排行", W.S.hostRankCache.has("c.example"));
+}
+// 探活只累加样本数与 tcp/tls 的 EWMA，不写真实首字节的矩
+{
+  W.nsProbe("pr.test:443", 120, 90, 30);
+  W.nsProbe("pr.test:443", 130, 95, 35);
+  const prs = W.S.nstat.get("pr.test:443");
+  eq("探活只累加样本数", prs.pN, 2);
+  ok("探活不写首字节矩（否则会给还没承载流量的节点白加抖动罚）", prs.pSum === 0 && prs.pSumSq === 0);
+  ok("探活会更新 tcp 的 EWMA", prs.tcp > 0);
+  ok("门槛判断写成「跨过那一条」", fs.readFileSync("src/nodes/stat.ts", "utf8").includes("before < EMPTY_CLOSE_BAD"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

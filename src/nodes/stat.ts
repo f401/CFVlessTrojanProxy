@@ -54,6 +54,8 @@ export const ZERO_STAT: NodeStats = {
 
 export const TEN_MB = 10 * 1048576;
 export const E10_PRIOR = (TEN_MB / SC.PRIOR_BPS) * 1000;   // 无吞吐样本时的先验代价（≈5 秒，PRIOR_BPS=2MB/s）
+/** 经中转的空关闭累计到多少次算「这条通道可疑」（跨过那一条才作废站点排行缓存） */
+export const EMPTY_CLOSE_BAD = 5;
 
 /** NodeStatsTable：把原来的自由函数收成方法（行为逐位不变，外部仍可用同名薄包装） */
 export class NodeStatsTable {
@@ -141,10 +143,18 @@ export class NodeStatsTable {
   if (!k) return;
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
-  if (viaP) s.eCloseP = (s.eCloseP || 0) + 1;
+  const before = s.eCloseP || 0;
+  if (viaP) s.eCloseP = before + 1;
   else s.eCloseD = (s.eCloseD || 0) + 1;
-  // 跨过可疑门槛时，候选/站点排行缓存不能继续推荐它
-  if (viaP && s.eCloseP >= 5) { S.hostRankCache.clear(); invalidateRank(); }
+  // 只有「这一条刚好把计数推过门槛」才作废缓存。
+  // 原写法判的是 `eCloseP >= 5`，而 eCloseP 按 `SC.HL`（6 小时）半衰期衰减 ——
+  // 一旦跨过就至少挂几个小时，这段时间里**每一条**空关闭都会清掉整张站点排行缓存
+  // （最多 80 个站点），等于把缓存关掉。`nsOk` 里那条「每条成功连接都清会让过滤缓存
+  // 永远失效」是同一个教训，这里漏改了。
+  if (viaP && before < EMPTY_CLOSE_BAD && s.eCloseP >= EMPTY_CLOSE_BAD) {
+    S.hostRankCache.clear();
+    invalidateRank();
+  }
   s.at = now;
 }
 /**
@@ -178,9 +188,12 @@ export class NodeStatsTable {
   if (tls > 0) s.tls = s.tls ? s.tls * (1 - SC.A) + tls * SC.A : tls;
 }
 /**
- * 记一次探活结果：只进延迟样本，不参与可用性、也不解除熔断。
+ * 记一次探活结果：只累加探活样本数与 tcp/tls 的 EWMA，不参与可用性、也不解除熔断。
+ * `ms`（握手总耗时）只用来筛掉非正样本，**不写** `pSum`/`pSumSq`：
+ * 那两个字段是「真实首字节」的一二阶矩，混进探活 RTT 会让还没承载用户流量的节点
+ * 平白多出一份抖动罚（`jitMs = pSumSq * 1.4826`），而探活本来就在 `probeL` 里另算。
  * @param {string} k "host:port"
- * @param {number} ms 握手总耗时
+ * @param {number} ms 握手总耗时（仅校验）
  * @param {number} tcp 建连耗时
  * @param {number} tls TLS 往返
  * @returns {void}
@@ -191,7 +204,8 @@ export class NodeStatsTable {
   nsDecay(s, now);
   s.pN += 1;
   s.pF *= 0.5;
-  // 探活只进延迟样本：不要动 s.ok，否则面板成功率会被探测次数灌水
+  // 探活只动探活计数与 tcp/tls 的 EWMA：不要动 s.ok，否则面板成功率会被探测次数灌水；
+  // 也不要写 pSum/pSumSq —— 它们是真实首字节矩，混进来会给「还没承载流量」的节点加抖动罚
   if (tcp > 0) s.tcp = s.tcp ? s.tcp * (1 - SC.A) + tcp * SC.A : tcp;
   if (tls > 0) s.tls = s.tls ? s.tls * (1 - SC.A) + tls * SC.A : tls;
   s.at = now;
@@ -413,7 +427,7 @@ export function nsOk(k: string, tcp: number, tls: number) {
   STATS.nsOk(k, tcp, tls);
 }
 
-/** 功能：记一次探活成功（首字节入 EWMA 矩，不触碰真实流量权重）。@param k 节点键。@param ms 首字节毫秒。@param tcp 连接毫秒。@param tls TLS 毫秒。@returns 无 */
+/** 功能：记一次探活成功（只累加 pN 与 tcp/tls 的 EWMA；首字节矩只由真实连接写）。@param k 节点键。@param ms 握手总耗时（仅校验）。@param tcp 连接毫秒。@param tls TLS 往返毫秒。@returns 无 */
 export function nsProbe(k: string, ms: number, tcp: number, tls: number) {
   STATS.nsProbe(k, ms, tcp, tls);
 }

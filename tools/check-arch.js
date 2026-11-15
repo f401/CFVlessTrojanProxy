@@ -117,6 +117,23 @@ for (const f of walk(TYPES)) {
   }
 }
 
+// 行尾卫生：`\r\r\n`（双 CR）是「按行切开再 join("\r\n") 写回」留下的畸形行尾。
+// 它不报错，但会让 git 把每一行都算成改动；而只数 `\r\n` 的检查抓不到它
+// （`\r\r\n` 里本来就含一个 `\r\n`）—— 7.163 的文档脚本就这么把 AGENTS.md 与
+// src/core/util.ts 各写坏了 300 多行。
+const eolTargets = [...files, path.join(ROOT, "AGENTS.md")];
+const DOCS = path.join(ROOT, "docs");
+if (fs.existsSync(DOCS)) {
+  for (const e of fs.readdirSync(DOCS, { withFileTypes: true })) {
+    if (e.isFile() && e.name.endsWith(".md")) eolTargets.push(path.join(DOCS, e.name));
+  }
+}
+for (const f of eolTargets) {
+  const t = fs.readFileSync(f, "utf8");
+  const n = (t.match(/\r\r\n/g) || []).length;
+  if (n) problems.push(`${path.relative(ROOT, f)}: ${n} 处 \\r\\r\\n（双 CR 行尾），应为单一 CRLF`);
+}
+
 const uniq = [...new Set(problems)];
 if (uniq.length) {
   console.log("架构门禁失败：");
