@@ -493,7 +493,11 @@ const hl = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d,
       } catch (e) {}
       const cur = (this.c.up || 0) + (this.c.down || 0);
       const want = (Number(d.up) || 0) + (Number(d.down) || 0);
-      if (want > cur) {
+      // 连接数也是单调量：只看字节会让「只建过连接、没有可计量流量」的用户恢复不到
+      // conns/first；`/seed` 的门槛是 up+down+conns，两条恢复路径的口径必须一致
+      const curN = this.c.conns || 0;
+      const wantN = Number(d.conns) || 0;
+      if (want > cur || wantN > curN) {
         const oldC = { ...this.c };
         // 恢复历史累计不能把"今日"一起抹掉；只有快照的 d 是今天才采纳 dU/dD
         const today = new Date().toISOString().slice(0, 10);
@@ -512,8 +516,15 @@ const hl = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d,
         this.c = {
           up: Number(d.up) || 0,
           down: Number(d.down) || 0,
-          conns: Number(d.conns) || this.c.conns || 0,
-          first: Number(d.first) || this.c.first || Date.now(),
+          // conns 取两者更大：快照可能比 DO 落后几小时，直接赋值会让面板的连接数变小
+          conns: Math.max(wantN, curN),
+          // first 取更早的非零值：重建后不能把「首次使用时间」推后
+          first: (() => {
+            const a = Number(d.first) || 0;
+            const b = this.c.first || 0;
+            if (a > 0 && b > 0) return Math.min(a, b);
+            return a || b || Date.now();
+          })(),
           ts: Date.now(),
           d: restoreDay || sameDay ? today : this.c.d || "",
           dU,

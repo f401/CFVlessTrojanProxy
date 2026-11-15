@@ -3842,5 +3842,28 @@ console.log("\n【164】池子侧的死状态");
   ok("页面说明有几个用户这次没读到", page.includes("1 个用户这次没读到用量"));
 }
 
+// 第 166 组：/meter/set 的恢复门槛（第 98 条）
+// 旧门槛只看 up+down，导致「只建过连接、没有可计量流量」的用户整条恢复被跳过；
+// 同时 conns 直接赋值会让落后几小时的快照把更大的连接数改小。
+const dset = (m, body) => m.fetch(new Request("https://meter/set", { method: "POST", body: JSON.stringify(body) }));
+{
+  const a = mkDO();
+  await dset(a.m, { up: 0, down: 0, conns: 7, first: 1000 });
+  eq("只有连接数、没有字节的用户也能恢复（旧代码整条跳过）", a.m.c.conns, 7);
+  eq("首次使用时间跟着恢复", a.m.c.first, 1000);
+  await dset(a.m, { up: 0, down: 0, conns: 12, first: 1000 });
+  eq("字节没变多时不再整体跳过：连接数继续前进", a.m.c.conns, 12);
+}
+{
+  const b = mkDO();
+  await dset(b.m, { up: 100, down: 200, conns: 9, first: 1000 });
+  await dset(b.m, { up: 150, down: 200, conns: 3, first: 5000 });
+  eq("快照落后时不会把更大的连接数改小", b.m.c.conns, 9);
+  eq("首次使用时间取更早的那个", b.m.c.first, 1000);
+  eq("字节按快照恢复（快照更大才覆盖）", b.m.c.up + b.m.c.down, 350);
+}
+const mSrc166 = fs.readFileSync("src/store/meter.ts", "utf8");
+ok("恢复门槛含连接数（与 /seed 口径一致）", mSrc166.includes("wantN > curN"));
+ok("conns 用 max 合并，快照落后也不回退", mSrc166.includes("Math.max(wantN, curN)"));
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
