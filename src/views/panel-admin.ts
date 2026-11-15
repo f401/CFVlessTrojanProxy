@@ -144,18 +144,3 @@ ${rows || '<tr><td colspan="8" class="mu">还没有用户</td></tr>'}
 /* ==================================================================
  * §9  路由与响应
  * ================================================================== */
-
-/**
- * 计算对客户端展示的配额总量：用量到顶就自动翻倍。
- * @param {object} env Worker 环境
- * @param {number} used 已用字节
- * @returns {number} 展示用总量
- */
-
-/**
- * 生成订阅响应头（subscription-userinfo / 到期 / 标题）。
- * @param {object} env Worker 环境
- * @param {object} stats 用量对象
- * @returns {Record<string,string>} 响应头
- */
-

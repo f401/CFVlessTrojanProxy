@@ -227,12 +227,4 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
   return new Response(null, { status: 101, webSocket: clientWS } as unknown as ResponseInit);
 }
 
-/**
- * 上游 → WebSocket 的下行转发，含首包合并、RTT 标记与背压控制。
- * @param {Socket} sock 上游连接
- * @param {WebSocket} ws 客户端连接
- * @param {object} st 连接状态
- * @param {(gotData: boolean) => void} [onClose] 上游关闭时的回调（gotData 表示是否收到过数据）
- * @returns {void}
- */
 

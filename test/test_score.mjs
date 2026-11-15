@@ -3307,5 +3307,9 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
 }
 
 
+
+/* ---------- 111. 死字段与孤儿文档（v7.151） ---------- */
+eq("Thompson 的成员表缓存字段已删除（v6.42 删采样器时留下的死字段）", W.S.tsMem, undefined);
+ok("状态表里不再有 tsMem 的键", !Object.prototype.hasOwnProperty.call(W.S, "tsMem"));
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

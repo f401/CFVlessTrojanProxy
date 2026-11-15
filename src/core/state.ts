@@ -66,8 +66,6 @@ export class AppState {
     // 分片重建：大池一次算不完，用每次 pick 顺带推进一片，期间继续用上一版排行
     step: Record<string, { keys: string[]; pos: number; top: RankRow[]; extra: RankRow[]; ok: number }>;
   } = { t: 0, at: {}, v: {}, step: {} };
-  // Thompson 采样的成员表缓存（按延迟前 TS_K 个），20 秒重建一次
-  tsMem: { at: number; keys: string[] } = { at: 0, keys: [] };
 
   // —— 日计数 ——
   cntKeys = [

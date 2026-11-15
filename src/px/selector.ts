@@ -396,8 +396,6 @@ export class Selector {
       if (best) { if (st) st.node = best; return best; }
     }
     // 非 CF 出口优先，但只在分数可比时（1.5x + 50ms 带内）：CF 托管站点的
-    // 判定依据是出口 IP，非 CF 中继才可能改变结果；分数差太多则不值得。
-    // 非 CF 出口优先，但只在分数可比时（1.5x + 50ms 带内）：CF 托管站点的
     // 判定依据是出口 IP 族，非 CF 中继才可能改变结果。偏好开关由判定层（Policy）给。
     if (host && HOOK.nonCfFirst && HOOK.nonCfFirst()) {
       const now = Date.now();
@@ -469,11 +467,6 @@ export class Selector {
     S.seedDirty = true;
   }
 
-  /**
-   * 一轮扫描：重建池子 → 探测候选 → 复测 alive → 重算游标 → 落盘。
-   * @param {object} env Worker 环境
-   * @returns {Promise<void>}
-   */
 }
 
 export const SEL = new Selector();

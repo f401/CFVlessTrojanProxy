@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.150**（自举审计三十批、共 48 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.151**（自举审计三十一批、共 51 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -201,6 +201,10 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   `cron.ts` 的 `runRound(plan)` 调用、`test-surface.ts` 的两个导出；`planRound` 收成「准入拿满、不超过 `SCAN_MAX`」，
   并显式写明两个参数只剩保留签名的作用。锁：第 37 组改成「这三样已删除」，第 67 组改成「预算里不再有判定额度这一项」（旧代码上 6 条断言红）。
 - **第 47 条（7.150）两条证据入口都是死路**：`src/route/observe.ts` 的 `recordProbe`（探测链 7.69 整体删除后就没有入口）与 `recordClient`（订阅只有客户端 `url-test`，客户端从不回传状态码）在生产代码里**零调用点**，却仍被 `test-surface.ts` 导出、8 条单测在用，头注释还写着「一次写两处（判定表 + 池子基础质量）」「blocked/dead 只能由 probe 或 client 产生」——三句都不成立。删两个函数与两个事件类型，注释改成「只剩三条真实入口：`recordTraffic` / `recordBlock` / `recordPass`」。
+- **第 49 条（v7.151）** `S.tsMem` 是死字段：`src/core/state.ts` 里 88 个字段中唯一「0 读 0 写」的一个（注释还写着「Thompson 采样的成员表缓存」——v6.42 删采样器时留下的）。已删。
+- **第 50 条（v7.151）** `src/px/selector.ts` 有两段相邻且互相重复的「非 CF 出口优先」注释（一段说「判定依据是出口 IP」，一段说「出口 IP 族」），保留措辞更准的那段。
+- **第 51 条（v7.151）** 十段孤儿文档：`src/views/panel.ts` 七段（cookie/sha256/sessionToken/adminAuthed/loginAllowed/clearLogin/newNonce——辅助函数早已搬到 `src/edge/auth.ts` 与 `src/views/panel-admin.ts`）、`src/proxy/session.ts` 的下行转发（实现在 `src/proxy/tunnel.ts`）、`src/px/selector.ts` 的扫描方法（已不存在）、`src/views/panel-admin.ts` 的配额翻倍与订阅响应头（分别在 `sub-common.ts` 与 `routes/subscription.ts`）。它们让读代码的人以为这些能力还在本文件里。全部删除，并把「文档块结束后紧跟 `}` 或文件结束」做成 `tools/doc-audit.mjs` 的门禁（当前能抓 3 处，另外 7 处是「一段文档叠在另一段文档前面」，只能靠人读——门禁不假装覆盖）。
+
 - **第 48 条（7.150）`eq` 对函数是空断言**：`eq` 用 `JSON.stringify(a) === JSON.stringify(b)` 比较，而 `JSON.stringify(函数)` 与 `JSON.stringify(undefined)` 都返回 `undefined` ⇒ 历史上所有「某函数已删除」的锁（7.133 的 `edgeAdd`/`p90Local`/`relAgg`/`vGet`、7.141 的 `STORE.usageSnapWrite`、7.145 的 `judge`/`queueLen`/`HOOK.verify`、7.149 的 `pickHosts`/`SWEEP_COST`/`runRound`）都是**永远为真**的空断言 —— 这次是 A/B 在旧代码上仍然 0 失败才暴露。修法：`const strict = b === undefined || typeof a === "function" || typeof b === "function";` 后走 `Object.is`。
 - **已核查、不是缺陷**（留档免得再查一遍）：`refillPool` 抓源用的是 `fetch`（占 50 子请求额度），`cronScan` 的探活用的是 `connect()`；两者虽共用 `SCAN_SUB` 这个数字，但线上 `/<uuid>/logs` 里从未出现 subrequest 超限（`count 24 / persisted 22` 全是 `forced _Rd` 这类中继日志），说明探活并不吃抓源那份额度 —— 把 `SCAN_SUB` 再减一个「固定开销」会让冷启动发现速度直接砍半，所以不改。三条属于「短路/顺序」类，
   按函数行为写的单测永远测不到（分支没被执行）——这类缺陷只能靠端到端闭环证明或真实流量发现。

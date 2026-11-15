@@ -137,51 +137,6 @@ ${row("?k=", "页面口令（配置了 pageKey 才生效）", false)}
 /* ---------- 会话与登录（挑战-应答，密码不出现在任何请求里） ---------- */
 
 /**
- * 从请求头里取指定 cookie 的值。
- * @param {Request} req 请求
- * @param {string} name cookie 名
- * @returns {string} 值，没有则空串
- */
-
-/**
- * 计算字符串的 SHA-256，输出十六进制。
- * @param {string} str 原文
- * @returns {Promise<string>} 64 位十六进制
- */
-
-/**
- * 用 adminKey 派生会话 token（不存任何明文）。
- * @param {object} env Worker 环境
- * @returns {Promise<string>} token
- */
-
-/**
- * 校验管理端请求是否已登录（cookie 或 URL 上的 key）。
- * @param {Request} request 请求
- * @param {URL} url 请求 URL
- * @param {object} env Worker 环境
- * @returns {Promise<boolean>} 是否通过
- */
-
-/**
- * 登录限流：命中则返回 false。
- * @param {string} ip 客户端 IP
- * @param {number} limit 单位时间内的最大次数
- * @returns {boolean} 是否允许本次请求
- */
-
-/**
- * 清空某个 IP 的失败计数（登录成功后调用）。
- * @param {string} ip 客户端 IP
- * @returns {void}
- */
-
-/**
- * 生成一次性随机串（用于登录表单防重放）。
- * @returns {string} 32 位十六进制
- */
-
-/**
  * 渲染登录页。
  * @param {string} nonce 一次性串
  * @param {string} [err] 错误提示
