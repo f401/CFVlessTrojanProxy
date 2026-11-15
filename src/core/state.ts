@@ -90,7 +90,6 @@ export class AppState {
     "capSet",
     "capNoise",
     "rehab",
-    "cfDiff",
     "dnsProbe",
     "dnsDO",
     "egDO",

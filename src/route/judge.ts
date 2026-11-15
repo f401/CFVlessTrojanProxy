@@ -12,7 +12,7 @@ import { cnt } from "../core/counter";
 import { queueVerify } from "./verify";
 import { HEALTH } from "./relay-health";
 import { FACT } from "./factshadow";
-import { commitFact } from "./commitfact";
+import type { FactOut } from "./commitfact";
 import { PS } from "./psfacts";
 import { DNS } from "./dnsfacts";
 import { egDerive } from "./egfacts";
@@ -107,25 +107,29 @@ export class Judge {
     // 事件自己的时间戳：回放/聚合的事件必须按发生时间归批，否则三批会被压成一批
     const ty = (e as { at?: number }).at ?? Date.now();
     HEALTH.note(e.node, e.down, e.ok); // 中继存活度：与站点无关的那一半证据
-    // v8 的写入裁决只有一个入口：`commitFact`。影子算出「本会写什么」，生产侧再按同一裁决落库，
-    // 两者结论不同就记 `cfDiff` —— 它说明有人在别处绕过了裁决（这正是「同一件事只能有一份状态」的守卫）。
-    let verdict = "";
+    // v8 的写入裁决：`commitFact` 决定「这条观测最多能写一条什么事实」。
+    // 生产与影子**共用同一次裁决**（`FACT.decide`）：以前影子先算、生产再算一次，而影子算完就会
+    // 推进批次/节流时钟 —— 生产读到的是「刚刚」，于是密集 tiny 流里生产侧永远看到 `R_SINGLE_BATCH`。
+    // 分工要写清，否则很容易以为「这里就是唯一的写入口」：
+    //   · `ps`（站点×中继的成功率）由这里消费，是唯一的写者；
+    //   · `blk`（封锁）不在这里落库 —— 它需要「三批独立确认」的跨事件状态，纯函数持不了，
+    //     真正的写者是下面 `BLK.note` 的批次投票，`commitFact` 的 `blk` 裁决只是逐观测的建议；
+    //   · `dead` 同理，由拨号器/探活的 `deadNote` 写。
+    let out: FactOut = { reason: "" };
     try {
-      verdict = FACT.observe(e, ty);
+      out = FACT.decide(e, ty);
     } catch {
       /* 影子统计绝不影响真实判定 */
     }
     if (e.via === "node" && e.node && e.host) {
       const pip = e.node.slice(0, e.node.lastIndexOf(":"));
       if (pip) {
-        const out = commitFact({ kind: "relay", host: e.host, relay: pip, at: ty, down: e.down, status: 0 }, FACT.ctxFor(e, ty));
-        if (verdict && out.reason !== verdict) cnt("cfDiff");
         // 只有「拿到完整响应」才记成功率；tiny 的负样本由 blk 的批次投票负责（§5.1 D14）
         if (out.write && out.write.kind === "ps" && out.write.j.ok) PS.note(e.host, pip, true, ty);
-    // B 级负样本：`tiny` + 同窗口有 ≥20KB 对照，但批次还不够三批（A 级），此时不写 `blk`，
-    // 但必须让 `ps` 记住这次失败 —— 否则 `ps` 只能因为成功而变便宜（`factor = prior/p` 恒 ≤1），
-    // 「这条中继对这个站点不行」这个信息一条也进不去（本地对照里 `ps` 边际为 0 的主因之一）。
-    else if (out.reason === "R_SINGLE_BATCH") PS.note(e.host, pip, false, ty);
+        // B 级负样本：`tiny` + 同窗口有 ≥20KB 对照，但批次还不够三批（A 级），此时不写 `blk`，
+        // 但必须让 `ps` 记住这次失败 —— 否则 `ps` 只能因为成功而变便宜（`factor = prior/p` 恒 ≤1），
+        // 「这条中继对这个站点不行」这个信息一条也进不去（本地对照里 `ps` 边际为 0 的主因之一）。
+        else if (out.reason === "R_TINY_PEER") PS.note(e.host, pip, false, ty);
       }
     }
     const chan = this.chanOf(e);

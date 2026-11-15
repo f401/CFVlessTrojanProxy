@@ -14,7 +14,7 @@
 import { cnt } from "../core/counter";
 import { S } from "../core/state";
 import type { TrafficEvt } from "../core/hook";
-import { BIG_WIN, commitFact, factKey, isTiny, type FactCtx, type FactObs } from "./commitfact";
+import { BIG_WIN, commitFact, factKey, type FactCtx, type FactObs, type FactOut } from "./commitfact";
 
 /** 影子统计的一次快照 */
 export interface FactShadowSnap {
@@ -84,10 +84,10 @@ export function notePeer(o: FactObs, now: number): void {
  * 功能：影子上下文 —— 从本 isolate 已有的状态拼出 `commitFact` 需要的上下文。
  * @param {FactObs} o 当前观测
  * @param {number} now 当前时间
- * @param {Record<string, { at: number }>} prev 已确认批次
+ * @param {number} lastWriteAt 该事实键上一次做出裁决的时间（0 = 没有记录，交给 `WRITE_GAP` 判）
  * @returns {FactCtx} 上下文
  */
-export function shadowCtx(o: FactObs, now: number, prev: Record<string, { at: number }>): FactCtx {
+export function shadowCtx(o: FactObs, now: number, lastWriteAt = 0): FactCtx {
   const ck = chanKey(o);
   const peers: FactObs[] = (S.peers.get(o.host) || [])
     .filter((x) => x.ck !== ck && now - x.at <= BIG_WIN)
@@ -102,14 +102,18 @@ export function shadowCtx(o: FactObs, now: number, prev: Record<string, { at: nu
       down: x.down,
       status: 200,
     }));
-  const bigAt = S.bigByHost.get(o.host) || 0;
+  // 只带两样：这个站点见过的最大响应（判 tiny 的尺度）与同窗口的其他观测（当对照）。
+  // 「批次时钟」与「同站点整页时间」已经不进上下文：前者随「两批 → 写 blk」分支一起删除
+  // （那条分支在生产路径上不可达），后者的反向证据检查在 `BLK.note` 里自己做。
   const ctx: FactCtx = {
     now,
     bigTypical: S.bigTyp.get(o.host) || 0,
     peers,
-    lastBigAt: bigAt ? { [o.host]: bigAt } : {},
   };
-  if (prev[ck]) ctx.prevBatch = { [ck]: { at: prev[ck].at } };
+  // 节流时钟：`commitFact` 用 `factKey` 查（中继腿是 `站点|中继`，直连腿是 `d`），
+  // 这里就按同一个键填一行。不填它 `R_THROTTLED` 永远命中不了 —— 那意味着
+  // `WRITE_GAP`（同一个键 60 秒内只写一条事实）在整条生产链路上从未生效过。
+  if (lastWriteAt > 0) ctx.lastWrite = { [factKey(o)]: lastWriteAt };
   return ctx;
 }
 
@@ -123,42 +127,56 @@ export class FactShadow {
   private n = 0;
   private would = new Map<string, number>();
   private why = new Map<string, number>();
-  /** 每个键上一次 tiny 观测的时间：第二批要 ≥60s 才算确认 */
-  private prevBlk = new Map<string, number>();
+  /**
+   * 每个事实键上一次「做出裁决」（写入事实，或确认一批）的时间。
+   *
+   * 为什么需要它：`commitFact` 的第 0 条规则是节流 —— 同一个键 60 秒内只写一条事实
+   * （`WRITE_GAP`）。这条规则要靠 `ctx.lastWrite` 才成立，而之前没有任何调用方填过它，
+   * 于是 `R_THROTTLED` 在生产路径上永远命中不了：一次突发里每条 tiny 响应都会给
+   * `ps` 记一个负样本（`PsFacts.note` 自己没有节流），45 分钟内把该通道的成功率压到
+   * 下界、代价乘以 2。事实是「事实」，不是日志 —— 一条通道一分钟内的二十次失败
+   * 说的是同一件事。
+   */
+  private wrote = new Map<string, number>();
 
   /**
-   * 功能：观察一条连接收尾事件（只统计，不写任何事实）。
+   * 功能：对一条观测做出**唯一一次**裁决（生产与影子共用这一个结果），并顺带推进两个时钟。
+   *
+   * 为什么必须只算一次：以前是「影子先算一次、生产再用 `ctxFor` 算一次」，而影子在算完后
+   * 会推进批次时钟 —— 生产读到的 `prevBatch` 已经是「刚刚」，于是同一个观测在两侧得到
+   * 不同结论：密集 tiny 流里生产侧永远是 `R_SINGLE_BATCH`（两批确认不可达），
+   * `cfDiff` 每一条都在涨。一份输入只能有一个结论，这是「同一件事只有一份状态」的最小要求。
    * @param {TrafficEvt} e 连接收尾事件
-   * @param {number} now 当前时间（默认取系统时间）
-   * @returns {string} 决策理由码（`ok` 表示会写；便于单测直接断言）
+   * @param {number} now 事件时间
+   * @returns {FactOut} 裁决（写什么 / 为什么什么都不写）
    */
-  /**
-   * 功能：给外部（生产写入点）拼一份与影子完全相同的上下文，保证两边用同一套证据。
-   * @param e 连接事件
-   * @param now 事件时间
-   * @returns 裁决器上下文
-   */
-  ctxFor(e: TrafficEvt, now = Date.now()): FactCtx {
-    const prev = this.prevBlk as unknown as Record<string, { at: number }>;
-    const o: FactObs = { kind: e.via === "node" ? "relay" : "direct", host: e.host, relay: e.node ? e.node.slice(0, e.node.lastIndexOf(":")) : "", at: now, down: e.down, status: 0 };
-    return shadowCtx(o, now, prev);
-  }
-  observe(e: TrafficEvt, now = Date.now()): string {
+  decide(e: TrafficEvt, now = Date.now()): FactOut {
     const o = shadowObs(e, now);
-    const ck = chanKey(o);
-    const prevAt = this.prevBlk.get(ck) || 0;
-    const prev: Record<string, { at: number }> = prevAt ? { [ck]: { at: prevAt } } : {};
-    const r = commitFact(o, shadowCtx(o, now, prev));
+    const r = commitFact(o, shadowCtx(o, now, this.wrote.get(factKey(o)) || 0));
+    // 统计（「如果切到 v8 会写出什么」的分布，`/health` 上的 `would`/`why` 就是它）
     this.n += 1;
     const kind = r.write ? r.write.kind : "none";
     this.would.set(kind, (this.would.get(kind) || 0) + 1);
     this.why.set(r.reason, (this.why.get(r.reason) || 0) + 1);
     cnt("cfObs");
-    // tiny 观测记一批（无论这次是否凑够对照）：下一次 tiny 才有机会变成「两批确认」
-    if (isTiny(o, S.bigTyp.get(o.host) || 0)) this.prevBlk.set(ck, now);
-    if (this.prevBlk.size > 2048) this.prevBlk.clear();
+    // 时钟二：节流。真的落了库（`ps`）或裁决为「该写 blk / 该记负样本」才算做过一次裁决；
+    // 只有 `R_THROTTLED` 本身不推进，否则一条被节流的观测会把下一个 60 秒也锁上。
+    if (r.write || r.reason === "ok" || r.reason === "R_TINY_PEER") {
+      this.wrote.set(factKey(o), now);
+      if (this.wrote.size > 2048) this.wrote.clear();
+    }
     notePeer(o, now);
-    return r.reason;
+    return r;
+  }
+
+  /**
+   * 功能：观察一条连接收尾事件，只返回裁决理由码（单测与 `/health` 的旧入口）。
+   * @param {TrafficEvt} e 连接收尾事件
+   * @param {number} now 当前时间（默认取系统时间）
+   * @returns {string} 决策理由码（`ok` 表示会写）
+   */
+  observe(e: TrafficEvt, now = Date.now()): string {
+    return this.decide(e, now).reason;
   }
 
   /**
@@ -174,7 +192,7 @@ export class FactShadow {
     this.n = 0;
     this.would.clear();
     this.why.clear();
-    this.prevBlk.clear();
+    this.wrote.clear();
   }
 }
 

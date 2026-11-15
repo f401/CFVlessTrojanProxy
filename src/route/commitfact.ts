@@ -19,7 +19,6 @@ export const BIG_PEER = 20000;
 /** 同窗口宽度：120 秒内的观测可以互为对照 */
 export const BIG_WIN = 120000;
 /** 确认间隔：第二批至少要隔 60 秒（三批才算 A 级证据） */
-export const CONFIRM_GAP = 60000;
 /** `blk` 寿命 90 分钟；`ps` 45 分钟（软证据比硬证据过期快） */
 export const BLK_TTL = 90 * 60000;
 export const DEAD_TTL = 30 * 60000;
@@ -55,9 +54,7 @@ export interface FactCtx {
   /** 同窗口内的其他观测（用来找「另一条通道拿到整页」） */
   peers?: FactObs[];
   /** 同键上一次被确认的批次时间（用于「至少要两批」） */
-  prevBatch?: Record<string, { at: number }>;
   /** 每个站点最近一次拿到整页的时间（用于「三分钟内还出过整页 → 矛盾」） */
-  lastBigAt?: Record<string, number>;
   /** 每个键上次写入时间（用于节流） */
   lastWrite?: Record<string, number>;
 }
@@ -160,12 +157,12 @@ export function commitFact(o: FactObs, ctx: FactCtx = {}): FactOut {
   if (isTiny(o, bigTypical)) {
     if (o.kind !== "relay") return { reason: "R_DIRECT_NEVER" };
     if (!bigPeer) return { reason: "R_NO_BIG_PEER" };
-    const prev = ctx.prevBatch ? ctx.prevBatch[key] : undefined;
-    if (!prev || now - prev.at < CONFIRM_GAP) return { reason: "R_SINGLE_BATCH" };
-    const bigAt = ctx.lastBigAt ? ctx.lastBigAt[o.host] : 0;
-    // 三分钟内这条通道还出过整页 → 自相矛盾，宁可弃权（7.57 的教训：错封锁比不封锁贵得多）
-    if (bigAt && now - bigAt < 3 * 60000) return { reason: "R_CONTRADICTORY" };
-    return { write: { kind: "blk", key, at: now, j: { at: now } }, reason: "ok" };
+    // 两批确认只是「B 级证据」：这里**不写任何事实**，由上层（judge）给 `ps` 记一条负样本。
+    // 真正的封锁（`blk`）由 `src/route/blkfacts.ts` 的 `BLK.note` 三批投票决定，反向证据检查也在那边。
+    // 这里以前还有一条「两批 → 写 blk」和一条 `R_CONTRADICTORY` 分支，纯函数里永远走不到：
+    // `bigPeer` 要求 120 秒内有 ≥20KB 的对照，而那条对照同时会写 `S.bigByHost`，本函数又用
+    // 3 分钟的窗口判矛盾 —— 两条规则互相排除，只有手写上下文的单测能走到它们（v7.137 删除）。
+    return { reason: "R_TINY_PEER" };
   }
 
   // 6) 其余「拿到完整响应」→ `ps` 成功计数（tiny 的负样本由上层单独登记，见 §5.1 D14）

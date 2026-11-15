@@ -2393,22 +2393,22 @@ console.log("\n77) 事实写入决策器（v8 的 commitFact）");
   const V = [
     ["回显 v4 写 eg", R({ echoFam: 4, down: 620 }), {}, "ok", "eg"],
     ["回显太小不算", R({ echoFam: 4, down: 20 }), {}, "R_ECHO_SMALL"],
-    ["tiny + 有大响应 + 两批 → 写 blk", R({ down: 737, status: 403 }), { bigTypical: 45000, peers: [D({ down: 45290 })], prevBatch: { [K]: { at: T - 61000 } } }, "ok", "blk"],
+    ["tiny + 有整页对照 → B 级证据（不写事实）", R({ down: 737, status: 403 }), { bigTypical: 45000, peers: [D({ down: 45290 })] }, "R_TINY_PEER"],
     ["403 tiny 且无对照 → 站点级", R({ down: 737, status: 403 }), { bigTypical: 45000 }, "R_SITE_LEVEL"],
     ["200 tiny 且对照不够大", R({ down: 737, status: 200 }), { bigTypical: 45000, peers: [D({ down: 5000 })] }, "R_NO_BIG_PEER"],
-    ["tiny 只有一批", R({ down: 737, status: 403 }), { bigTypical: 45000, peers: [D({ down: 45290 })] }, "R_SINGLE_BATCH"],
-    ["直连腿 tiny 永不写 blk", D({ down: 737, status: 403 }), { bigTypical: 45000, peers: [R({ down: 45290 })], prevBatch: { d: { at: T - 61000 } } }, "R_DIRECT_NEVER"],
+    ["tiny 有对照但只这一条 → 仍是 B 级", R({ down: 737, status: 403 }), { bigTypical: 45000, peers: [D({ down: 45290 })] }, "R_TINY_PEER"],
+    ["直连腿 tiny 永不写 blk", D({ down: 737, status: 403 }), { bigTypical: 45000, peers: [R({ down: 45290 })] }, "R_DIRECT_NEVER"],
     ["429 只退避", R({ down: 400, status: 429 }), { bigTypical: 45000 }, "R_429_BACKOFF"],
     ["全通道 4xx = 站点级", R({ down: 1277, status: 415 }), { bigTypical: 1277 }, "R_SITE_LEVEL"],
     ["业务 4xx 有对照 → 记 ps", R({ down: 1277, status: 415 }), { bigTypical: 1277, peers: [D({ down: 45290 })] }, "ok", "ps"],
     ["正常大响应 → ps", R({ down: 45290, status: 200 }), { bigTypical: 45000 }, "ok", "ps"],
     ["证书错 → dead", R({ err: "x509", down: 0 }), {}, "ok", "dead"],
     ["直连证书错不写 dead", D({ err: "x509" }), {}, "R_DEAD_DIRECT"],
-    ["三分钟内同通道出过整页 → 矛盾", R({ down: 737, status: 403 }), { bigTypical: 45000, peers: [D({ down: 45290 })], prevBatch: { [K]: { at: T - 61000 } }, lastBigAt: { "x.com": T - 120000 } }, "R_CONTRADICTORY"],
+    ["同站点三分钟内出过整页 → 仍是 B 级（封锁由 BLK.note 判）", R({ down: 737, status: 403 }), { bigTypical: 45000, peers: [D({ down: 45290 })] }, "R_TINY_PEER"],
     ["节流：60s 内同键只写一次", R({ down: 45290, status: 200 }), { bigTypical: 45000, lastWrite: { [K]: T - 30000 } }, "R_THROTTLED"],
     ["1277B 且典型 1277 → 业务页不是 tiny", R({ down: 1277, status: 200 }), { bigTypical: 1277, peers: [D({ down: 1277 })] }, "ok", "ps"],
     ["932B 且典型 932 → 业务页不是 tiny", { kind: "relay", host: "example.com", relay: "45.147.250.39", at: T, down: 932, status: 200 }, { bigTypical: 932 }, "ok", "ps"],
-    ["737B 且典型未知 → 仍算 tiny（有对照两批）", R({ down: 737, status: 403 }), { bigTypical: 0, peers: [D({ down: 45290 })], prevBatch: { [K]: { at: T - 61000 } } }, "ok", "blk"],
+    ["737B 且典型未知 → 仍算 tiny（有对照）", R({ down: 737, status: 403 }), { bigTypical: 0, peers: [D({ down: 45290 })] }, "R_TINY_PEER"],
     ["没拿到任何字节", R({ down: 0, status: 0 }), {}, "R_NO_BYTES"],
   ];
   let okN = 0;
@@ -2425,15 +2425,25 @@ console.log("\n78) 写入决策器的影子统计");
 {
   W.FACT.clear();
   const ev = (x) => ({ host: "shadow.example", via: "node", node: "45.136.117.194:443", down: 0, ok: true, life: 900, up: 0, ...x });
-  eq("整页 → 本会写 ps", W.FACT.observe(ev({ down: 45290, ok: true })), "ok");
-  eq("tiny 但没有同窗口对照 → 弃权", W.FACT.observe(ev({ down: 737, ok: true, life: 80 })), "R_NO_BIG_PEER");
-  eq("直连腿的 tiny → 永不写封锁", W.FACT.observe(ev({ via: "direct", node: "", down: 737 })), "R_DIRECT_NEVER");
-  eq("零字节 → 弃权", W.FACT.observe(ev({ down: 0, ok: false })), "R_NO_BYTES");
+  // 时间轴必须拉开：从 v7.137 起 `WRITE_GAP` 真的生效了（`ctx.lastWrite` 有了生产者），
+  // 同一个「站点|中继」60 秒内第二次裁决一律是 `R_THROTTLED`。对照窗口是 120 秒，
+  // 所以「看不见对照」的用例要跨过 120 秒，而不是 60 秒。
+  const t0 = 1_700_000_000_000;
+  eq("整页 → 本会写 ps", W.FACT.observe(ev({ down: 45290, ok: true }), t0), "ok");
+  eq("tiny 但没有同窗口对照 → 弃权", W.FACT.observe(ev({ down: 737, ok: true, life: 80 }), t0 + 121000), "R_NO_BIG_PEER");
+  eq("直连腿的 tiny → 永不写封锁", W.FACT.observe(ev({ via: "direct", node: "", down: 737 }), t0 + 242000), "R_DIRECT_NEVER");
+  eq("零字节 → 弃权", W.FACT.observe(ev({ down: 0, ok: false }), t0 + 363000), "R_NO_BYTES");
   const sn = W.FACT.snap();
   eq("影子统计了 4 条", sn.n, 4);
   eq("本会写 ps 的只有 1 条", sn.would.ps, 1);
   eq("本会写封锁的是 0 条", sn.would.blk || 0, 0);
   eq("理由码也被统计", sn.why.R_NO_BYTES, 1);
+  // 节流：同一个键 60 秒内只写一条事实（这条规则在 v7.137 之前根本命中不了）
+  W.FACT.clear();
+  const t1 = 1_700_100_000_000;
+  eq("第一次整页 → 写 ps", W.FACT.observe(ev({ down: 45290, ok: true }), t1), "ok");
+  eq("20 秒后同一个键 → 节流", W.FACT.observe(ev({ down: 45290, ok: true }), t1 + 20000), "R_THROTTLED");
+  eq("61 秒后再来 → 又能写", W.FACT.observe(ev({ down: 45290, ok: true }), t1 + 61000), "ok");
   W.FACT.clear();
   eq("清零后快照为空", W.FACT.snap().n, 0);
 }
@@ -2450,9 +2460,9 @@ console.log("\n79) 同窗口对照与 bigTypical（影子从此能算出「本�
   const B = "91.215.153.143:443";
   const t0 = 1_700_000_000_000;
   eq("整页先入对照环形 → 本会写 ps", W.FACT.observe(ev({ node: A, down: 45290, ok: true }), t0), "ok");
-  eq("另一条中继的 tiny 只有一批 → 单批弃权", W.FACT.observe(ev({ node: B, down: 737, ok: false, life: 80 }), t0 + 1000), "R_SINGLE_BATCH");
-  eq("同一中继 ≥60s 后第二批 + 有整页对照 → 写入封锁", W.FACT.observe(ev({ node: B, down: 737, ok: false, life: 80 }), t0 + 70000), "ok");
-  eq("快照里记下 1 条本会写封锁", W.FACT.snap().would.blk, 1);
+  eq("另一条中继的 tiny + 有整页对照 → B 级证据", W.FACT.observe(ev({ node: B, down: 737, ok: false, life: 80 }), t0 + 1000), "R_TINY_PEER");
+  eq("同一中继 ≥60s 后再来仍是 B 级（不写事实）", W.FACT.observe(ev({ node: B, down: 737, ok: false, life: 80 }), t0 + 70000), "R_TINY_PEER");
+  eq("本会写封锁的仍然是 0 条（封锁只由 BLK.note 三批投票写）", W.FACT.snap().would.blk || 0, 0);
   eq("bigTypical 取见过的最大响应", W.S.bigTyp.get(H), 45290);
   eq("737B 对 45KB 的典型页算 tiny", W.isTiny({ kind: "relay", host: H, relay: "1.2.3.4", at: t0, down: 737, status: 403 }, 45290), true);
   eq("1277B 对自身同尺寸的典型页不算 tiny", W.isTiny({ kind: "relay", host: H, relay: "1.2.3.4", at: t0, down: 1277, status: 415 }, 1277), false);
@@ -2463,8 +2473,8 @@ console.log("\n79) 同窗口对照与 bigTypical（影子从此能算出「本�
   W.S.bigByHost.set(C, t0);
   const cev = (x) => ({ host: C, via: "node", node: A, down: 0, ok: true, life: 900, up: 0, ...x });
   eq("先喂一条整页当对照", W.FACT.observe(cev({ node: B, down: 30000, ok: true }), t0), "ok");
-  eq("同通道第一批 tiny → 单批弃权", W.FACT.observe(cev({ down: 737, ok: false }), t0 + 1000), "R_SINGLE_BATCH");
-  eq("同通道 3 分钟内出过整页 → 判矛盾不写封锁", W.FACT.observe(cev({ down: 737, ok: false }), t0 + 62000), "R_CONTRADICTORY");
+  eq("同通道 tiny + 有对照 → B 级证据", W.FACT.observe(cev({ down: 737, ok: false }), t0 + 1000), "R_TINY_PEER");
+  eq("同通道 3 分钟内出过整页：commitFact 仍只给 B 级，反向证据由 BLK.note 判", W.FACT.observe(cev({ down: 737, ok: false }), t0 + 62000), "R_TINY_PEER");
   W.FACT.clear();
   W.S.peers.clear();
   W.S.bigTyp.clear();
@@ -2700,9 +2710,9 @@ console.log("\n85) 康复通道（v8 D12）");
 console.log("\n86) commitFact 单一裁决：ps 由 judge 写入");
 {
   W.PS.clear();
+  const obs0 = W.cntView().cfObs || 0;
   const host = "psw.example.com";
   const ip = "198.51.100.77";
-  const c0 = W.cntView().cfDiff || 0;
   W.JUDGE.onTraffic({
     host,
     via: "node",
@@ -2727,7 +2737,24 @@ console.log("\n86) commitFact 单一裁决：ps 由 judge 写入");
     at: Date.now(),
   });
   eq("直连腿不写站点×中继成功率", W.psOk(host, "d"), -1);
-  eq("影子与生产结论一致（无 cfDiff）", W.cntView().cfDiff || 0, c0);
+  eq("两个事件各裁决一次（cfObs +2）", (W.cntView().cfObs || 0) - obs0, 2);
+}
+
+
+console.log("\n86b) 密集 tiny 只留一条负样本（节流在判据里，不在调用方）");
+{
+  const host = "dense.example.com";
+  const A = "198.51.100.21:443";
+  const B = "198.51.100.22:443";
+  const t0 = 1_700_200_000_000;
+  const mk = (node, down, ok, at) => ({ host, via: "node", node, down, ok, life: down > 20000 ? 1800 : 80, up: 400, cf: false, at });
+  const p0 = W.cntView().psNote || 0;
+  // 先从中继 B 拿一页整页：这是「同窗口有对照」的来源
+  W.JUDGE.onTraffic(mk(B, 45210, true, t0));
+  // 同一个中继 A 连续 5 条 tiny：只有第一条能记负样本（同一个键 60 秒内只写一条事实）
+  for (let i = 0; i < 5; i += 1) W.JUDGE.onTraffic(mk(A, 737, false, t0 + 1000 + i * 200));
+  eq("整页 1 条正样本 + 密集 tiny 只 1 条负样本", (W.cntView().psNote || 0) - p0, 2);
+  eq("负样本真的进了 ps（不是只记了计数）", W.psOk(host, "198.51.100.21") < 0.6, true);
 }
 
 

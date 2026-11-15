@@ -120,7 +120,7 @@ export { LAT, LatObs } from "./core/latobs";
 export { DNS, DnsFacts, DNS_TTL } from "./route/dnsfacts";
 export { BLK, BLK_BATCH, BLK_GAP, BLK_MIN, BLK_PEN, blkPen } from "./route/blkfacts";
 export { mergeAt, mergeBlk } from "./core/facts";
-export { BLK_TTL, CONFIRM_GAP, DEAD_TTL, BIG_PEER, TINY_ABS, WRITE_GAP, commitFact, factKey, isTiny } from "./route/commitfact";
+export { BLK_TTL, DEAD_TTL, BIG_PEER, TINY_ABS, WRITE_GAP, commitFact, factKey, isTiny } from "./route/commitfact";
 export { FACT, FactShadow, shadowCtx, shadowObs } from "./route/factshadow";
 /** 四类事实的门面（OOP 收口后唯一的上行/合并入口） */
 export { FACTS, FactsStore } from "./route/factsstore";
