@@ -22,15 +22,12 @@ export function vtDelta(): VtRow[] {
   for (const [k, t] of S.vtPend) {
     const bar = k.indexOf("|");
     if (bar <= 0 || t <= now) continue;
-    if (k.startsWith("*|")) continue; // 通配封锁不外发：见下方 vtDelta 里的说明
     out.push({ k, s: 2, t });
   }
   for (const v of vAll()) {
     if (v.state < 2) continue;
-    // 通配封锁（`*|通道`）**不跨 isolate 共享**：它 30 分钟才过期，几轮突发就能把大半中继在别的
-    // isolate 里标死，可用池变薄后连接反而更差（实测失败率 10% → 50%）。站点级证据（`站点|通道`）
-    // 仍然同步 —— 那才是「这个站点这条通道被封」的可信事实。
-    if (v.t === "*") continue;
+    // 表里不可能再有通配行：写入入口（`VerdictTable.blockWild`）直接拒绝 `*`。
+    // 站点级证据（`站点|通道`）照旧同步 —— 那才是「这个站点这条通道被封」的可信事实。
     const k = v.t + "|" + v.c;
     const exp = v.at + 1800000;
     if (exp <= now) continue;
@@ -56,7 +53,7 @@ export function vtAck(): void {
 export function vtNack(): void {
   S.vtPend.clear();
 }
-/** 冷启动拉一次远端强证据（失败静默：判定表本来就是「本 isolate 先信自己」） *//**
+/**
  * 功能：冷启动拉一次远端事实（失败静默：判定表本来就是「本 isolate 先信自己」）。
  * 两条并发纪律：
  * - single-flight：旧实现是「先同步置 `vtLoaded` 再 await」，于是同一波次里只有第 1 条连接真的在读，

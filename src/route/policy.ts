@@ -75,9 +75,16 @@ export class Policy {
     return pick;
   }
 
-  /** 通道是否可用：既没有站点级封禁，也没有通配级封禁（vBad 自身会回退到通配） */
-  chanOk(ip: string, host = ""): boolean {
-    return !(host && vBad(host, "r:" + ip)) && !vBad("*", "r:" + ip);
+  /**
+   * 功能：该中继对某站点是否可用（判定表里没有「被封」结论）。
+   * 只看站点级结论：通配级封锁在 7.57 事故后就不再有写入者，7.133 起判定表的写入入口
+   * 直接拒绝 `*` 行（`blockWild`），所以这里不再查询通配键。
+   * @param ip 中继出口 IP
+   * @param host 目标站点
+   * @returns 可用返回 true
+   */
+  chanOk(ip: string, host: string): boolean {
+    return !(host && vBad(host, "r:" + ip));
   }
 
   /**
@@ -169,7 +176,8 @@ export class Policy {
       }
     }
     const nonCf = stick.filter((ip) => !isCfIp(ip));
-    const okOnes = stick.filter((ip) => vOk(c.host, "r:" + ip) || vOk("*", "r:" + ip));
+    // 优先挑「本站点已实测打得通」的中继；通配键已不可能存在（7.133 起写入端直接拒绝）
+    const okOnes = stick.filter((ip) => vOk(c.host, "r:" + ip));
 
     // 直连成功证据只信 5 分钟：边缘出口会漂移。这条必须排在「客户端 v6」与「有中继就用中继」之前 ——
     // 客户端地址族只影响落到哪个 POP，不会传给目标（本地配对实测：直连 30/30 vs 中继 26/30）。

@@ -93,7 +93,7 @@ export { pickHosts, SWEEP_COST } from "./route/round";
 export { vSet, vSetState, vState, vOk, vBad, vDead, vAll, vClear, vImport } from "./route/verdict";
 export { vtDelta, vtLoad, vtAck, vtNack } from "./route/verdictsync";
 export { recordProbe, recordTraffic, recordClient } from "./route/observe";
-export { DIRECT, chanKey, parseChan, nodeKeyOf } from "./route/channel";
+export { DIRECT, chanKey, nodeKeyOf } from "./route/channel";
 export { decide, shadow, policyOn } from "./route/policy";
 export { pxDecision } from "./proxy/pxhook";
 export { HOOK } from "./core/hook";

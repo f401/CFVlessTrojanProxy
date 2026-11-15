@@ -1,13 +1,14 @@
-// 判定表：以 IP 为单位（目标站 IP × 通道 IP）。键 t|c，c ∈ {d, r:<ip>, e:<ip>}。
+// 判定表：以 IP 为单位（目标站 IP × 通道 IP）。键 t|c，c ∈ {d, r:<ip>}。
 // 状态机：0 unknown / 1 ok / 2 blocked / 3 dead。
 // 纪律：弱证据（traffic）不得把强证据（probe/client）的结论冲掉；封锁只能由「行为证据」判定。
+import { cnt } from "../core/counter";
 export type VState = 0 | 1 | 2 | 3;
 export type VSrc = 0 | 1 | 2; // 0 traffic 弱证据 / 1 probe 强证据 / 2 client 端到端
 
 /** 一行判定：某个目标站经某条通道的结论 */
 export interface Verdict {
   t: string; // 目标站（主机名或 IP 字面量）
-  c: string; // 通道键：d=直连 / r:<ip>=中继 / e:<ip>=入口
+  c: string; // 通道键：d=直连 / r:<ip>=中继
   state: VState; // 0 未知 / 1 可用 / 2 被拦 / 3 连不上
   code: number; // 最近一次观察到的 HTTP 状态码（0 = 没拿到状态码）
   ms: number; // 首字节延迟（毫秒，EWMA）
@@ -25,7 +26,8 @@ export interface Verdict {
  * 存储纪律：
  * - 30 分钟过期（TTL），最多 600 行；
  * - 弱证据只能「降级到未知」，不能把强证据的 blocked/dead 覆盖成 ok；
- * - 封锁只能由行为证据（2xx 存在与否）判定，不看响应体大小。
+ * - 封锁只能由行为证据（2xx 存在与否）判定，不看响应体大小；
+ * - 目标 `*`（通配）一律不落表：写入入口直接拒绝并计数（见 `blockWild`），读取侧也不再有通配回落。
  */
 export class VerdictTable {
   private m = new Map<string, Verdict>();
@@ -64,6 +66,21 @@ export class VerdictTable {
   }
 
   /**
+   * 功能：拒绝一切「通配目标」写入，并记一次 `vwild` 计数。
+   * 为什么这条不变量要放在表里、而不是靠「没有调用点」：v6 时代 `*|<通道>` 的含义是
+   * 「这条通道被所有站点拒绝」，7.57 的一次机房级突发就把它写满了整池中继，可用池由厚变薄，
+   * 成功率从 97% 掉到 2/20。当时是靠删掉所有写入点止血的 —— 但「没有调用者」不是不变量，
+   * 任何人重新接一个调用就能复现。放在写入入口拒绝、并让计数可见，才与调用点无关。
+   * @param t 目标站
+   * @returns 是通配目标（已被拒绝）返回 true，调用方应立即返回
+   */
+  private static blockWild(t: string): boolean {
+    if (t !== "*") return false;
+    cnt("vwild");
+    return true;
+  }
+
+  /**
    * 功能：写入一条带状态码的观察结果。
    * @param t 目标站
    * @param c 通道键
@@ -73,6 +90,7 @@ export class VerdictTable {
    * @returns 无
    */
   set(t: string, c: string, code: number, ms: number, src: VSrc = 1): void {
+    if (VerdictTable.blockWild(t)) return;
     const k = VerdictTable.key(t, c);
     const old = this.m.get(k);
     const ems = old ? Math.round(old.ms * 0.6 + ms * 0.4) : Math.round(ms);
@@ -92,6 +110,7 @@ export class VerdictTable {
    * @returns 无
    */
   setState(t: string, c: string, state: VState, src: VSrc): void {
+    if (VerdictTable.blockWild(t)) return;
     const k = VerdictTable.key(t, c);
     const old = this.m.get(k);
     if (old && old.src > src) return;
@@ -140,17 +159,14 @@ export class VerdictTable {
 
   /**
    * 功能：该通道对该目标是否可用。
-   * 精确结论优先；没有精确结论时回落到节点级通配 `*|<通道>`
-   * （中继自己解析域名时钉不死 A 记录，一条通配结论比没有结论有用）。
+   * 只认精确结论（`站点|通道`）：通配回落在 `blockWild` 之后已不可能存在（表内不接受 `*`），
+   * 留着回落只会让人误以为「有一条通配的好消息」能救场。
    * @param t 目标站
    * @param c 通道键
    * @returns 可用返回 true
    */
   ok(t: string, c: string): boolean {
-    const e = this.fresh(this.m.get(VerdictTable.key(t, c)));
-    if (e) return e.state === 1;
-    const w = this.fresh(this.m.get(VerdictTable.key("*", c)));
-    return !!w && w.state === 1;
+    return this.fresh(this.m.get(VerdictTable.key(t, c)))?.state === 1;
   }
 
   /**
@@ -160,7 +176,7 @@ export class VerdictTable {
    * @returns 状态为 2 或 3 返回 true
    */
   bad(t: string, c: string): boolean {
-    const e = this.fresh(this.m.get(VerdictTable.key(t, c))) || this.fresh(this.m.get(VerdictTable.key("*", c)));
+    const e = this.fresh(this.m.get(VerdictTable.key(t, c)));
     return !!e && (e.state === 2 || e.state === 3);
   }
 
@@ -220,7 +236,10 @@ export class VerdictTable {
       if (!r || typeof r.k !== "string" || r.t <= now) continue;
       const i = r.k.lastIndexOf("|");
       if (i <= 0) continue;
-      this.setState(r.k.slice(0, i), r.k.slice(i + 1), (r.s === 3 ? 3 : 2) as VState, 1);
+      const t = r.k.slice(0, i);
+      // 远端行是不可信输入（可能来自旧版本 isolate）：通配行在这里就丢掉，不靠上游过滤
+      if (VerdictTable.blockWild(t)) continue;
+      this.setState(t, r.k.slice(i + 1), (r.s === 3 ? 3 : 2) as VState, 1);
       n++;
     }
   }
