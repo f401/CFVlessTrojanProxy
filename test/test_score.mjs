@@ -3364,5 +3364,21 @@ ok("状态表里不再有 tsMem 的键", !Object.prototype.hasOwnProperty.call(W
   ok(`[${g}] tfVerdict 的文档合并成一段（不再两段叠在一起）`, !tfb.includes("IP 级封锁探测：探 1–3 条中继"));
 }
 
+
+// 第 145 组：活文档引用门禁（7.156）。
+// 说明：这里读的是源码/文档文件本身，不是 test/_bundle.mjs —— esbuild 会把注释与文档剥掉。
+
+const g = "活文档引用";
+const audit = fs.readFileSync("tools/doc-audit.mjs", "utf8");
+const arch = fs.readFileSync("docs/ARCHITECTURE.md", "utf8");
+const v8 = fs.readFileSync("docs/v8.md", "utf8");
+
+ok(`[${g}] doc-audit 有活文档引用规则（否则文档能一直给不存在的类作证）`, audit.includes("livingRefs"));
+ok(`[${g}] 类表里没有指向已删读缓存的 StatsTable 行`, !arch.includes("| `StatsTable` |"));
+ok(`[${g}] 预算那段写的是自由函数而不是 Budget 类`, arch.includes("自由函数 `planRound`"));
+ok(`[${g}] 快照那段不再声称有 Snapshot 类`, !arch.includes("| `Snapshot` |"));
+ok(`[${g}] v8 映射表用的是落地名 FACTS.ack()`, v8.includes("`FACTS.ack()`"));
+ok(`[${g}] 设计阶段的临时名只在「更正」那句里出现`, !v8.includes("`factsAck()`"));
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

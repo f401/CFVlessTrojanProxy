@@ -202,9 +202,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `NodeStatsTable`（`STATS`） | `src/nodes/stat.ts` | 每节点的权重、样本矩、CUSUM、快速失败窗口 |
 | `Scorer`（`SCORER`） | `src/nodes/score.ts` | 排行缓存、黑名单/冻结表、可用性判断 |
 | `Store` / `Seal` | `src/store/store.ts`、`crypto.ts` | KV 写入节流、AES 密钥缓存 |
-| `Snapshot` | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存 |
+| 快照读写（自由函数 `writeSnap` / `getSnap` / `flushSnap`） | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存（无跨请求状态要独占，所以没有类） |
 | `PendingLedger`（`PEND`） | `src/store/pend.ts` | 待上报账本、自适应退避与 flush 定时器 |
-| `StatsTable` | `src/store/stats.ts` | 用量读缓存 |
 | `Pool` | `src/px/pool.ts` | 池子、准入复测游标、探活坏点表（代际提交在 `poolgen.ts`：写前读 KV 锚点、三者取最大 +1、锚点写失败留证据） |
 | `SourceHealth`（`SOURCES`） | `src/px/probe.ts` | 池子源健康度（连续失败降权、1 小时冷却、不删源） |
 | `SeedStore` | `src/px/seed.ts` | 跨 isolate 的种子表（只存名字） |
@@ -216,7 +215,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `RelayHealth`（`HEALTH`） | `src/route/relay-health.ts` | 中继健康表（sent/pending 语义） |
 | `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps） |
 | `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |
-| `Budget`（`planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核），纯函数入口 |
+| 预算分配（自由函数 `planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核）：判定额度这一项在 7.149 随 `round.ts` 一起删掉，现在只有 `adm` 与 `cap` |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表 |
 | `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |

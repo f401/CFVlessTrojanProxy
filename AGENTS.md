@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.155**（自举审计三十五批、共 59 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.156**（自举审计三十六批、共 60 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -217,6 +217,23 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   单测因此偶发失败（同一份代码 4 次跑 1 次红）——把 sweep 上移到所有早返回之前，并用 `Math.random = () => 0` 锁住「早返回时自愈仍发生」。
 
 - **第 48 条（7.150）`eq` 对函数是空断言**：`eq` 用 `JSON.stringify(a) === JSON.stringify(b)` 比较，而 `JSON.stringify(函数)` 与 `JSON.stringify(undefined)` 都返回 `undefined` ⇒ 历史上所有「某函数已删除」的锁（7.133 的 `edgeAdd`/`p90Local`/`relAgg`/`vGet`、7.141 的 `STORE.usageSnapWrite`、7.145 的 `judge`/`queueLen`/`HOOK.verify`、7.149 的 `pickHosts`/`SWEEP_COST`/`runRound`）都是**永远为真**的空断言 —— 这次是 A/B 在旧代码上仍然 0 失败才暴露。修法：`const strict = b === undefined || typeof a === "function" || typeof b === "function";` 后走 `Object.is`。
+### 7.156 自举审计（第 60 条：活文档在给不存在的类作证）
+
+- **判据**：文档在描述「当前系统」时，它提到的文件、常量、函数、类必须真的存在于 src。
+- **现场**：`docs/ARCHITECTURE.md` 类表有三行指向 src 里不存在的类 —— `Snapshot`（snapshot.ts 只有自由函数）、
+  `StatsTable`（用量读缓存 7.135 已删）、`Budget`（budget.ts 只有 `planRound`）。
+  `docs/v8.md` 的落地映射表「v8」列写着 factsAck / factsNack / readFacts，代码里从来没有这些符号
+  （真名是 `FACTS.ack()` / `FACTS.nack()` / `vtLoad()`，设计名与落地名混在一列里，读者会去找不存在的函数）。
+- **修法**：三行改成「自由函数 + 为什么没有类」的描述；映射表换成落地名，并加一句设计名 → 落地名的更正。
+  `tools/doc-audit.mjs` 新增 `livingRefs()`：只对 `docs/ARCHITECTURE.md` 与 `docs/v8.md`（这两份描述当前系统）查四件事 ——
+  ① 反引号里的 `src/…ts` 路径必须存在；② `SC.常量` 必须有定义；③ 裸 `name()` 必须在 src 里出现过；
+  ④ 类表首列的类必须真有 `class X`。
+- **为什么只查这两份**：`docs/评分机制_final.md`、`docs/判定模块设计.md`、`docs/节点选择仿真.md` 是历史稿，
+  提到已删模块本身是记录；全量查会制造噪音，历史稿靠「本节描述的是 X 之前的设计」这类标注区分。
+- **证据**：新门禁对 7.155 的两份文档报 6 处（exit=1），修完 0 处；单测第 145 组 6 条锁住（旧文档上 1020 通过 6 失败）。
+- **教训**：JSDoc 里写通配路径会把注释块提前结束（`*/` 出现在注释中间），node 报 `Unexpected token '*'` ——
+  这是 7.151 那条坑的第二次踩中，这次是「注释里写路径通配」。
+
 ### 7.155 自举审计（第 58–59 条）
 
 - **58 三条「Worker 看不到 HTTP 状态码」是过期说法**：`src/routes/debug.ts` 里「只验 SNI，看不到 HTTP 状态」、

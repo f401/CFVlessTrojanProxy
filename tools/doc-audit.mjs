@@ -96,6 +96,54 @@ function stackedDocs(lines) {
   return out;
 }
 
+// 活文档：这两份描述的是「当前系统」，不是历史。它们里提到的东西必须真的在 src 里存在，
+// 否则读者会照着文档去找一个早已删掉的类/函数/文件（7.156 就是靠这条抓到 ARCHITECTURE 的
+// `StatsTable` 行与 v8.md 落地表里的三个设计名）。
+const LIVING = ["docs/ARCHITECTURE.md", "docs/v8.md"];
+
+/**
+ * 活文档引用体检：路径必须存在、`SC.常量` 必须有定义、`name()` 必须在 src 里出现过。
+ * ARCHITECTURE 的类表还多一条：每行首个反引号标识符必须是 src 里真实存在的一个类。
+ * @param {string[]} files 活文档路径
+ * @param {string} srcAll src 下所有 .ts 的全文拼成一个字符串
+ * @param {string} constText src/core/const.ts 全文
+ * @returns {{file: string, tok: string, why: string, line: number}[]} 可疑引用
+ */
+function livingRefs(files, srcAll, constText) {
+  const out = [];
+  for (const f of files) {
+    if (!fs.existsSync(f)) continue;
+    const lines = fs.readFileSync(f, "utf8").split(/\r?\n/);
+    lines.forEach((line, i) => {
+      for (const m of line.matchAll(/`([^`\n]{2,80})`/g)) {
+        const tok = m[1].trim();
+        if (/^src\/[\w/.-]+\.ts$/.test(tok)) {
+          if (!fs.existsSync(tok)) out.push({ file: f, tok, why: "文件不存在", line: i + 1 });
+          continue;
+        }
+        const sc = tok.match(/^SC\.([A-Z0-9_]+)$/);
+        if (sc) {
+          if (!new RegExp(`\\b${sc[1]}\\b`).test(constText)) out.push({ file: f, tok, why: "常量不存在", line: i + 1 });
+          continue;
+        }
+        const fn = tok.match(/^([A-Za-z_$][\w$]*)\(\)?$/);
+        if (fn && fn[1].length >= 6 && !new RegExp(`\\b${fn[1]}\\s*[(=:]`).test(srcAll)) {
+          out.push({ file: f, tok, why: "符号不存在", line: i + 1 });
+        }
+      }
+      // 类表行：`| \`Name\`（\`EXPORT\`） | \`src/...\` | 职责 |`
+      if (f.endsWith("ARCHITECTURE.md") && line.startsWith("| `")) {
+        const cls = line.match(/^\| `([A-Za-z_$][\w$]*)`/);
+        const hasFile = /`src\/[\w/.-]+\.ts`/.test(line);
+        if (cls && hasFile && !new RegExp(`class ${cls[1]}\\b`).test(srcAll)) {
+          out.push({ file: f, tok: cls[1], why: "类不存在", line: i + 1 });
+        }
+      }
+    });
+  }
+  return out;
+}
+
 const rows = [];
 let total = 0;
 const orphanRows = [];
@@ -142,6 +190,25 @@ if (stackSum) {
   for (const r of stackedRows) {
     for (const s of r.stk) console.log(`  ${r.file}:${s.line} → 下一段文档在第 ${s.next} 行`);
   }
+  process.exitCode = 1;
+}
+const livingRows = (() => {
+  const acc = [];
+  const srcAll = (function cat(dir) {
+    for (const n of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, n.name);
+      if (n.isDirectory()) cat(p);
+      else if (p.endsWith(".ts")) acc.push(fs.readFileSync(p, "utf8"));
+    }
+    return acc.join("\n");
+  })("src");
+  const constText = fs.readFileSync("src/core/const.ts", "utf8");
+  return livingRefs(LIVING, srcAll, constText);
+})();
+
+if (livingRows.length) {
+  console.log(`\n活文档引用（文档在给不存在的东西作证）：${livingRows.length} 处`);
+  for (const r of livingRows) console.log(`  ${r.file}:${r.line} \`${r.tok}\` → ${r.why}`);
   process.exitCode = 1;
 }
 process.exitCode = process.exitCode || 0;
