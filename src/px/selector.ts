@@ -349,8 +349,25 @@ export class Selector {
     S.pxFailMem = 0;
   }
 
-  /** 当前节点（"auto" 模式才用池子；手动配置直接返回） */
-  async current(env: Env, mode: Mode, st: PickState | null, host = "", cfOnly = false) {
+  /**
+   * 当前节点（"auto" 模式才用池子；手动配置直接返回）。
+   * @param {object} env Worker 环境
+   * @param {'lat'|'tput'} mode 选路模式
+   * @param {object|null} st 连接状态（会写 st.node）
+   * @param {string} host 目标站点（空串 = 没有站点上下文，只按通用分数挑）
+   * @param {boolean} cfOnly 目标是否 CF 托管（是则跳过 CF 边缘中继）
+   * @param {Set<string>|null} exclude 已经试过的 `host:port`（拨号重试要找「下一条」，
+   *   不能把刚失败的同一条再挑回来 —— 这条链路的返回值在确定性路径下是每次都一样的）
+   * @returns {string} `host:port`，没有可选候选时返回空串
+   */
+  async current(
+    env: Env,
+    mode: Mode,
+    st: PickState | null,
+    host = "",
+    cfOnly = false,
+    exclude: Set<string> | null = null,
+  ) {
     const raw = String(env.proxyip || "").trim();
     if (!raw) return "";
     const m = mode === "lat" ? "lat" : "tput";
@@ -386,6 +403,8 @@ export class Selector {
       let best = "";
       let bv = Infinity;
       for (const k of S.alive.keys()) {
+        // 已试过的那条要跳过：pFail 惩罚不足以让它在同一秒内掉出第一
+        if (exclude && exclude.has(k)) continue;
         if (isBlack(k) || isFrozen(k) || bad(k)) continue;
         const ip = k.slice(0, k.lastIndexOf(":"));
         if (cfOnly && isCfIp((S.alive.get(k) || { h: "" } as { h?: string }).h || "")) continue;
@@ -402,6 +421,7 @@ export class Selector {
       let nk = "";
       let nv = Infinity;
       for (const [rk, a] of S.alive) {
+        if (exclude && exclude.has(rk)) continue;
         if (isCfIp(a.h) || isBlack(rk) || isFrozen(rk) || bad(rk)) continue;
         const v = costOf(rk, m, now);
         if (v < nv) { nv = v; nk = rk; }
@@ -413,6 +433,21 @@ export class Selector {
     // CF 托管目标：优先非 CF 出口，但没有时必须允许 CF 边缘中继 ——
     // 直连经常被自家边缘丢掉，只有绕一次才拿得到响应（哪怕是 403）。
     const first = this.pick(env, m, st);
+    // 拨号重试要的是「下一条」：抽到的正好是刚失败的那条时，直接按通用分数重扫一遍。
+    // 这里不看站点偏好与入口族偏好，只求「换一条能连的」，否则第二次尝试等于空转 2.5 秒。
+    if (first && exclude && exclude.has(first)) {
+      const now2 = Date.now();
+      let bk = "";
+      let bv2 = Infinity;
+      for (const [k2, a2] of S.alive) {
+        if (exclude.has(k2) || isBlack(k2) || isFrozen(k2) || bad(k2)) continue;
+        if (cfOnly && isCfIp(a2.h)) continue;
+        const v2 = costOf(k2, m, now2);
+        if (v2 < bv2) { bv2 = v2; bk = k2; }
+      }
+      if (bk) { if (st) st.node = bk; return bk; }
+      return "";
+    }
     // 站点偏好：该通道对当前站点已被实测判死（403/不可达）就换一条没被判死的，
     // 打得通（0）与没测过（1）都不降权 —— 未知不等于坏，否则新中继永远上不了场。
     const cp = HOOK.chanPref;
@@ -422,6 +457,7 @@ export class Selector {
     let best = "";
     let bv = Infinity;
     for (const x of candsFor(m)) {
+      if (exclude && exclude.has(x.k)) continue;
       if (isBlack(x.k) || isFrozen(x.k)) continue;
       if (cp(ipOf(x.k), host) >= 2) continue;
       if (x.v < bv) { bv = x.v; best = x.k; }

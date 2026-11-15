@@ -86,8 +86,19 @@ ok("blk：表里有一行", W.BLK.snap(now + 200000).length === 1, W.BLK.snap(no
 W.RELPERF.clear();
 W.relNote(HOST, IP4, 100, 0, now); // IP4 首字节更快
 W.relNote(HOST, "203.0.113.204", 300, 0, now);
+// decide 里有一条「5% 概率挑一条被判封锁的中继去复检」的探索分支（policy.ts 的 explore 早返回），
+// 它会让这条断言以 5% 的概率假红（实测 20 次跑挂 1 次，2026-11-15）。这里把随机数钉死，
+// 顺便把探索分支本身也锁住：它必须返回被封锁的那条、并带上 why="explore"。
+const rnd0 = Math.random;
+Math.random = () => 0.99; // 不进探索分支
 const d1 = W.decide({ host: HOST, cfHost: true, clientV6: false, relays: [IP4, "203.0.113.204"], legacyWantsRelay: true, mode: "tput" });
+Math.random = rnd0;
 ok("选路：被判封锁的更快中继被排到后面", d1.chan.ip === "203.0.113.204", d1.chan && d1.chan.ip);
+const rnd1 = Math.random;
+Math.random = () => 0; // 强制走探索分支
+const dEx = W.decide({ host: HOST, cfHost: true, clientV6: false, relays: [IP4, "203.0.113.204"], legacyWantsRelay: true, mode: "tput" });
+Math.random = rnd1;
+ok("选路：5% 探索分支会挑回被判封锁的那条（复检语义，不是排序失效）", dEx.why === "explore" && dEx.chan.ip === IP4, [dEx.why, dEx.chan && dEx.chan.ip]);
 const d2 = W.decide({ host: HOST, cfHost: true, clientV6: false, relays: [IP4], legacyWantsRelay: true, mode: "tput" });
 ok("选路：只剩被判封锁的一条时仍然用它", d2.chan.ip === IP4, d2.chan && d2.chan.ip);
 

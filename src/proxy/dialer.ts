@@ -92,10 +92,18 @@ export class Dialer {
       // ?rx= 钉住中继（只给诊断脚本用）：跳过选择器直接用它，用来给每条中继量吞吐。
       // 最多试两条：公共中继里有一类是「TCP 能连、但一直不回字节」或「回自己的证书」，
       // 单次尝试失败就退回直连，而 CF 托管目标直连大概率 4 字节 403 —— 等于白丢这次请求。
-      for (let tries = 0; tries < 2 && !sock; tries++) {
-        const p = parseProxyIp(st.rx || (await SEL.current(env, mode, st, host, cfHost)));
+      // 第二个候选必须**换一条**：选择器的确定性路径（站点偏好 / 非 CF 优先）在同一秒内
+      // 两次调用返回的是同一条，而 nsFail 的惩罚不足以让它掉出第一 —— 所以把试过的键传下去。
+      const tried = new Set<string>();
+      // 钉住的 ?rx= 只试一次：它本来就是「我就要这一条」的诊断语义
+      const maxTries = st.rx ? 1 : 2;
+      for (let tries = 0; tries < maxTries && !sock; tries++) {
+        const p = parseProxyIp(st.rx || (await SEL.current(env, mode, st, host, cfHost, tried)));
         if (!p || checkTarget(p.host, p.port)) break;
         const key = p.host + ":" + p.port;
+        // 没有别的候选了（选择器回空或回同一条）：不要再花 2.5 秒试同一条
+        if (tried.has(key)) break;
+        tried.add(key);
         // 池子里的「优选 IP」本身就是 CF 边缘：拿它中转到 CF 托管目标，等于从同一边缘再撞一次。
         if (cfHost && isCfIp(p.host)) {
           logErr(`skip cf-edge relay ${p.host}`, host);

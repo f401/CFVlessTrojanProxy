@@ -3655,5 +3655,38 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   ok("探活会更新 tcp 的 EWMA", prs.tcp > 0);
   ok("门槛判断写成「跨过那一条」", fs.readFileSync("src/nodes/stat.ts", "utf8").includes("before < EMPTY_CLOSE_BAD"));
 }
+// 拨号重试必须换一条：选择器的确定性路径在同一秒内两次返回同一条
+{
+  const keepAlive = new Map(W.S.alive);
+  const keepN = new Map(W.S.nstat);
+  W.S.alive.clear();
+  W.S.nstat.clear();
+  const mk = (k) => { const i = k.lastIndexOf(":"); W.S.alive.set(k, { h: k.slice(0, i), p: Number(k.slice(i + 1)) || 443, cc: "", ms: 100 }); };
+  mk("1.1.1.1:443");
+  mk("2.2.2.2:443");
+  W.nsGet("1.1.1.1:443").tcp = 40;
+  W.nsGet("2.2.2.2:443").tcp = 200;
+  W.hostNodeMark("1.1.1.1:443", "retry.test", true, 120);
+  const env = { proxyip: "auto" };
+  const a1 = await W.SEL.current(env, "tput", null, "retry.test", false);
+  const a2 = await W.SEL.current(env, "tput", null, "retry.test", false);
+  eq("站点偏好是确定性路径：两次调用挑同一条", a1, a2);
+  const a3 = await W.SEL.current(env, "tput", null, "retry.test", false, new Set([a1]));
+  ok("排除刚失败的那条之后换一条（否则第二次尝试等于空转 2.5 秒）", a3 && a3 !== a1);
+  eq("排除之后挑到的是另一条", a3, "2.2.2.2:443");
+  eq("全部排除时回空：宁可退直连也不重复同一条", await W.SEL.current(env, "tput", null, "retry.test", false, new Set(["1.1.1.1:443", "2.2.2.2:443"])), "");
+  W.S.alive.clear();
+  W.S.nstat.clear();
+  for (const [k, v] of keepAlive) W.S.alive.set(k, v);
+  for (const [k, v] of keepN) W.S.nstat.set(k, v);
+}
+// 拨号器把试过的键传下去，并且钉住 ?rx= 时只试一次
+{
+  const dsrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
+  ok("拨号器把已试过的键传给选择器", dsrc.includes("SEL.current(env, mode, st, host, cfHost, tried)"));
+  ok("钉住的 ?rx= 只试一次（诊断语义：我就要这一条）", dsrc.includes("const maxTries = st.rx ? 1 : 2;"));
+  ok("同一条不会试第二次", dsrc.includes("if (tried.has(key)) break;"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
