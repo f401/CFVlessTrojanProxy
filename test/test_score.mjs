@@ -2968,5 +2968,35 @@ eq("超过上限时只取一批", W.restorePick(["a", "b", "c", "d"], 2, 0).leng
 eq("超出上限时按小时轮转起点", W.restorePick(["a", "b", "c", "d"], 2, 3600000).join(","), "b,c");
 eq("轮转不产生重复", new Set(W.restorePick(Array.from({ length: 30 }, (_x, i) => "u" + i), 12, 7200000)).size, 12);
 eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
+// 99) 候选池代际必须跨 isolate 单调：本地号落后时不能用旧号覆盖别人的池子
+{
+  const mem = new Map();
+  const envP = { uuid: "00000000-0000-0000-0000-000000000000", STATS: {
+    get: async (k) => (mem.has(k) ? mem.get(k) : null),
+    put: async (k, v) => { mem.set(k, v); },
+  } };
+  const mk = (n, tag) => Array.from({ length: n }, (_x, i) => ({ h: tag + i, p: 443, cc: "" }));
+  // 键名与 src/px/const.ts 的 SEED_KEY 一致；写错的话下面「代际号跟着锚点走」会立刻失败
+  const putSeed = (gen, n) => mem.set("px:seed", JSON.stringify({ v: 7, ts: 0, poolGen: gen, poolN: n, builtAt: 0, byColo: {} }));
+  W.S.pool = mk(10, "old"); W.S.poolGen = 3; W.S.seed.poolGen = 3; W.S.seedAt = Date.now(); W.S.seedReadFail = false; W.S.colo = "TST";
+  putSeed(9, 10);
+  const c1 = await W.POOL.commitPool(envP, mk(60, "n"), true);
+  eq("代际号以 KV 锚点为准（不是本地 +1）", c1.gen, 10);
+  eq("新代际键写进去了", mem.has("px:pool:10"), true);
+  eq("锚点写回成功", c1.anchored, true);
+  // 本地没有池子时，缩水判断必须看 KV 里的真实大小
+  W.S.pool = []; W.S.poolGen = 10; W.S.seed.poolGen = 10;
+  putSeed(10, 100);
+  const c2 = await W.POOL.commitPool(envP, mk(50, "s"), false);
+  eq("按 KV 的真实池子大小拒绝缩水", c2.ok, false);
+  eq("拒绝时不落新代际键", mem.has("px:pool:11"), false);
+  // 锚点读失败：宁可这轮不换池，也不盲写一个可能被占用的号
+  const badEnv = { uuid: "00000000-0000-0000-0000-000000000000", STATS: { get: async () => { throw new Error("kv down"); }, put: async () => { throw new Error("kv down"); } } };
+  const c3 = await W.POOL.commitPool(badEnv, mk(60, "b"), true);
+  eq("锚点读失败就不提交", c3.ok, false);
+  eq("理由就是 anchor read", c3.reason, "anchor read");
+  W.S.pool = []; W.S.poolGen = 0; W.S.seed.poolGen = 0; W.S.colo = "";
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

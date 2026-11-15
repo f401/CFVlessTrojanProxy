@@ -11,7 +11,7 @@ store/    index kv crypto         适配器：KV / 加密 / 快照 / 计量 / Me
           snapshot pend stats
           meter-client meter
 nodes/    stat score metrics       节点域：统计原语、评分与候选表、画像与看板行
-px/       pool probe seed selector 中转域：候选池、探活、信誉表、选择器
+px/       pool poolgen probe seed selector 中转域：候选池、探活、信誉表、选择器
           const regions              共享常量 / 地区列表（打破 pool 互引）
 proxy/    protocol dial session     数据面：协议、拨号、会话
           fallback tunnel connection
@@ -205,7 +205,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Snapshot` | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存 |
 | `PendingLedger`（`PEND`） | `src/store/pend.ts` | 待上报账本、自适应退避与 flush 定时器 |
 | `StatsTable` | `src/store/stats.ts` | 用量读缓存 |
-| `Pool` | `src/px/pool.ts` | 池子、准入复测游标、探活坏点表 |
+| `Pool` | `src/px/pool.ts` | 池子、准入复测游标、探活坏点表（代际提交在 `poolgen.ts`：写前读 KV 锚点、三者取最大 +1、锚点写失败留证据） |
 | `SourceHealth`（`SOURCES`） | `src/px/probe.ts` | 池子源健康度（连续失败降权、1 小时冷却、不删源） |
 | `SeedStore` | `src/px/seed.ts` | 跨 isolate 的种子表（只存名字） |
 | `Selector` | `src/px/selector.ts` | 站点偏好 + 单层抽样入口 |

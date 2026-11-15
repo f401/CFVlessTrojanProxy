@@ -1,0 +1,95 @@
+import { errMsg } from "../core/util";
+
+import { S } from "../core/state";
+import { logErr } from "../nodes/metrics";
+import { invalidateRank } from "../nodes/score";
+import { kvGet, kvGetStrict, kvSet } from "../store/index";
+import { PX_TTL, SEED_KEY } from "./const";
+import { POOL_MAX } from "./probe";
+import { SEEDS } from "./seed";
+
+/* 候选池的代际读写：单独一层，因为提交规则（跨 isolate 单调 + 两阶段锚点）本身就是一段逻辑 */
+
+/**
+ * 功能：取候选池 —— 内存 → KV(当前代际键) → 空；空时由 cronScan 触发重建。
+ * @param env Worker 环境
+ * @returns {Promise<PoolEntry[]>} 候选池（已按 POOL_MAX 截断）
+ */
+export async function ensurePool(env: Env) {
+  // 内存空 → 读种子表拿当前代际号，再按代际键取池子；
+  // 代际号是两阶段提交的锚点，读一个键比扫 px:pool:* 前缀便宜得多
+  if (S.pool.length) return S.pool;
+  await SEEDS.read(env);
+  const gen = S.seed.poolGen || 0;
+  // 没有代际号说明从没成功提交过池子：返回空，交给 cronScan 去拉源重建
+  if (!gen) return [];
+  try {
+    const v = await kvGet<PoolEntry[]>(env, "px:pool:" + gen);
+    if (Array.isArray(v) && v.length) {
+      // 截断到当前上限：KV 里的池子可能比配置的 POOL_MAX 大（上限被调小过）
+      S.pool = v.slice(0, POOL_MAX);
+      S.poolGen = gen;
+      invalidateRank();
+    }
+  } catch (e) {
+    // 读失败与「还没有池子」在调用方看来都是空池，但前者要留证据：
+    // 静默吞掉会让 KV 故障表现为「一直在重建池子」，排查时看不到任何线索
+    logErr("pool gen " + gen + " " + String(errMsg(e)).slice(0, 60), "kv");
+  }
+  return S.pool;
+}
+
+/**
+ * 功能：两阶段提交新候选池 —— 先写新代际键，成功后再把锚点写回 seed。
+ * @param env Worker 环境
+ * @param fresh 新候选（会在落盘前按 POOL_MAX 截断）
+ * @param allowShrink 允许池子变小（手动 refill 时才传 true）
+ * @returns {Promise<{ok:boolean,gen?:number,n?:number,anchored?:boolean,reason?:string}>} 结果
+ */
+export async function commitPool(env: Env, fresh: PoolEntry[], allowShrink = false) {
+  // 路由手动 refill 可能把多个源的合并结果直接传进来；落 KV/进内存前统一截断
+  fresh = fresh.slice(0, POOL_MAX);
+  const newN = fresh.length;
+  if (!newN) return { ok: false, reason: "empty" };
+  // 代际号是跨 isolate 的锚点，而本地的 S.poolGen 只代表「这台见过的最大的号」，
+  // 可能落后半小时：直接 +1 会撞上别的 isolate 已经提交过的号，
+  // 结果用自己的（可能更小、更旧的）池子覆盖掉更新的那一代。
+  // 所以写之前严格读一次 KV 锚点，号与裁剪判断都以它为准。
+  let anchorGen = 0;
+  let anchorN = 0;
+  try {
+    const v = await kvGetStrict<{ poolGen?: number; poolN?: number } | null>(env, SEED_KEY);
+    anchorGen = Number(v && v.poolGen) || 0;
+    anchorN = Number(v && v.poolN) || 0;
+  } catch (e) {
+    // 读不到锚点就不提交：盲写一个号可能落在别人的代际上，那比这轮不换池更糟。
+    // 池子会由下一轮 cron 重试（调用方本来就按 TTL 反复尝试）。
+    logErr("pool anchor read " + String(errMsg(e)).slice(0, 60), "kv");
+    return { ok: false, reason: "anchor read" };
+  }
+  // 池子「缩水 60%」的判断必须拿真实大小比：本地 S.pool 可能是上一代的小池子，
+  // 会让一次正常的重建被误拒（反之也会放过真正的缩水）
+  const oldN = S.pool.length || anchorN || Number(S.seed.poolN) || 0;
+  if (!allowShrink && oldN && newN < oldN * 0.6) {
+    return { ok: false, reason: `rejected ${newN} < 60% of ${oldN}` };
+  }
+  const gen = Math.max(S.poolGen || 0, Number(S.seed.poolGen) || 0, anchorGen) + 1;
+  try {
+    await kvSet(env, "px:pool:" + gen, fresh, { expirationTtl: PX_TTL });
+  } catch (e) {
+    return { ok: false, reason: "kv " + String(errMsg(e)).slice(0, 60) };
+  }
+  S.pool = fresh;
+  S.poolGen = gen;
+  invalidateRank();
+  S.poolBuilt = Date.now();
+  S.seed.poolGen = gen;
+  // 第二阶段：把锚点写回 seed。写失败时新池子只活在本 isolate 里（冷启动会退回旧代际），
+  // 所以失败要重试一次，还不成就记进错误环 —— 不能像以前那样返回 ok 就当已落盘。
+  let w = await SEEDS.write(env, S.colo ? undefined : true, true);
+  if (!w.ok) {
+    w = await SEEDS.write(env, S.colo ? undefined : true, true);
+    if (!w.ok) logErr("pool anchor " + String(w.err || "write").slice(0, 60), "kv");
+  }
+  return { ok: true, gen, n: newN, anchored: w.ok };
+}

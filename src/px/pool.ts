@@ -1,17 +1,19 @@
-import { errMsg } from "../core/util";
+import { commitPool, ensurePool } from "./poolgen";
 
 import { SEED_WRITE_GAP } from "../core/const";
 import { SC } from "../core/const";
 import { HOOK } from "../core/hook";
 import { logErr } from "../nodes/metrics";
-import { POOL_MAX, POOL_TTL_MS, chunks, geoLabel, probeProxy, probeSni, refillPool } from "./probe";
+import { POOL_TTL_MS, chunks, geoLabel, probeProxy, probeSni, refillPool } from "./probe";
 import { candsFor, capOf, invalidateRank, scoreParts, nsLatency, nsProbe, nsProbeFail, p90Of, pFailOf, pStallOf, pctOf, isBlack, isFrozen } from "../nodes/score";
 import { BUCKET_DEF, SEEDS } from "./seed";
-import { PX_TTL, MODES, keyOf } from "./const";
+import { MODES, keyOf } from "./const";
 import { S } from "../core/state";
-import { kvGet, kvSet } from "../store/index";
 
 /* 代理节点：状态 / 信誉分桶 / 选择 / cron */
+
+// 池子的代际读写搬去 ./poolgen（提交规则较长，混在本文件会顶到 560 行上限）
+export { commitPool, ensurePool };
 
 /**
  * 探活结果分类。null 有两种可能：连不上（DNS/拒绝/超时）或握手途中异常，
@@ -33,51 +35,6 @@ const ALIVE_MAX = 800; // 长期运行 alive 上限：池子换代不会永久�
 // 由本机房自己的探活决定谁留谁走。
 
 
-/** 候选项池：内存 → KV(poolGen) → 空；空时由 cronScan 触发重建 */
-export async function ensurePool(env: Env) {
-  // 内存空 → 读种子表拿当前代际号，再按代际键取池子；
-  // 代际号是两阶段提交的锚点，读一个键比扫 px:pool:* 前缀便宜得多
-  if (S.pool.length) return S.pool;
-  await SEEDS.read(env);
-  const gen = S.seed.poolGen || 0;
-  // 没有代际号说明从没成功提交过池子：返回空，交给 cronScan 去拉源重建
-  if (!gen) return [];
-  try {
-    const v = await kvGet<PoolEntry[]>(env, "px:pool:" + gen);
-    if (Array.isArray(v) && v.length) {
-      // 截断到当前上限：KV 里的池子可能比配置的 POOL_MAX 大（上限被调小过）
-      S.pool = v.slice(0, POOL_MAX);
-      S.poolGen = gen;
-      invalidateRank();
-    }
-  } catch (e) {}
-  return S.pool;
-}
-
-/** 两阶段提交新候选池：先写新代际键，成功后再改 seed.poolGen */
-export async function commitPool(env: Env, fresh: PoolEntry[], allowShrink = false) {
-  // 路由手动 refill 可能把多个源的合并结果直接传进来；落 KV/进内存前统一截断
-  fresh = fresh.slice(0, POOL_MAX);
-  const oldN = S.pool.length || Number(S.seed.poolN) || 0;
-  const newN = fresh.length;
-  if (!newN) return { ok: false, reason: "empty" };
-  if (!allowShrink && oldN && newN < oldN * 0.6) {
-    return { ok: false, reason: `rejected ${newN} < 60% of ${oldN}` };
-  }
-  const gen = (S.poolGen || S.seed.poolGen || 0) + 1;
-  try {
-    await kvSet(env, "px:pool:" + gen, fresh, { expirationTtl: PX_TTL });
-  } catch (e) {
-    return { ok: false, reason: "kv " + String(errMsg(e)).slice(0, 60) };
-  }
-  S.pool = fresh;
-  S.poolGen = gen;
-  invalidateRank();
-  S.poolBuilt = Date.now();
-  S.seed.poolGen = gen;
-  await SEEDS.write(env, S.colo ? undefined : true, true);
-  return { ok: true, gen, n: newN };
-}
 
 /**
  * 取轮换模块的对外快照。冷启动只继承「本机房」的信誉。
