@@ -71,6 +71,7 @@ export class AppState {
     "restoreSkip",
   "admStatsSkip",
     "egSent",
+    "rgFail",
     "psNote",
     "psDO",
     "psSent",

@@ -143,7 +143,10 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
             const failRegion = (msg: string) => {
               st.dead = true;
               st.failed = true;
-              cnt("dead");
+              // 地区失败与「目标不可达」不是一回事：没节点 / 节点被策略禁止 / 节点连不上，
+              // 三种都不说明目标站有问题。混记进 dead 会让面板上的 dead 同时代表两件事，
+              // 排查「目标到底能不能连」时读不出来（v7.170 起分开计）。
+              cnt("rgFail");
               kickFlush(env, st.id);
               logErr(`region ${ipRegion}: ${msg}`, r.host);
               try {

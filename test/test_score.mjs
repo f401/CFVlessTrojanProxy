@@ -3741,5 +3741,16 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   ok("proxyip 连不上要给中继记账", aSrc.includes('nsFail(px.host + ":" + px.port)'));
   ok("死条件 !px || st.retried 已经删掉（只判代码行，注释里可以留历史）", !/if \(!px \|\| st\.retried\)/.test(aSrc));
 }
+{
+
+  // 第 160 组：地区分流（?rg=）的拨号超时与失败归因（v7.170）
+  // 地区是硬要求，挂死不能靠「等客户端放弃」；失败也不能记到目标站头上。
+  const rgSrc = fs.readFileSync("src/proxy/region.ts", "utf8");
+  const ssSrc = fs.readFileSync("src/proxy/session.ts", "utf8");
+  eq("地区分流的两条拨号都加了 2.5 秒上限", (rgSrc.match(/withTimeout\(/g) || []).length, 2);
+  eq("地区分流里不再有裸 connect（超时迟到成功的 socket 必须有人关）", (rgSrc.match(/await connect\(/g) || []).length, 0);
+  ok("同一个节点一次失败只罚一次（否则冷却跳两档）", rgSrc.includes("st.node !== failed"));
+  ok("地区失败单独计数，不混进「目标不可达」", ssSrc.includes('cnt("rgFail")') && W.S.cntKeys.includes("rgFail"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

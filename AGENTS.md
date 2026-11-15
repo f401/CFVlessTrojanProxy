@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.169**（自举审计四十九批、共 85 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.170**（自举审计五十批、共 88 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -371,6 +371,20 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - **第 85 条：死条件与不记账。** `attacher.ts:110` 的 `if (!px || st.retried)` 里 `st.retried` 永远不生效
   （上面第 ④ 支已经 return）；`catch` 只 `close(1011, "proxyip failed")`，既不 `nsFail` 也不计数 ⇒
   一条「池子里能解析但连不上」的中继会被无限重复挑中。
+### 7.170 自举审计（第 86–88 条，地区硬分流）
+
+- **第 86 条：地区分流的两条 `connect` 没有超时。** `src/proxy/region.ts` 的 `RegionPicker.open` 是
+  `?rg=xx` 的唯一入口（硬要求：找不到 / 连不上就明确失败，绝不回落），但两次 `connect()` 都是裸 `await`——
+  和 7.169 修的补救链是同一个形状：主路径有 `withTimeout(pk, 2500)`，地区路径没有。挂死时客户端只会一直等。
+  修法：两处都包 `withTimeout(…, 2500)`，并把超时迟到成功的 socket 关掉（免费计划全局 6 个并发名额）。
+- **第 87 条：同一个节点一次失败罚两次。** 第一次 `connect` 失败已经 `nsFail(st.node)`；如果同国没有备选
+  （或备选被 `checkTarget` 拦下），`st.node` 还是那一个，函数末尾又 `nsFail(st.node)` 一次 ⇒ `streak` 跳两档、
+  `bad`/`fail` 记两次。小池子里一节冷却 10 秒会直接变成 60 秒，而这个地区可能只有这一条节点。
+  修法：记 `failed` 变量，只有换到别的节点时才再罚一次。
+- **第 88 条：地区失败被记成「目标不可达」。** `session.ts` 的 `failRegion` 把三种原因（该地区没节点、
+  节点地址被策略禁止、节点连不上）都记成 `cnt("dead")` + `st.dead = true`，而 `dead` 在别处专指
+  「目标站连不上」⇒ 面板上 `dead` 升高时分不清是站的问题还是池子的问题。改成 `cnt("rgFail")`
+  （`st.dead = true` 保留：它是「后续帧不要再解析」的闩，与计数无关）。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。
