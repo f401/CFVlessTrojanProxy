@@ -12,7 +12,7 @@ import { runTfb } from "../route/tfb";
 import { DNS } from "../route/dnsfacts";
 import { probeFam } from "../proxy/dial";
 import { SEL } from "../px/selector";
-import { flushSnap, pendFlush, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
+import { flushSnap, pendFlush, restorePick, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
 import { loadUsers } from "../proxy/protocol";
 
 /**
@@ -103,7 +103,7 @@ async function cronOnce(env: Env): Promise<void> {
     // 一轮 cron 的子请求预算先算清：准入（池子）、判定（目标 x 通道）、入口（客户端→边缘）
     const plan = planRound(S.pool.length, S.alive.size);
     // 活跃池不够 16 条时加码扫描：8 条池「好出口 <2」概率 28.5%，16 条只有 3.4%
-  await cronScan(env, alivePlan(S.alive.size, plan.adm));
+    await cronScan(env, alivePlan(S.alive.size, plan.adm));
     await runRound(plan);
     await edgeScan(env, plan.edge);
     await tfbRound(env);
@@ -125,7 +125,13 @@ async function cronOnce(env: Env): Promise<void> {
     // 用户一多时 50 个 /set 同时飞出去会把 cron 的 CPU 拉满，限 8 并发。
     const snap = await usageSnapGet(env);
     if (snap && snap.users) {
-      await eachLimit(Object.keys(snap.users), 8, (id) => restoreUsage(env, id, snap).then(() => undefined));
+      // 每次恢复 = 1 个 DO 子请求：不限量时用户一多就会撞 50 个子请求上限，
+      // 而这里的 catch 会吞掉异常、顺带跳过下面的快照写 —— 表现为「用量越用越不记」。
+      const allIds = Object.keys(snap.users);
+      const pick = restorePick(allIds);
+      cnt("restore", pick.length);
+      if (allIds.length > pick.length) cnt("restoreSkip", allIds.length - pick.length);
+      await eachLimit(pick, 8, (id) => restoreUsage(env, id, snap).then(() => undefined));
     }
     const users = await loadUsers(env);
     // 读 KV 失败且没有完整缓存时 list 可能缺托管用户：此时写快照会把

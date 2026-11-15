@@ -2961,5 +2961,12 @@ eq("冷却期内不再重试", factsCalls, 1);
 W.S.vtCool = 0;
 await W.vtLoad(badEnv);
 eq("冷却过后允许重试", factsCalls, 2);
+
+// 98) 用量恢复必须受子请求预算约束（每次恢复 = 1 个 DO 子请求，一轮只有 50 个）
+eq("用户数没超上限时全部恢复", W.restorePick(["a", "b", "c"], 12, 0).join(","), "a,b,c");
+eq("超过上限时只取一批", W.restorePick(["a", "b", "c", "d"], 2, 0).length, 2);
+eq("超出上限时按小时轮转起点", W.restorePick(["a", "b", "c", "d"], 2, 3600000).join(","), "b,c");
+eq("轮转不产生重复", new Set(W.restorePick(Array.from({ length: 30 }, (_x, i) => "u" + i), 12, 7200000)).size, 12);
+eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

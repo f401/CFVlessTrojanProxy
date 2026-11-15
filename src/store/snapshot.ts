@@ -85,6 +85,25 @@ export async function usageSnapWrite(env: Env, users?: UserRec[]) {
   }
 }
 
+/** 每轮 cron 最多恢复的用户数：每次恢复 = 1 个 DO 子请求，一次调用总共只有 50 个（还要留给 refill/tfb/DoH） */
+export const RESTORE_MAX = 12;
+
+/**
+ * 功能：从快照用户里挑出本轮要恢复的那一批 —— 超过上限时按小时窗口轮转，避免「前 12 个永远恢复、后面的永远不恢复」。
+ * @param {string[]} ids 快照里的用户 id 列表
+ * @param {number} max 本轮上限（默认 RESTORE_MAX）
+ * @param {number} now 当前时间（默认 Date.now，便于测试注入）
+ * @returns {string[]} 要恢复的 id 列表（长度 ≤ max，无重复）
+ */
+export function restorePick(ids: string[], max = RESTORE_MAX, now = Date.now()): string[] {
+  if (!Array.isArray(ids) || ids.length <= max) return Array.isArray(ids) ? ids.slice() : [];
+  // 起点按小时平移：否则用户数一多，排在后面的用户永远拿不到恢复机会
+  const start = Math.floor(now / 3600000) % ids.length;
+  const out: string[] = [];
+  for (let k = 0; k < max; k++) out.push(ids[(start + k) % ids.length]);
+  return out;
+}
+
 /**
  * 功能：把某用户已上报的用量恢复进本地状态（换 isolate 后不让客户端看到「用量归零」）。
  * @param env 环境变量
