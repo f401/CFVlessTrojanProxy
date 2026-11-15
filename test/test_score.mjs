@@ -3752,5 +3752,15 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   ok("同一个节点一次失败只罚一次（否则冷却跳两档）", rgSrc.includes("st.node !== failed"));
   ok("地区失败单独计数，不混进「目标不可达」", ssSrc.includes('cnt("rgFail")') && W.S.cntKeys.includes("rgFail"));
 }
+
+// 第 161 组：会话层补救链的拨号超时与地区口径（v7.171）
+// Dialer 抛错后那条「临时取一条中继直连」是最后一跳，漏了超时就会把客户端拖到放弃。
+const ss2 = fs.readFileSync("src/proxy/session.ts", "utf8");
+const at2 = fs.readFileSync("src/proxy/attacher.ts", "utf8");
+ok("会话层补救链的 connect 也加了 2.5 秒上限", /withTimeout\(pk0, 2500\)/.test(ss2));
+ok("会话层不再有裸 connect（迟到成功的 socket 必须有人关）", !/await connect\(\{ hostname: px0\.host/.test(ss2));
+ok("超时之后迟到成功的 socket 会被关掉", /void pk0\s*\n\s*\.then\(\(s\) => \{ try \{ s\.close\(\); \}/.test(ss2));
+ok("地区钉住的补救链不再把「没别的候选」记成目标不可达", at2.includes('cnt(region ? "rgFail" : "dead")'));
+eq("attacher 里只剩一处 dead（真正的目标不可达）", (at2.match(/cnt\("dead"\)/g) || []).length, 1);
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

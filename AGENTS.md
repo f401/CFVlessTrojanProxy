@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.170**（自举审计五十批、共 88 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.171**（自举审计五十一批、共 90 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -385,6 +385,15 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   节点地址被策略禁止、节点连不上）都记成 `cnt("dead")` + `st.dead = true`，而 `dead` 在别处专指
   「目标站连不上」⇒ 面板上 `dead` 升高时分不清是站的问题还是池子的问题。改成 `cnt("rgFail")`
   （`st.dead = true` 保留：它是「后续帧不要再解析」的闩，与计数无关）。
+### 7.171 自举审计（第 89–90 条）
+
+- **第 89 条：会话层补救链还有一处裸 `connect`。** `Dialer.open` 抛错后，`src/proxy/session.ts` 会「临时取一条中继直连」
+  （`SEL.current` → `parseProxyIp` → `connect`），这条路径也是补救链的最后一跳，却和 7.169/7.170 修过的
+  `fallback.ts` / `attacher.ts` / `region.ts` 三处不同：没有 2500ms 上限，超时迟到成功的 socket 也没人关。
+  现在补上 `withTimeout(pk0, 2500)` 并在 `catch` 里关掉迟到的那条（免费计划全局 6 个并发 `connect` 名额）。
+- **第 90 条：地区钉住的失败被记成「目标不可达」。** `src/proxy/attacher.ts` 的 `st.retried` 分支（「换节点也不通」）
+  无条件 `cnt("dead")`，但 `?rg=xx` 这条路上 `dialAnother` 被限定了同一地区 —— 走到这里可能只是「该地区没别的候选」，
+  不是目标连不上。和 7.170 在 `session.ts` 里做的拆分同一个口径，改记 `rgFail`；直连那一支的 `dead` 保持不变。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

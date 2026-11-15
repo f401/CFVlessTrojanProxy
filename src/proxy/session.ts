@@ -15,7 +15,7 @@ import { SC } from "../core/const";
 import { kickFlush } from "../store/index";
 import { SEL } from "../px/selector";
 import { flushSnap, pendFlush, statBump } from "../store/index";
-import { closeQuietly, enc, safeSend, toU8 } from "../core/util";
+import { closeQuietly, enc, safeSend, toU8, withTimeout } from "../core/util";
 import { connect } from "cloudflare:sockets";
 
 /**
@@ -177,8 +177,19 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
                 // 纵深防御：种子池来自外部名单，进 connect 之前再验一次地址
                 st.node = px0.host + ":" + px0.port;
                 if (checkTarget(px0.host, px0.port)) throw new Error("proxyip 被策略禁止");
-                sock = await connect({ hostname: px0.host, port: px0.port });
-                st.via = "node";
+                // 与 Dialer / Attacher / Region 的补救链同一口径：connect() 自己没有超时，挂死会让
+                // 客户端一直等；超时之后迟到成功的 socket 也必须关掉，否则白占免费计划的 6 个
+                // 并发 connect 名额（v7.171 补上这一处，之前只有 fallback/attacher/region 有）。
+                const pk0 = Promise.resolve(connect({ hostname: px0.host, port: px0.port }));
+                try {
+                  sock = await withTimeout(pk0, 2500);
+                  st.via = "node";
+                } catch (e3) {
+                  void pk0
+                    .then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } })
+                    .catch(() => { /* 本来就没连上 */ });
+                  throw e3;
+                }
               } catch (e2) {
                 // 这个中转连不上，换一个再试一次
                 const alt = await dialAnother(env, st, mode, r.host);

@@ -75,7 +75,10 @@ export class Attacher {
             return;
           }
         }
-        cnt("dead");
+        // 地区钉住的连接失败不等价于「目标不可达」：这里可能只是该地区没别的候选了。
+        // 混记进 dead 会让面板上的 dead 同时代表两件事（v7.170 在 session.ts 里分开计，
+        // v7.171 把补救链这一处也一起分开）。
+        cnt(region ? "rgFail" : "dead");
         kickFlush(env, st.id); // 换节点也不通 → 这个目标走不了中转
         st.failed = true;
         st.siteFail = true;
