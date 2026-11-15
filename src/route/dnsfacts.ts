@@ -40,8 +40,7 @@ export class DnsFacts {
   private rows = new Map<string, DnsRow>();
   /** 待上行：本轮新记、还没被 ack 的行（未 ack 前重发 = 重试，不是重复计数）。 */
   private pend = new Map<string, DnsRow>();
-  /** 已上行：ack 之后留在表里做参考，不再进增量。 */
-  private sent = new Map<string, DnsRow>();
+  // 这里原有一张 `sent`（ack 后留作参考）—— 没有任何读端，长跑时只增不减；v7.138 删除
 
   /**
    * 功能：记一条确证过的 DNS 结论。
@@ -104,7 +103,6 @@ export class DnsFacts {
 
   /** 功能：上报成功 —— 待发转已发。@returns {void} */
   ack(): void {
-    for (const [h, r] of this.pend) this.sent.set(h, r);
     this.pend.clear();
   }
 
@@ -129,7 +127,6 @@ export class DnsFacts {
       const cur = this.rows.get(r.h);
       if (cur && cur.at >= at) continue;
       this.rows.set(r.h, { v6: r.v, at });
-      this.sent.set(r.h, { v6: r.v, at });
       n += 1;
     }
     return n;
@@ -158,7 +155,6 @@ export class DnsFacts {
   clear(): void {
     this.rows.clear();
     this.pend.clear();
-    this.sent.clear();
   }
 
   /**

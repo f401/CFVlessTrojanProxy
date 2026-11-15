@@ -14,7 +14,7 @@ import { HEALTH, ipOf } from "./relay-health";
 import { CF_NEG, JUDGE } from "./judge";
 import { EG } from "./egfacts";
 import { relCostMode, relNote, relSnap } from "./relperf";
-import { psOk } from "./psfacts";
+import { psBest } from "./psfacts";
 import { deadNote, isDead } from "./deadfacts";
 import { BLK } from "./blkfacts";
 import { capNote } from "./capfacts";
@@ -168,7 +168,10 @@ export class Policy {
     const nth = (this.seq.get(c.host) || 0) + 1;
     this.seq.set(c.host, nth);
     if (nth % 20 === 0 && stick.length > 1) {
-      const back = stick.filter((ip) => psOk(c.host, ip) >= 0.6 || JUDGE.posOn(c.host, ip));
+      // 闸门看「历史最好」而不是会衰减的当前均值：这条通道唯一的用途就是打破
+      // 「被降权 → 拿不到样本 → 永远回不来」的死锁；用均值等于把这次机会交给运气
+      // （实测口径：成过一次、之后连败十条的通道，均值早已 < 0.6，而它正是最该被放一条的）。
+      const back = stick.filter((ip) => psBest(c.host, ip) >= 0.6 || JUDGE.posOn(c.host, ip));
       const worst = back.length ? (back[back.length - 1] as string) : "";
       if (worst && worst !== stick[0]) {
         cnt("rehab");

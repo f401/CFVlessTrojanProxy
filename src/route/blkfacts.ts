@@ -79,6 +79,9 @@ export class BlkFacts {
       return false;
     }
     if (this.muted(o.host, o.at)) return false;
+    // `batch` 与 `mute` 都按「见过的键」增长（rows 有 BLK_MAX 与 drop，这两张没有）：
+    // 超过上限时扫一遍 —— 批的有效窗口只有 BLK_GAP，更旧的批下次只会被当成换批重置。
+    if (this.batch.size + this.mute.size > BLK_MAX) this.trim(o.at);
     const k = o.host + "|" + o.ip;
     const b = this.batch.get(k);
     if (!b) {
@@ -87,13 +90,16 @@ export class BlkFacts {
     }
     // 同一批：把观测累计到这一批里（60 秒窗口内的连续请求共享同一个倒霉后端，只能算一批）
     if (o.at - b.at <= BLK_GAP) {
-      b.n += 1;
+      // 计数只为「这一批够不够 3 次」服务，封顶免得长突发把 n 顶到几千（它只是个计数器）
+      b.n = Math.min(BLK_MIN * 4, b.n + 1);
       if (b.n < BLK_MIN) return false;
     } else {
-      // 换批：上一批没攒够 BLK_MIN 次就作废（偶发一个空体响应不该定价）
+      // 换批：上一批没攒够 BLK_MIN 次就作废（偶发一个空体响应不该定价）。
+      // 这条分支必然 return —— 新批的第一条只是「开批」，不是一次投票。
+      // （v7.138 之前这里写的是 `b.n = 1; if (b.n < BLK_MIN) return false;`，判断恒真。）
       b.n = 1;
       b.at = o.at;
-      if (b.n < BLK_MIN) return false;
+      return false;
     }
     // 这一批确认了：还要满足「与上一批之间 ≥ BLK_GAP」
     if (b.last > 0 && o.at - b.last < BLK_GAP) return false;
@@ -148,6 +154,24 @@ export class BlkFacts {
   muted(host: string, now = Date.now()): boolean {
     const until = this.mute.get(host) || 0;
     return until > now;
+  }
+
+  /**
+   * 功能：清掉两张表里已经不可能再用的条目 —— 超过两倍窗口的批、已经到期的静默。
+   *
+   * 为什么必须主动清：批进度超过 `BLK_GAP` 就再也延长不了（下次只会走「换批」重置），
+   * 静默到期后时间戳也没意义；而这两张表没有容量淘汰，一个长寿命 isolate 里只增不减。
+   * @param {number} now 当前时间
+   * @returns {void}
+   */
+  private trim(now: number): void {
+    for (const [k, b] of this.batch) if (now - b.at > BLK_GAP * 2) this.batch.delete(k);
+    for (const [h, until] of this.mute) if (until <= now) this.mute.delete(h);
+    // 过期清不掉（短时间见过一大堆键）时按 `at` 兜底 —— 扔掉一条批进度最多丢两次投票，
+    // 而真需要它确认的那条通道，下一次观测会重新开批。
+    if (this.batch.size <= BLK_MAX) return;
+    const old = [...this.batch.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, this.batch.size - BLK_MAX);
+    for (const [k] of old) this.batch.delete(k);
   }
 
   /**

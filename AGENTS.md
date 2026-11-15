@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.137**（自举审计十六批、共 27 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.138**（自举审计十七批、共 31 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -144,6 +144,7 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 ## 9. 当前状态与未完成
 
 - 线上 **7.123**（`facts=eg`，仓库同版）。7.122 把 `dns` 事实接到跨 isolate（`FactsStore` + `mergeFacts`），7.123 修掉「`HOOK.facts` 从未注册 → `facts=none` 不影响选路」这个洞，并加 `?fx=` 单请求开关与「HOOK 槽位必须有人注册」的接线门禁。7.80–7.85 修的是「中继那一跳到底值不值」：
+- **7.138 自举审计（第 28–31 条，同一张事实表族）**：`psfacts`/`dnsfacts` 的 `sent` 表只写不读（ack 里 set、`clear` 里 clear，没有任何读端；`relay-health.ts` 的同名表有读端，所以这不是统一模式）⇒ 长跑只增不减，删掉；康复通道闸门用会衰减的 `psOk` 判「历史上有过整页」⇒ 成过一次、连败十条的通道永远进不了康复名单（v8 §3.2 D12 的死锁仍在）⇒ `PsRow.top` 记历史最好 + `psBest`；`BlkFacts.batch/mute` 无上限无过期 ⇒ 新增 `trim()`；`blkfacts` 换批分支的 `if (b.n < BLK_MIN)` 恒真（死分支）。
 - **7.124–7.137 自举审计**（`tools/exp-v8proof.mjs` 挂进 preflight，N=400 闭环证明）：共修 27 个缺陷 —— `cf-ok-relay` 短路、`nack` 丢待发（pending 语义）、事实读失败后永久关闭（改 60 秒冷却重试）、cron 恢复用量不限量扇出（改 `restorePick` 每轮 ≤12）、`backpressure` 把客户端主动断开记成节点头上的 `cut`（改 `ccut`）、`cnt` 字面量漏登记会静默丢计数（补静态门禁）、`Pool` 门面的 9 条自指文档且错报返回类型（重写 + 修 `doc-gen` 根因）、
   未知族 ×40 死锁（改 ×2）、`direct-ok` 不可达、`egDerive` 跨站点污染（加 `cf` 门）、`ps` 负样本从未写入（S3 零边际的结构性原因）、
   `eg-pin` 挑已判死的中继、`clientV6 && cfHost` 分支回退到含死通道的 `usable` 且排在 `direct-ok` 之前、

@@ -25,6 +25,12 @@ export interface PsRow {
   n: number;
   /** 最后一次观测时间 */
   at: number;
+  /**
+   * 历史最好的一次（0..255）：用来看「这条通道曾经成过」。
+   * 与 `q` 分工：`q` 是现在的均值（会衰减），康复通道关心的是「曾经行过」——
+   * 用 `q` 做闸门会让「成过一次、后来连着失败」的通道永远进不了康复名单（那是它唯一能回样本的机会）。
+   */
+  top?: number;
 }
 
 /** 一行待上报/已上报的传输形态 */
@@ -88,8 +94,7 @@ export class PsFacts {
   private rows = new Map<PsKey, PsRow>();
   /** 待上报行（未 ack 前重发等于重试，不是重复） */
   private pend = new Map<PsKey, PsRow>();
-  /** 已上报行（只在内存里留作对比，不再发） */
-  private sent = new Map<PsKey, PsRow>();
+  // 这里原有一张 `sent`（ack 后留作对比）—— 没有任何读端，长跑时只增不减；v7.138 删除
 
   /**
    * 功能：记录一次真实观测（EWMA：乘 0.98 衰减，新样本权重 1）。
@@ -107,7 +112,9 @@ export class PsFacts {
     const q0 = cur ? cur.q : toQ(psPrior(ip, now));
     const n = Math.min(N_CAP, n0 + 1);
     const q = (q0 * n0 + 255 * (ok ? 1 : 0)) / Math.max(1e-9, n0 + 1);
-    const row: PsRow = { q: Math.round(q), n, at: now };
+    // 历史最好：只升不降，和 `q` 的衰减分开记（康复通道要用它，见 `PsRow.top`）
+    const top = Math.max(cur?.top ?? 0, ok ? 255 : 0);
+    const row: PsRow = { q: Math.round(q), n, at: now, top };
     this.rows.set(k, row);
     this.pend.set(k, row);
     cnt("psNote");
@@ -126,6 +133,23 @@ export class PsFacts {
   okOf(host: string, ip: string, now = Date.now()): number {
     const r = this.get(host, ip, now);
     return r ? r.q / 255 : -1;
+  }
+
+  /**
+   * 功能：这条通道**曾经**拿到过的最好结果（0..1），没有样本返回 -1。
+   *
+   * 与 `okOf` 的区别：`okOf` 是「现在还行不行」（均值会随失败衰减），这里是「行过没有」（只升不降）。
+   * 康复通道（`policy.ts` 每 20 条放一条）必须用后者 —— 它的用途正是给「被降权、但如果一直
+   * 拿不到样本就永远回不来」的通道一次机会；用会衰减的均值当闸门，等于把这件事交给运气。
+   * @param host 目标站点
+   * @param ip 中继出口 IP
+   * @param now 当前时间（毫秒）
+   * @returns 历史最好值，或 -1 表示无样本
+   */
+  bestOf(host: string, ip: string, now = Date.now()): number {
+    const r = this.get(host, ip, now);
+    if (!r) return -1;
+    return (r.top ?? r.q) / 255;
   }
 
   /**
@@ -192,7 +216,6 @@ export class PsFacts {
 
   /** 功能：上报成功 —— 待发转已发。@returns {void} */
   ack(): void {
-    for (const [k, r] of this.pend) this.sent.set(k, r);
     this.pend.clear();
   }
 
@@ -220,7 +243,8 @@ export class PsFacts {
       if (!Number.isFinite(q) || !Number.isFinite(cntN) || !Number.isFinite(at)) continue;
       const cur = this.rows.get(r.k);
       if (cur && cur.at >= at) continue;
-      this.rows.set(r.k, { q: Math.max(0, Math.min(255, Math.round(q))), n: Math.max(0, Math.min(N_CAP, cntN)), at });
+      // 远端行没有 `top`（线格式不含它）：按「这一行的当前值」起算，宁可低估历史最好
+      this.rows.set(r.k, { q: Math.max(0, Math.min(255, Math.round(q))), n: Math.max(0, Math.min(N_CAP, cntN)), at, top: Math.max(0, Math.min(255, Math.round(q))) });
       n += 1;
     }
     if (this.rows.size > PS_MAX) this.drop(0);
@@ -246,7 +270,6 @@ export class PsFacts {
   clear(): void {
     this.rows.clear();
     this.pend.clear();
-    this.sent.clear();
   }
 
   /**
@@ -291,6 +314,17 @@ export function psNote(host: string, ip: string, ok: boolean, now = Date.now()):
  */
 export function psOk(host: string, ip: string, now = Date.now()): number {
   return PS.okOf(host, ip, now);
+}
+
+/**
+ * 功能：薄包装 —— 历史最好（供康复通道判断「曾经成过」）。
+ * @param host 目标站点
+ * @param ip 中继出口 IP
+ * @param now 当前时间（毫秒）
+ * @returns 0..1；-1 表示没有样本
+ */
+export function psBest(host: string, ip: string, now = Date.now()): number {
+  return PS.bestOf(host, ip, now);
 }
 
 /**

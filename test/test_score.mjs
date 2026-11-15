@@ -3070,5 +3070,35 @@ eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
   S.meterCache.clear();
 }
 
+/* ---------- 103. 康复闸门看「历史最好」；只写不读的 sent 表删除（v7.138） ---------- */
+{
+  W.PS.clear();
+  W.DNS.clear();
+  const rh = "hist.example.com";
+  const rip = "198.51.100.9";
+  eq("没样本时 psBest 返回 -1", W.psBest(rh, rip), -1);
+  W.PS.note(rh, rip, true, Date.now());
+  eq("成过一次 → 历史最好是 100%", W.psBest(rh, rip) > 0.99, true);
+  for (let i = 0; i < 6; i++) W.PS.note(rh, rip, false, Date.now());
+  eq("连败之后当前均值掉到 0.6 以下", W.psOk(rh, rip) < 0.6, true);
+  // 本轮核心：康复通道给的是「再试一次」的机会，闸门必须问「曾经行过吗」，
+  // 不是「现在还好吗」—— 后者恰恰是被降权那批通道最不可能满足的条件。
+  eq("但历史最好仍是 100%（康复通道还认它）", W.psBest(rh, rip) > 0.99, true);
+  eq("psfacts 不再保留已上报表（只写不读的内存）", W.PS.sent, undefined);
+  eq("dnsfacts 同上", W.DNS.sent, undefined);
+  W.PS.clear();
+  W.DNS.clear();
+
+  // 批进度表按「见过的键」增长：短时间见过一大堆键时必须被压回上限
+  W.BLK.clear();
+  const tb = 1_000_000;
+  for (let i = 0; i < 1200; i++) {
+    W.BLK.note({ host: "burst.example.com", ip: `10.0.${i >> 8}.${i & 255}`, down: 737, peerBig: true, at: tb + i });
+  }
+  // 上限 1024，最后一次写入又加了一条才触发剪枝，所以允许 +1
+  eq("批进度表有上限（不会只增不减）", W.BLK.batch.size <= 1025, true);
+  W.BLK.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
