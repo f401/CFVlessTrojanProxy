@@ -16,8 +16,8 @@ export class Meter {
   /** 键 `host|node` → 到期时间：这条中继对这个站点被按 IP 拒（403）的判定，跨 isolate 共享 */
   blk: Record<string, number>;
   vt: Record<string, number>;
-  /** 中继存活度：ip → { o: ok, b: bad, d: dead } */
-  hl: Record<string, { o: number; b: number; d: number }>;
+  /** 中继存活度：ip → { o: ok, b: bad, d: dead, t: 最后观测时间 }（`t` 缺省表示 7.160 之前写入的老行） */
+  hl: Record<string, { o: number; b: number; d: number; t?: number }>;
   /** 出口族事实：ip → { f: 4|6, at }。v8 §3 的 eg：只用于选路代价偏置，永不剔除候选 */
   eg: Record<string, { f: number; at: number }>;
   /** 「站点 × 中继」成功率事实：`站点|中继IP` → { q 0..255, n 样本数, at }。只折价，永不剔候选 */
@@ -66,7 +66,7 @@ export class Meter {
           if (Array.isArray(o.cl)) this.cl = o.cl as ClRec[];
     if (o.blk && typeof o.blk === "object") this.blk = o.blk as Record<string, number>;
     if (o.vt && typeof o.vt === "object") this.vt = o.vt as unknown as Record<string, number>;
-    if (o.hl && typeof o.hl === "object") this.hl = o.hl as unknown as Record<string, { o: number; b: number; d: number }>;
+    if (o.hl && typeof o.hl === "object") this.hl = o.hl as unknown as Record<string, { o: number; b: number; d: number; t?: number }>;
     if (o.eg && typeof o.eg === "object") this.eg = o.eg as unknown as Record<string, { f: number; at: number }>;
     if (o.ps && typeof o.ps === "object") this.ps = o.ps as unknown as Record<string, { q: number; n: number; at: number }>;
     if (o.dead && typeof o.dead === "object") this.dead = o.dead as unknown as Record<string, { n: number; at: number }>;
@@ -229,12 +229,17 @@ export class Meter {
       mergeFacts(this, d);
       // 中继存活度搭便车：加性合并（只增不减，避免别的 isolate 的旧数据把本地结论冲掉）
       if (Array.isArray(d.hl) && d.hl.length) {
+        const nowHl = Date.now();
         for (const r of d.hl) {
           if (!r || typeof r.i !== "string") continue;
           const cur = this.hl[r.i] || { o: 0, b: 0, d: 0 };
           cur.o = Math.max(cur.o, Number(r.o) || 0);
           cur.b = Math.max(cur.b, Number(r.b) || 0);
           cur.d = Math.max(cur.d, Number(r.d) || 0);
+          // 存下证据时间（夹到现在）：不带它，冷启动读回的行只能被当成「刚刚观测」，
+          // 30 分钟半衰期对最容易过期的那批数据完全失效（v7.160）。
+          const t = Math.min(Number(r.t) || nowHl, nowHl);
+          cur.t = Math.max(Number(cur.t) || 0, t);
           this.hl[r.i] = cur;
         }
         const hk = Object.keys(this.hl);
@@ -407,7 +412,7 @@ export class Meter {
       return Response.json({ cl: this.cl });
     }
     if (p.endsWith("/hl")) {
-      const rows = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d }));
+const rows = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d, t: Number(x.t) || 0 }));
       rows.sort((a, b) => b.d + b.b - (a.d + a.b));
       return Response.json({ hl: rows.slice(0, 120) });
     }
@@ -415,7 +420,7 @@ export class Meter {
       const out: Array<{ k: string; s: number; t: number }> = [];
       const now = Date.now();
       for (const [k, t] of Object.entries(this.vt)) if (t > now) out.push({ k, s: 2, t });
-      const hl = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d }));
+const hl = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d, t: Number(x.t) || 0 }));
       const eg = Object.entries(this.eg).map(([i, x]) => ({ i, f: x.f, at: x.at }));
       eg.sort((a, b) => b.at - a.at);
       const ps = Object.entries(this.ps).map(([k, x]) => ({ k, q: x.q, n: x.n, at: x.at }));

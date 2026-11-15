@@ -390,8 +390,12 @@ interface MeterBody {
   /** `host|node` → 到期时间：中继对该站点被 403 的判定（跨 isolate 共享） */
   blk?: Record<string, number>;
   vt?: Array<{ k: string; s: number; t: number }>;
-  /** 中继存活度增量：ip + ok/bad/dead 计数 */
-  hl?: Array<{ i: string; o: number; b: number; d: number }>;
+  /**
+   * 中继存活度增量：ip + ok/bad/dead 计数。
+   * `t` 是这条证据的最后观测时间（7.160 起带上）：接收端靠它决定证据有多旧，
+   * 缺省时按「刚刚」算——老版本 isolate 发上来的行没有这个字段。
+   */
+  hl?: Array<{ i: string; o: number; b: number; d: number; t?: number }>;
   /** 出口族事实增量：中继 IP + 族（4/6）+ 观测时间（v8 §3 的 eg） */
   eg?: Array<{ i: string; f: number; at: number }>;
   ps?: Array<{ k: string; q: number; n: number; at: number }>;

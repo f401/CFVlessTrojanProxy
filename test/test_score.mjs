@@ -3467,5 +3467,27 @@ const judgeSrc = fs.readFileSync("src/route/judge.ts", "utf8");
 ok("judge 写入 smCnt 后就地裁剪（源码断言，防止被悄悄删掉）", judgeSrc.includes("trimAged(S.smCnt"));
 W.S.smCnt.clear();
 
+
+// ---- 150. 中继存活度证据必须带时间：否则冷启动读回的行只能被当成「刚刚观测」 ----
+W.HEALTH.clear();
+W.HEALTH.merge([{ i: "203.0.113.7", o: 9, b: 0, d: 0, t: Date.now() - 3 * 3600 * 1000 }]);
+ok("三小时前的证据按半衰期回落到中性", Math.abs(W.HEALTH.score("203.0.113.7") - 0.5) < 0.02);
+W.HEALTH.clear();
+W.HEALTH.merge([{ i: "203.0.113.8", o: 9, b: 0, d: 0, t: Date.now() }]);
+ok("刚发生的证据照旧算数", W.HEALTH.score("203.0.113.8") > 0.9);
+W.HEALTH.clear();
+W.HEALTH.note("198.51.100.45:443", 45290, true);
+const hlD = W.HEALTH.delta();
+ok("增量行带上最后观测时间（否则接收端只能当刚发生）", hlD.length === 1 && hlD[0].t > 0);
+const doHl = mkDO();
+const stubHl = { fetch: (u, init) => doHl.m.fetch(typeof u === "string" ? new Request(u, init) : u) };
+const hlT = Date.now() - 3 * 3600 * 1000;
+await stubHl.fetch("https://meter/add", { method: "POST", body: JSON.stringify({ hl: [{ i: "203.0.113.9", o: 9, b: 0, d: 0, t: hlT }] }) });
+const hlBack = (await (await stubHl.fetch("https://meter/hl")).json()).hl;
+eq("DO 存下了证据时间", hlBack[0].t, hlT);
+W.HEALTH.clear();
+W.HEALTH.merge(hlBack);
+ok("冷启动合并后仍按证据时间衰减（不是当成刚刚）", Math.abs(W.HEALTH.score("203.0.113.9") - 0.5) < 0.05);
+W.HEALTH.clear();
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

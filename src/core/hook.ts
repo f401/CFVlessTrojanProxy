@@ -36,7 +36,7 @@ export interface Hooks {
   /** 该站点最近哪条通道成功过（弱证据来源）：直连 / 中继 */
   win: ((host: string) => { d: boolean; r: boolean }) | null;
   /** 中继存活度的未上报增量（由 route 注册，store 在上报批次里取用） */
-  healthDelta: (() => Array<{ i: string; o: number; b: number; d: number }>) | null;
+  healthDelta: (() => Array<{ i: string; o: number; b: number; d: number; t?: number }>) | null;
   /** 四类同步事实的增量（eg/ps/dead/blk2）；未 ack 前重发等于重试，不是重复计数 */
   factsDelta: (() => {
     eg?: Array<{ i: string; f: number; at: number }>;

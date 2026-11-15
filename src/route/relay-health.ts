@@ -10,12 +10,18 @@ export interface RelayStat {
   at: number;
 }
 
-/** 跨 isolate 传输的行（短键省字节） */
+/**
+ * 跨 isolate 传输的行（短键省字节）。
+ * `t` 是这条证据的最后观测时间。它可以缺省（老 DO 里的行没有这个字段），
+ * 但**必须带上**：没有它，`merge()` 只能把别处的旧证据当成「刚刚发生」，
+ * `score()` 里的 30 分钟半衰期对冷启动最大的那批数据就完全失效。
+ */
 export interface HlRow {
   i: string;
   o: number;
   b: number;
   d: number;
+  t?: number;
 }
 
 const BIG = 20000;
@@ -82,8 +88,10 @@ export class RelayHealth {
       const p = this.sent.get(i);
       if (p && p.o === s.ok && p.b === s.bad && p.d === s.dead) continue;
       if (this.pending.has(i)) continue;
-      out.push({ i, o: s.ok, b: s.bad, d: s.dead });
-      this.pending.set(i, { i, o: s.ok, b: s.bad, d: s.dead });
+      // 带上最后观测时间：接收端要靠它判断「这份证据有多旧」，否则只能当刚发生
+      const row: HlRow = { i, o: s.ok, b: s.bad, d: s.dead, t: s.at };
+      out.push(row);
+      this.pending.set(i, row);
       if (out.length >= 40) break;
     }
     return out;
@@ -102,13 +110,17 @@ export class RelayHealth {
 
   /** 冷启动合并别处的计数（加性合并，不覆盖本地更强的结论） */
   merge(rows: HlRow[]): void {
+    const now = Date.now();
     for (const r of rows) {
       if (!r || !r.i) continue;
       const s = this.m.get(r.i) || { ok: 0, bad: 0, dead: 0, at: 0 };
       s.ok = Math.max(s.ok, Number(r.o) || 0);
       s.bad = Math.max(s.bad, Number(r.b) || 0);
       s.dead = Math.max(s.dead, Number(r.d) || 0);
-      s.at = Date.now();
+      // 证据时间取「本地已有的」与「别处报来的」之中较新的一个，并夹到现在：
+      // 老行没有 t（DO 里 7.160 之前的记录）时按「刚刚」算，避免把全部历史证据一次性衰减掉。
+      const at = Math.min(Number(r.t) || now, now);
+      s.at = Math.max(s.at, at);
       this.m.set(r.i, s);
       this.sent.set(r.i, { o: s.ok, b: s.bad, d: s.dead });
     }

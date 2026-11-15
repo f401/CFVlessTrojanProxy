@@ -345,7 +345,7 @@ export class Policy {
     HOOK.traffic = (e: TrafficEvt): void => JUDGE.onTraffic(e);
     // 「有非 CF 出口就优先用它」：CF→CF 会把客户端 IP 原样透传，封禁策略照旧命中
     HOOK.nonCfFirst = (): boolean => true;
-    HOOK.healthDelta = (): Array<{ i: string; o: number; b: number; d: number }> => HEALTH.delta();
+    HOOK.healthDelta = (): Array<{ i: string; o: number; b: number; d: number; t?: number }> => HEALTH.delta();
 
 // 上报成功才让增量生效；失败则退回，下一轮重新发（否则一次 1102 就永久少一段证据）
 HOOK.syncAck = (): void => {
