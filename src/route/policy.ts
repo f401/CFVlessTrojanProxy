@@ -207,15 +207,21 @@ export class Policy {
         const cip = this.pinFor(c.host, pool.length ? pool : nonCf.length ? nonCf : stick);
         if (cip) return { chan: { kind: "r", ip: cip }, why: "cold-pin" };
       }
-      if (okOnes.length) return { chan: { kind: "r", ip: okOnes[0] }, why: "cf-ok-relay" };
+      // 曾经这里有一条「只要本站在某条中继上有过成功记录就直接用它」的短路（`cf-ok-relay`）。
+      // 本地闭环证明（`tools/exp-v8proof.mjs`）把它钉成了缺陷：v6 出口有 12.5% 的概率蒙过一次，
+      // 一旦蒙过就把整站钉在这条 v6 上，`eg`/`score` 全被绕过（400 条里 399 条走这条短路，成功率 10.8%）。
+      // v8 的纪律是「事实只改顺序」：让 `posOf`（最近出过整页）+ `scoreOf`（含族偏置）去排序即可，
+      // 蒙过一次的 v6 中继会因为 `eg=6` 的 ×40 而排在已知 v4 后面。
+      // 直连成功证据只信 5 分钟：边缘出口会漂移。这一条必须排在「有中继就用中继」之前，
+      // 否则只要池子里有一条中继，直连证据永远没机会生效（本地闭环证明里直连 95% 的场景仍 100% 走中继）。
+      const dAt = vAt(c.host, "d");
+      if (vOk(c.host, "d") && dAt && Date.now() - dAt < 300000) return { chan: DIRECT, why: "direct-ok" };
       if (nonCf.length) return { chan: { kind: "r", ip: nonCf[0] }, why: "cf-noncf" };
       // 「本出口 fetch 得 200」不等于「隧道直连得 200」：fetch 走的是 CF 自己的出口，
       // 隧道直连可能落在一个对 CF 托管站点不友好的边缘出口上（实测 200 → 隧道 403）。
       // 所以只有在**隧道直连自己有过成功证据**（vOk(host,"d")）时才选直连；否则宁可走一条已知可用的中继。
       // 直连成功证据只信 5 分钟内：边缘出口会漂移，"十分钟前直连 200" 不代表这一分钟还行。
       // 30 分钟 TTL 内一直选直连，一次幸运 200 会换来一串 4 字节 403（实测 tput 15/20 → 20/20 的差别就来自这里）。
-      const dAt = vAt(c.host, "d");
-      if (vOk(c.host, "d") && dAt && Date.now() - dAt < 300000) return { chan: DIRECT, why: "direct-ok" };
       if (code === 403 && stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "http403" };
       if (code === 200 && !stick.length) return { chan: DIRECT, why: "http200" };
       if (stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "cf-any" };

@@ -83,7 +83,10 @@ export class EgFacts {
     const f = this.famOf(ip, now);
     if (f === 4) return cf ? 1 : 0.95;
     if (f === 6) return cf ? 40 : 1.05;
-    return cf ? 40 : 1;
+    // 未知族在 CF 站点上只轻罚（×2）：本地闭环证明（`tools/exp-v8proof.mjs`）显示，把未知也压到 40 会死锁 ——
+    // 冷启动第一条连接被 `cold-pin` 钉在 v6 上，之后「没量过的 v4」与「已知是 v6」同价，探索压力消失，
+    // 400 条连接全卡在 10.8%。轻罚后未测的 v4 会排在已知 v6 前面，先被采样、随后靠整页证据升到 ×1。
+    return cf ? 2 : 1;
   }
 
   /**
