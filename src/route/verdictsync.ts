@@ -1,12 +1,13 @@
 // 判定表的跨 isolate 同步：只同步「强证据」（blocked/dead），带 30 分钟 TTL。
 // 目标 isolate 冷启动时拉一次，之后靠本地的记录增量回传，避免每请求都读 DO。
 import { S } from "../core/state";
-import { vAll, vImport } from "./verdict";
+import { vAll, vImport, VT_TTL_MS } from "./verdict";
 import { HEALTH } from "./relay-health";
 import { FACTS } from "./factsstore";
 import { EG } from "./egfacts";
 import type { EgRow } from "./egfacts";
 import { cnt } from "../core/counter";
+import { dropExpired, trimAged } from "../core/hostmem";
 
 export interface VtRow {
   k: string; // `target|chan`
@@ -29,7 +30,9 @@ export function vtDelta(): VtRow[] {
     // 表里不可能再有通配行：写入入口（`VerdictTable.blockWild`）直接拒绝 `*`。
     // 站点级证据（`站点|通道`）照旧同步 —— 那才是「这个站点这条通道被封」的可信事实。
     const k = v.t + "|" + v.c;
-    const exp = v.at + 1800000;
+    // 有效期跟判定表共用同一个常量：以前这里自己抄了一个 1800000，
+    // 7.154 把 `SC.VT_TTL` 删掉之后这种副本就会静默漂移
+    const exp = v.at + VT_TTL_MS;
     if (exp <= now) continue;
     if ((S.vtSent.get(k) || 0) >= exp) continue;
     if ((S.vtPend.get(k) || 0) >= exp) continue;
@@ -47,6 +50,10 @@ export function vtDelta(): VtRow[] {
 export function vtAck(): void {
   for (const [k, exp] of S.vtPend) S.vtSent.set(k, exp);
   S.vtPend.clear();
+  // 键是「站点|通道」，判定表本身有上限、这张记账表没有：不同站点一路累加，
+  // 过期行也永远不会被读端清掉（读端只做数值比较）。先删过期，再压回上限。
+  dropExpired(S.vtSent);
+  trimAged(S.vtSent);
 }
 
 /** 上报失败：丢掉 pending，下一轮重新登记 */

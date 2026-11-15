@@ -37,8 +37,12 @@ export interface Ctx {
   facts?: ReadonlySet<string>;
 }
 
-/** 「按站点」的两张内存表上限：站点名来自客户端请求，不是有限集合 */
-const HOST_MEM_MAX = 512;
+/**
+ * 「按站点」的内存表上限：站点名来自客户端请求，不是有限集合。
+ * 7.158 起这个数字挪到 `SC.HOST_MEM_MAX`（judge / dialer / verdictsync 也要用同一份），
+ * 这里保留别名只是为了不把 trim 里的算式改得到处都是。
+ */
+const HOST_MEM_MAX = SC.HOST_MEM_MAX;
 
 export interface Choice {
   chan: Chan;

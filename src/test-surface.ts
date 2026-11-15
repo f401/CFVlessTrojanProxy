@@ -1,5 +1,6 @@
 // 测试专用出口：只在 dist/_test.js 里存在，生产包不含此文件
 export { sha224Bytes, toHex, VERSION, shadowRate, eachLimit, withTimeout } from "./core/util";
+export { trimAged, dropExpired } from "./core/hostmem";
 export { detectProtocol, parseVLESS, parseTrojan, loadUsers } from "./proxy/protocol";
 export { checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
 export { isPxHost, pxHostList } from "./core/hosts";

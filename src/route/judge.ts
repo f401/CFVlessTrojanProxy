@@ -3,6 +3,8 @@
 // 设计目标：① IP 级封锁 1 次请求就能感知；② 业务层 403 绝不被「拦截」——
 // 判定只影响「走哪条通道」，永不断开连接；某站点一条通道都不剩时自愈（VerdictTable.clearHost）。
 import { S } from "../core/state";
+import { SC } from "../core/const";
+import { trimAged } from "../core/hostmem";
 import { TrafficEvt } from "../core/hook";
 import { Chan, DIRECT, chanKey } from "./channel";
 import { vBad, vOk } from "./verdict";
@@ -153,6 +155,12 @@ export class Judge {
       cnt("trHit");
       S.bigByHost.set(e.host, now);
       S.bigChan.set(e.host, ck);
+      // 键是客户端带过来的站点名，不是有限集合：超过上限先按最旧压回，
+      // 两张表必须同步裁剪（bigDiff 同时读这两张，落单的键会让判定读到别站点的通道）
+      if (S.bigByHost.size > SC.HOST_MEM_MAX) {
+        trimAged(S.bigByHost);
+        for (const h of S.bigChan.keys()) if (!S.bigByHost.has(h)) S.bigChan.delete(h);
+      }
       S.smCnt.delete(ck);
       recordTraffic({ target: e.host, chan, down: e.down, ok: true });
       recordPass({ target: e.host, chan, down: e.down, ok: true });

@@ -3405,5 +3405,48 @@ ok(`[${g}] 设计阶段的临时名只在「更正」那句里出现`, !v8.inclu
   cg.clear();
 }
 
+// 147. 按站点表的内存上限：站点名是客户端给的，必须有裁剪（v7.158）
+{
+  // ① 通用裁剪：600 条里留最新的 512 条
+  const aged = new Map();
+  for (let i = 0; i < 600; i++) aged.set("h" + i, 1000 + i);
+  W.trimAged(aged);
+  eq("裁剪后正好是上限行数", aged.size, W.SC.HOST_MEM_MAX);
+  ok("最旧的那些先被删掉", !aged.has("h0") && !aged.has("h87"));
+  ok("最新的那些都还在", aged.has("h88") && aged.has("h599"));
+  // ② 过期表：值是过期时刻，<= now 的都要清掉
+  const exp = new Map();
+  exp.set("past", 1000);
+  exp.set("now", 5000);
+  exp.set("future", 9000);
+  eq("过期清理只删 <= now 的", W.dropExpired(exp, 5000), 2);
+  eq("剩下的就是还没过期的那条", [...exp.keys()].join(","), "future");
+  // ③ judge 每条整页都会写 bigByHost/bigChan：600 个不同站点后必须被压回
+  W.S.bigByHost.clear();
+  W.S.bigChan.clear();
+  for (let i = 0; i < 600; i++) {
+    const h = "big" + i + ".test";
+    W.JUDGE.onTraffic({ host: h, chan: { kind: "r", ip: "198.51.100.9" }, via: "node", node: "198.51.100.9:443", ok: true, down: 45290, up: 800, life: 900, cf: false, at: 1_700_000_000_000 + i });
+  }
+  eq("bigByHost 被压回上限", W.S.bigByHost.size, W.SC.HOST_MEM_MAX);
+  eq("bigChan 与 bigByHost 同步裁剪（落单的键会让判定读到别站点的通道）", W.S.bigChan.size, W.S.bigByHost.size);
+  // ④ vtAck 顺手清掉过期的记账行
+  W.S.vtPend.clear();
+  W.S.vtSent.clear();
+  W.S.vtPend.set("old.test|r:1.1.1.1", 1000);
+  W.S.vtPend.set("new.test|r:2.2.2.2", Date.now() + 600000);
+  W.vtAck();
+  eq("vtAck 之后过期行没了、新鲜行还在", [W.S.vtSent.has("old.test|r:1.1.1.1"), W.S.vtSent.has("new.test|r:2.2.2.2")].join(","), "false,true");
+  W.S.vtSent.clear();
+  // ⑤ 三处调用点都在（防止后续改动把裁剪悄悄删掉）
+  const dialSrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
+  const vtSrc = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+  const jdSrc = fs.readFileSync("src/route/judge.ts", "utf8");
+  ok("dialer 裁剪 cfHost", dialSrc.includes("dropExpired(S.cfHost)") && dialSrc.includes("trimAged(S.cfHost)"));
+  ok("verdictsync 裁剪 vtSent", vtSrc.includes("dropExpired(S.vtSent)") && vtSrc.includes("trimAged(S.vtSent)"));
+  ok("judge 裁剪 bigByHost", jdSrc.includes("trimAged(S.bigByHost)"));
+  ok("verdictsync 不再自己抄 TTL", !vtSrc.includes("v.at + 1800000"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -8,6 +8,7 @@ import { isCfIp } from "../core/net";
 import { S } from "../core/state";
 import { cnt } from "../core/counter";
 import { withTimeout } from "../core/util";
+import { dropExpired, trimAged } from "../core/hostmem";
 import { logErr } from "../nodes/metrics";
 import { nsFail } from "../nodes/stat";
 import { SEL } from "../px/selector";
@@ -54,7 +55,14 @@ export class Dialer {
           cfHost = false;
         }
       }
-      if (cfHost) S.cfHost.set(host, Date.now() + 1800000);
+      if (cfHost) {
+        S.cfHost.set(host, Date.now() + 1800000);
+        // 键是客户端请求里的站点名：先过期清理，再按「最早过期」压回上限
+        if (S.cfHost.size > SC.HOST_MEM_MAX) {
+          dropExpired(S.cfHost);
+          trimAged(S.cfHost);
+        }
+      }
     }
     if (cfHost && !S.vtLoaded && HOOK.vtLoad) {
       // 冷 isolate 读一次事实能省掉「注定失败的第一次请求」，但首字节不能为它排队：
