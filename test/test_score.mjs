@@ -1782,9 +1782,9 @@ W.vClear();
   W.vClear();
 }
 // 第 41 组：差分复核链路已删除（免费计划单次 userland TLS 握手就超 CPU 预算，实测 1102）
-// 它在 7.69 删掉 subtls 时就只剩空壳：SC.PROBE_REQ / PROBE_RND 恒为 0 ⇒ 入队闸门恒假、
+// 它在 7.69 删掉 subtls 时就只剩空壳：两个探测开关（PROBE_REQ / PROBE_RND）恒为 0 ⇒ 入队闸门恒假、
 // 预算里 vt 份额恒为 0、runRound 立即返回 ⇒ 队列只进不出，?vtq=1 永远显示一份没人处理的积压。
-eq("探测配额恒为 0（这是复核链路被删的原因）", [W.SC.PROBE_REQ, W.SC.PROBE_RND], [0, 0]);
+ok("两个探测开关已随复核链路一起删除（7.153：零读取点的假旋钮）", W.SC.PROBE_REQ === undefined && W.SC.PROBE_RND === undefined);
 eq("没有复核判定函数（封锁判定只走 tbf 的两批共识）", W.judge, undefined);
 eq("没有复核队列", W.queueLen, undefined);
 eq("HOOK 不再有 verify 槽位", W.HOOK.verify, undefined);
@@ -2103,7 +2103,7 @@ ok("整轮额度都给了准入", big.adm >= 40, String(big.adm));
 // 67) 探测全关时，判定扫描不占额度
 console.log("\n67) 探测全关时的预算");
 {
-  ok("两项探测都关（当前配置）", W.SC.PROBE_RND === 0 && W.SC.PROBE_REQ === 0, `${W.SC.PROBE_RND}/${W.SC.PROBE_REQ}`);
+  ok("两个探测开关已删除（不再有「关着的旋钮」）", W.SC.PROBE_REQ === undefined && W.SC.PROBE_RND === undefined);
   for (const poolN of [0, 64, 400, 1600, 3000]) {
     const q = W.planRound(poolN, 0);
 eq(`预算里不再有判定额度这一项（pool ${poolN}）`, q.vt, undefined);
