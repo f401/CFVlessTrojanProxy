@@ -83,6 +83,28 @@ for (const f of prod) {
   });
 }
 fail += cntFail;
+// DO 端点的调用方与实现方必须成对：7.69 删掉 subtls 时移除了 `/meter/{probe,raw,dbt}`，
+// 但调试端点仍在 POST 它们 —— `Meter.fetch` 的兜底分支是 `return this.json()`（200 + 整份计量表），
+// 于是 `?draw=` / `?dbt=` 一直"返回成功"，看起来还能用。这类"调用方还在、实现方已删"的死链
+// 只能靠静态比对发现（行为测试根本不会去点这些诊断端点）。
+const meterSrc = fs.readFileSync("src/store/meter.ts", "utf8");
+const served = new Set([...meterSrc.matchAll(/endsWith\("\/([A-Za-z0-9]+)"\)/g)].map((m) => m[1]));
+// `/get` 是**故意**走兜底：`Meter.fetch` 的契约就是「其他路径返回当前值」（见它的 JSDoc），
+// `meterGet` 靠这条读计量表。除它以外的未实现路径都算死链。
+const FALLBACK_OK = new Set(["get"]);
+let routeFail = 0;
+for (const f of prod) {
+  const lines = fs.readFileSync(f, "utf8").split(/\r?\n/);
+  lines.forEach((l, i) => {
+    for (const m of l.matchAll(/https:\/\/meter\/([A-Za-z0-9]+)/g)) {
+      if (!served.has(m[1]) && !FALLBACK_OK.has(m[1])) {
+        routeFail += 1;
+        console.log(`FAIL DO 端点 /meter/${m[1]} 不存在（${f}:${i + 1}），调用方会拿到兜底 JSON 却以为成功`);
+      }
+    }
+  });
+}
+fail += routeFail;
 if (fail) {
   console.log(`\n接线扫描：${fail} 条事实没有被真实链路调用`);
   process.exit(1);

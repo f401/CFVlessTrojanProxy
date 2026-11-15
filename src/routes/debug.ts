@@ -366,15 +366,14 @@ export async function debug(c: UserCtx): Promise<Response> {
       return json({ ok: false, error: errMsg(e) });
     }
   }
-  // DO 里 setTimeout 是否触发 / 根库解析耗时
-  if (url.searchParams.get("tim") || url.searchParams.get("dbt")) {
+  // DO 里 setTimeout 是否触发（根库解析那个 /meter/dbt 端点已随 subtls 一起删除）
+  if (url.searchParams.get("tim")) {
     const deny = await adminOnly(c);
     if (deny) return deny;
     const inst = url.searchParams.get("n") || "t" + Date.now();
     try {
       const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
-      const path = url.searchParams.get("tim") ? `https://meter/tim?ms=${Number(url.searchParams.get("tim"))}` : "https://meter/dbt";
-      const resp = await withTimeout(stub.fetch(path), 20000);
+      const resp = await withTimeout(stub.fetch(`https://meter/tim?ms=${Number(url.searchParams.get("tim"))}`), 20000);
       return json({ ok: true, out: await resp.json() });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
@@ -415,50 +414,6 @@ export async function debug(c: UserCtx): Promise<Response> {
     return Response.json({ host: tfHost, relay: tfRelay, do: body });
   }
 
-  // 跨请求 socket 存活实验：?hold=<host> 建连并发 hello，?cont=1 在下一个请求里读
-  if (url.searchParams.get("hold")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    const hh = String(url.searchParams.get("hold"));
-    try {
-      const inst = url.searchParams.get("n") || "hold" + Date.now();
-      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
-      const q = new URLSearchParams({ h: hh });
-      const resp = await withTimeout(stub.fetch("https://meter/hold?" + q.toString()), 15000);
-      return json({ ok: true, hold: await resp.json(), inst });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
-  if (url.searchParams.get("cont")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    try {
-      const inst = url.searchParams.get("n") || "";
-      if (!inst) return json({ ok: false, error: "need &n=<same inst as hold>" });
-      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
-      const resp = await withTimeout(stub.fetch("https://meter/cont"), 20000);
-      return json({ ok: true, cont: await resp.json() });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
-  // DO 里发 ClientHello（不碰密码学）：验证 DO 是否能对外 connect
-  if (url.searchParams.get("draw")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    const hh = String(url.searchParams.get("draw"));
-    const rr = url.searchParams.get("r") || "";
-    try {
-      const inst = url.searchParams.get("n") || "raw" + Date.now();
-      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
-      const q = new URLSearchParams({ h: hh, r: rr });
-      const resp = await withTimeout(stub.fetch("https://meter/raw?" + q.toString()), 15000);
-      return json({ ok: true, raw: await resp.json() });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
   // 纯同步忙等：区分「CPU 预算」与「crypto.subtle 不返回」
   if (url.searchParams.get("burnjs")) {
     const deny = await adminOnly(c);
