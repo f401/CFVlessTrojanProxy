@@ -2341,7 +2341,26 @@ console.log("\n76) 出口族事实（v8 的 eg）");
   W.egDerive("198.51.100.5", 737, { cf: true, peerBig: true }, t0 + 1000);
   eq("CF 站点带对照的小页写 v6", W.EG.famOf("198.51.100.5", t0 + 1000), 6);
   W.egDerive("198.51.100.6", 737, { cf: false, peerBig: true }, t0 + 1000);
-  eq("非 CF 站点的小页不判族", W.EG.famOf("198.51.100.6", t0 + 1000), 0);
+  eq("非 CF 站点的小页不判族", W.EG.famOf("198.51.100.6", t0 + 1000), 0);
+  // ps 必须能记负样本：否则 factor=prior/p 恒 ≤1，失败信息一条也进不去
+  W.PS.clear();
+  eq("没有样本时 ps 因子为 1", W.psFactor("neg.example.com", "198.51.100.7"), 1);
+  W.PS.note("neg.example.com", "198.51.100.7", false, Date.now());
+  ok("一次失败就让 ps 变贵（>1）", W.psFactor("neg.example.com", "198.51.100.7") > 1);
+  W.PS.note("neg.example.com", "198.51.100.7", true, Date.now());
+  W.PS.note("neg.example.com", "198.51.100.7", true, Date.now());
+  ok("连续成功把 ps 拉回（< 3）", W.psFactor("neg.example.com", "198.51.100.7") < 3);
+  // eg-pin 不能挑一条刚判死的中继
+  W.EG.clear(); W.DEAD.clear();
+  // 客户端 v6 + CF 站点：只要本站点有新鲜的直连成功证据，仍然选直连（族不传递）
+  W.vSetState("v6c.example.com", "d", 1, 1);
+  eq("v6 客户端 + CF 站点有直连证据 → direct-ok", W.decide({ host: "v6c.example.com", cfHost: true, clientV6: true, relays: ["203.0.113.21"], legacyWantsRelay: true }).why, "direct-ok");
+  W.vClear();
+  W.EG.note("198.51.100.8", 4, Date.now());
+  W.deadNote("198.51.100.8", false, Date.now());
+  W.deadNote("198.51.100.8", false, Date.now());
+  eq("eg-pin 跳过已判死的 v4 出口（无存活中继时退直连）", W.decide({ host: "dead.example.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: true }).why, "direct");
+  W.EG.clear(); W.DEAD.clear();
   eq("非 CF 站点不做族分层（github/example 在 v6 上都能过）", T.bias("2001:db8::1", false, t0 + 1000), 1.05);
   eq("过了寿命就当作未知", T.famOf("203.0.113.7", t0 + W.EG_TTL + 1), 0);
   eq("新学到的进待发队列", T.delta().length, 2);

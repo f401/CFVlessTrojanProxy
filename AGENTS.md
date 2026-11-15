@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**（仓库同版；`facts=eg`））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.125**（自举审计两批修复，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -143,6 +143,10 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 ## 9. 当前状态与未完成
 
 - 线上 **7.123**（`facts=eg`，仓库同版）。7.122 把 `dns` 事实接到跨 isolate（`FactsStore` + `mergeFacts`），7.123 修掉「`HOOK.facts` 从未注册 → `facts=none` 不影响选路」这个洞，并加 `?fx=` 单请求开关与「HOOK 槽位必须有人注册」的接线门禁。7.80–7.85 修的是「中继那一跳到底值不值」：
+- **7.124–7.125 自举审计**（`tools/exp-v8proof.mjs` 挂进 preflight，N=400 闭环证明）：共修 7 个缺陷 —— `cf-ok-relay` 短路、
+  未知族 ×40 死锁（改 ×2）、`direct-ok` 不可达、`egDerive` 跨站点污染（加 `cf` 门）、`ps` 负样本从未写入（S3 零边际的结构性原因）、
+  `eg-pin` 挑已判死的中继、`clientV6 && cfHost` 分支回退到含死通道的 `usable` 且排在 `direct-ok` 之前。三条属于「短路/顺序」类，
+  按函数行为写的单测永远测不到（分支没被执行）——这类缺陷只能靠端到端闭环证明或真实流量发现。
   · 7.81 `src/px/selector.ts` 冷 isolate 拉池子封顶 700ms（`ensurePool` 能拖 2–4 秒，那是用户等首字节的时间）；
   · 7.83 `src/route/relperf.ts` 代价函数纠偏：只有 ≥1MB 的传输才记吞吐，小样本按 `ttfb + 2000ms` 计
     （否则 45KB 正常页 18KB/s 比 4 字节 403 页 46KB/s 还「贵」，排序反向，实测 tput 4/24）；

@@ -122,6 +122,10 @@ export class Judge {
         if (verdict && out.reason !== verdict) cnt("cfDiff");
         // 只有「拿到完整响应」才记成功率；tiny 的负样本由 blk 的批次投票负责（§5.1 D14）
         if (out.write && out.write.kind === "ps" && out.write.j.ok) PS.note(e.host, pip, true, ty);
+    // B 级负样本：`tiny` + 同窗口有 ≥20KB 对照，但批次还不够三批（A 级），此时不写 `blk`，
+    // 但必须让 `ps` 记住这次失败 —— 否则 `ps` 只能因为成功而变便宜（`factor = prior/p` 恒 ≤1），
+    // 「这条中继对这个站点不行」这个信息一条也进不去（本地对照里 `ps` 边际为 0 的主因之一）。
+    else if (out.reason === "R_SINGLE_BATCH") PS.note(e.host, pip, false, ty);
       }
     }
     const chan = this.chanOf(e);

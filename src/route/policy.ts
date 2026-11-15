@@ -171,9 +171,16 @@ export class Policy {
     const nonCf = stick.filter((ip) => !isCfIp(ip));
     const okOnes = stick.filter((ip) => vOk(c.host, "r:" + ip) || vOk("*", "r:" + ip));
 
+    // 直连成功证据只信 5 分钟：边缘出口会漂移。这条必须排在「客户端 v6」与「有中继就用中继」之前 ——
+    // 客户端地址族只影响落到哪个 POP，不会传给目标（本地配对实测：直连 30/30 vs 中继 26/30）。
+      const dAt = vAt(c.host, "d");
+      if (vOk(c.host, "d") && dAt && Date.now() - dAt < 300000) return { chan: DIRECT, why: "direct-ok" };
+
     if (c.clientV6 && c.cfHost) {
       // F6：v6 客户端打 CF 目标必 403，只有非 CF 主机能改判
-      const pool = nonCf.length ? nonCf : usable;
+      // 回退顺序用 `stick`（已把判死的挪到队尾），不能退回 `usable` —— 那里面还留着判死的通道；
+      // 选谁交给排序结果（`stick` 已按 neg/pos/score 排好），不再按池子迭代顺序取第一条。
+      const pool = nonCf.length ? nonCf : stick.length ? stick : usable;
       if (pool.length) {
         const ip = (okOnes.find((x) => pool.includes(x)) || pool[0]) as string;
         return { chan: { kind: "r", ip }, why: "v6-cf" };
@@ -214,8 +221,6 @@ export class Policy {
       // 蒙过一次的 v6 中继会因为 `eg=6` 的 ×40 而排在已知 v4 后面。
       // 直连成功证据只信 5 分钟：边缘出口会漂移。这一条必须排在「有中继就用中继」之前，
       // 否则只要池子里有一条中继，直连证据永远没机会生效（本地闭环证明里直连 95% 的场景仍 100% 走中继）。
-      const dAt = vAt(c.host, "d");
-      if (vOk(c.host, "d") && dAt && Date.now() - dAt < 300000) return { chan: DIRECT, why: "direct-ok" };
       if (nonCf.length) return { chan: { kind: "r", ip: nonCf[0] }, why: "cf-noncf" };
       // 「本出口 fetch 得 200」不等于「隧道直连得 200」：fetch 走的是 CF 自己的出口，
       // 隧道直连可能落在一个对 CF 托管站点不友好的边缘出口上（实测 200 → 隧道 403）。
@@ -228,7 +233,8 @@ export class Policy {
       // 冷 isolate 兜底：`S.alive` 还没探出来时 `stick` 是空的，原来的结局是直连 → 403。
       // 事实层里已有「这条中继送回过整页」的 v4 出口（DO 读到的），先把它们用起来，
       // 比直连稳得多（钉中继实测 v4 9/9 200、直连约 1/6）。只挑一条，失败交给 dialect 的重试。
-      const eg4 = EG.v4List();
+      // 事实里的 v4 出口也可能刚被判死：不挑 dead，否则兜底会把请求送到已知连不上的中继
+      const eg4 = EG.v4List().filter((x) => !isDead(x));
       if (eg4.length) return { chan: { kind: "r", ip: eg4[0] as string }, why: "eg-pin" };
     }
     return { chan: DIRECT, why: "direct" };
