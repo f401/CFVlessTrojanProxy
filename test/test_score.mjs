@@ -3928,5 +3928,56 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   eq("第二轮把剩下的 8 个发完", W.S.pend.size, 0);
   eq("两轮合计正好 40 次 DO 往返", sent.length, 40);
 }
+// 169) UDP/DNS 分帧：拆在两条消息里的包不能被丢
+{
+  const dnsSrc = fs.readFileSync("src/proxy/dns.ts", "utf8");
+  ok("帧解析区分「还没到齐」与「格式非法」", dnsSrc.includes('return "short";') && dnsSrc.includes("udpBuf"));
+  ok("拆不完的字节会留到下一帧，而不是丢掉", (dnsSrc.match(/carry\(buf\)/g) || []).length === 3 && dnsSrc.includes("st.udpBuf = rest.slice();"));
+
+  const mkT = (n) => {
+    const out = [1, 192, 0, 2, 1, 0x00, 0x35, (n >> 8) & 0xff, n & 0xff];
+    for (let i = 0; i < n; i++) out.push(0x40 + i);
+    return new Uint8Array(out);
+  };
+  const mkV = (n) => {
+    const out = [(n >> 8) & 0xff, n & 0xff];
+    for (let i = 0; i < n; i++) out.push(0x50 + i);
+    return new Uint8Array(out);
+  };
+
+  const frame = mkT(12);
+  const whole = W.trojanUdpFrame(frame);
+  eq("完整的 Trojan UDP 帧能拆出来", whole && whole.msg.length, 12);
+  eq("少一个字节算「还没到齐」，不是非法帧", W.trojanUdpFrame(frame.subarray(0, frame.length - 1)), "short");
+  eq("ATYP 非法才算格式错误", W.trojanUdpFrame(new Uint8Array([9, 1, 2, 3, 4, 0, 53, 0, 12])), null);
+
+  const realFetch = globalThis.fetch;
+  const sent = [];
+  let closed = 0;
+  const ws = { readyState: 1, send(b) { sent.push(b.length); }, close(c) { closed = c; } };
+  globalThis.fetch = async () => new Response(new Uint8Array(20), { status: 200 });
+  try {
+    const st = { down: 0, header: null, udpBuf: null };
+    await W.handleDns(ws, frame.subarray(0, 5), st, true);
+    eq("半个 Trojan 帧：一次也不发", sent.length, 0);
+    eq("半个 Trojan 帧：留在 udpBuf 里等下一帧", st.udpBuf && st.udpBuf.length, 5);
+    eq("半个 Trojan 帧：连接没被关", closed, 0);
+    await W.handleDns(ws, frame.subarray(5), st, true);
+    eq("拼起来之后发一次", sent.length, 1);
+    eq("响应 = 地址前缀(7) + 长度 + 负载", sent[0], 7 + 2 + 20);
+    eq("残留清空", st.udpBuf, null);
+
+    const st2 = { down: 0, header: null, udpBuf: null };
+    const vframe = mkV(12);
+    await W.handleDns(ws, vframe.subarray(0, 6), st2, false);
+    eq("半个 VLESS 帧：先不发", sent.length, 1);
+    eq("半个 VLESS 帧：留下 6 字节", st2.udpBuf && st2.udpBuf.length, 6);
+    await W.handleDns(ws, vframe.subarray(6), st2, false);
+    eq("VLESS 拼完发一次", sent.length, 2);
+    eq("VLESS 响应 = 2 + 负载", sent[1], 2 + 20);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

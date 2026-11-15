@@ -40,6 +40,8 @@ export class Connection {
   via = "direct";
   udp = false; // 首包已判定为 UDP/53：后续帧直接当 DNS 报文
   udpTrojan = false; // Trojan UDP 的后续帧带 [ATYP][ADDR][PORT] 前缀
+  /** 上一帧没拆完的 UDP 字节：WS 分帧不等于 UDP 分帧，拆不完的要留到下一帧接着拼 */
+  udpBuf: Uint8Array | null = null;
   dead = false; // 已经明确失败并关闭：后续帧不要再解析
 
   // —— 热路径计数 ——

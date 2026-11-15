@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.177**（自举审计五十七批、共 100 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.178**（自举审计五十八批、共 101 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -384,6 +384,13 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - **修法**：`SC.PEND_MAX = 32`；`flush` 先按 `S.pendIdx` 轮转起点再 `slice(0, SC.PEND_MAX)`，游标推进 `(start + batch.length) % all.length`；只 `delete` 这一批（在途期间新加的留在账本里，不再 `S.pend.clear()`）；被截断的人数记 `cnt("pendSkip", …)`（`cntKeys` 已登记）；`S.pendBytes` 按剩余条目重算，而不是清 0。
 - **为什么必须轮转**：只取前 N 个时，成功的那批留在同一位置、失败的那批也留在同一位置，于是「先发谁」永远不变 —— 这是典型饥饿，且回滚逻辑会让它看起来像偶发抖动。
 - **锁**：第 168 组 9 条（`PEND_MAX = 32`、轮转切片、只删这一批、`pendSkip` 计数、40 个用户时首轮只发 32 个且账本剩 8 个、剩余的是末尾 8 个、两轮合计 40 次往返）。A/B：旧代码 1167 通过 **8 失败** → 新 1175/0。
+
+### 7.178 自举审计（第 101 条，UDP/DNS 的分帧）
+
+- **现象**：`src/proxy/dns.ts` 的 `handleDns` 每次只解析「这一条 WS 消息里的字节」，没有跨消息的残留缓冲。`WS 分帧 ≠ UDP 分帧`：客户端完全可以把一个 DNS 包拆到两条消息里发（大响应、拥塞窗口都会这样）。旧代码在 VLESS 侧遇到 `buf.length < 2 + n` 直接 `break` 丢掉尾巴，在 Trojan 侧更糟 —— `trojanUdpFrame` 把「数据没到齐」和「格式非法」都返回 `null`，于是**只是少一个字节的合法帧会把整条连接以 1003 断掉**。
+- **后果**：拆开的那次查询永久无应答（浏览器表现为 DNS 卡住到超时），而日志里只有一条 `bad udp frame`，看起来像客户端在发垃圾包。
+- **修法**：`trojanUdpFrame` 的返回值从 `frame | null` 改成 `frame | "short" | null`（区分「还没到齐」与「ATYP/长度非法」）；`Connection` 新增 `udpBuf`，`handleDns` 入口把上一帧的残留接回来，出口把没拆完的字节 `carry` 回去；残留上限 `DNS_CARRY_MAX = DNS_MAX + 64`，超限才关连接（`udp overflow`）。两条收尾分支（`queries >= 32` 用满配额、剩余不足一个帧头）也走 `carry`，不再静默丢。
+- **锁**：第 169 组 17 条 —— `trojanUdpFrame` 三态（完整 / 少一字节 = `short` / ATYP 非法 = `null`）、Trojan 半个帧不发且连接不断、拼起来发一次且长度 = 前缀(7) + 长度(2) + 负载(20)、残留清空、VLESS 半个帧同理、源码断言（`carry(buf)` 三处、`st.udpBuf = rest.slice();`）。A/B：旧代码 1180 通过 **10 失败** → 新 1190/0。
 
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
