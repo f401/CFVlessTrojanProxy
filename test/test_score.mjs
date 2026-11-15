@@ -3907,5 +3907,26 @@ ok("conns 用 max 合并，快照落后也不回退", mSrc166.includes("Math.max
 const pSrc167 = fs.readFileSync("src/store/pend.ts", "utf8");
 ok("确认只发生在挂增量的那一批", pSrc167.includes("=== carriedBy"));
 ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).toLowerCase();"));
+// 168) 增量上报的批次上限与轮转
+{
+  const pendSrc = fs.readFileSync("src/store/pend.ts", "utf8");
+  eq("PEND_MAX 是 32：一轮最多 32 次 DO 往返，留出子请求余量", W.SC.PEND_MAX, 32);
+  ok("批次按轮转取，而不是永远取 Map 的前 N 个", pendSrc.includes("rotated.slice(0, SC.PEND_MAX)") && pendSrc.includes("(S.pendIdx || 0) % all.length"));
+  ok("只摘掉这一批，不整表清空（在途增量留在账本里）", pendSrc.includes("for (const [bid] of batch) S.pend.delete(bid);") && !pendSrc.includes("S.pend.clear();"));
+  ok("被截断的人数会记进 pendSkip", pendSrc.includes('cnt("pendSkip", rotated.length - batch.length)'));
+  const sent = [];
+  const mkP = { METER: { idFromName: (x) => x, get: (id) => ({ fetch: async () => { sent.push(id); return new Response(JSON.stringify({ v: null }), { status: 200 }); } }) } };
+  W.S.pend.clear();
+  W.S.pendIdx = 0;
+  for (let i = 0; i < 40; i++) W.S.pend.set("p" + i, { up: 10, down: 20, conns: 1 });
+  await W.PEND.flush(mkP, true);
+  eq("一轮只发 PEND_MAX 个用户", sent.length, 32);
+  eq("没发出去的留在账本里", W.S.pend.size, 8);
+  eq("没发出去的正好是末尾那 8 个", [...W.S.pend.keys()].join(","), "p32,p33,p34,p35,p36,p37,p38,p39");
+  ok("截断的人数记进了 pendSkip", (W.cntView().pendSkip || 0) >= 8);
+  await W.PEND.flush(mkP, true);
+  eq("第二轮把剩下的 8 个发完", W.S.pend.size, 0);
+  eq("两轮合计正好 40 次 DO 往返", sent.length, 40);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -1,6 +1,7 @@
 import { S } from "../core/state";
 import { HOOK } from "../core/hook";
-import { cntDelta, cntUnsend } from "../core/counter";
+import { SC } from "../core/const";
+import { cnt, cntDelta, cntUnsend } from "../core/counter";
 import { eachLimit } from "../core/util";
 import { spdSnapshot } from "../core/node-snapshot";
 
@@ -89,9 +90,19 @@ export class PendingLedger {
     if (!env || !env.METER || !S.pend.size) return;
     if (!force && Date.now() - S.pendAt < S.pendMs) return;
     S.pendAt = Date.now();
-    const batch = [...S.pend.entries()];
-    S.pend.clear();
+    // 一轮最多带 PEND_MAX 个用户：每个用户 1 次 DO 往返，一轮总量不能超 50 子请求额度。
+    // 必须轮转起点：Map 的插入顺序几乎不变，只取前 N 个会让尾部用户长期推不上去
+    // （表现是「用量永远落后」，而失败批次会照常回滚、只把退避翻倍，看不出是截断）。
+    const all = [...S.pend.entries()];
+    const start = all.length ? (S.pendIdx || 0) % all.length : 0;
+    const rotated = all.slice(start).concat(all.slice(0, start));
+    const batch = rotated.slice(0, SC.PEND_MAX);
+    S.pendIdx = all.length ? (start + batch.length) % all.length : 0;
+    if (rotated.length > batch.length) cnt("pendSkip", rotated.length - batch.length);
+    // 只摘掉这一批：在途期间新加的增量留在账本里，下一轮接着发（不是整表清空）
+    for (const [bid] of batch) S.pend.delete(bid);
     S.pendBytes = 0;
+    for (const [, left] of S.pend) S.pendBytes += left.up + left.down;
     let bad = 0;
     // 快照固定挂在主 uuid 的对象上：挂到"批次第一个"会挂到另一个用户，
     // 结果面板（读主 uuid）永远看不到更新。

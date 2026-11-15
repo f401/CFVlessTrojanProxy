@@ -71,6 +71,7 @@ export class AppState {
     "restoreSkip",
   "admStatsSkip",
     "snapSkip",
+    "pendSkip",
     "egSent",
     "rgFail",
     "psNote",
@@ -171,6 +172,8 @@ export class AppState {
   tflush: ReturnType<typeof setTimeout> | null = null;
   pendBytes = 0;
   doCalls = 0;
+  /** 增量上报的游标：一轮只带 PEND_MAX 个用户，下一轮从上次停下的位置继续（否则尾部永远排不上） */
+  pendIdx = 0;
   meterCache: Map<string, { v: UsageMeter | null; t: number }> = new Map();
   snapCache: { v: SnapDoc | null; t: number } = { v: null, t: 0 };
   /** 跨 isolate 的节点快照（Meter DO 里的 s），面板用；60 秒缓存 */
