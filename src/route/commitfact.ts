@@ -11,6 +11,8 @@
 //   · 业务 4xx 与封锁必须分开：站点拒绝所有人时写 `blk` 等于把所有通道都打一遍。
 
 /** tiny 的绝对上限：响应小到不像页面（v8 §4；封锁页实测 737B，不是 4 字节） */
+import { FACT_TTL } from "../core/facts";
+
 export const TINY_ABS = 2048;
 /** tiny 的相对上限：小于本站点典型大响应的 20% */
 export const TINY_REL = 0.2;
@@ -19,8 +21,8 @@ export const BIG_PEER = 20000;
 /** 同窗口宽度：120 秒内的观测可以互为对照 */
 export const BIG_WIN = 120000;
 /** `blk` 寿命 90 分钟；`ps` 45 分钟（软证据比硬证据过期快） */
-export const BLK_TTL = 90 * 60000;
-export const DEAD_TTL = 30 * 60000;
+export const BLK_TTL = FACT_TTL.blk;
+export const DEAD_TTL = FACT_TTL.dead;
 /** 同一键 60 秒内最多写一次：facts 是事实，不是日志 */
 export const WRITE_GAP = 60000;
 

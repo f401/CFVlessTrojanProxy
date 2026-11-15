@@ -4157,5 +4157,63 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   ok("补救链也跳过本站点已判封锁的中继", /HOOK\.chanPref\(host, st\.host\) === 2/.test(fbSrc));
   ok("补救链的候选上限仍是 4（每个都是一次 connect）", /const ALT_TRIES = 4;/.test(fbSrc));
 }
+// 第 174 组：事实寿命的唯一真源 + 错误分类键的上限 + 中继地址的 IPv6 拆分
+{
+  const ttl = W.FACT_TTL;
+  eq(
+    "五类事实的寿命只有一份（core/facts 的 FACT_TTL）",
+    [ttl.eg, ttl.ps, ttl.dead, ttl.blk, ttl.dns].join(","),
+    "21600000,2700000,1800000,5400000,86400000",
+  );
+  ok(
+    "route 的五个 TTL 都从 FACT_TTL 取（不再各写一遍数字）",
+    W.EG_TTL === ttl.eg && W.PS_TTL === ttl.ps && W.DNS_TTL === ttl.dns && W.BLK_TTL === ttl.blk && W.DEAD_TTL === ttl.dead,
+  );
+  const fmSrc = fs.readFileSync("src/store/factmerge.ts", "utf8");
+  ok(
+    "factmerge 的合并规则读 FACT_TTL，不再自带四个裸数字",
+    fmSrc.includes("FACT_TTL.eg") &&
+      fmSrc.includes("FACT_TTL.ps") &&
+      fmSrc.includes("FACT_TTL.dead") &&
+      fmSrc.includes("FACT_TTL.blk") &&
+      fmSrc.includes("FACT_TTL.dns") &&
+      !fmSrc.includes("21600000") &&
+      !fmSrc.includes("2700000") &&
+      !fmSrc.includes("1800000"),
+  );
+  // 分类键含客户端带来的站点名（"tfb <站点>"）：同窗口里换站点就是换键
+  const E = W.ERRS;
+  E.bucket.clear();
+  for (let i = 0; i < 50; i++) E.count("cron: boom");
+  eq("高频分类先占住位置", (() => {
+    for (const [k, v] of E.bucket) if (k === "cron: boom") return v.n;
+    return -1;
+  })(), 50);
+  for (let i = 0; i < 400; i++) E.count("tfb atk" + i + ".test chan ok=1 bad=1 esc=none n=3");
+  ok("同一窗口里分类键也有上限（客户端换站点名撑不爆）", E.bucket.size <= 64, E.bucket.size);
+  eq("直方图仍能给出前 8 类", E.hist().length, 8);
+  eq("高频分类没有被淘汰掉", (() => {
+    for (const [k, v] of E.bucket) if (k === "cron: boom") return v.n;
+    return -1;
+  })(), 50);
+  const eSrc = fs.readFileSync("src/nodes/errlog.ts", "utf8");
+  ok("淘汰按本窗口计数最少的那批（而不是清空整表）", eSrc.includes("cold.length - 64"), true);
+  // 中继地址：IPv6 字面量自带冒号，split(":") 会把它拆成两截
+  ok("splitRelay 认得 [v6]:port", JSON.stringify(W.splitRelay("[2a06:98c0::1]:443", 443)) === '["2a06:98c0::1",443]', true);
+  ok("splitRelay 认得不带端口的裸 IPv6", JSON.stringify(W.splitRelay("2a06:98c0::1", 443)) === '["2a06:98c0::1",443]', true);
+  const tfSrc = fs.readFileSync("src/core/tf.ts", "utf8");
+  ok(
+    "probeTf 用 splitRelay 拆中继（代码里不再有 lastIndexOf，注释里留历史说明不算）",
+    tfSrc.includes("splitRelay(relay, 443)") && !/^\s*const i = relay\.lastIndexOf/m.test(tfSrc),
+    true,
+  );
+  const tfbSrc = fs.readFileSync("src/route/tfb.ts", "utf8");
+  ok(
+    "tfb 的判定键与探测地址都走 splitRelay/relayAddr",
+    tfbSrc.includes("splitRelay(row.relay, 443)[0]") && tfbSrc.includes("ips.map(relayAddr)") && !tfbSrc.includes('row.relay.split(":")[0]'),
+    true,
+  );
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.183**（自举审计六十三批、共 118 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.184**（自举审计六十四批、共 121 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -337,124 +337,24 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - 锁：第 164 组 5 条（类型里没有 `src?`、池子与 `warm` 四处写入都不带来源、`pxSet` 没有 `patch.alive`、
   签名只剩 `cur`、`LIVING` 含 `LIMITS.md`）。A/B：旧代码 1138 通过 / 4 失败，改后 1142/0。
 
-### 7.174 自举审计（第 96–97 条，用量快照与面板口径）
+### 7.174–7.183 自举审计（第 96–118 条）
 
-- **第 96 条：灾备快照逐个用户读 DO，没有上限。** `usageSnapWrite` 对整份用户表各发一次
-  `meterGet`（每人一个 DO 子请求），而一次调用总共只有 50 个额度 —— cron 一轮还要花在
-  `refillPool`（≤6 个源）与 `restoreUsage`（≤12 人）上。用户一多，排在后面的读全部失败；
-  `meterGet` 失败时返回 `null` 而不是抛错，而 `out.users` 是每次从空表重建的 ⇒ 那批人直接
-  从快照里消失，DO 重建后再也恢复不回来，且没有任何计数。修法：只读前 `SC.SNAP_MAX = 24` 个，
-  其余把上一次快照里的记录**原样搬过来**并记 `cnt("snapSkip")` —— 「这次没读」不等于「没有」。
-- **第 97 条：面板把「没读到」画成 `0 B`。** `renderAdmin` 原来 `const s = statsMap[u.id] || {}`，
-  超出 `ADMIN_STATS_MAX` 或读失败的用户显示 `0 B`，与「这个用户没流量」无法区分（7.142 只把它
-  记进 `admStatsSkip`，页面照旧说谎）。改成缺数据时显示「—」，并在标题下写明「其中 N 个用户
-  这次没读到用量」。
-- 锁：第 165 组 9 条（只读 SNAP_MAX 个、`snapSkip` 计数、没读的人保留旧值、读到的人换新值、
-  快照不丢人、面板显示「—」、不假装 `0 B`、页面说明、`SNAP_MAX = 24`）。
-  A/B 时先用 `const SNAPMAX = W.SC.SNAP_MAX || 24;` 兜住常量缺失，否则旧代码上会抛 TypeError
-  而不是干净地红（本次实测旧代码 7 条 FAIL）。
+这一段共 23 条缺陷，逐条证据、修法与锁都在 `docs/v8实现清单.md` 的 H6 表（行 96–118）。留在这里的只有**能复用的判据**：
 
-### 7.175 自举审计（第 98 条，用量恢复的门槛）
+- **第 96–100 条：一次调用的子请求预算有三个方向**。读方向（`usageSnapWrite` 逐用户 `meterGet`、面板 `ADMIN_STATS_MAX`）、写方向（`PendingLedger.flush` 一轮带全表 ⇒ 尾部用户永久饥饿，改 `PEND_MAX = 32` + 游标轮转），以及「谁有权确认」——`vt`/`hl`/`facts`/`cl` 只挂在主 uuid 一个请求体上，ack/nack 却写在每个批次回调里（7.176 的 `carriedBy`）。判据：**问「这一次调用最多花多少个往返」，而不是「并发多大」**。
+- **第 101 条：`WS 分帧 ≠ UDP 分帧`**。`handleDns` 只解析单条消息 ⇒ 拆包的那次查询永久无应答；Trojan 侧还把「没到齐」和「非法」都当 `null`，直接 1003 断连。修法是给 `Connection` 加跨消息残留 `udpBuf`（`DNS_CARRY_MAX = DNS_MAX + 64`）。判据：**任何「一帧一条消息」的假设都要在协议层验证**。
+- **第 102 条：恒等变换伪装成策略**。`alivePlan(x, 48)` 在 401 个 `alive` 取值下恒等于 48（加码值最大 20，被 `SCAN_SUB` 夹回），`ALIVE_MIN` 零读取点 —— 文档说「不够就加码」，代码里什么也没发生。判据：**给「策略函数」喂全量输入看它有没有真的改变输出**。
+- **第 103–106 条：探测路径的预算与地址解析**。`probeTf` 内部要有自己的 `TF_MS`（超时只让调用方不等，DO 里的请求照样挂着）；`splitRelay` 必须认裸 IPv6 与 `[v6]:port`（按冒号拆会把 `2a06:98c0::1:443` 拆成 `2a06`）；`refreshCfHttp` 要有在途集合 + 负缓存（否则冷启动 6 条连接 = 6 次探测，吃掉全部 `connect()` 名额）。
+- **第 107–114 条：上限、合并、口径**。四条通病：① 上限只写在一条写入路径上（`VerdictTable.set` 有 `sweep`、`setState`/`import` 没有；`S.needPx` 的上限只写在 attacher）；② 逐字段 `max` 会拼出从未发生过的证据（DO 的 `hl`）；③ 恢复/合并只让触发的那一维变大（`/set` 的字节维度）；④ 淘汰留最旧（`hl` 按插入顺序 `slice(200)`）。外加两条「静止的格子说的不是真相」（面板 `0 B`、`colspan=4`）与一条「注释还在描述已修的 bug」。
+- **第 115–118 条：起搏样本与补救链**。`seedAlive` 不能把探活 RTT 写进真实首字节的矩（40ms vs 400ms ⇒ CUSUM 立刻冻结那唯一能用的中继）；派生密钥的缓存必须记「用哪份 kek 算的」（换 kek 后旧 isolate 会一直解不开，表现是 `kv unseal failed` + 快照当空表）；补救链遇到一条坏条目要 `continue` 而不是 `return null`，且要过 `HOOK.chanPref`（已判封锁的中继再拨一遍只有 403）。
 
-- `src/store/meter.ts` 的 `/set`（cron 的 `restoreUsage` 走这条）门槛原来是 `want > cur`，只比字节（`up+down`）：
-  于是「只建过连接、没有可计量字节」的用户在 DO 重建后整条恢复被跳过，`conns`/`first` 永久归零；
-  而 `/seed`（`readStats` 的 KV 回退）门槛是 `up+down+conns === 0` —— 同一个字段，两条恢复路径口径不一致。
-- 同时 `conns: Number(d.conns) || this.c.conns || 0` 是直接赋值：快照比 DO 落后几小时时，恢复会把面板的连接数**改小**。
-- 修法：门槛改成 `want > cur || wantN > curN`；`conns: Math.max(wantN, curN)`；
-  `first` 改成「取更早的非零值」（重建后不能把首次使用时间推后）。
-- 锁第 166 组 8 条（只建连的用户能恢复、first 跟着走、字节没变多时连接数继续前进、快照落后不回退、first 取更早、字节按快照覆盖、两条源码断言）；
-  A/B 旧代码 1153 通过 **7 失败** → 新 1160/0。
-### 7.176 自举审计（第 99 条，增量只能由承载它的那一批确认）
+教训：这 23 条里超过一半是「同一条规则只在一个调用点成立」，另一小半是「跨层传值丢了一个维度」（时间戳、状态、`top`）。两者都不报错、门禁全绿，只能靠**按字段/按端点做读写点对照**与**闭环证明**发现。
+### 7.184 自举审计（第 119–121 条，唯一真源与 IPv6 地址）
 
-- `PendingLedger.flush()` 把 `vt`/`hl`/`facts`/`cl` 增量挂在**主 uuid 的那一个请求体**上（`attached` 只置一次），
-  但确认动作写在 `eachLimit` 的每个批次回调里：成功分支 `if (carried && HOOK.syncAck) HOOK.syncAck(); if (carriedCl) this.clAck(sentCl);`、
-  失败分支 `if (carried && HOOK.syncNack) HOOK.syncNack();`。
-- 后果一：多个用户批次同时成功时 `clAck(sentCl)` 会被调用多次，同一批连接观测被**重复相减** ⇒ 计数被减成 0 后删键，
-  剩下的样本凭空消失（面板的 ttfb/抖动标定因此偏少）。
-- 后果二：任一用户批次失败时 `syncNack()` 会清掉 `vtPend`/中继健康待发行 —— 而那批增量可能刚被主批次**成功送达**，
-  于是「已经送达的 + 在途期间新加的」待发项一起被抹掉（与 7.157 的 `S.cagg.clear()` 同一个形状，换了一层）。
-- 修法：挂增量时记下承接者 `carriedBy = String(id).toLowerCase();`，成功/失败分支都先判 `carriedBy && String(id).toLowerCase() === carriedBy`，
-  再执行 ack/nack 与 `cntUnsend`；别的批次只管回滚自己的 `d`。
-- 锁：第 167 组 5 条（主批次成功 + 另一批次失败时 `clAck` 只调 1 次、`syncNack` 0 次、失败用户的增量原样回账本、两条源码断言），
-  A/B 旧代码 1161 通过 **4 失败** → 新 1165/0。
-### 7.177 自举审计（第 100 条，增量上报的批次上限）
-
-- **现象**：`PendingLedger.flush()` 的 `const batch = [...S.pend.entries()]` 没有封顶，`eachLimit(batch, 8, …)` 每个用户 1 次 DO 往返。免费计划一次调用只有 50 子请求，用户数一多尾部批次全失败 —— 失败会回滚（数据不丢），但 `S.pendMs` 翻倍到 60 秒退避，而 `S.pend` 是 Map、插入顺序几乎不变 ⇒ **排在后面的用户长期推不上去**，面板只看到「用量落后」，日志里是普通的 DO 失败，看不出是截断。
-- **与同族的关系**：7.142 的 `ADMIN_STATS_MAX`、7.174 的 `SNAP_MAX` 都是「一次调用读太多人」；这条是**写**方向（每人 1 次往返），上限 32 比读侧更保守，因为一轮里还要留 `refillPool`（≤6 个源）与 `restoreUsage`（≤12 人）的额度。
-- **修法**：`SC.PEND_MAX = 32`；`flush` 先按 `S.pendIdx` 轮转起点再 `slice(0, SC.PEND_MAX)`，游标推进 `(start + batch.length) % all.length`；只 `delete` 这一批（在途期间新加的留在账本里，不再 `S.pend.clear()`）；被截断的人数记 `cnt("pendSkip", …)`（`cntKeys` 已登记）；`S.pendBytes` 按剩余条目重算，而不是清 0。
-- **为什么必须轮转**：只取前 N 个时，成功的那批留在同一位置、失败的那批也留在同一位置，于是「先发谁」永远不变 —— 这是典型饥饿，且回滚逻辑会让它看起来像偶发抖动。
-- **锁**：第 168 组 9 条（`PEND_MAX = 32`、轮转切片、只删这一批、`pendSkip` 计数、40 个用户时首轮只发 32 个且账本剩 8 个、剩余的是末尾 8 个、两轮合计 40 次往返）。A/B：旧代码 1167 通过 **8 失败** → 新 1175/0。
-
-### 7.178 自举审计（第 101 条，UDP/DNS 的分帧）
-
-- **现象**：`src/proxy/dns.ts` 的 `handleDns` 每次只解析「这一条 WS 消息里的字节」，没有跨消息的残留缓冲。`WS 分帧 ≠ UDP 分帧`：客户端完全可以把一个 DNS 包拆到两条消息里发（大响应、拥塞窗口都会这样）。旧代码在 VLESS 侧遇到 `buf.length < 2 + n` 直接 `break` 丢掉尾巴，在 Trojan 侧更糟 —— `trojanUdpFrame` 把「数据没到齐」和「格式非法」都返回 `null`，于是**只是少一个字节的合法帧会把整条连接以 1003 断掉**。
-- **后果**：拆开的那次查询永久无应答（浏览器表现为 DNS 卡住到超时），而日志里只有一条 `bad udp frame`，看起来像客户端在发垃圾包。
-- **修法**：`trojanUdpFrame` 的返回值从 `frame | null` 改成 `frame | "short" | null`（区分「还没到齐」与「ATYP/长度非法」）；`Connection` 新增 `udpBuf`，`handleDns` 入口把上一帧的残留接回来，出口把没拆完的字节 `carry` 回去；残留上限 `DNS_CARRY_MAX = DNS_MAX + 64`，超限才关连接（`udp overflow`）。两条收尾分支（`queries >= 32` 用满配额、剩余不足一个帧头）也走 `carry`，不再静默丢。
-- **锁**：第 169 组 17 条 —— `trojanUdpFrame` 三态（完整 / 少一字节 = `short` / ATYP 非法 = `null`）、Trojan 半个帧不发且连接不断、拼起来发一次且长度 = 前缀(7) + 长度(2) + 负载(20)、残留清空、VLESS 半个帧同理、源码断言（`carry(buf)` 三处、`st.udpBuf = rest.slice();`）。A/B：旧代码 1180 通过 **10 失败** → 新 1190/0。
-
-### 7.179 自举审计（第 102 条，活跃池的加码是恒等变换）
-
-- **现象**：`src/px/aliveplan.ts` 的 `alivePlan(alive, want)` 文档写「不够 16 条就加码扫描」，
-  但 `budget.ts` 的 `planRound` 从 7.149 起就与活跃数解耦（`adm = min(max(12, SCAN_SUB), SCAN_MAX) = 48`），
-  而加码值最大只有 `16 - 0 + 4 = 20 < 48` ⇒ 实测 **401 个 alive 取值下 `alivePlan(x, 48) === 48` 无一例外**；
-  更进一步：`cronScan` 里 `scanN = max(12, min(min(SCAN_MAX, sub), want))` 又被 `sub`（= `SCAN_SUB`）夹回来，
-  所以**任何** `SCAN_SUB` 配置下（12/24/48/64/400 都试过）加码值都会被夹回原值 —— 这不是「暂时不生效」，是恒等。
-- 同一族的第二处：`ALIVE_MIN = 12` 的文档说「低于这个数就该用缺多少补多少的力度去扫」，
-  但它**零读取点**（只有定义、导出与两条单测），没有任何代码拿它做判断。
-- 修法：删掉 `alivePlan` 与 `ALIVE_MIN`；`ALIVE_TARGET = 16` 保留但**给出唯一真读者** ——
-  `/health` 的 `relays` 新增 `target` 与 `short`（`ips.length < ALIVE_TARGET`），运维才有办法回答「池子够不够」；
-  `src/routes/cron.ts` 直接 `await cronScan(env, plan.adm)`（删掉那条恒等调用与它会误导人的注释）。
-- 锁：第 91 组改成「只作判据」——`ALIVE_MIN`/`alivePlan` 已删除、五种子请求配额下加码都被夹回原值、
-  `health.ts` 含 `target: ALIVE_TARGET`/`short: ips.length < ALIVE_TARGET`、`cron.ts` 里不再有 `alivePlan(` 调用
-  （按调用判而不是按名字判：注释里要留历史说明）。A/B：旧代码 **1185 通过 / 3 失败** → 新 1188/0。
-### 7.180 自举审计（第 103–106 条，探测路径）
-
-四条合进一个版本（用户要求少迭代）：三条在「探测 / 缓存」的边界上，一条是 7.163 漏掉的类型跟随。
-
-- **第 103 条 `probeTf` 没有自己的时间预算**（`src/core/tf.ts`）：userland TLS 走中继，卡住的那一刻不会自己回来。`runTfb` 虽然用 `withTimeout(..., 8000)` 包住了 DO 调用，但那只是**调用方**不再等 —— DO 里那个请求会一直挂着，而 `/meter/tf`、`/meter/tfb` 与计量端点共用同一个 DO 实例。现在 `probeTf` 内部 `await withTimeout(work, TF_MS, "tf timeout")`（`TF_MS = 8000`，覆盖「请求 + 读体」整段），超时后 `void work.catch(() => {})` 防 unhandled rejection（7.84 那个 1101 的老坑），`finally` 里照旧 `c.close()`。
-- **第 104 条 `probeHttp80` 把 IPv6 中继拆坏**（`src/core/http80.ts`）：原来是 `relay.split(":")`，而 IPv6 字面量本身就带冒号 —— `2a06:98c0::1:443` 会被拆成 host=`2a06`、port=`98c0`（→ 80），探测打到完全不相干的主机上；同一个操作在 `src/core/tf.ts` 里用的是 `lastIndexOf(":")`，两处口径不一致。新增 `splitRelay(raw, defPort)`：认裸 IPv6、`[v6]:port`、端口 0 视作没写。
-- **第 105 条 `refreshCfHttp` 没有在途去重**（`src/proxy/cfverdict.ts`）：它在 `Dialer.open` 里被**每个** CF 托管目标的连接调用，而探测要占一个 `connect()` 名额（免费计划全局 6 个）。冷启动时同一站点来 6 条连接就是 6 次并发探测，正好把真实拨号的名额吃掉 —— 表现是「所有站点一起变慢或失败」，日志里却什么都没有。修法：`S.cfHttpFlight` 在途集合（有界 200）+ 探测失败记 20 秒负缓存（`CF_HTTP_NEG`），否则失败还会逐请求重试。
-- **第 106 条 `FactsBody.ps` 的类型缺 `top`**（`src/route/verdictsync.ts`）：7.163 给 `PsWire` 加了 `top`，DO 的 `/vt` 也在发，但这里只声明 `{ k, q, n, at }` —— 运行时靠 `as PsWire[]` 蒙过去，类型层面已经漂移。与第 72 条（`PsWire.top`）、第 93 条（`NodeEntry.src`）同族。
-- 顺手：`src/route/psfacts.ts` 的 `delta()` 里有一句孤儿注释碎片（7.163 改 `top` 时被切断的半句），删掉。
-
-锁（第 170 组 13 条）：`splitRelay` 六种写法（含裸 IPv6 与 `[v6]:port`）、同一站点在途时只探一次、在途标记会清、探过之后不再立刻重探，外加四条源码断言（`TF_MS` 与 `withTimeout(work, TF_MS`、`relay ? splitRelay(relay, 80)`、`FactsBody.ps` 带 `top?: number`）。
-A/B：把 `src/proxy/cfverdict.ts` 换回旧版跑同一份测试 → **1198 通过 / 3 失败**（正是三条去重断言）；`splitRelay` 在旧版里不存在，整组会崩 —— 这一条按「旧版压根没有这个能力」处理，不做假红。
-### 7.181 自举审计（第 107–110 条，上限与合并口径）
-
-- **第 107 条 判定表的 600 行上限从来没生效**：`sweep()` 只清过期行，全新鲜时一行也删不掉；而 `setState`/`import` 连 `sweep()` 都不调（`recordBlock`/`recordPass`/`markBlocked`/远端同步全走 `setState`）。实测灌 700 条走 `vSetState` 仍是 **700**、走 `vImport`（8×120）能到 **960**。键是客户端给的目标站点名，长命 isolate 一路涨。修法：新增 `private trim()`（先 `sweep()`，仍超限就按 `at` 升序删最旧），`set`/`setState`/`import` 三处都调；改后三种路径都是 600。
-- **第 108 条 DO 的 `hl` 逐字段取 max，拼出一条从未发生过的证据**：三小时前 `o=9` 的「好」与刚刚 `b=6` 的「坏」被合成 `{o:9, b:6, t:刚刚}`，而客户端 `score()` 的 30 分钟半衰期正是按 `t` 算 ⇒ 最容易过期的那批数据反而永远新鲜（7.161 在客户端 `merge` 里修过同一形状，DO 这层漏了）。修法改成「一条证据整体胜出」：`inN > curN` 或（条数相同且 `t` 更新）才替换整行。
-- **第 109 条 `/set` 只让触发的那一维变大**：门槛是 `want > cur || wantN > curN`，但块内把 `up`/`down` 无条件写成快照值 ⇒ 「快照字节更少、连接数更多」时累计用量倒退（实测 1000 → 900）。修法两维各自 `Math.max`。
-- **第 110 条 `hl` 裁剪留最旧**：`Object.keys(this.hl).slice(200)` 按插入顺序切，删掉的是刚写进来的那条 ⇒ 新中继的健康证据永远进不了表（同 7.177 的 pend 星形饥饿）。修法按 `t` 降序留最新 200 条。
-- 教训：这一批四条全在「上限/合并」两轴上，且**都只在某一条写入路径上正确**（`set` 有 sweep、`setState` 没有；`/set` 的字节与连接两个维度）；写仓库时先问「还有谁会写这张表」。
-### 7.182 自举审计（第 111–114 条，上限与口径）
-
-- **第 111 条：`S.needPx` 的上限只在一条路上执行。** 「这个站点下次得走中转」这张表的 300 行上限写在
-  `src/proxy/attacher.ts` 的空关闭分支里，而 `src/route/judge.ts` 有**两条**写同一张表的路径
-  （小响应那条、`markBlocked` 那条）完全绕过它 —— 键是客户端 ClientHello 带来的站点名，6 小时的过期行
-  又只有 cron 会清，于是长命 isolate 里能涨到任意条数。现在三处共用 `SC.PX_MAX = 300` + `trimAged()`
-  （needPx 的值是过期时刻，值最小的正是最早过期那条，正好先删）。
-  锁：700 个不同站点各推一条小响应后 `S.needPx.size === SC.PX_MAX`、最早那条已被删、最新那条还在。
-- **第 112 条：限流表被撑爆就整体清空。** `src/edge/auth.ts` 的 `if (RL_MEM.size > 500) RL_MEM.clear();`
-  会把**所有人**的计数一起归零，而来源 IP 是攻击者可以换的（IPv6 一个 /64 就有海量地址）：501 个来源
-  刷一遍就能把自己刚被限住的登录计数重置掉 —— 这张表本来就是为了挡这件事。改成淘汰「计数最小且最旧」
-  的那一条、且绝不删刚插入的这个 ip：被限住的来源 n 会涨上去自然留下，刷表的人只会删掉自己刷进去的那批。
-  顺手把 JSDoc 的「每分钟 limit 次」改成「10 分钟窗口」（`admin.ts` 的提示本来就是「请 10 分钟后再试」）。
-- **第 113 条：`shadowRate` 的说明还在描述一个已经修掉的 bug。** 注释写着「显示 10 实际 0（关闭探索）」，
-  实现却是 `Math.min(1, n)` —— 这套函数存在的理由正是「三处共用一套规则」，注释里却留着「面板与实际
-  不一致」的旧例子，读的人会以为 10 与 0 之间有特殊映射。
-- **第 114 条：用量页的「暂无数据」只跨了 4 列。** `src/views/panel-stats.ts` 的 RTT 表有 5 列
-  （入口标签 / 机房 / RTT / 样本 / 成功率），空态却是 `colspan=4`，第五列留空 —— 与 7.174 的「没读到
-  用量却画成 0 B」同一类：静止的格子说的不是真相。
-
-教训：前三条都是「同一条规则只在一个调用点成立」——上限、淘汰、口径写在某处，别的调用点绕过去，
-不产生错误，只产生缓慢漂移。
-
-### 7.183 自举审计（第 115–118 条，起搏样本与补救链）
-
-- **115 `seedAlive` 把探活 RTT 写进真实首字节矩**（`src/px/warm.ts`）：它探完立刻 `nsLatency(k, x.ms)`，而探活的 ms 是「ClientHello→ServerHello 到中继」，比经中继的 TTFB 小一个数量级（40ms vs 400ms）。后果不是「估计偏低」这么温和 —— `nsLatency` 里的 CUSUM 拿它当基线，第一条真实请求就 `cus += 400-40-30`，越过 `CUSUM_H = 300` 立刻冻结 60 秒并 `invalidateRank()`，而冷启动时它往往是唯一能用的中继（`seedAlive` 只在 `S.alive.size === 0` 时才跑）。7.165 已经因为同一条理由把 `nsProbe` 的 `ms` 参数改名 `_ms`（「探活首字节与真实请求不是同一个量」），但漏掉了这条调用方。修法：删掉 `nsLatency` 这一行，排序不缺这个数 —— 优先延迟读 `a.ms`（`S.alive` 条目里的探活延迟），`tcp/tls` 由 `nsProbe` 记。
-- **116 派生密钥的缓存不记 kek**（`src/store/crypto.ts`）：`if (KEY_BOX.aek) return KEY_BOX.aek;` 之后才读 `env.kek`，所以换 kek（面板改 secret）以后旧 isolate 一直用旧密钥解新数据。表现：`kvGetStrict` 抛 `kv unseal failed`（池子锚点写不进去、`SEEDS.write` 返回 false）、`kvGet` 返回 null（快照被当成空表），要等 isolate 回收才恢复，且没有任何日志指向「密钥换了」。修法：缓存带 `raw`，不一致就重新派生。同一处还有一句假文档「kek 缺失时给出可用的降级密钥」——实际是返回 null、`seal` 按**明文 JSON** 存，改成实话（这属于第 113 条那族「文档在替代码撒谎」）。
-- **117 补救链遇到一个坏条目就整条放弃**（`src/proxy/fallback.ts`）：`if (checkTarget(host, port)) return null;` —— 池子只要有一条被污染（内网地址/禁用端口），补救链直接放弃，调用方回落直连、白丢这次请求。改成 `continue`。
-- **118 补救链不过滤已判封锁的中继**（同一文件）：主路径 `Dialer.open → Selector.current → HOOK.chanPref` 会跳过「本站点 × 该中继已被实测判为封锁」的候选，补救链只用 `nextNode`（只看分数）。走到补救链时客户端已经等了两三秒，再花 4 × 2.5 秒拨一遍已知会 403 的中继没有任何收益。改成同一个口径：`HOOK.chanPref(host, st.host) === 2` 就跳过。
+- **D119 错误分类键没有上限**：`ErrRing.count()` 只在 `bucket.size > 64` 时删「非当前窗口」的键，而分类键是 `errKind(msg)` = 消息前两个词 —— `logErr(`tfb ${host} …`)`、`logErr(`forced proxyip ${p.host}`)` 这类把站点名/地址带了进来，**同一窗口里换站点就是一个新键**，于是窗口淘汰一个都删不掉；再叠加「每次写日志都要把整张表遍历一遍」，随机站点名即可把它撑成 CPU 放大（免费计划只有几十毫秒）。修法：窗口淘汰之后再按「本窗口计数最少」淘汰一次，表恒 ≤ 64 行，留下的是真正高频的那几类（面板 `errsByKind` 只取前 8）。实测 400 个不同站点：旧代码 401 行，新代码 64 行，且高频类 `cron: boom` 的计数原样保留。
+- **D120 五类事实的寿命有两处真源**：`src/store/factmerge.ts` 里 eg=21600000 / ps=2700000 / dead=1800000 / blk=90×60000 / dns=86400000 是裸数字，而 `src/route/{eg,ps,dns}facts.ts` 与 `commitfact.ts` 各有一份同名常量。两处漂移的症状是「本地已经当它过期、DO 还当它是新鲜证据」，不报错、单测也测不出来 —— 7.154 的 `VT_TTL` 就是这么分裂成两份的。修法：`FACT_TTL`（`src/core/facts.ts`，core 层，store 与 route 都能取）做唯一真源，`factmerge` 与五个 TTL 全部改成 `FACT_TTL.xxx`（导出名保持不变，调用点与单测零改动）。
+- **D121 IPv6 中继地址被拆成两截**：`src/core/tf.ts` 的 `probeTf` 用 `lastIndexOf(":")` 拆 `host:port`、`src/route/tfb.ts` 用 `split(":")[0]` 取 IP，`2a06:98c0::1:443` 会被拆成 host=`2a06`、port=`98c0` ⇒ 探测打到完全不相干的主机上，判定键还会被写成 `r:2a06`（写进判定表的键从此对不上真实中继）。7.180 在 `http80.ts` 修过同一处，这两处漏改。修法：两处都走 `core/http80.ts` 的 `splitRelay`（认 `[v6]:port` / 裸 IPv6 / 缺端口），拼地址用新增的 `relayAddr`（IPv6 加方括号）。
+- 锁：第 174 组 12 条（`FACT_TTL` 五个数字、route 五个 TTL 与它相等、`factmerge` 不再含裸数字、400 个站点后 `bucket.size <= 64` 且高频类保留、`errlog` 的 `cold.length - 64`、`splitRelay` 的两种 IPv6 写法、`tf.ts`/`tfb.ts` 的源码接线）。A/B 只 stash `errlog.ts`/`tf.ts`/`tfb.ts`（`facts.ts` 与五个 TTL 别名是等价改写，留着才能解析）→ 旧代码 **1243 通过 / 4 失败**，恢复后 **1247 / 0**。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

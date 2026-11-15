@@ -1,6 +1,7 @@
 ﻿import { connect } from "cloudflare:sockets";
 import { Client } from "tunnelfetch";
 import { withTimeout } from "./util";
+import { splitRelay } from "./http80";
 
 /** 一次探测的总预算：userland TLS 走中继，卡住的那一刻不会自己回来。
  * 不设上限时，DO 里那个请求会一直挂着 —— 探测是诊断路径，绝不能拖住计量端点。 */
@@ -16,9 +17,9 @@ const TF_MS = 8000;
  */
 export async function probeTf(host: string, relay = "", path = "/"): Promise<Record<string, unknown>> {
   const t0 = Date.now();
-  const i = relay.lastIndexOf(":");
-  const rh = i > 0 ? relay.slice(0, i) : relay;
-  const rp = i > 0 ? Number(relay.slice(i + 1)) : 443;
+  // 拆 `host:port` 必须走 splitRelay：IPv6 字面量自带冒号，`lastIndexOf(":")` 会把
+  // `2a06:98c0::1:443` 拆成 host=`2a06`、port=`98c0`（7.180 在 http80 修过同一处，这是第二处）
+  const [rh, rp] = relay ? splitRelay(relay, 443) : ["", 443];
   const dial = relay
     ? () => connect({ hostname: rh, port: rp })
     : (o: { hostname: string; port: number }) => connect(o);

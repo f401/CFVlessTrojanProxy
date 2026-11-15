@@ -4,7 +4,7 @@
 // 每加一种事实要写 20 行合并代码，加第五种（dns）时直接撞线。拆出来后 meter 只保留
 // 「DO 生命周期 + 往返编解码」，合并规则集中在这里，加事实不再改 meter。
 
-import { mergeAt, mergeBlk } from "../core/facts";
+import { FACT_TTL, mergeAt, mergeBlk } from "../core/facts";
 
 /** Meter 的五类事实表（就地修改）。 */
 export interface FactTables {
@@ -41,7 +41,7 @@ export function mergeFacts(t: FactTables, d: FactDeltaIn): void {
       for (const r of d.eg as Array<{ i?: unknown; f?: unknown; at?: unknown }>) {
         if (!r || typeof r.i !== "string" || typeof r.at !== "number") continue;
         if (r.f !== 4 && r.f !== 6) continue;
-        if (r.at <= Date.now() - 21600000) continue;
+if (r.at <= Date.now() - FACT_TTL.eg) continue;
         const cur = t.eg[r.i];
         if (cur && cur.at >= r.at) continue;
         t.eg[r.i] = { f: r.f, at: r.at };
@@ -54,7 +54,7 @@ export function mergeFacts(t: FactTables, d: FactDeltaIn): void {
     }
     // DNS 事实：24 小时寿命（DoH 全失败时调用方根本不写，所以不必区分「没有」与「不知道」）
     if (Array.isArray(d.dns) && d.dns.length) {
-      mergeAt(t.dns, d.dns, 512, 86400000, (r) => {
+mergeAt(t.dns, d.dns, 512, FACT_TTL.dns, (r) => {
         const x = r as { v?: unknown; at?: unknown };
         if (x.v !== 0 && x.v !== 1) return null;
         const at = Number(x.at) || 0;
@@ -67,7 +67,7 @@ export function mergeFacts(t: FactTables, d: FactDeltaIn): void {
 for (const r of d.ps as Array<{ k?: unknown; q?: unknown; n?: unknown; at?: unknown; top?: unknown }>) {
         if (!r || typeof r.k !== "string" || !r.k.includes("|")) continue;
         if (typeof r.at !== "number" || typeof r.q !== "number" || typeof r.n !== "number") continue;
-        if (r.at <= Date.now() - 2700000) continue;
+if (r.at <= Date.now() - FACT_TTL.ps) continue;
         const cur = t.ps[r.k];
         if (cur && cur.at >= r.at) continue;
         // 历史最好只升不降（v7.163）：它不进 `at` 的比较，也不能被新观测的均值覆盖，
@@ -85,12 +85,12 @@ for (const r of d.ps as Array<{ k?: unknown; q?: unknown; n?: unknown; at?: unkn
     }
     // 「连不上」事实（形状 { i, n, at }）：更新的胜、30 分钟过期、上限 256；只收判死（n>=2）的行
     if (Array.isArray(d.dead) && d.dead.length) {
-      mergeAt(t.dead, d.dead, 256, 1800000, (r) => {
+mergeAt(t.dead, d.dead, 256, FACT_TTL.dead, (r) => {
         const x = r as { n?: unknown; at?: unknown };
         if (typeof x.at !== "number" || typeof x.n !== "number" || x.n < 2) return null;
         return { n: Math.max(2, Math.min(9, Math.round(x.n))), at: x.at };
       });
     }
     // 单 IP 封锁事实：形状 `{ k, n, at }`，更新的胜、90 分钟过期、上限 1024 条（逻辑在 core/facts）
-    if (Array.isArray(d.blk2) && d.blk2.length) mergeBlk(t.blk2, d.blk2, 1024, 90 * 60000);
+if (Array.isArray(d.blk2) && d.blk2.length) mergeBlk(t.blk2, d.blk2, 1024, FACT_TTL.blk);
 }

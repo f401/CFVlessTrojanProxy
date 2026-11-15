@@ -8,6 +8,7 @@
 // 一个 `eg=6` 的中继仍然可能在别的站点头等好使，把它从候选里删掉就是 7.57 的老路
 // （通配硬封锁 → 可用池变薄 → 失败率 10%→50%）。
 import { cnt } from "../core/counter";
+import { FACT_TTL } from "../core/facts";
 
 /** 一条出口族事实：`i` 中继 IP，`f` 族（4 或 6），`at` 观测时间 */
 export interface EgRow {
@@ -17,7 +18,7 @@ export interface EgRow {
 }
 
 /** 事实寿命：实测 1.5 小时后出口族仍一致，但中继会换线路，6 小时足够保守 */
-export const EG_TTL = 21600000;
+export const EG_TTL = FACT_TTL.eg;
 
 /** 表上限：池子 1600 条，这里只留最常出现的几百条，避免内存与上报体积失控 */
 const EG_MAX = 512;

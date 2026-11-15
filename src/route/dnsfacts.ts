@@ -15,7 +15,9 @@
 // 纯 v4 站点在 v6 出口上也**可能**成功（NAT64/HTTP 代理型中继），所以只降权。
 
 /** DNS 事实寿命：24 小时 */
-export const DNS_TTL = 24 * 3600_000;
+import { FACT_TTL } from "../core/facts";
+
+export const DNS_TTL = FACT_TTL.dns;
 /** 表上限：512 个站点 */
 export const DNS_MAX = 512;
 

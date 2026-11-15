@@ -79,6 +79,7 @@ export {
   errCount,
   errHist,
 } from "./nodes/metrics";
+export { ERRS } from "./nodes/errlog";
 export { tlsHello, refillPool, chunks, srcNote, srcRank, srcHealth, poolSources, POOL_SOURCES } from "./px/probe";
 export { regionListAsync } from "./px/regions";
 export { PEND, clSnapshot, nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
@@ -113,13 +114,13 @@ export { CAP, CAP_TTL, CapFacts, capFactor } from "./route/capfacts";
 export { ALIVE_TARGET, srcStat } from "./px/aliveplan";
 export { FACT_ALL, factList, factOn, factParse } from "./route/factflags";
 export { factMul } from "./route/factmul";
-export { PS, psBest, psFactor, psNote, psOk, psPrior, psSnap } from "./route/psfacts";
+export { PS, PS_TTL, psBest, psFactor, psNote, psOk, psPrior, psSnap } from "./route/psfacts";
 export { DEAD, DEAD_N, deadNote, isDead } from "./route/deadfacts";
 export { FO, FirstObs, FO_GRAY, FO_LIMIT, FO_PAGE } from "./core/firstobs";
 export { LAT, LatObs } from "./core/latobs";
 export { DNS, DnsFacts, DNS_TTL } from "./route/dnsfacts";
 export { BLK, BLK_BATCH, BLK_GAP, BLK_MIN, BLK_PEN, blkPen } from "./route/blkfacts";
-export { mergeAt, mergeBlk } from "./core/facts";
+export { FACT_TTL, mergeAt, mergeBlk } from "./core/facts";
 export { BLK_TTL, DEAD_TTL, BIG_PEER, TINY_ABS, WRITE_GAP, commitFact, factKey, isTiny } from "./route/commitfact";
 export { FACT, FactShadow, shadowCtx, shadowObs } from "./route/factshadow";
 /** 四类事实的门面（OOP 收口后唯一的上行/合并入口） */

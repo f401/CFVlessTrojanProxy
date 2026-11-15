@@ -33,6 +33,14 @@ export class ErrRing {
     // 表本身有界：只保留当前窗口的键，历史窗口直接淘汰（不写 KV，不跨 isolate）
     if (this.bucket.size > 64) {
       for (const [kk, v] of this.bucket) if (v.win !== win) this.bucket.delete(kk);
+      // 同一个窗口里也会超上限：分类键是「消息前两个词」，而 `tfb <站点>` 这类消息把
+      // 客户端带来的站点名带了进来 —— 换个站点就多一个键。只按窗口淘汰等于没淘汰
+      // （当前窗口一个都删不掉），而每写一条日志都要把整张表遍历一遍：随机站点名可以
+      // 把它撑成 CPU 放大。这里再按「本窗口计数最少」淘汰一次，留下的是真正高频的那几类。
+      if (this.bucket.size > 64) {
+        const cold = [...this.bucket.entries()].sort((a, b) => a[1].n - b[1].n);
+        for (let i = 0; i < cold.length - 64; i++) this.bucket.delete(cold[i][0]);
+      }
     }
   }
 

@@ -13,6 +13,7 @@
 // 3) 有界 + 会衰减：表上限 512 行，45 分钟没再被观测就当作没有样本。
 import { cnt } from "../core/counter";
 import { EG } from "./egfacts";
+import { FACT_TTL } from "../core/facts";
 
 /** 事实键：`站点|中继 IP`（`eg` 用 IP、`blk` 用同一个键，方便互相印证） */
 export type PsKey = string;
@@ -51,7 +52,7 @@ export interface PsWire {
 }
 
 /** 样本过期时间：45 分钟没再被观测就当没有样本（v8 §3 表） */
-export const PS_TTL = 45 * 60000;
+export const PS_TTL = FACT_TTL.ps;
 /** 表上限：满了按 `at` 淘汰最旧的 */
 export const PS_MAX = 512;
 /** 平滑强度：先验相当于 4 个样本（Beta(4·p, 4·(1-p)) 的等效） */

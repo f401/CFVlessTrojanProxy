@@ -3,7 +3,15 @@ type RouteCtx = { env: Env };
 import { S } from "../core/state";
 import { withTimeout } from "../core/util";
 import { vAt, vSet, vSetState } from "./verdict";
+import { splitRelay } from "../core/http80";
 import { logErr } from "../nodes/metrics";
+/**
+ * 功能：把主机拼成 `host:port`（IPv6 要加方括号，否则下游拆分会把它当裸地址）。
+ * @param h 主机（IPv4 或 IPv6 字面量）
+ * @returns 带端口的地址串
+ */
+const relayAddr = (h: string): string => (h.includes(":") ? "[" + h + "]:443" : h + ":443");
+
 /** 站点 → 上一批判定标签的容量上限：站点名来自客户端 ClientHello，不是有限集合。 */
 const TFB_MEM_MAX = 256;
 
@@ -107,7 +115,7 @@ export function pickFresh(host: string, ips: string[], n: number): string[] {
 export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): Promise<Response> {
   const own = [...S.alive.values()].map((x) => x.h);
   const pool = (list ? list.split(",") : own.length ? own : SEED)
-    .map((x) => x.trim().split(":")[0])
+.map((x) => splitRelay(x.trim(), 443)[0])
     .filter((h, i, arr) => h && arr.indexOf(h) === i);
   const ips = pickFresh(host, pool, Math.max(1, Math.min(3, n)));
   // 直连也算一条通道：DO 的出口族与中继不同，常常正好一个 403 一个 200（真混采样）
@@ -115,7 +123,7 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
   const dres = (await withTimeout(stub0(c).fetch(dq), 8000)) as Response | undefined;
   const direct = dres ? ((await withTimeout(dres.json(), 4000)) as { ok: boolean; status?: number; bytes?: number; ms?: number }) : { ok: false };
   const q =
-    "https://meter/tfb?h=" + encodeURIComponent(host) + "&r=" + encodeURIComponent(ips.map((x) => x + ":443").join(","));
+"https://meter/tfb?h=" + encodeURIComponent(host) + "&r=" + encodeURIComponent(ips.map(relayAddr).join(","));
   const stub = stub0(c);
   const r = (await withTimeout(stub.fetch(q), 20000)) as Response | undefined;
   const body = r
@@ -130,7 +138,7 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
   // 两批共识：单批 `chan` 只当「怀疑」，不写判定表（写进去等于让这条中继 30 分钟不可用）
   const mayBlock = tfBlockOk(prevTag, verdict);
   for (const row of rows) {
-    const ip = row.relay.split(":")[0];
+const ip = splitRelay(row.relay, 443)[0];
     if (verdict === "chan" && row.status === 403 && mayBlock) vSetState(host, ip === "direct" ? "d" : "r:" + ip, 2, 1);
     else if (row.ok && row.status === 200) vSet(host, ip === "direct" ? "d" : "r:" + ip, 200, Number(row.ms || 0), 1);
   }
