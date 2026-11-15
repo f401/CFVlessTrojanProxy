@@ -1625,7 +1625,7 @@ eq("影子模式统计一致", W.S.polSame, 1);
 W.shadow({ ...rCtx, legacyWantsRelay: false });
 eq("影子模式统计不一致", W.S.polDiff, 1);
 const pl = W.planRound(1600, 8);
-  ok("预算不超过子请求硬上限", pl.adm + pl.vt <= pl.cap, JSON.stringify(pl));
+ok("预算不超过子请求硬上限", pl.adm <= pl.cap, JSON.stringify(pl));
 ok("池子很饿时优先给准入", pl.adm >= 4, JSON.stringify(pl));
 // 7.62 起策略全生效（level 2）：判定层已有 660+ 条断言与线上实测背书，
 // 且「隧道直连成功证据 / 中继软降权」这些判据只有全生效时才真正影响选路。
@@ -1693,19 +1693,12 @@ ok("level 0 时 CF 托管目标也不改（只影子）", W.pxDecision(reqV4, "x
 ok("level 1 不改写「本来就要中转」的判断", W.pxDecision(reqV6, "x.com", false, true, 1) === true);
 ok("level 2 全生效：v4+CF 也走判定", W.pxDecision(reqV4, "x.com", true, false, 2) === true);
 ok("level 2 无候选时回落原判断", W.pxDecision(reqV4, "y.com", false, false, 2) === false);
-// 第 37 组：一轮 cron 的判定侧编排（预算 → 挑站点）
-W.vClear(); W.S.needPx.clear();
-eq("无信号时没有要扫的站", W.pickHosts(3).length, 0);
-W.S.needPx.set("x.com", Date.now() + 3600000);
-eq("needPx 未过期的排第一", W.pickHosts(3)[0], "x.com");
-W.S.needPx.set("old.com", Date.now() - 1000);
-eq("过期的 needPx 不算信号", W.pickHosts(3).length, 1);
-W.S.needPx.clear();
-W.vSetState("api.x.com", "r:1.1.1.1", 2, 1);
-eq("刚记下的 blocked 不复核", W.pickHosts(3).length, 0);
-const vrow = W.vAll()[0]; vrow.at = Date.now() - 1200000;
-eq("过了 15 分钟的 blocked 要复核", W.pickHosts(3)[0], "api.x.com");
-eq("预算 8 只够扫 2 个站", Math.floor(8 / W.SWEEP_COST), 2);
+// 第 37 组：判定侧编排已删除（7.149）
+// pickHosts 只在测试里被调用、runRound 从 7.69 起就是 `void plan; return {hosts:[],swept:0}`，
+// 而 cron 连它的返回值都不看 ⇒ 整条链路只剩注释与一个永远为 0 的预算字段。
+eq("pickHosts 已删除", W.pickHosts, undefined);
+eq("SWEEP_COST 已删除", W.SWEEP_COST, undefined);
+eq("runRound 已删除", W.runRound, undefined);
 W.vClear();
 
 // 第 38 组：订阅侧入口条目与「按边缘实测 x」的组（客户端实测）
@@ -2080,7 +2073,7 @@ console.log("\n65) 子请求预算");
   for (const poolN of pools) {
     for (const aliveN of alives) {
       const q = W.planRound(poolN, Math.min(aliveN, poolN));
-      const sum = q.adm + q.vt;
+const sum = q.adm;
       if (sum > worst) worst = sum;
       ok(`总和不超 cap（pool ${poolN} alive ${aliveN}）`, sum <= q.cap, `${sum} > ${q.cap}`);
       eq(`预算里没有入口这一项（pool ${poolN} alive ${aliveN}）`, q.edge, undefined);
@@ -2096,11 +2089,11 @@ console.log("\n66) 入口偏好整条服务端链路已删除");
 {
   eq("EDGE_AUTO 常量已删除", W.SC.EDGE_AUTO, undefined);
   for (const poolN of [0, 64, 1600, 3000]) {
-    const q = W.planRound(poolN, Math.floor(poolN / 2));
-    ok(`额度不超额（pool ${poolN}）`, q.adm + q.vt <= q.cap, String(q.adm + q.vt));
+const q = W.planRound(poolN, Math.floor(poolN / 2));
+ok(`额度不超额（pool ${poolN}）`, q.adm <= q.cap, String(q.adm));
   }
   const big = W.planRound(3000, 0);
-  ok("省下来的额度分给准入/判定", big.adm + big.vt >= 40, `${big.adm} + ${big.vt}`);
+ok("整轮额度都给了准入", big.adm >= 40, String(big.adm));
 }
 
 // 67) 探测全关时，判定扫描不占额度
@@ -2109,9 +2102,9 @@ console.log("\n67) 探测全关时的预算");
   ok("两项探测都关（当前配置）", W.SC.PROBE_RND === 0 && W.SC.PROBE_REQ === 0, `${W.SC.PROBE_RND}/${W.SC.PROBE_REQ}`);
   for (const poolN of [0, 64, 400, 1600, 3000]) {
     const q = W.planRound(poolN, 0);
-    eq(`判定额度为 0（pool ${poolN}）`, q.vt, 0);
+eq(`预算里不再有判定额度这一项（pool ${poolN}）`, q.vt, undefined);
     ok(`准入吃满（pool ${poolN}）`, q.adm >= 40, String(q.adm));
-    ok(`不超额（pool ${poolN}）`, q.adm + q.vt <= q.cap, String(q.adm + q.vt));
+ok(`不超额（pool ${poolN}）`, q.adm <= q.cap, String(q.adm));
   }
   const big = W.planRound(3000, 0);
   ok("准入拿到 48 上限附近", big.adm >= 44 && big.adm <= big.cap, String(big.adm));

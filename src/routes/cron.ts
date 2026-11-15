@@ -6,7 +6,6 @@ import { cnt } from "../core/counter";
 import { cronScan, flushPx } from "../px/pool";
 import { alivePlan } from "../px/aliveplan";
 import { planRound } from "../route/budget";
-import { runRound } from "../route/round";
 import { runTfb } from "../route/tfb";
 import { DNS } from "../route/dnsfacts";
 import { probeFam } from "../proxy/dial";
@@ -101,7 +100,6 @@ async function cronOnce(env: Env): Promise<void> {
     const plan = planRound(S.pool.length, S.alive.size);
     // 活跃池不够 16 条时加码扫描：8 条池「好出口 <2」概率 28.5%，16 条只有 3.4%
     await cronScan(env, alivePlan(S.alive.size, plan.adm));
-    await runRound(plan);
     await tfbRound(env);
     await dnsRound();
     SEL.afterScan(env);

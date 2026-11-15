@@ -1,59 +1,40 @@
-// 子请求预算分配：一轮 cron 里「准入探活 / 判定扫描」各拿多少个 connect()。
-// 硬上限是 SC.SCAN_SUB（免费计划 50 子请求），保底给前两项，剩余按价值分。
+// 子请求预算：一轮 cron 里给「准入探活」多少个 connect()。
+// 硬上限是 SC.SCAN_SUB（免费计划 50 子请求）。判定侧扫描（`vt`）在 7.69 删 userland TLS 后就没额度了，
+// 7.149 把这条只剩空壳的维度连同 round.ts 一起去掉——以前那套「覆盖缺口 × 陈旧度」加权只在
+// `PROBE_RND/PROBE_REQ > 0` 时有意义，两项恒为 0 时它的结果恒等于 cap，而 `?vt=` 里那份「判定额度」
+// 与 `staleR` 就成了两个永远不动、看起来仍在测量的假仪表。
 import { SC } from "../core/const";
 import { S } from "../core/state";
 import { vAll } from "./verdict";
 
 export interface Plan {
   adm: number; // 池子准入探活（新增候选）
-  vt: number; // 判定扫描（目标 IP × 通道）
   cap: number; // 本轮总闸
 }
 
 /**
- * 价值近似：`覆盖缺口 × 陈旧度`。
- * - 覆盖缺口：候选里还没测过的比例（`1 - alive/pool`），越大越该花在准入上；
- * - 陈旧度：判定表里超过一半 TTL 的条目占比，越大越该花在判定上。
- * 都是 O(1)，不遍历全表（判定表 ≤600）。
+ * 本轮预算：准入拿满、但不超过 `SC.SCAN_MAX`。
+ * @param poolN 池子大小（仅调试展示用：预算不再随池子变化）
+ * @param aliveN 活跃池大小（同上）
+ * @returns 本轮 `Plan`
  */
 export function planRound(poolN: number, aliveN: number): Plan {
+  // 预算已与池子/活跃数解耦：判定维度删除后，两个参数只剩「保留签名」的作用。
+  // 注释里说明而不是删参数，是因为 `?vt=` 端点、`planView` 与单测都用这个签名取数。
+  void poolN;
+  void aliveN;
   const cap = Math.max(12, SC.SCAN_SUB);
-  const cover = poolN > 0 ? Math.max(0, 1 - aliveN / poolN) : 0;
-  const now = Date.now();
-  const all = vAll();
-  let stale = 0;
-  for (const v of all) if (now - v.at > SC.VT_TTL / 2) stale++;
-  const staleR = all.length ? stale / all.length : 1;
-
-  // 判定扫描/差分复核都要真的花 TLS 探测；两项都关时不该再给它们留额度
-  // （PROBE_RND=0 让 runRound 直接返回、PROBE_REQ=0 让复核只入队），
-  // 否则每轮白扣 4 个准入额度，冷启动就更慢。
-  const vtOn = SC.PROBE_RND > 0 || SC.PROBE_REQ > 0;
-  // 保底：池子最饿的时候也别把额度全给判定
-  const admMin = aliveN < 64 ? 6 : 4;
-  const vtMin = vtOn ? 4 : 0;
-  let rest = cap - admMin - vtMin;
-  if (rest < 0) rest = 0;
-
-  const wAdm = cover * 2 + 0.3;
-  const wVt = vtOn ? staleR * 2 + 0.3 : 0;
-  const wSum = wAdm + wVt;
-  let adm = admMin + Math.round((rest * wAdm) / wSum);
-  let vt = vtMin + Math.round((rest * wVt) / wSum);
-  // 四舍五入可能把总和顶到 cap 之上：多出来的先退判定（每轮本来只探 1 个），再退准入。
-  // 之前这里是 `Math.max(0, cap - adm - vt)`，总和一旦超 cap 就只是把这个差值压成 0，
-  // 实际子请求数仍然超额。
-  while (adm + vt > cap) {
-    if (vt > vtMin) vt--;
-    else if (adm > admMin) adm--;
-    else break;
-  }
-  return { adm: Math.min(adm, SC.SCAN_MAX), vt: vtOn ? vt : 0, cap };
+  // 准入吃满整轮闸门：探活走 connect()，不吃 fetch 子请求额度（线上 /logs 从未出现 subrequest 超限）。
+  return { adm: Math.min(cap, SC.SCAN_MAX), cap };
 }
 
-/** 供调试端点与日志用的快照（不参与决策） */
+/**
+ * 供调试端点与日志用的快照（不参与决策）
+ * @param poolN 池子大小
+ * @param aliveN 活跃池大小
+ * @returns 预算 + 判定表行数 + 最近站点
+ */
 export function planView(poolN: number, aliveN: number): Plan & { verds: number; site: string } {
   const p = planRound(poolN, aliveN);
   return { ...p, verds: vAll().length, site: S.site || "" };
 }
-

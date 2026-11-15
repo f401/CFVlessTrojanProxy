@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.148**（自举审计二十八批、共 45 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.149**（自举审计二十九批、共 46 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -191,6 +191,14 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   修法：新增 `RelPerfTable.mixKbs(oldK, k)`——这次没量到就沿用旧值、旧值是 0 就直接采用这次，两张表（站点×中继、跨站点聚合）共用；
   顺带删掉零调用点的 `healthyRelays`（`policy.ts` 里两处早就在内联同样的 `HEALTH.rank(...).slice(...)`）；锁：第 110 组（大小样本交替后仍是 740 / 940）。
 
+- **7.149 自举审计（第 46 条）**：判定扫描的编排链只剩空壳 —— `pickHosts` **没有任何生产调用点**
+  （只有 `test-surface.ts` 与单测在用），`SWEEP_COST` 的注释自己写着「sweepHost 已随 subtls 删除，保留导出避免下游 import 断裂」，
+  而 `runRound` 从 7.69 起就是 `void plan; return { hosts: [], swept: 0 };`、`cron.ts` 连它的返回值都不看；
+  `budget.ts` 里那套「覆盖缺口 × 陈旧度」加权只在 `vtOn` 为真时有意义，而 `PROBE_RND/PROBE_REQ` 恒为 0 ⇒
+  `plan.vt` 恒 0、加权结果恒等于 `cap`，`?vt=` 里那份「判定扫描额度」与 `staleR` 就成了两个永远不动的假仪表。
+  修法：删 `src/route/round.ts`（`pickHosts`/`SWEEP_COST`/`runRound`/`RoundOut`）、`Plan.vt`、`budget.ts` 的 `vtOn/vtMin/wVt/staleR` 加权、
+  `cron.ts` 的 `runRound(plan)` 调用、`test-surface.ts` 的两个导出；`planRound` 收成「准入拿满、不超过 `SCAN_MAX`」，
+  并显式写明两个参数只剩保留签名的作用。锁：第 37 组改成「这三样已删除」，第 67 组改成「预算里不再有判定额度这一项」（旧代码上 6 条断言红）。
 - **已核查、不是缺陷**（留档免得再查一遍）：`refillPool` 抓源用的是 `fetch`（占 50 子请求额度），`cronScan` 的探活用的是 `connect()`；两者虽共用 `SCAN_SUB` 这个数字，但线上 `/<uuid>/logs` 里从未出现 subrequest 超限（`count 24 / persisted 22` 全是 `forced _Rd` 这类中继日志），说明探活并不吃抓源那份额度 —— 把 `SCAN_SUB` 再减一个「固定开销」会让冷启动发现速度直接砍半，所以不改。三条属于「短路/顺序」类，
   按函数行为写的单测永远测不到（分支没被执行）——这类缺陷只能靠端到端闭环证明或真实流量发现。
   · 7.81 `src/px/selector.ts` 冷 isolate 拉池子封顶 700ms（`ensurePool` 能拖 2–4 秒，那是用户等首字节的时间）；
