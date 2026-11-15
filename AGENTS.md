@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.180**（自举审计六十批、共 106 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.181**（自举审计六十一批、共 110 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -419,6 +419,13 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 
 锁（第 170 组 13 条）：`splitRelay` 六种写法（含裸 IPv6 与 `[v6]:port`）、同一站点在途时只探一次、在途标记会清、探过之后不再立刻重探，外加四条源码断言（`TF_MS` 与 `withTimeout(work, TF_MS`、`relay ? splitRelay(relay, 80)`、`FactsBody.ps` 带 `top?: number`）。
 A/B：把 `src/proxy/cfverdict.ts` 换回旧版跑同一份测试 → **1198 通过 / 3 失败**（正是三条去重断言）；`splitRelay` 在旧版里不存在，整组会崩 —— 这一条按「旧版压根没有这个能力」处理，不做假红。
+### 7.181 自举审计（第 107–110 条，上限与合并口径）
+
+- **第 107 条 判定表的 600 行上限从来没生效**：`sweep()` 只清过期行，全新鲜时一行也删不掉；而 `setState`/`import` 连 `sweep()` 都不调（`recordBlock`/`recordPass`/`markBlocked`/远端同步全走 `setState`）。实测灌 700 条走 `vSetState` 仍是 **700**、走 `vImport`（8×120）能到 **960**。键是客户端给的目标站点名，长命 isolate 一路涨。修法：新增 `private trim()`（先 `sweep()`，仍超限就按 `at` 升序删最旧），`set`/`setState`/`import` 三处都调；改后三种路径都是 600。
+- **第 108 条 DO 的 `hl` 逐字段取 max，拼出一条从未发生过的证据**：三小时前 `o=9` 的「好」与刚刚 `b=6` 的「坏」被合成 `{o:9, b:6, t:刚刚}`，而客户端 `score()` 的 30 分钟半衰期正是按 `t` 算 ⇒ 最容易过期的那批数据反而永远新鲜（7.161 在客户端 `merge` 里修过同一形状，DO 这层漏了）。修法改成「一条证据整体胜出」：`inN > curN` 或（条数相同且 `t` 更新）才替换整行。
+- **第 109 条 `/set` 只让触发的那一维变大**：门槛是 `want > cur || wantN > curN`，但块内把 `up`/`down` 无条件写成快照值 ⇒ 「快照字节更少、连接数更多」时累计用量倒退（实测 1000 → 900）。修法两维各自 `Math.max`。
+- **第 110 条 `hl` 裁剪留最旧**：`Object.keys(this.hl).slice(200)` 按插入顺序切，删掉的是刚写进来的那条 ⇒ 新中继的健康证据永远进不了表（同 7.177 的 pend 星形饥饿）。修法按 `t` 降序留最新 200 条。
+- 教训：这一批四条全在「上限/合并」两轴上，且**都只在某一条写入路径上正确**（`set` 有 sweep、`setState` 没有；`/set` 的字节与连接两个维度）；写仓库时先问「还有谁会写这张表」。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

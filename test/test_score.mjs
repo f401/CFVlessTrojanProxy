@@ -4023,5 +4023,71 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   ok("FactsBody.ps 的类型带上 top（7.163 漏的跟随）", vsSrc.includes("at: number; top?: number }>"));
 }
 
+
+/* ── 第 171 组：上限与合并口径（v7.181）────────────────────────────────────
+ * 四条：判定表的上限真正生效（以前 set 只清过期行、setState/import 连调用都没有）；
+ * DO 的 hl 不再把两段不同时刻的证据逐字段拼成一条；hl 裁剪留最新而不是留最旧；
+ * /set 只让触发的那一维变大，另一维不再被快照写小。 */
+{
+  // 1) 判定表：走 setState（recordBlock/recordPass/markBlocked/import 都走它）灌 700 行
+  W.VT.clear();
+  for (let i = 0; i < 700; i++) W.vSetState("cap" + i + ".test", "r:198.51.100.9", 2, 1);
+  eq("判定表的上限在 setState 上也生效（700 → 600）", W.VT.size(), 600);
+  ok("删掉的是最旧的：第一条已经不在了", !W.vAll().some((r) => r.t === "cap0.test"));
+  ok("最新的那条还在", W.vAll().some((r) => r.t === "cap699.test"));
+
+  // 2) 判定表：走 import（远端同步，单批 120 行）灌 960 行
+  W.VT.clear();
+  for (let b = 0; b < 8; b++) {
+    const rows = [];
+    for (let i = 0; i < 120; i++) rows.push({ k: "imp" + b + "_" + i + ".test|r:198.51.100.9", s: 2, t: Date.now() + 1800000 });
+    W.vImport(rows);
+  }
+  eq("判定表的上限在 import 上也生效（960 → 600）", W.VT.size(), 600);
+  W.VT.clear();
+
+  // 3) DO 的 hl：三小时前「好」+ 刚刚「坏」不得拼成 { o:9, b:6, t:刚刚 }
+  const dh = mkDO();
+  const hlStub = { fetch: (u, i) => dh.m.fetch(typeof u === "string" ? new Request(u, i) : u) };
+  const hlOld = Date.now() - 3 * 3600 * 1000;
+  await hlStub.fetch("https://meter/add", {
+    method: "POST",
+    body: JSON.stringify({ hl: [{ i: "198.51.100.44", o: 9, b: 0, d: 0, t: hlOld }] }),
+  });
+  await hlStub.fetch("https://meter/add", {
+    method: "POST",
+    body: JSON.stringify({ hl: [{ i: "198.51.100.44", o: 0, b: 6, d: 0, t: Date.now() }] }),
+  });
+  const hlBack = await (await hlStub.fetch("https://meter/hl")).json();
+  const hlRow = hlBack.hl.find((x) => x.i === "198.51.100.44") || { o: -1, b: -1, d: -1, t: 0 };
+  eq("hl 不会把两段证据拼在一起：保留的是整条胜出的那条", [hlRow.o, hlRow.b, hlRow.d].join(","), "9,0,0");
+  ok("并且它的时间还是三小时前（客户端半衰期因此真的在衰减）", hlRow.t < Date.now() - 3600 * 1000);
+
+  // 4) hl 裁剪：超过 200 条时删最旧、留最新（按插入顺序切会删掉刚写进来的那条）
+  const dt = mkDO();
+  const trimStub = { fetch: (u, i) => dt.m.fetch(typeof u === "string" ? new Request(u, i) : u) };
+  const flood = [];
+  for (let i = 0; i < 260; i++) flood.push({ i: "10.1.0." + i, o: 1, b: 0, d: 0, t: Date.now() - (260 - i) * 1000 });
+  await trimStub.fetch("https://meter/add", { method: "POST", body: JSON.stringify({ hl: flood }) });
+  // /hl 出口只发 120 条，所以用「最旧那条是否还在」判定裁剪方向
+  const trimBack = await (await trimStub.fetch("https://meter/hl")).json();
+  ok("hl 裁剪留最新：最旧那条已被删掉", !trimBack.hl.some((x) => x.i === "10.1.0.0"));
+
+  // 5) /set：只有 conns 变大时，up/down 不得被快照写小
+  const ds = mkDO();
+  const setStub = { fetch: (u, i) => ds.m.fetch(typeof u === "string" ? new Request(u, i) : u) };
+  const post = (p, body) => setStub.fetch("https://meter" + p, { method: "POST", body: JSON.stringify(body) });
+  await post("/add", { up: 1000, down: 0, conns: 50 });
+  await post("/set", { up: 900, down: 0, conns: 60 });
+  const setBack = await (await setStub.fetch("https://meter/cnt")).json();
+  eq("恢复时字节取两者更大（累积用量不倒退）", (setBack.c.up || 0) + (setBack.c.down || 0), 1000);
+  eq("连接数取两者更大", setBack.c.conns, 60);
+
+  // 6) 源码断言：三处写入路径都要 trim
+  const vSrc = fs.readFileSync("src/route/verdict.ts", "utf8");
+  ok("set 走上限检查", vSrc.includes("this.trim();"));
+  ok("trim 会删最旧的而不是只清过期", vSrc.includes("const over = this.m.size - this.max;"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

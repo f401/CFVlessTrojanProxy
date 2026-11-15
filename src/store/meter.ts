@@ -249,18 +249,28 @@ export class Meter {
         const nowHl = Date.now();
         for (const r of d.hl) {
           if (!r || typeof r.i !== "string") continue;
-          const cur = this.hl[r.i] || { o: 0, b: 0, d: 0 };
-          cur.o = Math.max(cur.o, Number(r.o) || 0);
-          cur.b = Math.max(cur.b, Number(r.b) || 0);
-          cur.d = Math.max(cur.d, Number(r.d) || 0);
-          // 存下证据时间（夹到现在）：不带它，冷启动读回的行只能被当成「刚刚观测」，
-          // 30 分钟半衰期对最容易过期的那批数据完全失效（v7.160）。
-          const t = Math.min(Number(r.t) || nowHl, nowHl);
-          cur.t = Math.max(Number(cur.t) || 0, t);
-          this.hl[r.i] = cur;
+          const o0 = Number(r.o) || 0;
+          const b0 = Number(r.b) || 0;
+          const d0 = Number(r.d) || 0;
+          const t0 = Math.min(Number(r.t) || nowHl, nowHl);
+          const cur0 = this.hl[r.i];
+          // 一条证据整体胜出（v7.181）：以前逐字段取 max，会把「三小时前 9 次成功」与
+          // 「刚刚 6 次失败」拼成 { o:9, b:6, t:刚刚 } —— 一条从未发生过的证据，
+          // 而客户端的 30 分钟半衰期正是按 t 算的，最容易过期的那批数据反而永远新鲜
+          // （7.161 在客户端 merge 里修过同一形状，DO 这层漏了）。
+          const inN = o0 + b0 + d0;
+          const curN = cur0 ? cur0.o + cur0.b + cur0.d : -1;
+          if (!cur0 || inN > curN || (inN === curN && t0 > (Number(cur0.t) || 0))) {
+            this.hl[r.i] = { o: o0, b: b0, d: d0, t: t0 };
+          }
         }
         const hk = Object.keys(this.hl);
-        if (hk.length > 200) for (const k of hk.slice(200)) delete this.hl[k];
+        if (hk.length > 200) {
+          // 留最新的 200 条（v7.181）：按插入顺序切会删掉刚写进来的那条，
+          // 新中继的健康证据永远进不了表（同 7.177 的 pend 星形饥饿）。
+          hk.sort((x, y) => (Number(this.hl[y].t) || 0) - (Number(this.hl[x].t) || 0));
+          for (const k of hk.slice(200)) delete this.hl[k];
+        }
       }
       // 被封的中继（带到期时间）：只接受未过期的
       if (d.blk && typeof d.blk === "object") {
@@ -514,8 +524,10 @@ const hl = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d,
             ? this.c.dD || 0
             : 0;
         this.c = {
-          up: Number(d.up) || 0,
-          down: Number(d.down) || 0,
+          // 两维各自取大（v7.181）：以前无条件写成快照值，只看 conns 变大就会把
+          // up/down 换成快照里的旧数（快照可能落后几小时）——面板与订阅头的累计用量倒退。
+          up: Math.max(Number(d.up) || 0, this.c.up || 0),
+          down: Math.max(Number(d.down) || 0, this.c.down || 0),
           // conns 取两者更大：快照可能比 DO 落后几小时，直接赋值会让面板的连接数变小
           conns: Math.max(wantN, curN),
           // first 取更早的非零值：重建后不能把「首次使用时间」推后

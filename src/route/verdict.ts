@@ -106,7 +106,7 @@ export class VerdictTable {
     // 弱证据不得把强证据的 blocked/dead 冲掉，也不得把 ok 冲成 blocked
     const st = src === 0 && old ? (old.state === 1 ? (code >= 200 ? 1 : old.state) : old.state) : VerdictTable.stateOf(code);
     this.m.set(k, { t, c, state: st, code, ms: ems, n: (old?.n || 0) + 1, at: Date.now(), src });
-    if (this.m.size > this.max) this.sweep();
+    if (this.m.size > this.max) this.trim();
   }
 
   /**
@@ -124,6 +124,7 @@ export class VerdictTable {
     const old = this.m.get(k);
     if (old && old.src > src) return;
     this.m.set(k, { t, c, state, code: old?.code || 0, ms: old?.ms || 0, n: (old?.n || 0) + 1, at: Date.now(), src });
+    this.trim();
   }
 
   /**
@@ -251,6 +252,7 @@ export class VerdictTable {
       this.setState(t, r.k.slice(i + 1), (r.s === 3 ? 3 : 2) as VState, 1);
       n++;
     }
+    this.trim();
   }
 
   /**
@@ -270,7 +272,24 @@ export class VerdictTable {
   }
 
   /**
-   * 功能：清掉过期行（写入超上限时自动触发）。
+   * 功能：把表压到上限以内——先清过期行，仍超限就删最旧的。
+   * 为什么分两步（v7.181）：只清过期行时，「全新鲜」的表一行也删不掉，
+   * 600 行上限名存实亡（实测灌 700 条走 setState 仍是 700、走 import 能到 960）；
+   * 而键里的站点名来自客户端，长命 isolate 会一路涨。trim 在 set/setState/import 三处都调。
+   * @returns 无
+   */
+  private trim(): void {
+    if (this.m.size <= this.max) return;
+    this.sweep();
+    if (this.m.size <= this.max) return;
+    // 仍超限：按写入时间升序删最旧的（at 相同时保持插入顺序，行为稳定可测）
+    const over = this.m.size - this.max;
+    const rows = [...this.m.entries()].sort((a, b) => a[1].at - b[1].at);
+    for (let i = 0; i < over && i < rows.length; i++) this.m.delete(rows[i][0]);
+  }
+
+  /**
+   * 功能：清掉过期行（trim 的第一步）。
    * @returns 无
    */
   private sweep(): void {
