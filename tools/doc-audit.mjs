@@ -64,9 +64,42 @@ function orphanDocs(lines) {
   return out;
 }
 
+/**
+ * 叠文档：文档块结束后（跳过空行）紧跟另一个文档块 —— 前一段在为「不存在的声明」写文档，
+ * 读者却以为文件里真有那个函数。7.158 之前有八处：`score.ts` 的 `scoreParts`/`usable` 各叠三段
+ * （旧公式说明 + 签名文档 + doc-gen 生成的「薄包装」）、`connection.ts` 的类文档被 `TICK_BYTES` 挤开、
+ * `probe.ts` 的 `refillPool` 旧文档、`ts.ts` 指向「文件底部」的过期指针、`panel.ts` 搬走的密码生成、
+ * `sub.ts` 的 `renderClash` 旧签名。孤儿门禁（下一条规则）抓不到它们：下一行不是 `}` 而是另一段 `/**`。
+ *
+ * 文件头注释不算：它前面没有任何代码行（只有注释与空行），那是模块说明，本来就该独立成段。
+ * @param {string[]} lines 文件行
+ * @returns {{line: number, next: number}[]} 命中的位置（1 起）
+ */
+function stackedDocs(lines) {
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    // 单行文档（`/** 一句话 */`）同样会叠：起点用 startsWith，不要求整行就是 `/**`
+    if (!lines[i].trim().startsWith("/**")) continue;
+    // 前面只有注释/空行 ⇒ 这是文件头说明，允许后面再跟一个声明的文档
+    const header = lines.slice(0, i).every((l) => {
+      const t = l.trim();
+      return t === "" || t.startsWith("//") || t.startsWith("/*") || t.startsWith("*") || t === "*/";
+    });
+    let j = i;
+    while (j < lines.length && !lines[j].includes("*/")) j++;
+    if (j >= lines.length) break;
+    let k = j + 1;
+    while (k < lines.length && lines[k].trim() === "") k++;
+    if (!header && k < lines.length && lines[k].trim().startsWith("/**")) out.push({ line: i + 1, next: k + 1 });
+    i = j;
+  }
+  return out;
+}
+
 const rows = [];
 let total = 0;
 const orphanRows = [];
+const stackedRows = [];
 for (const file of walk(root)) {
   if (only && !file.includes(only)) continue;
   const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
@@ -80,6 +113,8 @@ for (const file of walk(root)) {
   if (miss.length) rows.push({ file, miss, n: miss.length });
   const orph = orphanDocs(lines);
   if (orph.length) orphanRows.push({ file, orph, n: orph.length });
+  const stk = stackedDocs(lines);
+  if (stk.length) stackedRows.push({ file, stk, n: stk.length });
 }
 
 rows.sort((a, b) => b.n - a.n);
@@ -98,6 +133,14 @@ if (orphSum) {
   console.log(`\n孤儿文档（注释块后面不是声明，而是 "}" 或文件结束）：${orphSum} 处`);
   for (const r of orphanRows) {
     for (const o of r.orph) console.log(`  ${r.file}:${o.line} → ${o.nxt}`);
+  }
+  process.exitCode = 1;
+}
+const stackSum = stackedRows.reduce((a, r) => a + r.n, 0);
+if (stackSum) {
+  console.log(`\n叠文档（一段文档后面紧跟另一段文档，前一段没有任何声明可挂）：${stackSum} 处`);
+  for (const r of stackedRows) {
+    for (const s of r.stk) console.log(`  ${r.file}:${s.line} → 下一段文档在第 ${s.next} 行`);
   }
   process.exitCode = 1;
 }

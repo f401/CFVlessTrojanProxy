@@ -18,7 +18,6 @@ export const TINY_REL = 0.2;
 export const BIG_PEER = 20000;
 /** 同窗口宽度：120 秒内的观测可以互为对照 */
 export const BIG_WIN = 120000;
-/** 确认间隔：第二批至少要隔 60 秒（三批才算 A 级证据） */
 /** `blk` 寿命 90 分钟；`ps` 45 分钟（软证据比硬证据过期快） */
 export const BLK_TTL = 90 * 60000;
 export const DEAD_TTL = 30 * 60000;
@@ -53,8 +52,6 @@ export interface FactCtx {
   bigTypical?: number;
   /** 同窗口内的其他观测（用来找「另一条通道拿到整页」） */
   peers?: FactObs[];
-  /** 同键上一次被确认的批次时间（用于「至少要两批」） */
-  /** 每个站点最近一次拿到整页的时间（用于「三分钟内还出过整页 → 矛盾」） */
   /** 每个键上次写入时间（用于节流） */
   lastWrite?: Record<string, number>;
 }

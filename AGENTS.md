@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.154**（自举审计三十四批、共 57 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.155**（自举审计三十五批、共 59 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -217,6 +217,19 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   单测因此偶发失败（同一份代码 4 次跑 1 次红）——把 sweep 上移到所有早返回之前，并用 `Math.random = () => 0` 锁住「早返回时自愈仍发生」。
 
 - **第 48 条（7.150）`eq` 对函数是空断言**：`eq` 用 `JSON.stringify(a) === JSON.stringify(b)` 比较，而 `JSON.stringify(函数)` 与 `JSON.stringify(undefined)` 都返回 `undefined` ⇒ 历史上所有「某函数已删除」的锁（7.133 的 `edgeAdd`/`p90Local`/`relAgg`/`vGet`、7.141 的 `STORE.usageSnapWrite`、7.145 的 `judge`/`queueLen`/`HOOK.verify`、7.149 的 `pickHosts`/`SWEEP_COST`/`runRound`）都是**永远为真**的空断言 —— 这次是 A/B 在旧代码上仍然 0 失败才暴露。修法：`const strict = b === undefined || typeof a === "function" || typeof b === "function";` 后走 `Object.is`。
+### 7.155 自举审计（第 58–59 条）
+
+- **58 三条「Worker 看不到 HTTP 状态码」是过期说法**：`src/routes/debug.ts` 里「只验 SNI，看不到 HTTP 状态」、
+  「Worker 里唯一能看见 403 的办法」、「note: Worker 看不到 HTTP 状态码（TLS 端到端）」——7.24 起 `cfHttpCode`/`tfb`
+  就能拿到真状态码，而同一个 `?diag` 响应里 `cfVerdict.code/cached` 就是状态码，自相矛盾。改成：probeSni 不完成握手所以
+  拿不到应用层字节；隧道腿是端到端 TLS，要看状态码用 `cached` 或 `?tfb=`。
+- **59 十四处「叠文档」**：一段文档后面紧跟另一段文档（前一段没有任何声明可挂），读起来像「文件里有这个函数」。
+  来源都是历次删常量/删字段/改参数名：`const.ts` 三行（7.153 删的 PROBE_REQ/PROBE_RND/通道策略）、`hook.ts` 两行
+  （7.145 的 verify、7.88 的 eg 单槽）、`state.ts` 两行（7.145 的 vtQ/vtLast）、`cfverdict.ts`、`pxhook.ts`、
+  `commitfact.ts` 三行（7.137 的 CONFIRM_GAP/prevBatch/lastBigAt）、`tfb.ts`（tfVerdict 两段）、`score.ts` 两个方法各叠三段、
+  `connection.ts` 的类文档被 `TICK_BYTES` 挤开、`probe.ts`/`ts.ts`/`panel.ts`/`sub.ts` 各一处。
+  `tools/doc-audit.mjs` 新增「叠文档」规则（文件头注释豁免）；对旧 `src/` 报 **22 处**，修完 0 处。
+
 - **已核查、不是缺陷**（留档免得再查一遍）：`refillPool` 抓源用的是 `fetch`（占 50 子请求额度），`cronScan` 的探活用的是 `connect()`；两者虽共用 `SCAN_SUB` 这个数字，但线上 `/<uuid>/logs` 里从未出现 subrequest 超限（`count 24 / persisted 22` 全是 `forced _Rd` 这类中继日志），说明探活并不吃抓源那份额度 —— 把 `SCAN_SUB` 再减一个「固定开销」会让冷启动发现速度直接砍半，所以不改。三条属于「短路/顺序」类，
   按函数行为写的单测永远测不到（分支没被执行）——这类缺陷只能靠端到端闭环证明或真实流量发现。
   · 7.81 `src/px/selector.ts` 冷 isolate 拉池子封顶 700ms（`ensurePool` 能拖 2–4 秒，那是用户等首字节的时间）；

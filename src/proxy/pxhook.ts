@@ -1,7 +1,6 @@
 // proxy 侧的决策入口：只依赖 core 的 HOOK，不反向依赖 route。
 import { HOOK } from "../core/hook";
 
-/** 返回「这一条连接要不要走中继」。apply = 策略是否生效（否则只做影子统计） */
 /** 返回「这一条连接要不要走中转」。level = 策略生效级别：0 只影子统计、1 只硬规则、2 全生效。 */
 export function pxDecision(request: Request, host: string, cfHost: boolean, wantPx: boolean, level: number, mode = "tput"): boolean {
   const fn = HOOK.decide;

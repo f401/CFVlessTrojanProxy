@@ -3348,5 +3348,21 @@ ok("状态表里不再有 tsMem 的键", !Object.prototype.hasOwnProperty.call(W
   eq(`[${g}] 自愈清掉了封锁行`, W.BLK.penOf(H, rel[0]), 1);
 }
 
+// —— 144：状态码可见性与文档残留 ——
+{
+  const g = "144";
+  const bundle = fs.readFileSync("test/_bundle.mjs", "utf8");
+  const dbg = fs.readFileSync("src/routes/debug.ts", "utf8");
+  ok(`[${g}] 「Worker 看不到 HTTP 状态码」的过期说法已删掉`, !dbg.includes("Worker 看不到 HTTP 状态码"));
+  ok(`[${g}] 调试端点改为指向 tfb 与状态码缓存`, bundle.includes("要看真状态码用 cached"));
+  ok(`[${g}] 只验 SNI 的注释改成真实原因（不完成握手）`, dbg.includes("不完成握手，拿不到应用层状态"));
+  const audit = fs.readFileSync("tools/doc-audit.mjs", "utf8");
+  ok(`[${g}] doc-audit 有叠文档规则（否则叠加的文档会让人以为函数还在）`, audit.includes("stackedDocs"));
+  const consts = fs.readFileSync("src/core/const.ts", "utf8");
+  ok(`[${g}] 被删常量的残留文档已清（const.ts 不再提「每个请求最多做几次探测」）`, !consts.includes("每个请求最多做几次探测"));
+  const tfb = fs.readFileSync("src/route/tfb.ts", "utf8");
+  ok(`[${g}] tfVerdict 的文档合并成一段（不再两段叠在一起）`, !tfb.includes("IP 级封锁探测：探 1–3 条中继"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

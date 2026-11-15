@@ -5,16 +5,6 @@ export * from "./sub-common";
 export { renderSingbox } from "./sub-singbox";
 export { renderLinks } from "./sub-links";
 
-/**
- * 生成 Clash / Mihomo 订阅 YAML。
- * @param {object} env Worker 环境
- * @param {URL} url 请求 URL
- * @param {string} id 用户 UUID
- * @param {string} host 入口域名
- * @param {object} [learned] RTT 学习结果
- * @param {string[]} [regions] 地区列表
- * @returns {string} YAML 文本
- */
 /** YAML 双引号字符串：JSON 转义是 YAML 双引号标量的合法子集，引号/反斜杠/换行/制表符一起处理 */
 const yamlStr = (s: string) => JSON.stringify(String(s));
 

@@ -51,8 +51,6 @@ export class AppState {
   peers: Map<string, Array<{ ck: string; down: number; at: number }>> = new Map();
   /** 每个站点见过的最大响应字节数：v8 的 bigTypical（tiny 的相对判据要用） */
   bigTyp: Map<string, number> = new Map();
-  /** 复核队列：流量发现「可疑」后排队做同站点两条通道的实测差分 */
-  /** 最近一次复核的结果（供 debug 展示） */
   colo = "";
   funnel: Record<string, number> = { direct: 0, node: 0, v6: 0 };
   candN = 0; // 最近一次 candsFor 的候选数（观测用）
@@ -143,9 +141,9 @@ export class AppState {
   /** 上一次读 seed 是否失败：失败时 write 必须跳过，不能拿空表覆盖别人的桶 */
   seedReadFail = false;
   pool: PoolEntry[] = [];
-  /** 已上报到 DO 的判定（键 `target|chan`，值 = 到期时间） */
   /** 已交给上报、等待 ack 的强证据（k → 到期时间） */
   vtPend: Map<string, number> = new Map();
+  /** 已上报到 DO 的判定（键 `target|chan`，值 = 到期时间） */
   vtSent: Map<string, number> = new Map();
   vtLoaded = false;
   /** 事实读失败后的冷却截止时间：失败一次不该把这个 isolate 的事实层永久关掉（v8 §20.5 允许 60 秒后重试） */

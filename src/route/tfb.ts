@@ -40,13 +40,13 @@ const SEED = ["185.253.117.147", "45.136.117.194", "91.215.154.80"];
 
 const stub0 = (c: RouteCtx) => c.env.METER.get(c.env.METER.idFromName("tf-probe"));
 
-/** IP 级封锁探测：探 1–3 条中继，按 consensus 写判定表。
+/**
+ * 判定收敛：200 与 403 并存才升级为 IP 级封锁证据；全 403 说明是站点级，不写封禁。
  *  · 全部 200        → ok（站点可达）
  *  · 200 与 403 并存 → 403 的那些通道判被封（这才是「IP 级」证据）
  *  · 全部 403        → 站点层面的拒绝（业务 403 常见形态），**不写任何封禁**，只记 suspect
  *  · 全部失败        → unknown（中继或网络问题，不冤枉任何一方）
  */
-/** 判定收敛：200 与 403 并存才升级为 IP 级封锁证据；全 403 说明是站点级，不写封禁。 */
 export function tfVerdict(rows: Array<{ ok: boolean; status?: number; bytes?: number }>): "ok" | "chan" | "site" | "unknown" {
   const okN = rows.filter((x) => x.ok && x.status === 200).length;
   const badN = rows.filter((x) => (x.status || 0) >= 400).length;

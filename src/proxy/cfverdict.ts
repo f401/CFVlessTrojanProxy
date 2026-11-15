@@ -1,8 +1,6 @@
 import { S } from "../core/state";
 import { httpProbe } from "./dial";
 
-/** 冷启动时把 DO 里的 403 判定读回来（每 isolate 一次），否则每个新 isolate 都要从零踩坑。 */
-
 /** 目标站点的 HTTP 判定缓存：200 = 本出口没被按 IP 拒，403 = 被拒（必须绕中继）。0 = 未知。 */
 export function cfHttpCode(host: string): number {
   const c = S.cfHttp.get(host);

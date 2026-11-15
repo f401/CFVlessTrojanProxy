@@ -164,11 +164,6 @@ export interface PoolRefill {
 }
 
 /**
- * 从所有上游源抓取候选池并按 ip:port 去重（单源失败不影响其他源）。
- * @param {object} env Worker 环境
- * @returns {Promise<PoolRefill>} 合并后的候选池与各源统计
- */
-/**
  * 功能：池子源健康度表（每个 isolate 一份，不跨 isolate 共享）。
  *
  * 镜像源经常整站挂掉或被限流，逐个重试会白烧子请求预算（免费计划每轮约 50 个子请求）。

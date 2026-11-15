@@ -12,6 +12,10 @@ import { S } from "../core/state";
 import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";
 import { WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS, closeQuietly, releaseAll } from "../core/util";
 
+
+/** 每收到多少字节触发一次 tick */
+export const TICK_BYTES = 512 * 1024;
+
 /**
  * 一条 WebSocket 连接的全部状态与行为。
  *
@@ -25,9 +29,6 @@ import { WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS, closeQuietly, rel
  * 改造前每个 64KB chunk 要读 3 次 bufferedAmount、取 1 次时钟；
  * 4MB/s 下就是每秒 192 次跨边界调用。现在降到每秒 8 次。
  */
-
-/** 每收到多少字节触发一次 tick */
-export const TICK_BYTES = 512 * 1024;
 
 export class Connection {
   // —— 归属 ——

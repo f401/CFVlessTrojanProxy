@@ -64,30 +64,19 @@ function buildCands(m: Mode, now: number): RankRow[] {
 
 /** Scorer：把原来的自由函数收成方法（行为逐位不变，外部仍可用同名薄包装） */
 export class Scorer {
-/**
- * 评分明细（v2）：排序与面板共用同一份分项，避免"面板一套公式、选路另一套"。
- *
- *   延迟 L = confL × Lobs + (1-confL) × Lprior
- *   吞吐 E10 = confB × (10MiB/cap) + (1-confB) × (10MiB/prior)
- *   score = 目标项 + FAIL×pFailRisk + STALL×pStall
- */
   /**
    * 功能：算某节点在某模式下的代价分解（延迟项、失败风险、卡顿、吞吐），是选路的唯一评分入口。
+   *
+   * 分项（排序与面板共用这一份，避免"面板一套公式、选路另一套"）：
+   *   延迟 L = confL × Lobs + (1-confL) × Lprior
+   *   吞吐 E10 = confB × (10MiB/cap) + (1-confB) × (10MiB/prior)
+   *   score = 目标项 + FAIL×pFailRisk + STALL×pStall
    * @param k 节点键 host:port
    * @param mode lat 速率优先 / tput 吞吐优先
    * @param now 当前时间戳
    * @param withGate 是否计入准入闸门（未探活的惩罚）
    * @param bytes 本次目标流量，用于按流量折算代价
    * @returns 代价分解对象（含 score、各项分量与置信度）
-   */
-  /**
-   * 功能：薄包装，委托 Scorer.scoreParts（评分分解）。
-   * @param k 节点键
-   * @param mode 模式
-   * @param now 当前时间
-   * @param withGate 是否计入准入闸门
-   * @param bytes 目标流量
-   * @returns 代价分解
    */
   scoreParts(k: string, mode: Mode, now = Date.now(), withGate = false, bytes = 0): ScoreParts {
   const m: Mode = mode === "tput" ? "tput" : "lat";
@@ -202,24 +191,12 @@ export class Scorer {
   emptyCloseSuspect(k: string): boolean {
   return suspectOf(S.nstat.get(k));
 }
-/**
- * 候选资格：活着、不在冷却/冻结、可用性够、不是空关闭可疑节点。
- * 全局选路与地区选路必须共用这一份判定 —— 否则 rg=xx 会绕过排除规则，
- * 把全国流量压到一个"连得上但永远传不出数据"的节点上。
- * @param {string} k "host:port"
- * @param {number} now 当前时间
- * @returns {boolean} 是否可用
- */
   /**
    * 功能：节点当前是否可用（活着、不在黑名单、没被冻结，且样本未过期）。
+   * 全局选路与地区选路必须共用这一份判定 —— 否则 rg=xx 会绕过排除规则，
+   * 把全国流量压到一个「连得上但永远传不出数据」的节点上。
    * @param k 节点键
    * @param now 当前时间戳
-   * @returns 可用为 true
-   */
-  /**
-   * 功能：薄包装，委托 Scorer.usable（节点当前是否可用）。
-   * @param k 节点键
-   * @param now 当前时间
    * @returns 可用为 true
    */
   usable(k: string, now = Date.now()): boolean {

@@ -181,7 +181,7 @@ export async function debug(c: UserCtx): Promise<Response> {
     const direct = S.hostDirect.get(fam) || { ok: 0, bad: 0, at: 0 };
 
     // 主动探测：不信历史样本时，直接拿每个节点试一次
-    // （只验"能不能把这个 SNI 转出去"，看不到 HTTP 状态）
+// （只验"能不能把这个 SNI 转出去"：probeSni 发完 ClientHello 就等 ServerHello，不完成握手，拿不到应用层状态）
     let probe: Array<{ node: string; cc: string } & SniProbe> | null = null;
     if (url.searchParams.get("probe") === "1") {
       probe = await Promise.all(
@@ -210,7 +210,7 @@ export async function debug(c: UserCtx): Promise<Response> {
       basisLabel = "主动探测";
     }
     // 判定：先看 DNS 解析出的 IP 在不在 CF 网段，再用 HTTP 探一次拿真实状态码
-    // （Worker 里唯一能“看见 403”的办法；隧道内 TLS 是端到端的，看不到状态行）
+// （Worker 自己发 HTTPS 请求时看得到状态码；走中继的 WebSocket 隧道是端到端 TLS，看不到状态行——那一路要靠 tfb 在 DO 里用 tunnelfetch 单独建连）
     const ips = await resolveV4All(diagHost).catch(() => []);
     const cfHosted = await isCfHost(diagHost).catch(() => false);
     const live = await httpProbe(diagHost, 4000).catch(() => ({ code: 0, colo: "" }));
@@ -264,7 +264,7 @@ export async function debug(c: UserCtx): Promise<Response> {
       cfVerdict,
       relayBlocked,
       ringBlk,
-      note: "Worker 看不到 HTTP 状态码（TLS 端到端），这里靠的是连接结果与对照",
+note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿到连接结果；要看真状态码用 cached（本 isolate 直连会话缓存）或 /debug?tfb=",
     });
   }
 

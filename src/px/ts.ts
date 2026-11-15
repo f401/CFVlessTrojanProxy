@@ -2,9 +2,6 @@ import { SC } from "../core/const";
 import { S } from "../core/state";
 import { candsFor, scoreParts } from "../nodes/score";
 
-/**
- * 单层抽样器见文件底部 pickThom。
- */
 
 /** 标准正态（Box-Muller）；不用 while，避免 Math.random 被打桩成 0 时死循环 */
 function gauss(): number {
