@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.185**（自举审计六十五批、共 123 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.186**（自举审计六十六批、共 124 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -13,7 +13,7 @@
 2. **没有 2xx 就不写封禁。** 封锁证据只来自「同一时间窗内，同站点有通道拿到 2xx、另一条没有」；全 4xx / 全超时只能 `rotate` 换出口重采，绝不能把站点或出口标记成 blocked。业务 403（如 `api.github.com`）必须原样透传。
 3. **绝不部署明文包。** `tools/check-obf.js` 是发版硬闸（严格关键字必须 0、`a_0x >= 100`、无 `class Meter` 明文），已前置进部署脚本，失败即 `REFUSE`。用户对此有过明确指令。
 4. **入口偏好只能客户端实测。** Worker 访问自家域名必然 522 自环，所以服务端探「客户端→边缘」在物理上不成立。订阅发 `server: <ip>` 条目 + `🌐 入口优选`（`url: https://<host>/health`、`expected-status: 200`）让客户端自己挑；`?e=0` 关闭、手动 `nodes` 优先。
-5. **免费计划的三条额度必须留余量。** ① 同时打开的 `connect()` ≤ 6（`SC.PROBE_CONC = 6`，除非你确认改的是别的量）；② 一次调用 fetch 子请求 ≤ 50（一轮预算 `plan.cap = 48`，refill + tfb 也在里面）；③ DO CPU 只有几十毫秒 —— 单发 TLS 握手只能走 `tunnelfetch`（`src/core/tf.ts`）；vendored `subtls` 与 `core/tlsprobe.ts` 已在 7.69 整体删除（免费计划必 1102），不要再引入 userland TLS。
+5. **免费计划的三条额度必须留余量。** ① 同时打开的 `connect()` ≤ 6（`SC.PROBE_CONC = 6`，除非你确认改的是别的量）；② 一次调用 fetch 子请求 ≤ 50（硬上限 `SC.SCAN_SUB = 48`；固定支出见 `src/route/budget.ts` 的 `SUB_FIXED`：源 6 / 判定批 1 / DoH 2 / 上报 1 / 快照 4 = 14，剩下的 `plan.sub = 34` 才是能自由分配的）；③ DO CPU 只有几十毫秒 —— 单发 TLS 握手只能走 `tunnelfetch`（`src/core/tf.ts`）；vendored `subtls` 与 `core/tlsprobe.ts` 已在 7.69 整体删除（免费计划必 1102），不要再引入 userland TLS。
 6. **注释与文档是门禁，不是礼貌。** 每个函数/方法上方必须有 `/** 功能 / @param / @returns */`，`node tools/doc-audit.mjs --max 0` 不过就发不了版；函数体内也要写「这步在干嘛 / 为什么」，协议偏移与边界条件必须解释。
 
 ---
@@ -364,6 +364,24 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - 锁：第 175 组 12 条（`pool.ts` 里 `nsLatency(` 计数为 0 而 `nsProbe(` ≥ 4；两次 `nsProbe` 后 `pN === 2` 且 `pSum === 0`；`cooling` 的四条状态迁移；池子够多时只发 1 次 `fetch` 且带 `skip`；只给 10 条时 3 次 `fetch` 且不跳；`POOL_ENOUGH === 300`）。A/B：`pool.ts` 退回旧版 → 红 1；删掉跳过判据 → 红 3。
 - 教训一：`test/test_score.mjs` 的 `ok(n, c, info)` 第三参是**失败信息**不是 `want`，`ok("…", cond, false)` 永远是红的；要比较就用 `eq` 或写成 `cond === false`。
 - 教训二：源码回退后不重新 `bundle` + `mk_test`，行为断言两边全绿（第一版 A/B 就这样假通过）——只有「读源码文本」的断言会红。
+
+### 7.186 自举审计（第 124 条，假总闸与单测空锁）
+- **D124 `Plan.cap` 是「写端有、读端没有」的假总闸**（`src/route/budget.ts`）。它自称「本轮总闸」，
+  注释还写「refill + tfb 也在里面」，但生产侧只用过 `plan.adm`（`src/routes/cron.ts` 传给 `cronScan`），
+  `cap` 从没有任何减法 —— 而 `test/test_score.mjs` 有五处断言拿它当上界（`q.adm <= q.cap`、
+  `sum <= q.cap`），永远成立，等于什么也没锁。修法：把两笔账拆开写清楚 —— ① 探活吃 `connect()`
+  额度（`SC.PROBE_CONC = 6`），按 `SCAN_MAX` 给满；② fetch 子请求额度是 `SC.SCAN_SUB = 48` 减去
+  固定支出 `SUB_FIXED`（源 6 / 判定批 1 / DoH 2 / 上报 1 / 快照 4 = 14），剩下的 `plan.sub = 34`
+  才是能自由分配的；`restorePick` 的上限改成 `Math.min(RESTORE_MAX, plan.sub)`（以前写死 12，
+  与 48 没有任何数量关系，再加一个消费者就会静默撞线）。单测改成锁账本等式。
+- **排除了一个「看起来像缺陷」的东西**：`withTimeout` 超时后那一半仍在跑，看起来会变成未捕获的
+  rejection（1101）。A/B 把 `src/core/util.ts` 退回旧版跑单测：行为断言**两边全绿** ——
+  `Promise.race` 挂上去时就给 `p` 同时挂了 resolve/reject 处理器，晚到的失败只是被丢弃。真正会造出
+  未捕获 rejection 的是 `.then(完成分支)` 这种只挂一半的新链（dialer / region / session / fallback /
+  attacher 那五处都显式跟了 `.catch`）。因此**没有**给 `withTimeout` 加多余的丢弃器，只在单测里
+  留一条行为基线：超时后等到那一半真正失败，进程不能崩。
+- 教训：A/B 必须能红。这一轮的「修复」是被 A/B 自己否掉的 —— 只看源码就动手，会多出一段没人需要、
+  还掩盖真实信号的空实现。
 
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。

@@ -1630,7 +1630,7 @@ eq("影子模式统计一致", W.S.polSame, 1);
 W.shadow({ ...rCtx, legacyWantsRelay: false });
 eq("影子模式统计不一致", W.S.polDiff, 1);
 const pl = W.planRound(1600, 8);
-ok("预算不超过子请求硬上限", pl.adm <= pl.cap, JSON.stringify(pl));
+ok("预算不超过子请求硬上限", pl.adm <= W.SC.SCAN_SUB, JSON.stringify(pl));
 ok("池子很饿时优先给准入", pl.adm >= 4, JSON.stringify(pl));
 // 7.62 起策略全生效（level 2）：判定层已有 660+ 条断言与线上实测背书，
 // 且「隧道直连成功证据 / 中继软降权」这些判据只有全生效时才真正影响选路。
@@ -2080,12 +2080,19 @@ console.log("\n65) 子请求预算");
       const q = W.planRound(poolN, Math.min(aliveN, poolN));
 const sum = q.adm;
       if (sum > worst) worst = sum;
-      ok(`总和不超 cap（pool ${poolN} alive ${aliveN}）`, sum <= q.cap, `${sum} > ${q.cap}`);
+      ok(`总和不超硬上限（pool ${poolN} alive ${aliveN}）`, sum <= W.SC.SCAN_SUB, `${sum} > ${W.SC.SCAN_SUB}`);
       eq(`预算里没有入口这一项（pool ${poolN} alive ${aliveN}）`, q.edge, undefined);
       ok(`准入不超 SCAN_MAX（pool ${poolN}）`, q.adm <= 400, String(q.adm));
     }
   }
   ok("最坏情况也没超 48", worst <= 48, String(worst));
+  // 7.186：以前这里拿 plan.cap 当上界，而 cap 在生产侧零读取 —— 断言永远成立、什么也没锁住。
+  // 现在锁真实账本：剩余 fetch 额度 = 硬上限 − 固定支出，且固定支出本身不能吃掉一半预算。
+  const l0 = W.planRound(1600, 8);
+  eq("剩余 fetch 额度 = 硬上限 − 固定支出", l0.sub, W.SC.SCAN_SUB - W.SUB_FIXED_N);
+  ok("剩余额度非负", l0.sub >= 0, String(l0.sub));
+  ok("固定支出不到硬上限的一半", W.SUB_FIXED_N * 2 <= W.SC.SCAN_SUB, String(W.SUB_FIXED_N));
+  eq("固定支出含五项（源/判定批/DoH/上报/快照）", Object.keys(W.SUB_FIXED).length, 5);
 }
 
 // 66) 入口偏好不在服务端做：整条探测链（EDGE_AUTO / edgeScan / edge:pref）已删除，
@@ -2095,7 +2102,7 @@ console.log("\n66) 入口偏好整条服务端链路已删除");
   eq("EDGE_AUTO 常量已删除", W.SC.EDGE_AUTO, undefined);
   for (const poolN of [0, 64, 1600, 3000]) {
 const q = W.planRound(poolN, Math.floor(poolN / 2));
-ok(`额度不超额（pool ${poolN}）`, q.adm <= q.cap, String(q.adm));
+ok(`额度不超额（pool ${poolN}）`, q.adm <= W.SC.SCAN_SUB, String(q.adm));
   }
   const big = W.planRound(3000, 0);
 ok("整轮额度都给了准入", big.adm >= 40, String(big.adm));
@@ -2109,10 +2116,10 @@ console.log("\n67) 探测全关时的预算");
     const q = W.planRound(poolN, 0);
 eq(`预算里不再有判定额度这一项（pool ${poolN}）`, q.vt, undefined);
     ok(`准入吃满（pool ${poolN}）`, q.adm >= 40, String(q.adm));
-ok(`不超额（pool ${poolN}）`, q.adm <= q.cap, String(q.adm));
+ok(`不超额（pool ${poolN}）`, q.adm <= W.SC.SCAN_SUB, String(q.adm));
   }
   const big = W.planRound(3000, 0);
-  ok("准入拿到 48 上限附近", big.adm >= 44 && big.adm <= big.cap, String(big.adm));
+  ok("准入拿到 48 上限附近", big.adm >= 44 && big.adm <= W.SC.SCAN_SUB, String(big.adm));
 }
 
 // 68) 探活并发上限
@@ -3327,7 +3334,7 @@ ok("状态表里不再有 tsMem 的键", !Object.prototype.hasOwnProperty.call(W
 {
   const g = "112";
   eq(`[${g}] 判定表 TTL 只有一个来源（调试端点不再抄裸魔数）`, W.VT_TTL_MS, 30 * 60 * 1000);
-  eq(`[${g}] 预算快照只回 adm/cap（判定额度那一维 7.149 已删）`, Object.keys(W.planView(400, 20)).join(","), "adm,cap,verds,site");
+  eq(`[${g}] 预算快照只回 adm/sub（判定额度那一维 7.149 已删）`, Object.keys(W.planView(400, 20)).join(","), "adm,sub,verds,site");
   const src = fs.readFileSync("test/_bundle.mjs", "utf8");
   ok(`[${g}] 调试端点不再回恒空字段 ips/nodes/rows`, !src.includes("ips: sw.ips") && !src.includes("nodes: sw.nodes"));
 }
@@ -4282,5 +4289,29 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   ok("POOL_ENOUGH 是 300（低于它就照旧全抓）", W.POOL_ENOUGH, 300);
 }
 
+// 176) 预算账本与续回边界（7.186）
+// 这里同时记一个「排除了的疑点」：withTimeout 超时后那一半仍在跑，它若最终 reject，
+// 并不会变成未捕获的 rejection —— Promise.race 挂上去的那一刻已经给 p 同时挂了 resolve/reject
+// 处理器，晚到的失败只是被丢弃（A/B 实测：退回旧版 util.ts，行为断言两边全绿）。真正会造出
+// 未捕获 rejection 的是 `.then(完成分支)` 这种只挂一半的新链，dialer/region/session 那几处
+// 都显式跟了 .catch。所以这里不锁「util.ts 有没有多挂一个丢弃器」，只锁账本。
+console.log("\n176) 预算账本与续回边界");
+{
+  const late = new Promise((_, rej) => setTimeout(() => rej(new Error("late failure")), 30));
+  let thrown = "";
+  try {
+    await W.withTimeout(late, 5, "to");
+  } catch (e) {
+    thrown = String((e && e.message) || e);
+  }
+  eq("超时会按 msg 抛错", thrown, "to");
+  // 等到那一半真正失败：将来若把 race 改成「自己收尾、不再管 p」，这里会以 unhandledRejection 崩掉
+  await new Promise((r) => setTimeout(r, 120));
+  ok("超时之后的那一半失败不会打崩进程", true);
+  eq("restorePick 收到 0 时一个也不续回", W.restorePick([...Array(40).keys()].map((i) => "u" + i), 0).length, 0);
+  const l2 = W.planRound(0, 0);
+  ok("剩余额度不小于续回上限", l2.sub >= 12, String(l2.sub));
+  eq("准入次数 = min(SCAN_MAX, SCAN_SUB)", l2.adm, Math.min(W.SC.SCAN_MAX, W.SC.SCAN_SUB));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

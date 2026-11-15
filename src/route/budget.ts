@@ -1,39 +1,59 @@
-// 子请求预算：一轮 cron 里给「准入探活」多少个 connect()。
-// 硬上限是 SC.SCAN_SUB（免费计划 50 子请求）。判定侧扫描（`vt`）在 7.69 删 userland TLS 后就没额度了，
-// 7.149 把这条只剩空壳的维度连同 round.ts 一起去掉——以前那套「覆盖缺口 × 陈旧度」加权只在
-// 两个探测开关为真时有意义，而它们恒为 0（那对开关本身也在 7.153 删掉了：没有任何读取点，
-// 留着只会让人以为「改成 1 就能开探测」），所以加权结果恒等于 cap，`?vt=` 里那份「判定额度」
-// 与 `staleR` 就成了两个永远不动、看起来仍在测量的假仪表。
+// 子请求预算：一轮 cron 给「准入探活」多少次 connect()，以及还剩多少 fetch 子请求额度。
+// 这是两笔账，不能混：
+//   ① connect() 探活吃的是「同时打开的 socket」额度（SC.PROBE_CONC = 6），不占 fetch 子请求；
+//   ② fetch 子请求免费计划一次调用 50 个（SC.SCAN_SUB 取 48 留余量），由各消费者自己的上限
+//      保证：refillPool 最多 6 个源、tfbRound 1 批、dnsRound 2 次 DoH、pendFlush 1 次、
+//      快照 4 次。把这些固定支出从硬上限里扣掉，剩下来的才是可以自由分配的额度
+//      （restorePick 用它决定一轮能续回多少个用户）。
+// 7.186 之前这里还有一个 `cap` 字段自称「本轮总闸」，但它零读取点：单测拿它当上界做断言，
+// 生产侧从来没有任何减法 —— 等于在验证一条不存在的约束（六型里的「假仪表」）。
 import { SC } from "../core/const";
 import { S } from "../core/state";
 import { vAll } from "./verdict";
 
+/**
+ * 一轮 cron 的固定 fetch 支出：每个数字都对应一个真实调用点，改动调用点就要同步这里。
+ * 不把「探活」算进来，是因为探活走 connect()，不吃 fetch 子请求额度。
+ */
+export const SUB_FIXED = {
+  refill: 6, // refillPool：最多 6 个池子源（冷却中的源在池子够多时会被跳过）
+  tfb: 1, // tfbRound：一次 DO 子请求（DO 内部的抓取记在它自己那笔账上）
+  dns: 2, // dnsRound：最多 2 次 DoH
+  pend: 1, // pendFlush：一次 DO 子请求
+  snap: 4, // usageSnapGet / loadUsers / usageSnapWrite / flushPx
+} as const;
+
+/** 固定支出合计：订阅端与单测直接拿它和硬上限对账 */
+export const SUB_FIXED_N = SUB_FIXED.refill + SUB_FIXED.tfb + SUB_FIXED.dns + SUB_FIXED.pend + SUB_FIXED.snap;
+
 export interface Plan {
-  adm: number; // 池子准入探活（新增候选）
-  cap: number; // 本轮总闸
+  adm: number; // 池子准入探活（新增候选），单位是 connect() 次数
+  sub: number; // 扣掉固定支出后剩余的 fetch 子请求额度
 }
 
 /**
- * 本轮预算：准入拿满、但不超过 `SC.SCAN_MAX`。
- * @param poolN 池子大小（仅调试展示用：预算不再随池子变化）
- * @param aliveN 活跃池大小（同上）
- * @returns 本轮 `Plan`
+ * 功能：算出一轮 cron 的额度分配。
+ * @param {number} poolN 池子大小（预算已与池子解耦，保留签名是因为 `?vt=` 与单测按它取数）
+ * @param {number} aliveN 活跃池大小（同上，不参与计算）
+ * @returns {Plan} 准入次数 + 剩余 fetch 额度
  */
 export function planRound(poolN: number, aliveN: number): Plan {
-  // 预算已与池子/活跃数解耦：判定维度删除后，两个参数只剩「保留签名」的作用。
-  // 注释里说明而不是删参数，是因为 `?vt=` 端点、`planView` 与单测都用这个签名取数。
+  // 两个参数只为兼容调用方签名：判定侧扫描在 7.69 删 userland TLS 后就没额度了，
+  // 7.149 把那条只剩空壳的维度（round.ts）一起删掉，预算因此与池子彻底解耦。
   void poolN;
   void aliveN;
-  const cap = Math.max(12, SC.SCAN_SUB);
-  // 准入吃满整轮闸门：探活走 connect()，不吃 fetch 子请求额度（线上 /logs 从未出现 subrequest 超限）。
-  return { adm: Math.min(cap, SC.SCAN_MAX), cap };
+  // 探活走 connect()，不吃 fetch 子请求：按「本轮最多扫多少」给满，硬上限仍是 SCAN_SUB
+  const adm = Math.max(1, Math.min(SC.SCAN_MAX, SC.SCAN_SUB));
+  // 固定支出必须先扣：扣完仍为正，才是能自由分配的额度（负数说明固定支出本身就超预算了）
+  const sub = Math.max(0, SC.SCAN_SUB - SUB_FIXED_N);
+  return { adm, sub };
 }
 
 /**
- * 供调试端点与日志用的快照（不参与决策）
- * @param poolN 池子大小
- * @param aliveN 活跃池大小
- * @returns 预算 + 判定表行数 + 最近站点
+ * 功能：供调试端点与日志用的快照（不参与决策）。
+ * @param {number} poolN 池子大小
+ * @param {number} aliveN 活跃池大小
+ * @returns {Plan & { verds: number; site: string }} 预算 + 判定表行数 + 最近站点
  */
 export function planView(poolN: number, aliveN: number): Plan & { verds: number; site: string } {
   const p = planRound(poolN, aliveN);

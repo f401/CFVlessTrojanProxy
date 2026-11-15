@@ -9,7 +9,7 @@ import { runTfb } from "../route/tfb";
 import { DNS } from "../route/dnsfacts";
 import { probeFam } from "../proxy/dial";
 import { SEL } from "../px/selector";
-import { flushSnap, pendFlush, restorePick, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
+import { RESTORE_MAX, flushSnap, pendFlush, restorePick, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
 import { loadUsers } from "../proxy/protocol";
 
 /**
@@ -94,9 +94,10 @@ async function dnsRound(): Promise<void> {
  * @returns 无
  */
 async function cronOnce(env: Env): Promise<void> {
+  // 一轮 cron 的额度先算清：探活次数（connect 账）与剩余 fetch 额度（子请求账）。
+  // 放在最外层是因为下面三段都要用：准入探活用 adm，续回用户数用 sub。
+  const plan = planRound(S.pool.length, S.alive.size);
   try {
-    // 一轮 cron 的子请求预算先算清：准入（池子）、判定（目标 x 通道）
-    const plan = planRound(S.pool.length, S.alive.size);
     // 准入吃满本轮预算即可：加码函数 alivePlan 在 7.179 删除（它永远是恒等变换，见 px/aliveplan.ts 的文档）
     await cronScan(env, plan.adm);
     await tfbRound(env);
@@ -121,7 +122,9 @@ async function cronOnce(env: Env): Promise<void> {
       // 每次恢复 = 1 个 DO 子请求：不限量时用户一多就会撞 50 个子请求上限，
       // 而这里的 catch 会吞掉异常、顺带跳过下面的快照写 —— 表现为「用量越用越不记」。
       const allIds = Object.keys(snap.users);
-      const pick = restorePick(allIds);
+      // 一轮能续回多少个用户，由剩余 fetch 额度决定（plan.sub）：以前写死 12，
+      // 与 48 的硬上限没有任何数量关系，加到第 5 个消费者时就会静默撞线（7.186）。
+      const pick = restorePick(allIds, Math.min(RESTORE_MAX, plan.sub));
       cnt("restore", pick.length);
       if (allIds.length > pick.length) cnt("restoreSkip", allIds.length - pick.length);
       await eachLimit(pick, 8, (id) => restoreUsage(env, id, snap).then(() => undefined));
