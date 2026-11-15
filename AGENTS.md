@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.171**（自举审计五十一批、共 90 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.172**（自举审计五十二批、共 92 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -394,6 +394,22 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - **第 90 条：地区钉住的失败被记成「目标不可达」。** `src/proxy/attacher.ts` 的 `st.retried` 分支（「换节点也不通」）
   无条件 `cnt("dead")`，但 `?rg=xx` 这条路上 `dialAnother` 被限定了同一地区 —— 走到这里可能只是「该地区没别的候选」，
   不是目标连不上。和 7.170 在 `session.ts` 里做的拆分同一个口径，改记 `rgFail`；直连那一支的 `dead` 保持不变。
+### 7.172 自举审计（第 91–92 条，DO 端点的反方向）
+
+- **判据反过来**：前几轮查的是「调用方有、实现方没有」（`/meter/{dbt,raw,hold,cont}` 那批），这一轮查
+  「实现方有、调用方全无」——有完整代码、有文档提到，但没有任何路由能触发它，等于「写着的功能实际不可达」。
+- **第 91 条：`/meter/http80` 死实现**。DO 侧那份 `probeHttp80(h, r, p)` 与 `src/routes/debug.ts` 的 `?http=`
+  （`withTimeout(probeHttp80(...), 6000)`）完全重复，唯一的差别是它跑在 DO 里、要多吃一次 CPU 预算；零调用点。已删。
+- **第 92 条：`/meter/reset` 死实现**。用量清零能力写在 DO 里（`this.c = { up: 0, … }` + `save()`），
+  但没有任何路由或面板按钮能触发它 —— 想做「管理员清零」得先有管理员命令的权限设计，那是新功能不是修缺陷。已删。
+- 顺带修掉一处**落错位置的注释**：`src/store/meter.ts` 里「只在当前为 0 时回填，天然幂等，重建脚本后能自动恢复历史用量」
+  原本紧贴在 `/http80` 那一块上方，而它描述的是 `/seed` 的「累计为 0 才回填」分支 —— 已挪到 `/seed` 正上方（端点删掉后它会变成孤句）。
+- **门禁补反方向**：`tools/check-wire.mjs` 原来只查「调用方是否有实现」，于是实现方被删也会静默通过。
+  现在对每个 `endsWith("/x")` 的 DO 端点要求 `src/` 里（`meter.ts` 自己除外）必须出现 `https://meter/x`，
+  否则报「有实现但没有任何调用方（死端点：能力写着，实际不可达）」并 exit=1（`/get` 走兜底是登记过的契约）。
+- **自证**：把 `src/store/meter.ts` 换回旧版跑新 `check-wire` → 恰好报 `/meter/http80` 与 `/meter/reset` 两条、exit=1。
+- 锁：第 162 组 4 条（两个端点已删、不再 import `probeHttp80`、回填注释回到 `/seed` 上方、`check-wire` 有反向检查）；
+  旧代码上 4 条全红（1133 通过 / 4 失败），改后 1137/0。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

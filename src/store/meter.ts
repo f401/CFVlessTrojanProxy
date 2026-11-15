@@ -1,6 +1,5 @@
 import { mergeFacts } from "./factmerge";
 import { seal, unseal } from "./index";
-import { probeHttp80 } from "../core/http80";
 import { probeTf } from "../core/tf";
 
 /* do */
@@ -145,7 +144,7 @@ export class Meter {
   }
 
   /**
-   * DO 的请求入口：/add 累加增量、/seed 首次回填、/reset 清零、其他路径返回当前值。
+   * DO 的请求入口：/add 累加增量、/seed 首次回填、其他路径返回当前值。
    * @param {Request} req 请求（body 为 {up, down, conns, first} 的 JSON）
    * @returns {Promise<Response>} 处理后的累计值
    */
@@ -320,15 +319,6 @@ export class Meter {
       return this.json();
     }
 
-    // 只在当前为 0 时回填，天然幂等，重建脚本后能自动恢复历史用量
-    // 明文 HTTP 证据：零 TLS，CPU 几乎为零，DO 里也能跑。
-    if (p.endsWith("/http80")) {
-      const hh = url.searchParams.get("h") || "";
-      const rr = url.searchParams.get("r") || "";
-      const pp = url.searchParams.get("p") || "/";
-      if (!/^[a-z0-9.*-]+(\.[a-z0-9*-]+)+$/i.test(hh)) return Response.json({ ok: false, err: "bad host" }, { status: 400 });
-      return Response.json(await probeHttp80(hh, rr, pp));
-    }
     // TLS 探测走 DO：请求路径只有 10ms CPU 预算，DO 有独立且大得多的预算。
     // 一次探测不落盘、不额外写 DO（结果由调用方并入既有批次），不增加 KV 写。
     if (p.endsWith("/stage")) {
@@ -464,6 +454,7 @@ const hl = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d,
       return Response.json({ g: this.g, c: this.c, s: this.s, e: this.e });
     }
 
+    // 只在当前为 0 时回填，天然幂等，重建脚本后能自动恢复历史用量
     if (p.endsWith("/seed")) {
       let d: MeterBody = {};
       try {
@@ -534,18 +525,6 @@ const hl = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d,
           this.c = oldC;
           throw e;
         }
-      }
-      return this.json();
-    }
-
-    if (p.endsWith("/reset")) {
-      const oldC = { ...this.c };
-      this.c = { up: 0, down: 0, conns: 0, first: 0, ts: Date.now(), d: "", dU: 0, dD: 0 };
-      try {
-        await this.save();
-      } catch (e) {
-        this.c = oldC;
-        throw e;
       }
       return this.json();
     }

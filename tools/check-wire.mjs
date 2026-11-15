@@ -104,6 +104,20 @@ for (const f of prod) {
     }
   });
 }
+// 反方向：实现方必须有调用方。7.171 之前有两个 DO 端点「有完整实现、零调用点」——
+// `/meter/http80`（DO 侧明文探测，与 debug 的 `?http=` 重复一份）与 `/meter/reset`
+// （用量清零能力没有任何入口）。它们不会让任何门禁变红：调用方检查只看「调用方是否
+// 有实现」，不看「实现方是否有人调」，于是能力被删了也没人发现。
+let zombieFail = 0;
+for (const k of served) {
+  if (FALLBACK_OK.has(k)) continue;
+  const used = prod.some((f) => f !== "src/store/meter.ts" && fs.readFileSync(f, "utf8").includes("https://meter/" + k));
+  if (!used) {
+    zombieFail += 1;
+    console.log(`FAIL DO 端点 /meter/${k} 有实现但没有任何调用方（死端点：能力写着，实际不可达）`);
+  }
+}
+fail += zombieFail;
 fail += routeFail;
 if (fail) {
   console.log(`\n接线扫描：${fail} 条事实没有被真实链路调用`);

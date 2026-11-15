@@ -3762,5 +3762,14 @@ ok("会话层不再有裸 connect（迟到成功的 socket 必须有人关）", 
 ok("超时之后迟到成功的 socket 会被关掉", /void pk0\s*\n\s*\.then\(\(s\) => \{ try \{ s\.close\(\); \}/.test(ss2));
 ok("地区钉住的补救链不再把「没别的候选」记成目标不可达", at2.includes('cnt(region ? "rgFail" : "dead")'));
 eq("attacher 里只剩一处 dead（真正的目标不可达）", (at2.match(/cnt\("dead"\)/g) || []).length, 1);
+
+// 第 162 组：DO 端点的反方向（有实现、零调用方）（v7.172）
+// 前几轮只查过「调用方有、实现方没有」；这一批查反方向：能力被写下、却没有任何入口。
+const mSrc = fs.readFileSync("src/store/meter.ts", "utf8");
+const wSrc = fs.readFileSync("tools/check-wire.mjs", "utf8");
+ok("两个零调用点的 DO 端点已删除（/http80 与 /reset）", !/endsWith\("\/(http80|reset)"\)/.test(mSrc));
+ok("meter.ts 不再 import 探活用的 probeHttp80", !mSrc.includes("probeHttp80"));
+ok("错位的回填注释回到它描述的 /seed 分支上方", /只在当前为 0 时回填[\s\S]{0,80}endsWith\("\/seed"\)/.test(mSrc));
+ok("check-wire 有反向检查：实现方必须有调用方", wSrc.includes("zombieFail") && wSrc.includes("有实现但没有任何调用方"));
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
