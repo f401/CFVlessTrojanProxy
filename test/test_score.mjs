@@ -3102,5 +3102,26 @@ eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
   W.BLK.clear();
 }
 
+
+console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表有上限");
+{
+  W.FACTS.clear();
+  eq("门面登记了全部五张表（新增一类必须登记，否则 interface 报错）", W.FACTS.kinds().join(","), "eg,ps,dead,blk2,dns");
+  eq("快照按同一份登记表生成", Object.keys(W.FACTS.snap()).length, 5);
+  // 站点名来自客户端请求、不是有限集合：两张按站点的表必须被压回上限
+  W.POLICY.trim(0);
+  for (let i = 0; i < 600; i++) {
+    W.decide({ host: `h${i}.cap.example.com`, cfHost: false, clientV6: false, relays: [], legacyWantsRelay: false });
+  }
+  eq("决策序号表有上限（站点名不是有限集合）", W.POLICY.seqSize() <= 512, true);
+  eq("冷启动钉住表有上限", W.POLICY.pinSize() <= 512, true);
+  // 过期钉住会被清掉：先钉一条，再把时间推到 61 秒后
+  W.decide({ host: "pin.example.com", cfHost: true, clientV6: false, relays: ["198.51.100.44"], legacyWantsRelay: false });
+  const pinBefore = W.POLICY.pinSize();
+  eq("冷启动确实钉住了一条（否则下面的过期断言是空断言）", pinBefore >= 1, true);
+  W.POLICY.trim(Date.now() + 61_000);
+  eq("过期钉住被清掉（trim 传未来时间）", W.POLICY.pinSize(), 0);
+  W.FACTS.clear();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

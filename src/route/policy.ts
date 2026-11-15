@@ -38,6 +38,9 @@ export interface Ctx {
   facts?: ReadonlySet<string>;
 }
 
+/** 「按站点」的两张内存表上限：站点名来自客户端请求，不是有限集合 */
+const HOST_MEM_MAX = 512;
+
 export interface Choice {
   chan: Chan;
   why: string;
@@ -58,6 +61,40 @@ export class Policy {
 
   /** 每个站点的决策序号：康复通道按「每 20 条一次」触发，不随机（可复现、可测） */
   private seq = new Map<string, number>();
+
+  /**
+   * 功能：给两张「按站点」的表设上限（`pin` 与 `seq`）。
+   *
+   * 为什么要有（v7.140）：两者都在每次决策里 `set` 一次，条目只增不减 —— 长跑 isolate 里
+   * 见过的每个站点都会留一行，而站点名来自客户端请求的 ClientHello，不是有限集合。
+   * 裁剪规则：先清过期的 `pin`（`until <= now`），再把两张表压回 `HOST_MEM_MAX` 行；
+   * 压回时删 Map 里最前面的键 —— `set` 每次都会把键移到末尾，所以顺序 ≈ 最近使用顺序。
+   * @param now 当前时间
+   * @returns {void}
+   */
+  trim(now = Date.now()): void {
+    for (const [h, v] of this.pin) if (v.until <= now) this.pin.delete(h);
+    while (this.pin.size > HOST_MEM_MAX) {
+      const first = this.pin.keys().next().value as string | undefined;
+      if (!first) break;
+      this.pin.delete(first);
+    }
+    while (this.seq.size > HOST_MEM_MAX) {
+      const first = this.seq.keys().next().value as string | undefined;
+      if (!first) break;
+      this.seq.delete(first);
+    }
+  }
+
+  /** 功能：当前 `seq` 表条目数（单测与调试端点用）。 @returns {number} 条目数 */
+  seqSize(): number {
+    return this.seq.size;
+  }
+
+  /** 功能：当前 `pin` 表条目数（单测与调试端点用）。 @returns {number} 条目数 */
+  pinSize(): number {
+    return this.pin.size;
+  }
 
   /**
    * 功能：冷启动时为站点挑一条固定中继，60 秒内复用同一条。
@@ -167,6 +204,8 @@ export class Policy {
     // 用序号而不是随机数，是为了让「第 20 条会康复」这件事可复现、可断言。
     const nth = (this.seq.get(c.host) || 0) + 1;
     this.seq.set(c.host, nth);
+    // 站点名不是有限集合：超过上限就压回（见 trim 的注释）
+    if (this.seq.size > HOST_MEM_MAX || this.pin.size > HOST_MEM_MAX) this.trim();
     if (nth % 20 === 0 && stick.length > 1) {
       // 闸门看「历史最好」而不是会衰减的当前均值：这条通道唯一的用途就是打破
       // 「被降权 → 拿不到样本 → 永远回不来」的死锁；用均值等于把这次机会交给运气
@@ -184,8 +223,8 @@ export class Policy {
 
     // 直连成功证据只信 5 分钟：边缘出口会漂移。这条必须排在「客户端 v6」与「有中继就用中继」之前 ——
     // 客户端地址族只影响落到哪个 POP，不会传给目标（本地配对实测：直连 30/30 vs 中继 26/30）。
-      const dAt = vAt(c.host, "d");
-      if (vOk(c.host, "d") && dAt && Date.now() - dAt < 300000) return { chan: DIRECT, why: "direct-ok" };
+    const dAt = vAt(c.host, "d");
+    if (vOk(c.host, "d") && dAt && Date.now() - dAt < 300000) return { chan: DIRECT, why: "direct-ok" };
 
     if (c.clientV6 && c.cfHost) {
       // F6：v6 客户端打 CF 目标必 403，只有非 CF 主机能改判
@@ -230,8 +269,8 @@ export class Policy {
       // 一旦蒙过就把整站钉在这条 v6 上，`eg`/`score` 全被绕过（400 条里 399 条走这条短路，成功率 10.8%）。
       // v8 的纪律是「事实只改顺序」：让 `posOf`（最近出过整页）+ `scoreOf`（含族偏置）去排序即可，
       // 蒙过一次的 v6 中继会因为 `eg=6` 的 ×40 而排在已知 v4 后面。
-      // 直连成功证据只信 5 分钟：边缘出口会漂移。这一条必须排在「有中继就用中继」之前，
-      // 否则只要池子里有一条中继，直连证据永远没机会生效（本地闭环证明里直连 95% 的场景仍 100% 走中继）。
+      // 非 CF 主机是唯一能把「客户端 IP 透传」这条封禁规则改判掉的通道，所以优先；
+      // 注意「直连成功证据优先」那一条已经在本函数上半部（direct-ok），不在这里重复。
       if (nonCf.length) return { chan: { kind: "r", ip: nonCf[0] }, why: "cf-noncf" };
       // 「本出口 fetch 得 200」不等于「隧道直连得 200」：fetch 走的是 CF 自己的出口，
       // 隧道直连可能落在一个对 CF 托管站点不友好的边缘出口上（实测 200 → 隧道 403）。
