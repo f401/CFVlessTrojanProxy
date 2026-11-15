@@ -109,7 +109,7 @@ export { runTfb, tfVerdict, tfClass, tfEscalate, tfBlockOk, tfRemember, pickFres
 export { RELPERF, REL_TTL, relCost, relCostFor, relCostMode, relNote, relSnap } from "./route/relperf";
 export { EG, EG_BIG, EG_TINY, EG_TTL, EgFacts, egCounts, egDerive } from "./route/egfacts";
 export { CAP, CAP_TTL, CapFacts, capFactor } from "./route/capfacts";
-export { ALIVE_MIN, ALIVE_TARGET, alivePlan, srcStat } from "./px/aliveplan";
+export { ALIVE_TARGET, srcStat } from "./px/aliveplan";
 export { FACT_ALL, factList, factOn, factParse } from "./route/factflags";
 export { factMul } from "./route/factmul";
 export { PS, psBest, psFactor, psNote, psOk, psPrior, psSnap } from "./route/psfacts";

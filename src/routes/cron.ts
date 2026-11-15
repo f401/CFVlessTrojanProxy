@@ -4,7 +4,6 @@ import { logErr } from "../nodes/metrics";
 import { S } from "../core/state";
 import { cnt } from "../core/counter";
 import { cronScan, flushPx } from "../px/pool";
-import { alivePlan } from "../px/aliveplan";
 import { planRound } from "../route/budget";
 import { runTfb } from "../route/tfb";
 import { DNS } from "../route/dnsfacts";
@@ -98,8 +97,8 @@ async function cronOnce(env: Env): Promise<void> {
   try {
     // 一轮 cron 的子请求预算先算清：准入（池子）、判定（目标 x 通道）
     const plan = planRound(S.pool.length, S.alive.size);
-    // 活跃池不够 16 条时加码扫描：8 条池「好出口 <2」概率 28.5%，16 条只有 3.4%
-    await cronScan(env, alivePlan(S.alive.size, plan.adm));
+    // 准入吃满本轮预算即可：加码函数 alivePlan 在 7.179 删除（它永远是恒等变换，见 px/aliveplan.ts 的文档）
+    await cronScan(env, plan.adm);
     await tfbRound(env);
     await dnsRound();
     SEL.afterScan(env);

@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.178**（自举审计五十八批、共 101 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.179**（自举审计五十九批、共 102 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -392,6 +392,21 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - **修法**：`trojanUdpFrame` 的返回值从 `frame | null` 改成 `frame | "short" | null`（区分「还没到齐」与「ATYP/长度非法」）；`Connection` 新增 `udpBuf`，`handleDns` 入口把上一帧的残留接回来，出口把没拆完的字节 `carry` 回去；残留上限 `DNS_CARRY_MAX = DNS_MAX + 64`，超限才关连接（`udp overflow`）。两条收尾分支（`queries >= 32` 用满配额、剩余不足一个帧头）也走 `carry`，不再静默丢。
 - **锁**：第 169 组 17 条 —— `trojanUdpFrame` 三态（完整 / 少一字节 = `short` / ATYP 非法 = `null`）、Trojan 半个帧不发且连接不断、拼起来发一次且长度 = 前缀(7) + 长度(2) + 负载(20)、残留清空、VLESS 半个帧同理、源码断言（`carry(buf)` 三处、`st.udpBuf = rest.slice();`）。A/B：旧代码 1180 通过 **10 失败** → 新 1190/0。
 
+### 7.179 自举审计（第 102 条，活跃池的加码是恒等变换）
+
+- **现象**：`src/px/aliveplan.ts` 的 `alivePlan(alive, want)` 文档写「不够 16 条就加码扫描」，
+  但 `budget.ts` 的 `planRound` 从 7.149 起就与活跃数解耦（`adm = min(max(12, SCAN_SUB), SCAN_MAX) = 48`），
+  而加码值最大只有 `16 - 0 + 4 = 20 < 48` ⇒ 实测 **401 个 alive 取值下 `alivePlan(x, 48) === 48` 无一例外**；
+  更进一步：`cronScan` 里 `scanN = max(12, min(min(SCAN_MAX, sub), want))` 又被 `sub`（= `SCAN_SUB`）夹回来，
+  所以**任何** `SCAN_SUB` 配置下（12/24/48/64/400 都试过）加码值都会被夹回原值 —— 这不是「暂时不生效」，是恒等。
+- 同一族的第二处：`ALIVE_MIN = 12` 的文档说「低于这个数就该用缺多少补多少的力度去扫」，
+  但它**零读取点**（只有定义、导出与两条单测），没有任何代码拿它做判断。
+- 修法：删掉 `alivePlan` 与 `ALIVE_MIN`；`ALIVE_TARGET = 16` 保留但**给出唯一真读者** ——
+  `/health` 的 `relays` 新增 `target` 与 `short`（`ips.length < ALIVE_TARGET`），运维才有办法回答「池子够不够」；
+  `src/routes/cron.ts` 直接 `await cronScan(env, plan.adm)`（删掉那条恒等调用与它会误导人的注释）。
+- 锁：第 91 组改成「只作判据」——`ALIVE_MIN`/`alivePlan` 已删除、五种子请求配额下加码都被夹回原值、
+  `health.ts` 含 `target: ALIVE_TARGET`/`short: ips.length < ALIVE_TARGET`、`cron.ts` 里不再有 `alivePlan(` 调用
+  （按调用判而不是按名字判：注释里要留历史说明）。A/B：旧代码 **1185 通过 / 3 失败** → 新 1188/0。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

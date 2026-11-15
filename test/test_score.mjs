@@ -2832,15 +2832,25 @@ console.log("\n90) 吞吐容量噪声门：只记比值，两次不一致就不�
 }
 
 
-console.log("\n91) 活跃池目标：不够 16 条就加码扫描");
+console.log("\n91) 活跃池目标：只作判据（加码函数已删）");
 {
   eq("目标 16 条", W.ALIVE_TARGET, 16);
-  eq("下限 12 条", W.ALIVE_MIN, 12);
-  eq("空池按缺额加码（16-0+4 超过预算 4）", W.alivePlan(0, 4), 20);
-  eq("10 条时加到 10（16-10+4=10）", W.alivePlan(10, 4), 10);
-  eq("已经够用时不加码", W.alivePlan(16, 4), 4);
-  eq("超额时按预算走", W.alivePlan(40, 30), 30);
-  eq("加码不会压低预算", W.alivePlan(0, 60), 60);
+  ok("下限常量与加码函数都已删除", W.ALIVE_MIN === undefined && W.alivePlan === undefined);
+  // 加码值最大是 16-0+4=20，而 adm 恒等于 min(max(12,SCAN_SUB), SCAN_MAX)，scanN 又被 sub 夹回去
+  let clamped = 0;
+  for (const sub of [12, 24, 48, 64, 400]) {
+    const cap = Math.max(12, sub);
+    const adm = Math.min(cap, W.SC.SCAN_MAX);
+    const boosted = Math.max(adm, W.ALIVE_TARGET + 4);
+    const scanN = Math.max(12, Math.min(Math.min(W.SC.SCAN_MAX, sub), adm));
+    const scanN2 = Math.max(12, Math.min(Math.min(W.SC.SCAN_MAX, sub), boosted));
+    if (scanN === scanN2) clamped += 1;
+  }
+  eq("五种子请求配额下加码都被夹回原值", clamped, 5);
+  const hsrc = fs.readFileSync("src/routes/health.ts", "utf8");
+  ok("/health 的 relays 给出目标规模与「不够」标记", hsrc.includes("target: ALIVE_TARGET") && hsrc.includes("short: ips.length < ALIVE_TARGET"));
+  // 注释里可以留历史说明，只禁「调用」——因此按 `alivePlan(` 判，而不是按名字
+  ok("cron 不再调用加码函数", !/alivePlan\s*\(/.test(fs.readFileSync("src/routes/cron.ts", "utf8")));
   const s0 = W.srcStat();
   eq("初始没有失败源", s0.bad, 0);
   W.srcNote("https://example.invalid/list.txt", false);

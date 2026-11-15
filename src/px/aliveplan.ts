@@ -6,23 +6,14 @@ import { srcHealth } from "./probe";
  * 为什么是 16：仿真里「稳态好出口比例」只有 `r/(d+r) ≈ 0.286`（d=5%/h 掉线、r=2%/h 恢复），
  * 池子 8 条时「好出口 < 2 条」的概率 28.5%，12 条 10.2%，16 条降到 **3.4%**；
  * 而把复检频率拉到最大也只能把缺货率压到 26.7% —— 探测频率买不来供给，只有池子大小能。
+ *
+ * 这个数字**只作判据**：`/health` 的 `relays.short` 用它回答「池子够不够」。
+ * 7.179 之前它还有一个消费者 `alivePlan()`，按「离目标差多少」给扫描加码 ——
+ * 但那个加码永远是恒等变换（预算 `budget.ts` 的 `adm` 恒等于 `SC.SCAN_SUB`，
+ * 而加码值最大只有 `16 - 0 + 4 = 20`，`cronScan` 里又会被 `sub` 夹回去），
+ * 也就是说「缺货就多扫」这件事从 7.149 起就没有真正发生过，函数已删。
  */
 export const ALIVE_TARGET = 16;
-
-/** 活跃池的下限：低于这个数就该用「缺多少补多少」的力度去扫。 */
-export const ALIVE_MIN = 12;
-
-/**
- * 功能：在预算给出的准入条数上，按「离目标还差多少」加码。
- * 只在不够用时加码、从不在够用时削减 —— 池子扫描还兼着「找更好的节点」，削减它会伤大池表现。
- * @param alive 当前活跃节点数
- * @param want 预算原本给的准入条数
- * @returns {number} 本轮实际准入条数
- */
-export function alivePlan(alive: number, want: number): number {
-  if (alive >= ALIVE_TARGET) return want;
-  return Math.max(want, ALIVE_TARGET - alive + 4);
-}
 
 /**
  * 功能：源健康度概览 —— `/health` 用，回答「补货是不是一直失败」。
