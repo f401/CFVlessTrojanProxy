@@ -144,7 +144,7 @@ export class Dialer {
       }
       if (!sock) sock = await dial(host, port);
     }
-    if (!sock) throw new Error("skip-direct");
+    if (!sock) throw new Error("dial returned null");
     return sock;
   }
 }

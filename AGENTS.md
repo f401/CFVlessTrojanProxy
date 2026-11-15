@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.167**（自举审计四十七批、共 79 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.168**（自举审计四十八批、共 81 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -350,6 +350,12 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
 - **链接订阅是三种格式里唯一没把入口钉成 IPv4 的**：Clash 用 `server: <边缘 IPv4>` + `servername: <域名>` + `ip-version: ipv4`，sing-box 用 `domain_strategy: "ipv4_only"`，而 `src/views/sub-links.ts` 的 `vless://<uuid>@<域名>:<port>` 两样都没有 ⇒ 双栈网络上客户端把域名解析成 AAAA，CF→CF 把 v6 出口原样透传给目标，正是 7.49 之前 FlClash 打开 X 拿到 4 字节 `IPv6` 403 的那条路径。链接格式没有 `ip-version` 这类字段，所以钉法与 Clash 相同：`@<边缘 IP>` + `host=`/`sni=` 指回域名。
 - 修法：`manual`（`env.nodes` 非空）或 `?e=0` 时不钉（与 Clash 的 `noEdge` 同义）；否则 `edgeIps = X_EDGE_IPS.slice(0, 8)`，主循环与地区条目都按 `ei++ % edgeIps.length` 轮转取 IP，`n.host` / `host` 作为无 IP 时的回退。
 - 验收：`test/test_score.mjs` 第 157 组 7 条（每条都是 IP 字面量、`host=`/`sni=` 仍是域名、IP 至少三种、`?e=0` 退回域名、手动节点不钉、地区条目也钉、源码里有 `X_EDGE_IPS.slice(0, 8)`）；golden 8 项不变（golden 的 `env.nodes` 非空 ⇒ 走手动分支，输出与改前一致）。A/B：旧代码 1107 通过 4 失败 → 新 1111/0。
+### 7.168 自举审计（第 80–81 条）
+
+- **「连不上」被说成「故意跳过直连」**：`src/proxy/dialer.ts:147` 原来写 `if (!sock) throw new Error("skip-direct")`，而这条路径成立的前提是「中继全试过、`dial4` 与 `dial` 都没给出 socket」——`dial()`（`src/proxy/dial.ts:176`）的每个出口要么 `return` 一个 socket、要么 `throw`，从来不会返回 null ⇒ 这行**永远不可达**，一旦可达就是「连不上」而不是「跳过」。`src/proxy/session.ts:196` 有同一句话的第二份：`sock` 在 `REGION.open` 回空时已经 `return`、`DIALER.open` 只会返回 socket 或抛错，所以那里同样不可达。真正的危害是 `/logs` 里只留一行 `ws: skip-direct`，读的人会以为「这条连接是故意放弃直连的」，看不到底层失败原因。
+- 修法：两处都改成 `throw new Error("dial returned null")`（如实描述「两条拨号路径都没给出 socket」），并在 `session.ts` 的守卫上方写清「这里只为把类型收窄成 `Socket`，两条路径都不返回 null」以及历史标签的来历。
+- **脚本补丁打乱的缩进**：`src/proxy/connection.ts` 的 `flush(closing)` 里，`HOOK.relPerf?.(…)` 那一行被历次脚本改成了**顶格（缩进 0）**，`HOOK.traffic` 那段与 `nsLatency` 那行少缩进两格（块内层级读起来是断的，且与 `nsStall`/`S.cagg` 两段的缩进不一致）。修法：只改空白（同时验证 `git diff --stat` 里该文件只有缩进变化），并加一条锁：`src/proxy/connection.ts` 里不允许出现顶格的语句、`HOOK.relPerf` 那行必须是 10 空格。
+- 教训：`// 通道证据` 那段注释与代码曾经在 `if (!this.counted)` 里（7.108 前后挪过位置），脚本按行替换时把缩进一起挪丢了；这类改动不会让任何门禁变红，只有人读代码时才会发现。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。

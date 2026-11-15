@@ -3711,5 +3711,19 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   ok("地区条目同样钉入口 IP", lReg.length > lAuto.length && /^\d{1,3}(\.\d{1,3}){3}$/.test(lSrv(lReg[lReg.length - 1])));
   ok("实现里确实读了边缘 IP 表", fs.readFileSync("src/views/sub-links.ts", "utf8").includes("X_EDGE_IPS.slice(0, 8)"));
 }
+{
+  // 第 158 组：错误的标签与被打乱的缩进（v7.168）
+  // 「连不上」被写成 skip-direct 会让 /logs 里只看到「故意跳过直连」，看不出真正原因。
+  const dSrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
+  const sSrc = fs.readFileSync("src/proxy/session.ts", "utf8");
+  ok("拨号失败不许再被说成「故意跳过直连」（dialer）", !dSrc.includes("skip-direct") && dSrc.includes("dial returned null"));
+  ok("同一句话在 session 里也改掉", !/^\s*throw new Error\("skip-direct"\)/m.test(sSrc) && sSrc.includes("dial returned null"));
+  ok("session 的守卫注明了两条拨号路径都不会回 null", sSrc.includes("两条拨号路径都不返回 null"));
+  // 脚本补丁曾把一条语句顶格（缩进 0），块内的层级读起来是断的。
+  const cLines = fs.readFileSync("src/proxy/connection.ts", "utf8").split(/\r?\n/);
+  const relLine = cLines.find((l) => l.includes("HOOK.relPerf?.(this.host"));
+  ok("relPerf 那行和同块其它语句同层级（10 空格）", !!relLine && /^ {10}HOOK\.relPerf\?\./.test(relLine));
+  ok("closing 块里没有顶格的语句", cLines.filter((l) => /^\S/.test(l) && !/^(import|export|\/\/|\/\*|\}|type |const |function |class )/.test(l)).length === 0);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

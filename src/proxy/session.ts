@@ -193,7 +193,12 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
           // 把客户端首个载荷（TLS ClientHello 含目标 SNI）写给目标/中转，
           // 目标是 CF 托管站点时首个连接会被静默丢弃，此时靠 onClose 重试到 proxyip
           // 首包写入 + 双向搬运 + 0 字节关闭的补救链都在 Attacher 里（P5-4）
-          if (!sock) throw new Error("skip-direct");
+          //
+          // 这里的守卫只是为了把类型收窄成 Socket：两条拨号路径都不返回 null
+          // （REGION.open 为空时上面已经 return，DIALER.open 只会返回 socket 或抛错）。
+          // 以前写的是 throw new Error("skip-direct")，读日志的人会以为「故意跳过直连」，
+          // 实际只可能是「两条路都没给出 socket」——同一个错标签在 dialer 里也有一份（v7.168）。
+          if (!sock) throw new Error("dial returned null");
           await ATTACHER.run(
             { env, ws: serverWS, st, mode, host: r.host, port: r.port, region: ipRegion, payload },
             sock,

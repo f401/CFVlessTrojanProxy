@@ -325,19 +325,19 @@ export class Connection {
           // 1MB 以上才算「过了慢启动」；其余样本 kbs 记 0（只保留首字节），由代价函数特殊处理。
           const xfer = Math.max(1, ms - t0);
           const kbs = this.down >= 1048576 ? (this.down / 1024) * 1000 / xfer : 0;
-HOOK.relPerf?.(this.host, ip, t0, kbs);
+          HOOK.relPerf?.(this.host, ip, t0, kbs);
           // 只有真正拉到 ≥40KB 才算一次可用的吞吐样本：4 字节 403 页算出的"速度"是假的（文档 D5）
           if (this.down >= 40960) HOOK.capNote?.(ip, Math.round((this.down / 1024) * 1000 / Math.max(1, Date.now() - this.t0)));
           // 「站点 × 中继」成功率（v8 §5 的 ps）：拿到完整响应（>64B）才算过。
           // 64B 这条线来自实测：旧的「4 字节 IPv6 拒绝页」已变成 737B HTML（§19.2），
           // 所以不能只排除 4 字节；而正常页面哪怕再小也有几百字节（example.com 932B）。
         }
-      // 通道证据：交给决策层（弱证据只可能把 unknown 提成 ok；判死只有 probe 能下）
-      if (this.host && HOOK.traffic) {
-        HOOK.traffic({ cf: this.cf, host: this.host, via: this.via as "node" | "direct" | "v6", node: this.node || "", down: this.down, ok: !this.failed && this.down > 0, life: Date.now() - this.t0, up: this.up, at: Date.now() });
-      }
-      // 真实首字节回流：探活只能证明连得上，转发快不快只有这条路径知道
-      if (this.node && this.ttfb > 0) nsLatency(this.node, this.ttfb);
+        // 通道证据：交给决策层（弱证据只可能把 unknown 提成 ok；判死只有 probe 能下）
+        if (this.host && HOOK.traffic) {
+          HOOK.traffic({ cf: this.cf, host: this.host, via: this.via as "node" | "direct" | "v6", node: this.node || "", down: this.down, ok: !this.failed && this.down > 0, life: Date.now() - this.t0, up: this.up, at: Date.now() });
+        }
+        // 真实首字节回流：探活只能证明连得上，转发快不快只有这条路径知道
+        if (this.node && this.ttfb > 0) nsLatency(this.node, this.ttfb);
         if (this.host) {
           if (this.node) {
             const life = this.tAttach ? Math.max(1, Date.now() - this.tAttach) : 0;
