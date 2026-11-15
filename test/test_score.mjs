@@ -7,7 +7,10 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 let pass = 0,
   fail = 0;
 const eq = (n, a, b) => {
-  if (JSON.stringify(a) === JSON.stringify(b)) pass++;
+  // want 是 undefined / 函数，或拿到的东西是函数时，序列化比较会两边都变成 undefined，
+  // 断言永远为真（v7.150 修的空断言：删掉某函数后，旧锁其实一直没在测）。
+  const strict = b === undefined || typeof a === "function" || typeof b === "function";
+  if (strict ? Object.is(a, b) : JSON.stringify(a) === JSON.stringify(b)) pass++;
   else {
     fail++;
 
@@ -1598,20 +1601,21 @@ W.recordTraffic({ target: tg, chan: W.DIRECT, down: 4096, ok: true });
 eq("流量成功只产生弱 ok", W.vState(tg, "d"), 1);
 W.recordTraffic({ target: tg, chan: W.DIRECT, down: 0, ok: false });
 eq("流量失败不得把弱 ok 降级", W.vState(tg, "d"), 1);
-W.recordProbe({ target: tg, chan: chR2, code: 403, ms: 90 });
+W.vSet(tg, "r:185.253.117.147", 403, 90, 1);
 eq("probe 403 记为 blocked", W.vState(tg, "r:185.253.117.147"), 2);
 ok("blocked 通道被判坏", W.vBad(tg, "r:185.253.117.147"));
 W.vSetState(tg, "r:185.253.117.147", 1, 0);
 eq("弱证据不能冲掉强证据的 blocked", W.vState(tg, "r:185.253.117.147"), 2);
-W.recordProbe({ target: tg, chan: chR, code: 0, ms: 800 });
+W.vSet(tg, "r:45.136.117.194", 0, 800, 1);
 eq("probe 连不上记为 dead", W.vState(tg, "r:45.136.117.194"), 3);
-  W.recordProbe({ target: "*", chan: chR2, code: 200, ms: 60 });
+  W.vSet("*", "r:185.253.117.147", 200, 60, 1);
   ok("通配目标不落表", W.vAll().every((r) => r.t !== "*") && !W.vOk(tg, "r:185.253.117.147"));
   const cw = W.cntView();
   ok("通配写入被计数（vwild）", (cw.vwild || 0) >= 1, String(cw.vwild));
-  W.recordProbe({ target: "*", chan: chR, code: 200, ms: 55 });
+  W.vSet("*", "r:45.136.117.194", 200, 55, 1);
   ok("没有通配回退：别的站点照旧是未知", !W.vOk("1.2.3.4", "r:45.136.117.194"));
-ok("probe 同时写入池子统计", (W.nsGet("45.136.117.194:443").pN || 0) > 0);
+eq("probe 级证据入口已删除（探测链 7.69 整体移除）", W.recordProbe, undefined);
+eq("客户端回流入口已删除（订阅只有 url-test，客户端从不回传状态码）", W.recordClient, undefined);
 W.vClear();
 eq("清空后表为空", W.vAll().length, 0);
 // 第 31 组：通道策略（影子）与子请求预算
@@ -1644,11 +1648,11 @@ ok("影子统计有累计", W.S.polSame + W.S.polDiff >= 3, String(W.S.polSame +
 ok("原因分布有键", Object.keys(W.S.polWhy).length > 0, JSON.stringify(W.S.polWhy));
 // 第 33 组：判定表接入选路（veto）
 W.vClear();
-W.recordProbe({ target: "x.com", chan: { kind: "r", ip: "45.136.117.194" }, code: 403, ms: 70 });
+W.vSet("x.com", "r:" + "45.136.117.194", 403, 70, 1);
 ok("被判 blocked 的中继被 veto", W.HOOK.veto("x.com", "45.136.117.194") === true);
 ok("同站点未判过的中继不被 veto", W.HOOK.veto("x.com", "89.22.227.132") === false);
 ok("站点级判定不外溢到别的站点", W.HOOK.veto("y.com", "45.136.117.194") === false);
-W.recordProbe({ target: "*", chan: { kind: "r", ip: "89.22.227.132" }, code: 0, ms: 900 });
+W.vSet("*", "r:" + "89.22.227.132", 0, 900, 1);
 ok("通配判定不再生效：写不进表，也不会外溢到别的站点", W.HOOK.veto("y.com", "89.22.227.132") === false);
 W.vClear();
 ok("清空后不再 veto", W.HOOK.veto("x.com", "45.136.117.194") === false);
@@ -1667,7 +1671,7 @@ eq("之后拿到大响应 → 解除误判", W.vState("x.com", "r:45.136.117.194
 
 // 第 35 组：判定表跨 isolate 同步（只同步强证据）
 W.vClear(); W.S.vtSent.clear();
-W.recordProbe({ target: "x.com", chan: { kind: "r", ip: "45.136.117.194" }, code: 403, ms: 60 });
+W.vSet("x.com", "r:" + "45.136.117.194", 403, 60, 1);
 const dl = W.HOOK.vtDelta();
 eq("强证据进增量", dl.length, 1);
 eq("增量键是 target|chan", dl[0].k, "x.com|r:45.136.117.194");
@@ -1679,7 +1683,7 @@ eq("清空后本地为空", W.vAll().length, 0);
 W.vImport(dl);
 eq("远端强证据可导入", W.vState("x.com", "r:45.136.117.194"), 2);
 ok("导入后 veto 生效", W.HOOK.veto("x.com", "45.136.117.194") === true);
-W.recordProbe({ target: "y.com", chan: { kind: "r", ip: "1.1.1.1" }, code: 200, ms: 40 });
+W.vSet("y.com", "r:" + "1.1.1.1", 200, 40, 1);
 ok("ok 证据不进增量", W.HOOK.vtDelta().every((r) => r.k !== "y.com|r:1.1.1.1"));
 W.vClear(); W.S.vtSent.clear();
 // 第 36 组：策略分级（0 影子 / 1 只硬规则 / 2 全生效）

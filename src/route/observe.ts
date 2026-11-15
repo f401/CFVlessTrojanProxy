@@ -1,24 +1,9 @@
-// 证据入口：所有观测只从这里进，幂等、去重，且一次写两处（判定表 + 池子基础质量）。
-// 硬规则：traffic 只能产生「弱 ok」，blocked/dead 只能由 probe 或 client 产生。
-import { nsProbe, nsProbeFail } from "../nodes/score";
-import { Chan, chanKey, nodeKeyOf } from "./channel";
-import { vSet, vSetState, vState, vSrc, vAt } from "./verdict";
-
-export interface ProbeEvt {
-  target: string; // 目标 IP，或 "*"（中继路径钉不死目标 IP）
-  chan: Chan;
-  code: number; // HTTP 状态码，0 = 没握手/连不上
-  ms: number;
-}
-
-/** 强证据：同时更新判定表与池子统计 */
-export function recordProbe(e: ProbeEvt): void {
-  vSet(e.target, chanKey(e.chan), e.code, e.ms, 1);
-  const nk = nodeKeyOf(e.chan);
-  if (!nk) return;
-  if (e.code <= 0) nsProbeFail(nk);
-  else nsProbe(nk, e.ms, e.ms, 0);
-}
+// 证据入口：流量层三条真实入口（弱 ok / 差分 blocked / 整页 pass）都从这里进。
+// 硬规则：流量只能产生「弱 ok」；「差分 blocked」需要同窗口的整页对照（见 recordBlock）。
+// 7.150 删掉了另外两条：probe 级（recordProbe，探测链在 7.69 整体移除后零调用点）
+// 与客户端回流（recordClient，订阅只有 url-test，客户端从不回传状态码）。
+import { Chan, chanKey } from "./channel";
+import { vSetState, vState, vSrc, vAt } from "./verdict";
 
 export interface TrafficEvt {
   target: string;
@@ -27,35 +12,36 @@ export interface TrafficEvt {
   ok: boolean;
 }
 
-/** 弱证据：成功只把 unknown 提成「弱 ok」；失败**不动**结论（等 probe 确认） */
+/**
+ * 功能：弱证据——成功只把 unknown 提成「弱 ok」；失败**不动**结论（等差分或 tfb 确认）。
+ * @param e 流量事件（目标、通道、下行字节、是否拿到响应）
+ * @returns 无
+ */
 export function recordTraffic(e: TrafficEvt): void {
   const ck = chanKey(e.chan);
   if (e.ok && e.down > 0 && vState(e.target, ck) === 0) vSetState(e.target, ck, 1, 0);
 }
 
-/** 用户侧判据：上游只回几百~几千字节就结束 = 这条通道对该站点被拒（403/风控）。
- *  只在没有 probe 级 ok 时生效，所以被探测确认过能打通的中继不会被一次小响应当掉。 */
+/**
+ * 功能：差分证据——上游只回几百~几千字节就结束 = 这条通道对该站点被拒（403/风控）。
+ * 只在调用方已经确认「站点本身能出内容」（同窗口整页对照 / 本出口 200）时才该被调用；
+ * 7.69 之后不存在探测级证据，所以这条就是「一次差分即可判封锁」的那条路（三批投票的 `blk`
+ * 负责的是**代价**，不是判定）。探测确认过能打通的通道在 1 小时内免于被它推翻。
+ * @param e 流量事件
+ * @returns 无
+ */
 export function recordBlock(e: TrafficEvt): void {
   const ck = chanKey(e.chan);
-  // 探测/端到端刚确认过的通道免于被差分证据推翻（1 小时内的好证据比一次小响应可信）
+  // 1 小时内的好证据（整页/探测级）比一次小响应可信，不用它翻案
   if (vState(e.target, ck) === 1 && vSrc(e.target, ck) >= 1 && Date.now() - vAt(e.target, ck) < 3600000) return;
-  vSetState(e.target, ck, 2, 1); // 差分证据与探测同级：可推翻流量级的 ok
+  vSetState(e.target, ck, 2, 1); // 差分证据可推翻流量级的 ok
 }
 
-/** 反向证据：大响应回来 = 这条通道对这个站点能打通，顺手解除之前的小响应误判 */
+/**
+ * 功能：反向证据——大响应回来 = 这条通道对这个站点能打通，顺手解除之前的小响应误判。
+ * @param e 流量事件
+ * @returns 无
+ */
 export function recordPass(e: TrafficEvt): void {
   vSetState(e.target, chanKey(e.chan), 1, 1); // 真拿到整页 = 与探测同级的好证据
 }
-
-export interface ClientEvt {
-  target: string;
-  chan: Chan;
-  ok: boolean;
-  ms: number;
-}
-
-/** 端到端证据（订阅 expected-status 的回流）：最可信，可直接判 ok/blocked */
-export function recordClient(e: ClientEvt): void {
-  vSet(e.target, chanKey(e.chan), e.ok ? 200 : 403, e.ms, 2);
-}
-

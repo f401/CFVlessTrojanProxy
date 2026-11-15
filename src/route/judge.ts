@@ -1,5 +1,5 @@
 // 行为判定（OOP 版）：把「连接收尾的观测」变成判定表结论。
-// 只有这里会因流量写判定；probe / client 走 recordProbe / recordClient。
+// 只有这里会因流量写判定：probe 级证据（7.69 删除）与客户端回流（从来没接）都不存在。
 // 设计目标：① IP 级封锁 1 次请求就能感知；② 业务层 403 绝不被「拦截」——
 // 判定只影响「走哪条通道」，永不断开连接；某站点一条通道都不剩时自愈（VerdictTable.clearHost）。
 import { S } from "../core/state";
