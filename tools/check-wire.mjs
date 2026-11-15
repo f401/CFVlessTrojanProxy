@@ -65,6 +65,24 @@ for (const name of SLOTS) {
   }
 }
 fail += slotFail;
+// 计数字面量必须在 S.cntKeys 登记：漏登记时 cnt() 只打一行 `[cnt] unknown key` 就静默丢计数，
+// 面板和 /health 会显示「这个功能从没触发过」——这类缺陷靠读代码很难看出来。
+const stSrc = fs.readFileSync("src/core/state.ts", "utf8");
+const keyBlock = (stSrc.match(/cntKeys = \[([\s\S]*?)\]/) || [])[1] || "";
+const known = new Set([...keyBlock.matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+let cntFail = 0;
+for (const f of prod) {
+  const lines = fs.readFileSync(f, "utf8").split(/\r?\n/);
+  lines.forEach((l, i) => {
+    for (const m of l.matchAll(/\bcnt\("([A-Za-z0-9_]+)"/g)) {
+      if (!known.has(m[1])) {
+        cntFail += 1;
+        console.log(`FAIL 计数 ${m[1]} 未登记（${f}:${i + 1}），会静默丢失`);
+      }
+    }
+  });
+}
+fail += cntFail;
 if (fail) {
   console.log(`\n接线扫描：${fail} 条事实没有被真实链路调用`);
   process.exit(1);

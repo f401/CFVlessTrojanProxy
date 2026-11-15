@@ -179,7 +179,10 @@ export class Connection {
     // 缓冲涨到 16MB 上限或等满 60 秒则判定真卡死（stall）——两种情况都主动断，别让一个连接拖住整个 isolate
     while ((ws.bufferedAmount || 0) > WS_BUFFER_LIMIT) {
       if (ws.readyState !== WS_OPEN) {
-        cnt("cut");
+        // 这里是「客户端自己走了」，不是节点断流：必须记 ccut。
+        // 记成 cut 会把客户端切网/关标签算到节点头上 —— cut 是「节点中途断流」的计数器，
+        // 两者混在一起时 panel 的可用性会被客户端行为拉低（同 7.124 的短路类缺陷：测的是别的对象）。
+        cnt("ccut");
         closeQuietly(this.sock);
         return false;
       }
