@@ -99,7 +99,7 @@ function stackedDocs(lines) {
 // 活文档：这两份描述的是「当前系统」，不是历史。它们里提到的东西必须真的在 src 里存在，
 // 否则读者会照着文档去找一个早已删掉的类/函数/文件（7.156 就是靠这条抓到 ARCHITECTURE 的
 // `StatsTable` 行与 v8.md 落地表里的三个设计名）。
-const LIVING = ["docs/ARCHITECTURE.md", "docs/v8.md"];
+const LIVING = ["docs/ARCHITECTURE.md", "docs/v8.md", "docs/LIMITS.md"];
 
 /**
  * 活文档引用体检：路径必须存在、`SC.常量` 必须有定义、`name()` 必须在 src 里出现过。

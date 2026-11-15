@@ -129,13 +129,18 @@ interface NodeStats {
   [k: string]: unknown;
 }
 
-/** 存活节点（ALIVE 的值） */
+/**
+ * 存活节点（ALIVE 的值）。
+ *
+ * 这里只放「这条中继本身是什么」：地址、端口、国家码、最近一次探活握手耗时。
+ * 曾经的 `src`（pool/seed/probe 三种来源）在 7.173 删掉了：写进去三处、读的地方零处，
+ * 而探活命中时又会把整条覆盖成 "probe"，也就是说连"来源"这个信息本身都不成立。
+ */
 interface NodeEntry {
   h: string;
   p: number;
   cc?: string;
   ms?: number;
-  src?: string;
   [k: string]: unknown;
 }
 

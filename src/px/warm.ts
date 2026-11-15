@@ -35,7 +35,7 @@ export async function seedAlive(env: Env, n = SC.PROBE_CONC): Promise<number> {
       const k = seg[j].h + ":" + seg[j].p;
       bumpProbeBad(k, !!(x && !x.bad));
       if (!x || x.bad) continue;
-      S.alive.set(k, { h: x.h, p: x.p, cc: (x as { cc?: string }).cc || "", ms: x.ms, src: "probe" });
+      S.alive.set(k, { h: x.h, p: x.p, cc: (x as { cc?: string }).cc || "", ms: x.ms });
       nsLatency(k, x.ms);
       nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
       got++;

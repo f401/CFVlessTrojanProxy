@@ -59,7 +59,7 @@ export async function pxGet(env: Env) {
       // 由本机房的探活与失败学习决定留谁（池子是 CF 优选 IP，对非 CF 目标才有中转价值）。
       for (const c of S.pool.slice(0, 32)) {
         const k = c.h + ":" + c.p;
-        if (!S.alive.has(k)) S.alive.set(k, { h: c.h, p: c.p, cc: "", ms: SC.P_TCP, src: "pool" });
+        if (!S.alive.has(k)) S.alive.set(k, { h: c.h, p: c.p, cc: "", ms: SC.P_TCP });
       }
     }
     for (const n of src.slice(0, SEED_COLD_N)) {
@@ -71,7 +71,6 @@ export async function pxGet(env: Env) {
         p: n.p || Number(n.k.slice(i + 1)) || 443,
         cc: n.cc || "",
         ms: SC.P_TCP,
-        src: "seed",
       });
     }
   }
@@ -146,15 +145,18 @@ export function nsOf(keys: string[], limit = 64) {
   return m;
 }
 
-/** 兼容旧调用：只改内存，不落盘 */
-export async function pxSet(env: Env, patch: { cur?: string | null; alive?: NodeEntry[] }) {
+/**
+ * 改内存里的当前节点（不落盘）。
+ *
+ * 曾经还带一个 `alive` 参数、可以把整个 `S.alive` 换掉 —— 全仓唯一调用者是
+ * `/<uuid>/debug?cur=`，只传 `cur`，那条分支从来没被走过（7.173 删掉）。
+ * 换池子要走 `commitPool`：它管代际号、锚点与缩水守卫，直接替换内存会跟 KV 脱节。
+ */
+export async function pxSet(env: Env, patch: { cur?: string | null }) {
   if (!patch) return pxGet(env);
   if (typeof patch.cur === "string") {
     S.curs.tput = patch.cur;
     S.curs.lat = patch.cur;
-  }
-  if (Array.isArray(patch.alive)) {
-    S.alive = new Map(patch.alive.map((x) => [keyOf(x), x]));
   }
   return pxGet(env);
 }
@@ -305,7 +307,6 @@ export async function cronScan(env: Env, adm = 0) {
       p: x.p,
       cc: (x as { cc?: string }).cc || ((S.alive.get(k) || {}) as NodeEntry).cc || "",
       ms: x.ms,
-      src: "probe",
     });
     nsLatency(k, x.ms);
     nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
@@ -488,8 +489,13 @@ export class Pool {
   nsOf(keys: string[], limit = 64) {
     return nsOf(keys, limit);
   }
-  /** 功能：委托模块级 `pxSet`，局部更新可用的中继集合。@param env Worker 环境。@param patch `cur`/`alive` 的补丁。@returns 无 */
-  async pxSet(env: Env, patch: { cur?: string | null; alive?: NodeEntry[] }) {
+  /**
+   * 功能：委托模块级 `pxSet`，改内存里的当前节点。
+   * @param env Worker 环境
+   * @param patch 只认 `cur`（`alive` 那条分支在 7.173 删掉了：零调用方）
+   * @returns 转发 `pxSet` 的返回值
+   */
+  async pxSet(env: Env, patch: { cur?: string | null }) {
     return pxSet(env, patch);
   }
   /** 功能：委托模块级 `flushPx`，把池子/可用集的变更落盘（有节流）。@param env Worker 环境。@param force 跳过节流立即写。@returns 无 */

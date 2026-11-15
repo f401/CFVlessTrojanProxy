@@ -3771,5 +3771,24 @@ ok("两个零调用点的 DO 端点已删除（/http80 与 /reset）", !/endsWit
 ok("meter.ts 不再 import 探活用的 probeHttp80", !mSrc.includes("probeHttp80"));
 ok("错位的回填注释回到它描述的 /seed 分支上方", /只在当前为 0 时回填[\s\S]{0,80}endsWith\("\/seed"\)/.test(mSrc));
 ok("check-wire 有反向检查：实现方必须有调用方", wSrc.includes("zombieFail") && wSrc.includes("有实现但没有任何调用方"));
+
+console.log("\n【164】池子侧的死状态");
+(() => {
+  const typeSrc = fs.readFileSync("types/app.d.ts", "utf8");
+  const nodeEntry = (() => {
+    const at = typeSrc.indexOf("interface NodeEntry {");
+    const end = typeSrc.indexOf("}", at);
+    return typeSrc.slice(at, end);
+  })();
+  ok("存活条目不再有来源字段（写三处、读零处）", !/\bsrc\?:\s*string/.test(nodeEntry));
+  const poolSrc = fs.readFileSync("src/px/pool.ts", "utf8");
+  const warmSrc = fs.readFileSync("src/px/warm.ts", "utf8");
+  ok("四处写入都不再带来源", !/src:\s*"(pool|seed|probe)"/.test(poolSrc + warmSrc));
+  ok("pxSet 不再能整体替换存活表（那条分支零调用方）", !/patch\.alive/.test(poolSrc));
+  ok("pxSet 的补丁只剩 cur", /pxSet\(env: Env, patch: \{ cur\?: string \| null \}\)/.test(poolSrc));
+  const wSrc = fs.readFileSync("tools/doc-audit.mjs", "utf8");
+  ok("活文档体检把 LIMITS.md 也算上了", /LIVING = \[[^\]]*"docs\/LIMITS\.md"/.test(wSrc));
+})();
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
