@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.160**（自举审计四十批、共 65 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.161**（自举审计四十一批、共 69 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -282,6 +282,17 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   而 `score()` 的 30 分钟半衰期正是按 `at` 算的，对最容易过期的那批数据（别的 isolate 几小时前记的「存活/死亡」）完全失效。
   修法：`HlRow` 加可选 `t`（缺省时按「刚刚」算，兼容老 DO 行）、`delta()` 带上 `s.at`、`merge()` 用 `Math.max(本地, min(别处, now))` 取较新的那个、
   `Meter` 的 `hl` 记录与 `/hl`、`/vt` 一并带时间；锁：第 150 组 5 条（三小时前 → 回落中性、刚发生 → 照旧、增量行带 `t`、DO 存下 `t`、冷启动合并后仍按证据时间衰减）。
+
+- **第 66–69 条（v7.161，都是中继健康表 `src/route/relay-health.ts` 的边界）**：
+  · 66：`needLoad()` / `markLoaded()` / `loaded` 三个成员**零调用点** —— 冷启动加载实际由
+    `vtLoad()` 的 single-flight + `HEALTH.merge()` 负责，这三人组只会让人以为「忘了标记已加载」。已删。
+  · 67：`merge()` 逐字段取 `Math.max`、时间却单独取「较新的那个」⇒ 两边的观测被拼成一条从未存在过的证据。
+    本地 3 小时前的 8 次成功会顶着「刚刚」的时间戳算分（半衰期等于失效）。改成**一条证据整体胜出**：
+    条数多的胜出，条数相同用较新的时间；计数与时间永远来自同一次观测。
+  · 68：`drop()` 只清 `m`/`sent`，不清 `pending`；`ack()` 又会把 `pending` 里的行写进 `sent` ——
+    表外键因此在 `sent` 里永久驻留（`size()` 只看 `m`，泄漏不可见）。补 `pending.delete(k)` 与
+    `ack()` 的「只登记表内键」。
+  · 69：`delta()` 的上限判断写在 `push` 之后 ⇒ `pending` 已满 40 行时返回 41 行，突破「每批 ≤40 行」契约。判断前移。
 - **v8 事实层现状（7.88–7.107，均已上线或可开关）**：五类事实 `eg`/`ps`/`dead`/`blk`/`dns` + `cap` 噪声门 + `first/lat` 观测全部在仓库，
   由 `src/route/factflags.ts` 的 plain_text 绑定 `facts` 统一开关（`none`/`eg`/`eg,ps`/`all`，未配置=全开）；
   `FACTS`（`src/route/factsstore.ts`）是五张同步表唯一的上行/合并门面（v7.139 才把第五类 `dns` 的 `ack/nack/snap` 接上）；`tools/check-wire.mjs` 静态保证「有定义必有生产调用」。

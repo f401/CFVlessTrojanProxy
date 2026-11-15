@@ -3489,5 +3489,48 @@ W.HEALTH.clear();
 W.HEALTH.merge(hlBack);
 ok("冷启动合并后仍按证据时间衰减（不是当成刚刚）", Math.abs(W.HEALTH.score("203.0.113.9") - 0.5) < 0.05);
 W.HEALTH.clear();
+console.log("\n-- 中继健康表的合并口径与死出口（v7.161）");
+{
+  const K = "203.0.113.9";
+  const H3 = 3 * 3600 * 1000;
+  W.HEALTH.clear();
+  // 本地攒下 8 次成功 / 2 次小响应，但已经是三小时前的证据
+  W.HEALTH.merge([{ i: K, o: 8, b: 2, d: 0, t: Date.now() - H3 }]);
+  const oldStrong = W.HEALTH.score(K);
+  // 别处报来一条更弱、但更新的证据：不能把旧证据的「最后一次观测」刷新到现在
+  W.HEALTH.merge([{ i: K, o: 1, b: 0, d: 0, t: Date.now() }]);
+  const afterWeak = W.HEALTH.score(K);
+  ok("三小时前的强证据已经衰减到中性", Math.abs(oldStrong - 0.5) < 0.03);
+  ok("更弱的新证据不会给它续命（计数与时间必须来自同一次观测）", Math.abs(afterWeak - 0.5) < 0.03);
+  // 反过来：更强的证据应当整体胜出，并且带着自己的时间戳生效
+  W.HEALTH.merge([{ i: K, o: 20, b: 1, d: 0, t: Date.now() }]);
+  ok("更强的证据整体胜出（新计数 + 新时间）", W.HEALTH.score(K) > 0.8);
+  // 同分时用较新的时间：等价证据不该让衰减倒流
+  W.HEALTH.clear();
+  W.HEALTH.merge([{ i: K, o: 2, b: 0, d: 0, t: Date.now() - H3 }]);
+  W.HEALTH.merge([{ i: K, o: 1, b: 1, d: 0, t: Date.now() }]);
+  ok("条数相同时采用较新的观测时间", W.HEALTH.score(K) > 0.5);
+}
+{
+  // 每批严格 ≤40 行：以前上限判断写在压入之后，pending 已满时会返回 41 行
+  W.HEALTH.clear();
+  for (let i = 0; i < 60; i++) W.HEALTH.note("198.51.100." + i + ":443", 45290, true);
+  ok("一批最多 40 行中继证据", W.HEALTH.delta().length === 40);
+  // pending 已满时再来一条，仍然不能突破 40
+  W.HEALTH.note("198.51.100.200:443", 45290, true);
+  ok("pending 已满时也不会多出一行", W.HEALTH.delta().length === 40);
+}
+{
+  const rh = fs.readFileSync("src/route/relay-health.ts", "utf8");
+  ok("合并时按证据条数决定谁胜出", rh.includes("inN > cur.ok + cur.bad + cur.dead"));
+  ok("淘汰一条中继时连 pending 一起清掉", (rh.match(/this\.pending\.delete\(k\)/g) || []).length === 2);
+  ok("表外的键不会被登记进已上报快照", rh.includes("if (this.m.has(r.i)) this.sent.set(r.i"));
+  ok("中继健康表的 loaded 状态已删除（冷启动由 vtLoad 的 single-flight 负责）", W.HEALTH.loaded === undefined);
+  ok("needLoad 已经不存在", typeof W.HEALTH.needLoad === "undefined");
+  ok("markLoaded 已经不存在", typeof W.HEALTH.markLoaded === "undefined");
+  const vs = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+  ok("远端事实里的中继健康行带时间戳", vs.includes("hl?: Array<{ i: string; o: number; b: number; d: number; t?: number }>"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

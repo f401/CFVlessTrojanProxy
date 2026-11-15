@@ -34,7 +34,6 @@ export class RelayHealth {
   private sent = new Map<string, { o: number; b: number; d: number }>();
   /** 已交给调用方、还没确认送达的行 */
   private pending = new Map<string, HlRow>();
-  private loaded = false;
 
   /** 记一次收尾结果；node 是 host:port，直连时为空 */
   note(node: string, down: number, ok: boolean): void {
@@ -85,6 +84,9 @@ export class RelayHealth {
     // 上次已经交出去、还没 ack 的行，原样再给一次（调用方重试时能带上）
     const out: HlRow[] = [...this.pending.values()];
     for (const [i, s] of this.m) {
+      // 上限判断放在压入之前：以前写在压入之后，`pending` 里已经有 40 行时会返回 41 行，
+      // 多出来那一行既没有契约也没有预算（车身每多一行就多几字节，且突破「每批 ≤40 行」）
+      if (out.length >= 40) break;
       const p = this.sent.get(i);
       if (p && p.o === s.ok && p.b === s.bad && p.d === s.dead) continue;
       if (this.pending.has(i)) continue;
@@ -92,14 +94,17 @@ export class RelayHealth {
       const row: HlRow = { i, o: s.ok, b: s.bad, d: s.dead, t: s.at };
       out.push(row);
       this.pending.set(i, row);
-      if (out.length >= 40) break;
     }
     return out;
   }
 
   /** 上报成功：把 pending 里的快照正式提交为 sent */
   ack(): void {
-    for (const r of this.pending.values()) this.sent.set(r.i, { o: r.o, b: r.b, d: r.d });
+    for (const r of this.pending.values()) {
+      // 只登记还活着的行：`drop()` 可能已经把这条删了，往 `sent` 里塞一个表外键
+      // 会让它永远留着（`drop()` 只清表内的键），而 `size()` 又只看 `m`，泄漏完全不可见。
+      if (this.m.has(r.i)) this.sent.set(r.i, { o: r.o, b: r.b, d: r.d });
+    }
     this.pending.clear();
   }
 
@@ -108,21 +113,38 @@ export class RelayHealth {
     this.pending.clear();
   }
 
-  /** 冷启动合并别处的计数（加性合并，不覆盖本地更强的结论） */
+  /**
+   * 功能：冷启动合并别处的计数。一条证据整体胜出，不逐字段取最大值。
+   *
+   * 为什么必须整体胜出（v7.161 修）：以前每个计数各取 `Math.max`、时间却单独取「较新的一个」，
+   * 于是两边的观测会被拼成一条从未存在过的证据 —— 本地 3 小时前攒下的 8 次成功，
+   * 会顶着「刚刚」的时间戳去算分（`score()` 的半衰期按 `at` 衰减，等于让旧证据永不过期）；
+   * 反过来，别处更强的计数可能配着本地更旧的时间，被无谓地衰减掉。
+   * 现在的规则：证据条数（o+b+d）多的那条整体胜出；相等时用较新的时间 ——
+   * 计数与时间永远来自同一次观测，`不覆盖本地更强的结论` 也仍然成立。
+   * @param rows 别处报来的行（`t` 缺省 = 老 DO 行，按「刚刚」算）
+   * @returns 无
+   */
   merge(rows: HlRow[]): void {
     const now = Date.now();
     for (const r of rows) {
       if (!r || !r.i) continue;
-      const s = this.m.get(r.i) || { ok: 0, bad: 0, dead: 0, at: 0 };
-      s.ok = Math.max(s.ok, Number(r.o) || 0);
-      s.bad = Math.max(s.bad, Number(r.b) || 0);
-      s.dead = Math.max(s.dead, Number(r.d) || 0);
-      // 证据时间取「本地已有的」与「别处报来的」之中较新的一个，并夹到现在：
-      // 老行没有 t（DO 里 7.160 之前的记录）时按「刚刚」算，避免把全部历史证据一次性衰减掉。
+      // 老行没有 t（DO 里 7.160 之前的记录）时按「刚刚」算，避免把全部历史证据一次性衰减掉
       const at = Math.min(Number(r.t) || now, now);
-      s.at = Math.max(s.at, at);
-      this.m.set(r.i, s);
-      this.sent.set(r.i, { o: s.ok, b: s.bad, d: s.dead });
+      const o = Math.max(0, Number(r.o) || 0);
+      const b = Math.max(0, Number(r.b) || 0);
+      const d = Math.max(0, Number(r.d) || 0);
+      const inN = o + b + d;
+      const cur = this.m.get(r.i);
+      if (!cur || inN > cur.ok + cur.bad + cur.dead) {
+        this.m.set(r.i, { ok: o, bad: b, dead: d, at: cur ? Math.max(cur.at, at) : at });
+      } else if (inN === cur.ok + cur.bad + cur.dead) {
+        cur.at = Math.max(cur.at, at);
+      }
+      // 无论哪条胜出，都要把「已同步到 DO 的计数」对齐到表里的当前值，
+      // 否则下一轮 delta 会把这条已经确认过的证据再发一次。
+      const s2 = this.m.get(r.i) as RelayStat;
+      this.sent.set(r.i, { o: s2.ok, b: s2.bad, d: s2.dead });
     }
     if (this.m.size > MAX_IP) this.drop();
   }
@@ -142,7 +164,6 @@ export class RelayHealth {
     this.m.clear();
     this.sent.clear();
     this.pending.clear();
-    this.loaded = false;
   }
 
   /**
@@ -151,19 +172,6 @@ export class RelayHealth {
    */
   size(): number {
     return this.m.size;
-  }
-
-  /** 冷启动只拉一次（失败不阻塞） */
-  needLoad(): boolean {
-    return !this.loaded;
-  }
-
-  /**
-   * 功能：标记「已从 KV 载入过」，避免同一 isolate 反复读 KV。
-   * @returns 无
-   */
-  markLoaded(): void {
-    this.loaded = true;
   }
 
   /**
@@ -179,12 +187,14 @@ export class RelayHealth {
       if (s.dead > 0) continue;
       this.m.delete(k);
       this.sent.delete(k);
+      this.pending.delete(k);
       if (this.m.size <= MAX_IP) return;
     }
     // 第二遍硬兜底：不跳过 dead，从最老开始删到容量以内
     for (const [k] of rows) {
       this.m.delete(k);
       this.sent.delete(k);
+      this.pending.delete(k);
       if (this.m.size <= MAX_IP) return;
     }
   }

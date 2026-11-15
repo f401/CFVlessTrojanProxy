@@ -86,7 +86,7 @@ export async function vtLoad(env: Env): Promise<void> {
 /** 远端事实的响应体形状（五种事实 + 判定表 + 中继健康度） */
 interface FactsBody {
   vt?: VtRow[];
-  hl?: Array<{ i: string; o: number; b: number; d: number }>;
+  hl?: Array<{ i: string; o: number; b: number; d: number; t?: number }>;
   eg?: EgRow[];
   ps?: Array<{ k: string; q: number; n: number; at: number }>;
   dead?: Array<{ i: string; n: number; at: number }>;
