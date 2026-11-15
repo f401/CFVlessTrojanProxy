@@ -84,8 +84,12 @@ for (const file of walk(root)) {
     const ps = params(m[3]);
     const rt = (m[4] || "").trim();
     const pTxt = ps.length ? ps.map((p) => `@param ${p.n}${p.t ? " " + p.t : ""}`).join("。") + "。" : "无参数。";
-    const rTxt = rt && rt !== "void" ? `@returns 转发 ${target} 的返回值（${rt}）` : `@returns 无（${target} 无返回值）`;
-    out.push(`${m[1]}/** 功能：${m[2]} 是薄包装，直接委托 ${target}。${pTxt}${rTxt} */`);
+    // 类方法委托「模块级同名函数」时，target 与函数名相同：不能写成「直接委托自己」，
+    // 也不能断言「无返回值」——同名的模块级函数往往是有返回值的（Pool.ensurePool 就是这样被写错的）。
+    const selfName = target === m[2];
+    const rTxt = rt && rt !== "void" ? `@returns ${rt}` : "@returns 无";
+    const how = selfName ? `委托模块级同名函数 \`${target}\`` : `直接委托 \`${target}\``;
+    out.push(`${m[1]}/** 功能：${m[2]} 是薄包装，${how}。${pTxt}${rTxt} */`);
     out.push(line);
     made++;
     i = i; // 继续按行推进

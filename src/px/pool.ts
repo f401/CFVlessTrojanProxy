@@ -506,43 +506,44 @@ export async function cronScan(env: Env, adm = 0) {
 
 /**
  * Pool 门面（P4）：把「抓取 → 准入探活 → 写 alive → 淘汰」这条流程以对象形式暴露。
- * 方法委托同名函数（实现留在原地，避免整文件搬家带来的回归风险），与 src/store/store.ts 的
- * Store 门面同一形态；之后要真正内联，可逐方法替换实现，调用方无需改动。
+ * 每个方法都委托**模块级同名函数**（实现留在原地，避免整文件搬家带来的回归风险），
+ * 因此返回值就是被委托函数的返回值 —— 不要在这里另做裁剪或转换，否则会出现两份口径。
+ * 与 src/store/store.ts 的 Store 门面同一形态；要真正内联时逐个方法替换实现即可。
  */
 export class Pool {
-  /** 功能：noteProbe 是薄包装，直接委托 noteProbe。@param r { bad?: string } | null。@returns 无（noteProbe 无返回值） */
+  /** 功能：委托模块级 `noteProbe`，把一条探活结果写进节点统计。@param r 探活结果（`bad` 为非空表示失败原因）。@returns 无 */
   noteProbe(r: { bad?: string } | null) {
     return noteProbe(r);
   }
-  /** 功能：ensurePool 是薄包装，直接委托 ensurePool。@param env Env。@returns 无（ensurePool 无返回值） */
+  /** 功能：委托模块级 `ensurePool`，按代际键从 KV 载入候选池（冷 isolate 的入口）。@param env Worker 环境。@returns 载入后的池子（可能为空数组） */
   async ensurePool(env: Env) {
     return ensurePool(env);
   }
-  /** 功能：commitPool 是薄包装，直接委托 commitPool。@param env Env。@param fresh PoolEntry[]。@param allowShrink。@returns 无（commitPool 无返回值） */
+  /** 功能：委托模块级 `commitPool`，把新候选合并进池子并按代际键写回。@param env Worker 环境。@param fresh 新候选。@param allowShrink 允许池子变小（不能超过 POOL_MIN）。@returns 写入结果 */
   async commitPool(env: Env, fresh: PoolEntry[], allowShrink = false) {
     return commitPool(env, fresh, allowShrink);
   }
-  /** 功能：pxGet 是薄包装，直接委托 pxGet。@param env Env。@returns 无（pxGet 无返回值） */
+  /** 功能：委托模块级 `pxGet`，取当前可用中继列表。@param env Worker 环境。@returns 可用条目（按代价升序） */
   async pxGet(env: Env) {
     return pxGet(env);
   }
-  /** 功能：nsOf 是薄包装，直接委托 nsOf。@param keys string[]。@param limit。@returns 无（nsOf 无返回值） */
+  /** 功能：委托模块级 `nsOf`，把候选键翻译成节点统计视图。@param keys 候选键。@param limit 最多取几条。@returns 键 → 统计的映射 */
   nsOf(keys: string[], limit = 64) {
     return nsOf(keys, limit);
   }
-  /** 功能：pxSet 是薄包装，直接委托 pxSet。@param env Env。@param patch { cur?: string | null; alive?: NodeEntry[] }。@returns 无（pxSet 无返回值） */
+  /** 功能：委托模块级 `pxSet`，局部更新可用的中继集合。@param env Worker 环境。@param patch `cur`/`alive` 的补丁。@returns 无 */
   async pxSet(env: Env, patch: { cur?: string | null; alive?: NodeEntry[] }) {
     return pxSet(env, patch);
   }
-  /** 功能：flushPx 是薄包装，直接委托 flushPx。@param env Env。@param force? boolean。@returns 无（flushPx 无返回值） */
+  /** 功能：委托模块级 `flushPx`，把池子/可用集的变更落盘（有节流）。@param env Worker 环境。@param force 跳过节流立即写。@returns 无 */
   async flushPx(env: Env, force?: boolean) {
     return flushPx(env, force);
   }
-  /** 功能：aliveList 是薄包装，直接委托 aliveList。@param env Env。@returns 无（aliveList 无返回值） */
+  /** 功能：委托模块级 `aliveList`，取探活通过的条目（冷启动会先载入池子）。@param env Worker 环境。@returns 存活条目 */
   async aliveList(env: Env) {
     return aliveList(env);
   }
-  /** 功能：cronScan 是薄包装，直接委托 cronScan。@param env Env。@param adm。@returns 无（cronScan 无返回值） */
+  /** 功能：委托模块级 `cronScan`，跑一轮「抓取 → 准入复测 → 打标 → 游标重算」。@param env Worker 环境。@param adm 本轮准入预算（0 表示按池子大小自适应）。@returns 本轮实际探活的条数 */
   async cronScan(env: Env, adm = 0) {
     return cronScan(env, adm);
   }
