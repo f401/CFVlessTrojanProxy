@@ -2,6 +2,8 @@ import type { Socket } from "cloudflare:sockets";
 import { connect } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 import { S } from "../core/state";
+import { SC } from "../core/const";
+import { trimAged } from "../core/hostmem";
 import { cnt } from "../core/counter";
 import { closeQuietly, releaseAll, withTimeout, WS_OPEN } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
@@ -130,13 +132,11 @@ export class Attacher {
       }
       st.retried = true;
       st.pxTries = 1;
-      if (S.needPx.size >= 300) {
-        const now2 = Date.now();
-        for (const [h2, t2] of S.needPx) if (t2 <= now2) S.needPx.delete(h2);
-        if (S.needPx.size >= 300) S.needPx.delete(S.needPx.keys().next().value as string);
-      }
-      // 记住"这个站必须走中转"：6 小时覆盖一次浏览会话，真变回可直连也只是多走一跳
+      // 记住"这个站必须走中转"：6 小时覆盖一次浏览会话，真变回可直连也只是多走一跳。
+      // 上限用 SC.PX_MAX：以前这里手写一段「先清过期、再删最旧一条」，而 judge 写
+      // 同一张表的两条路径完全绕过了它（7.182 统一成 trimAged，按最早过期先删）。
       S.needPx.set(host, Date.now() + 6 * 3600e3);
+      trimAged(S.needPx, SC.PX_MAX);
       logErr(`empty close -> proxyip ${px.host}`, host);
       if (checkTarget(px.host, px.port)) {
         try {

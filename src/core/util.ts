@@ -3,7 +3,7 @@ export const WS_OPEN = 1;
 export const WS_BUFFER_LIMIT = 1024 * 1024; // 下行发送缓冲超过 1MB 就开始背压
 export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给它 60 秒
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐死
-export const VERSION = "7.181";
+export const VERSION = "7.182";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 
@@ -21,9 +21,9 @@ export const SHADOW_DEFAULT = 0.05;
 
 /**
  * 解析 pxShadow。三处（选择器 / 控制器 / /proxyip）必须用同一套规则，
- * 否则面板显示 10%、实际跑 5%，或者 pxShadow=0 时显示成 10%。
+ * 否则会出现「面板写一个数、实际跑另一个数」的老毛病（7.x 之前就踩过）。
  *   未设置 / 非数字 → 默认 5%
- *   显示 10       实际 0（关闭探索）
+ *   0            关闭探索（面板也显示 0%，两边一致）
  *   >1            按 1 处理（不放大）
  */
 export function shadowRate(env: Env) {

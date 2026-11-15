@@ -73,7 +73,7 @@ td,th{border:1px solid #ddd;padding:6px 9px;text-align:left}
 </table>
 ${total ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
 <h2>实测 RTT（按入口）</h2>
-<table><tr><th>入口标签</th><th>机房</th><th>RTT</th><th>样本</th><th>成功率</th></tr>${rttRows || "<tr><td colspan=4>暂无数据</td></tr>"}</table>
+<table><tr><th>入口标签</th><th>机房</th><th>RTT</th><th>样本</th><th>成功率</th></tr>${rttRows || "<tr><td colspan=5>暂无数据</td></tr>"}</table>
 <h2>节点评分（延迟 + 失败率 + 实测吞吐）</h2>
 <table><tr><th>节点</th><th>地区</th><th>探测延迟</th><th>实测吞吐</th><th>成功率</th><th>评分</th></tr>${nodeRowsHtml || "<tr><td colspan=6>暂无数据</td></tr>"}</table>
 <h2>最近错误</h2>

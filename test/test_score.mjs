@@ -4089,5 +4089,51 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   ok("trim 会删最旧的而不是只清过期", vSrc.includes("const over = this.m.size - this.max;"));
 }
 
+// 172. 站点记忆表的上限只在一条路上执行；限流表被撑爆就整体清空（v7.182）
+{
+  // 1) judge 写 needPx 的两条路径都要压回上限
+  W.S.needPx.clear();
+  const np0 = 1700000000000;
+  for (let i = 0; i < 700; i++) {
+    W.JUDGE.onTraffic({
+      host: "np" + i + ".test",
+      chan: { kind: "r", ip: "198.51.100.9" },
+      via: "node",
+      node: "198.51.100.9:443",
+      ok: true,
+      down: 737,
+      up: 400,
+      life: 80,
+      cf: true,
+      at: np0 + i,
+    });
+  }
+  eq("needPx 有上限：judge 写入也压回 SC.PX_MAX", W.S.needPx.size, W.SC.PX_MAX);
+  ok("最早过期的那些先被丢掉", !W.S.needPx.has("np0.test"));
+  ok("最新的那条还在", W.S.needPx.has("np699.test"));
+  const atSrc = fs.readFileSync("src/proxy/attacher.ts", "utf8");
+  ok("attacher 与 judge 共用同一个上限函数", atSrc.includes("trimAged(S.needPx, SC.PX_MAX)"));
+  ok("attacher 不再自己数 300", !/S\.needPx\.size >= 300/.test(atSrc));
+
+  // 2) 限流表：撑爆时只删最旧，不清空别人的计数
+  W.RL_MEM.clear();
+  const hot = "203.0.113.200";
+  let allowed = 0;
+  for (let i = 0; i < 10; i++) if (W.rlTake(hot, 10)) allowed += 1;
+  eq("窗口内前 10 次放行", allowed, 10);
+  ok("第 11 次被挡", W.rlTake(hot, 10) === false);
+  for (let i = 0; i < 600; i++) W.rlTake("10.9." + Math.floor(i / 256) + "." + (i % 256), 10);
+  ok("表被撑爆之后，原来被限住的 IP 仍然被限住（不是整体 clear）", W.rlTake(hot, 10) === false);
+  ok("限流表自己仍然有界", W.RL_MEM.size <= 501);
+
+  // 3) shadowRate 的说明不再自称「显示 10 实际 0」
+  const uSrc = fs.readFileSync("src/core/util.ts", "utf8");
+  ok("shadowRate 文档不再举「显示 10 实际 0」这个错例", !uSrc.includes("实际 0"));
+
+  // 4) RTT 表有 5 列，"暂无数据" 必须跨 5 列
+  const pSrc = fs.readFileSync("src/views/panel-stats.ts", "utf8");
+  ok("「暂无数据」跨满 RTT 表的 5 列", pSrc.includes("<td colspan=5>暂无数据</td>"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

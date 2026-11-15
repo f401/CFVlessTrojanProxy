@@ -214,7 +214,13 @@ export class Judge {
     // 出口族只能从「这次真拿到了什么」反推：整页 ⇒ v4；同类小页且有整页对照 ⇒ v6。
     if (e.via === "node" && e.node) egDerive(e.node.slice(0, e.node.lastIndexOf(":")), e.down, { peerBig: bigDiff, known, siteV4: DNS.v6Of(e.host) === 0, cf: !!e.cf }, now);
     if (!known) {
-      if (n >= 2 || e.cf) S.needPx.set(e.host, now + PX_TTL); // 只提醒「下次优先中转」，不下判定
+      if (n >= 2 || e.cf) {
+        // 只提醒「下次优先中转」，不下判定
+        S.needPx.set(e.host, now + PX_TTL);
+        // 键是客户端带来的站点名，不是有限集合：以前只有 attacher 那条路封顶，
+        // 这里两条路都能写，过期行又只有 cron 会清 —— 统一按 SC.PX_MAX 压回去。
+        trimAged(S.needPx, SC.PX_MAX);
+      }
       return;
     }
     this.markBlocked(e, chan, ck, now);
@@ -242,6 +248,7 @@ export class Judge {
     S.smCnt.delete(ck);
     recordBlock({ target: e.host, chan, down: e.down, ok: false });
     S.needPx.set(e.host, now + PX_TTL);
+    trimAged(S.needPx, SC.PX_MAX);
   }
 
   /**

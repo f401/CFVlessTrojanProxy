@@ -5,6 +5,9 @@ import type { RouteCtx } from "./types";
 
 export const RL_MEM = new Map(); // ip -> { n, t }
 
+/** 限流表最多记多少个来源 IP：超了只删最旧的一个，不整体清空（见 rlTake 里的说明） */
+const RL_MAX = 500;
+
 /**
  * 功能：从 Cookie 头里取指定名字的值。
  * @param req 请求
@@ -75,7 +78,7 @@ export async function adminAuthed(request: Request, url: URL, env: Env) {
 }
 
 /**
- * 功能：进程内固定窗口限流（每 ip 每分钟 limit 次）。
+ * 功能：进程内固定窗口限流（窗口 10 分钟，见函数体里的 600000；每 ip 每窗口 limit 次）。
  * @param ip 客户端标识
  * @param limit 窗口内允许次数
  * @returns 允许本次为 true
@@ -89,7 +92,26 @@ export function rlTake(ip: string, limit: number) {
     return true;
   }
   RL_MEM.set(ip, { n: 1, t: now });
-  if (RL_MEM.size > 500) RL_MEM.clear();
+  // 只删最旧的一条，**不要整体 clear()**：清空会把所有人的计数一起归零，而来源 IP
+  // 是攻击者可以换的（IPv6 一个 /64 就有海量地址），拿 501 个来源刷一遍就等于
+  // 把自己刚被限住的计数重置掉 —— 限流表本来是为了挡住这件事。
+  if (RL_MEM.size > RL_MAX) {
+    // 淘汰「计数最小、且最旧」的那条，并且绝不删刚刚这条 ip：
+    // 正在被限住的来源计数会涨上去（n 大）自然留下，而拿一堆一次性来源刷表的
+    // 攻击者只会把自己刷进去的那批删掉 —— 这样刷表既换不出额度，也顶不掉别人的限额。
+    let victim = "";
+    let minN = Infinity;
+    let minT = Infinity;
+    for (const [k, v] of RL_MEM) {
+      if (k === ip || !v) continue;
+      if (v.n < minN || (v.n === minN && v.t < minT)) {
+        minN = v.n;
+        minT = v.t;
+        victim = k as string;
+      }
+    }
+    if (victim) RL_MEM.delete(victim);
+  }
   return true;
 }
 
