@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.186**（自举审计六十六批、共 124 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.187**（自举审计六十七批、共 126 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -382,6 +382,26 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   留一条行为基线：超时后等到那一半真正失败，进程不能崩。
 - 教训：A/B 必须能红。这一轮的「修复」是被 A/B 自己否掉的 —— 只看源码就动手，会多出一段没人需要、
   还掩盖真实信号的空实现。
+
+### 7.187 自举审计（第 125–126 条，出站切片与建连超时）
+
+- **D125 出站事实按插入序切片**：`src/store/meter.ts` 的 `/vt` 把七张表打出站，七张表的上限是
+  200/200/512/1024/512（vt/hl/eg/ps/dead/blk2/dns，前两个 200）却只发 120/120/160/200/120/120/160 行；
+  `eg`/`ps`/`dead` 在返回前显式按 `at` 降序排过，`vt`/`hl`/`blk2`/`dns` 是直接 `slice(0, n)`。
+  而 `Object.entries` 是插入序、合并只会追加新键 ⇒ 切出来的是**最旧**的那批：新学到的证据在本地
+  躺着，永远到不了别的 isolate（`blk2` 表上限 1024 却只发 120 行）。同一形状 7.177（pend 星形饥饿）、
+  7.181（`hl` 淘汰留最旧）修过两回，出口这一层漏了。修法：出站形状整体搬到新建的
+  `src/store/factout.ts` 的 `factsOut(src, now)`，七张表统一走 `freshTop(rows, at, n)`（超上限才排序、
+  降序取前 n）；`meter.ts` 的 `/vt` 只剩一行委托（557 → 540 行，也顺便给 560 行上限腾出余量）。
+- **D126 诊断默认分支的 `connect` 没有超时**：`src/routes/debug.ts` 的 `?host=`/裸 debug 分支
+  `const s6 = await connect(...)` 直接 await，黑洞 v6 地址会一直挂着，占住免费计划全局 6 个 `connect`
+  名额之一（7.169–7.171 修过五处同类）。修法：`Promise.resolve(connect(...))` + `withTimeout(pk, 2500)`，
+  catch 里把迟到连上的 socket 也关掉。
+- 顺手把构造函数里被脚本打散缩进的九行（`o.blk`…`o.blk2`）恢复成 8 空格。
+- 锁：第 177 组 18 条（300 行 vt / 250 行 hl / 1100 行 blk2 / 600 行 dns 全都超过响应上限，
+  断言「取到的是最新那条」；老格式裸数字仍按 blocked、`dead` 保持 3、过期行一条不发；
+  `freshTop` 直接按时间戳降序；`meter.ts` 用 `factsOut(this)` 且不再自己拼 `blk2`）。
+  A/B：切片退回插入序 → **7 红**；`debug.ts` 退回 HEAD → **2 红**（两条都是源码锁）。
 
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。

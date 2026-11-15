@@ -4313,5 +4313,44 @@ console.log("\n176) 预算账本与续回边界");
   ok("剩余额度不小于续回上限", l2.sub >= 12, String(l2.sub));
   eq("准入次数 = min(SCAN_MAX, SCAN_SUB)", l2.adm, Math.min(W.SC.SCAN_MAX, W.SC.SCAN_SUB));
 }
+// ---- 第 177 组：出站事实切片必须按新鲜度（v7.187 D125）；诊断建连必须有超时（D126）----
+{
+  const now177 = Date.now();
+  // 七张表：每张都超过响应上限，且新行按插入序排在最后（模拟真实合并：只追加、不重排）
+  const vt177 = {};
+  for (let i = 1; i <= 300; i++) vt177["h.test|r" + i] = { s: 2, t: now177 + 1000 + i };
+  vt177["h.test|legacy"] = now177 + 8000; // 老格式：裸数字 = 只有到期时间，状态按 2
+  vt177["h.test|dead"] = { s: 3, t: now177 + 9000 }; // 最新的一条，且是 dead
+  vt177["h.test|expired"] = { s: 2, t: now177 - 1 }; // 已过期，不该出现在响应里
+  const hl177 = {};
+  for (let i = 1; i <= 250; i++) hl177["10.0.0." + i] = { o: 1, b: 0, d: 0, t: now177 + i };
+  const blk177 = {};
+  for (let i = 1; i <= 1100; i++) blk177["h.test|b" + i] = { n: 1, at: now177 + i };
+  const dns177 = {};
+  for (let i = 1; i <= 600; i++) dns177["d" + i + ".test"] = { v: 1, at: now177 + i };
+  const ps177 = { "h.test|1.1.1.1": { q: 200, n: 4, at: now177, top: 250 } };
+  const out177 = W.factsOut({ vt: vt177, hl: hl177, eg: {}, ps: ps177, dead: {}, blk2: blk177, dns: dns177 }, now177);
+  eq("判定行仍按 120 条上限切", out177.vt.length, 120);
+  eq("切出来的是最新的一条（dead）", out177.vt[0].k, "h.test|dead");
+  eq("最新那条保持 dead 状态", out177.vt[0].s, 3);
+  ok("过期行一条都不发", out177.vt.every((r) => r.k !== "h.test|expired"));
+  eq("老格式裸数字仍按 blocked 发", (out177.vt.filter((r) => r.k === "h.test|legacy")[0] || {}).s, 2);
+  eq("中继存活度按 120 条上限切", out177.hl.length, 120);
+  eq("存活度发的是最新观测", out177.hl[0].i, "10.0.0.250");
+  eq("封锁行按 120 条上限切", out177.blk2.length, 120);
+  eq("封锁行发的是最新的", out177.blk2[0].k, "h.test|b1100");
+  eq("DNS 行按 160 条上限切", out177.dns.length, 160);
+  eq("DNS 行发的是最新的", out177.dns[0].h, "d600.test");
+  eq("成功率行的历史最好原样透传", out177.ps[0].top, 250);
+  eq("freshTop 直接按时间戳降序取", W.freshTop([{ t: 1 }, { t: 3 }, { t: 2 }], (r) => r.t, 2).map((r) => r.t).join(","), "3,2");
+  eq("freshTop 不超上限时原样返回", W.freshTop([{ t: 1 }, { t: 3 }], (r) => r.t, 5).length, 2);
+  const meterSrc177 = fs.readFileSync("src/store/meter.ts", "utf8");
+  ok("meter 的 /vt 已委托给 factsOut", meterSrc177.includes("Response.json(factsOut(this))"), "meter.ts");
+  ok("meter 里不再自己拼 blk2 的插入序切片", !meterSrc177.includes("Object.entries(this.blk2)"), "meter.ts");
+  const dbgSrc177 = fs.readFileSync("src/routes/debug.ts", "utf8");
+  ok("诊断默认分支的建连带超时", dbgSrc177.includes("withTimeout(pk, 2500)"), "debug.ts");
+  ok("诊断默认分支把 connect 包成 Promise", dbgSrc177.includes("Promise.resolve(connect("), "debug.ts");
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -1,4 +1,5 @@
 import { mergeFacts } from "./factmerge";
+import { factsOut } from "./factout";
 import { seal, unseal } from "./index";
 import { probeTf } from "../core/tf";
 
@@ -68,15 +69,15 @@ export class Meter {
           if (o.s && typeof o.s === "object") this.s = Object.assign(Object.create(null), o.s);
           if (Array.isArray(o.e)) this.e = o.e;
           if (Array.isArray(o.cl)) this.cl = o.cl as ClRec[];
-    if (o.blk && typeof o.blk === "object") this.blk = o.blk as Record<string, number>;
-    if (o.vt && typeof o.vt === "object")
-      this.vt = o.vt as unknown as Record<string, number | { s: number; t: number }>;
-    if (o.hl && typeof o.hl === "object") this.hl = o.hl as unknown as Record<string, { o: number; b: number; d: number; t?: number }>;
-    if (o.eg && typeof o.eg === "object") this.eg = o.eg as unknown as Record<string, { f: number; at: number }>;
-    if (o.ps && typeof o.ps === "object") this.ps = o.ps as unknown as Record<string, { q: number; n: number; at: number; top?: number }>;
-    if (o.dead && typeof o.dead === "object") this.dead = o.dead as unknown as Record<string, { n: number; at: number }>;
-    if (o.dns && typeof o.dns === "object") this.dns = o.dns as unknown as Record<string, { v: number; at: number }>;
-    if (o.blk2 && typeof o.blk2 === "object") this.blk2 = o.blk2 as unknown as Record<string, { n: number; at: number }>;
+        if (o.blk && typeof o.blk === "object") this.blk = o.blk as Record<string, number>;
+        if (o.vt && typeof o.vt === "object")
+          this.vt = o.vt as unknown as Record<string, number | { s: number; t: number }>;
+        if (o.hl && typeof o.hl === "object") this.hl = o.hl as unknown as Record<string, { o: number; b: number; d: number; t?: number }>;
+        if (o.eg && typeof o.eg === "object") this.eg = o.eg as unknown as Record<string, { f: number; at: number }>;
+        if (o.ps && typeof o.ps === "object") this.ps = o.ps as unknown as Record<string, { q: number; n: number; at: number; top?: number }>;
+        if (o.dead && typeof o.dead === "object") this.dead = o.dead as unknown as Record<string, { n: number; at: number }>;
+        if (o.dns && typeof o.dns === "object") this.dns = o.dns as unknown as Record<string, { v: number; at: number }>;
+        if (o.blk2 && typeof o.blk2 === "object") this.blk2 = o.blk2 as unknown as Record<string, { n: number; at: number }>;
         }
         return;
       }
@@ -434,26 +435,8 @@ const rows = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.
       rows.sort((a, b) => b.d + b.b - (a.d + a.b));
       return Response.json({ hl: rows.slice(0, 120) });
     }
-    if (p.endsWith("/vt")) {
-      const out: Array<{ k: string; s: number; t: number }> = [];
-      const now = Date.now();
-      // 状态跟着存、跟着发（v7.164）：以前这里硬写 `s: 2`，任何 `dead` 证据跨一次 isolate 就降级。
-      for (const [k, v] of Object.entries(this.vt)) {
-        const t = typeof v === "number" ? v : v.t;
-        const s = typeof v === "number" ? 2 : v.s === 3 ? 3 : 2;
-        if (t > now) out.push({ k, s, t });
-      }
-const hl = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d, t: Number(x.t) || 0 }));
-      const eg = Object.entries(this.eg).map(([i, x]) => ({ i, f: x.f, at: x.at }));
-      eg.sort((a, b) => b.at - a.at);
-      // top 也要发（v7.163）：只发均值的话，冷启动的 isolate 只能看到「现在还行」——
-      // 康复闸门需要的是「曾经行过」，那条证据必须跨 isolate 活着。
-      const ps = Object.entries(this.ps).map(([k, x]) => ({ k, q: x.q, n: x.n, at: x.at, top: Number(x.top) || 0 }));
-      ps.sort((a, b) => b.at - a.at);
-      const dd = Object.entries(this.dead).map(([i, x]) => ({ i, n: x.n, at: x.at }));
-      dd.sort((a, b) => b.at - a.at);
-      return Response.json({ vt: out.slice(0, 120), hl: hl.slice(0, 120), eg: eg.slice(0, 160), ps: ps.slice(0, 200), dead: dd.slice(0, 120), blk2: Object.entries(this.blk2).map(([k, v]) => ({ k, ...v })).slice(0, 120), dns: Object.entries(this.dns).map(([h, x]) => ({ h, v: x.v, at: x.at })).slice(0, 160) });
-    }
+    // 七张表的出站形状与切片顺序都在 src/store/factout.ts（v7.187）
+    if (p.endsWith("/vt")) return Response.json(factsOut(this));
     if (p.endsWith("/blk")) {
       const nowB = Date.now();
       const out: Record<string, number> = {};

@@ -1,6 +1,7 @@
 import { errMsg, withTimeout } from "../core/util";
 import { probeHttp80 } from "../core/http80";
 import { connect } from "cloudflare:sockets";
+import type { Socket } from "cloudflare:sockets";
 
 import { S } from "../core/state";
 import { json } from "../edge/respond";
@@ -484,16 +485,25 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
   if (out.aaaa && typeof out.aaaa === "string" && out.aaaa.includes(":")) {
     const bad6 = checkTarget(out.aaaa, 443);
     if (bad6) out.v6Connect = "denied: " + bad6;
-    else
+    else {
+      // 只想知道这条 v6 地址能不能建连。`connect()` 本身没有超时：黑洞地址会一直挂着，
+      // 占住免费计划全局 6 个 `connect` 名额中的一个（7.169–7.171 修过五处同类）。
+      let pk: Promise<Socket> | null = null;
       try {
-        const s6 = await connect({ hostname: expandV6(out.aaaa), port: 443 });
+        // `connect()` 返回的是 Socket（连接在 `.opened` 上），包成 Promise 才能 race
+        pk = Promise.resolve(connect({ hostname: expandV6(out.aaaa), port: 443 }));
+        const s6 = await withTimeout(pk, 2500);
         out.v6Connect = "ok";
         try {
           s6.close();
         } catch (e) {}
       } catch (e) {
+        // 超时只是「先返回」，socket 可能随后才连上：到手就关，否则它长期占一个名额
+        const late = pk;
+        if (late) void late.then((s) => { try { s.close(); } catch { /* 已经关了 */ } }).catch(() => { /* 本来就没连上 */ });
         out.v6Connect = "ERR " + errMsg(e);
       }
+    }
   }
   return json(out);
 }
