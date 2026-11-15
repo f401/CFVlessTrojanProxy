@@ -3865,5 +3865,47 @@ const dset = (m, body) => m.fetch(new Request("https://meter/set", { method: "PO
 const mSrc166 = fs.readFileSync("src/store/meter.ts", "utf8");
 ok("恢复门槛含连接数（与 /seed 口径一致）", mSrc166.includes("wantN > curN"));
 ok("conns 用 max 合并，快照落后也不回退", mSrc166.includes("Math.max(wantN, curN)"));
+// 第 167 组：挂在主批次上的增量只能由那一批确认（第 99 条）
+// 旧代码对每个用户批次都跑 clAck/syncAck/syncNack，而增量只挂在主 uuid 的请求体里：
+// 多个用户同时成功会把连接观测重复相减，任一用户失败会把主批次刚确认的增量退回/清空。
+{
+  const mkMeter = (failIds) => ({
+    idFromName: (x) => x,
+    get: (id) => ({
+      fetch: async () =>
+        failIds.includes(id)
+          ? new Response("x", { status: 500 })
+          : new Response("{}", { status: 200 }),
+    }),
+  });
+  W.S.pend.clear();
+  W.S.cagg.clear();
+  W.S.pend.set("u1", { up: 10, down: 20, conns: 1 });
+  W.S.pend.set("u2", { up: 30, down: 40, conns: 2 });
+  W.S.pend.set("u3", { up: 50, down: 60, conns: 3 });
+  W.S.cagg.set("9.9.9.9:443", { n: 5, ok: 5, dn: 5000, v: [100, 110] });
+  let clAckCalls = 0;
+  let nackCalls = 0;
+  const oldClAck = W.PEND.clAck.bind(W.PEND);
+  W.PEND.clAck = (rows) => {
+    clAckCalls += 1;
+    return oldClAck(rows);
+  };
+  const oldNack = W.HOOK.syncNack;
+  W.HOOK.syncNack = () => {
+    nackCalls += 1;
+  };
+  await W.PEND.flush({ METER: mkMeter(["u2"]), uuid: "u1" }, true);
+  W.PEND.clAck = oldClAck;
+  W.HOOK.syncNack = oldNack;
+  eq("连接观测只按发出去的那一批相减一次", clAckCalls, 1);
+  eq("别的用户批次失败不会退回主批次的增量", nackCalls, 0);
+  eq("失败用户的增量原样回到账本", (W.S.pend.get("u2") || {}).up, 30);
+  W.S.pend.clear();
+  W.S.cagg.clear();
+}
+const pSrc167 = fs.readFileSync("src/store/pend.ts", "utf8");
+ok("确认只发生在挂增量的那一批", pSrc167.includes("=== carriedBy"));
+ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).toLowerCase();"));
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

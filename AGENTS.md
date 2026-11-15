@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.175**（自举审计五十五批、共 98 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.176**（自举审计五十六批、共 99 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -364,6 +364,19 @@ tsc → check-arch → bundle → mk_test → test_v3 / smoke / test_score / sim
   `first` 改成「取更早的非零值」（重建后不能把首次使用时间推后）。
 - 锁第 166 组 8 条（只建连的用户能恢复、first 跟着走、字节没变多时连接数继续前进、快照落后不回退、first 取更早、字节按快照覆盖、两条源码断言）；
   A/B 旧代码 1153 通过 **7 失败** → 新 1160/0。
+### 7.176 自举审计（第 99 条，增量只能由承载它的那一批确认）
+
+- `PendingLedger.flush()` 把 `vt`/`hl`/`facts`/`cl` 增量挂在**主 uuid 的那一个请求体**上（`attached` 只置一次），
+  但确认动作写在 `eachLimit` 的每个批次回调里：成功分支 `if (carried && HOOK.syncAck) HOOK.syncAck(); if (carriedCl) this.clAck(sentCl);`、
+  失败分支 `if (carried && HOOK.syncNack) HOOK.syncNack();`。
+- 后果一：多个用户批次同时成功时 `clAck(sentCl)` 会被调用多次，同一批连接观测被**重复相减** ⇒ 计数被减成 0 后删键，
+  剩下的样本凭空消失（面板的 ttfb/抖动标定因此偏少）。
+- 后果二：任一用户批次失败时 `syncNack()` 会清掉 `vtPend`/中继健康待发行 —— 而那批增量可能刚被主批次**成功送达**，
+  于是「已经送达的 + 在途期间新加的」待发项一起被抹掉（与 7.157 的 `S.cagg.clear()` 同一个形状，换了一层）。
+- 修法：挂增量时记下承接者 `carriedBy = String(id).toLowerCase();`，成功/失败分支都先判 `carriedBy && String(id).toLowerCase() === carriedBy`，
+  再执行 ack/nack 与 `cntUnsend`；别的批次只管回滚自己的 `d`。
+- 锁：第 167 组 5 条（主批次成功 + 另一批次失败时 `clAck` 只调 1 次、`syncNack` 0 次、失败用户的增量原样回账本、两条源码断言），
+  A/B 旧代码 1161 通过 **4 失败** → 新 1165/0。
 - 文档索引：`docs/ARCHITECTURE.md`（分层/类与职责/注释约定）、`docs/评分机制_final.md`（打分与抽样）、`docs/判定模块设计.md`（判定层）、`docs/本地验证.md`（能本地验 vs 必须真 CF）、`docs/LIMITS.md`（平台限制实测）。
 - **S3（`ps`）评估结论（2026-11-15）**：`facts=eg,ps` 与 `?fx=eg` 交替配对 40 对 → 30/40 vs 30/40，**差 0（±7.3）**。
   原因是 7.121 之后 CF 托管站点默认直连，`ps` 没有作用面；代码保留、绑定保持 `eg`。结论是「无作用面」而非「测出变差」。
