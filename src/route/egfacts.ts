@@ -202,6 +202,8 @@ export interface EgEv {
   known?: boolean;
   /** 本站点已被 DNS 事实确证为纯 v4（有 A 无 AAAA）：此时送到页面就证明中继有 v4 出口 */
   siteV4?: boolean;
+  /** 目标是否 CF 托管：只有这类站点会用「20KB 整页」区分出口族（见下面三条规则） */
+  cf?: boolean;
 }
 
 /**
@@ -218,12 +220,14 @@ export interface EgEv {
 export function egDerive(ip: string, down: number, ev: EgEv = {}, now = Date.now()): number {
   if (!ip) return 0;
   // 整页是硬证据：v6 出口在 737B 的小页上就停住了，拿不到 20KB 以上
-  if (down >= EG_BIG) {
+  // 「整页 ⇒ v4」只在 CF 托管站点上成立：别的站点 v6 出口也能出整页，拿它判族会把 v6 中继标成 v4，
+  // 之后打 CF 站点时按 ×1 优先选它（本地闭环证明里正是这种反向标注最伤）。
+  if (down >= EG_BIG && ev.cf) {
     EG.note(ip, 4, now);
     return 4;
   }
   // 小页 + 「站点能出内容」的旁证 ⇒ 差分成因明确：站点没拒绝所有人，是这条通道的出口被拒
-  if (down > 0 && down <= EG_TINY && (ev.peerBig || ev.known)) {
+  if (down > 0 && down <= EG_TINY && ev.cf && (ev.peerBig || ev.known)) {
     EG.note(ip, 6, now);
     return 6;
   }

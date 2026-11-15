@@ -71,9 +71,9 @@ function once(policy, world, host, facts, mode, rnd) {
   const resp = ok ? PAGE : DENY;
   // 与 judge 相同的三个写入点：族推导、成功率、软封锁（软封锁必须带「同窗口有整页」的对照）
   const peerBig = ok || W.EG.snap().some((r) => r.f === 4);
-  W.egDerive(ip, resp.down, { peerBig, known: peerBig }, vnow);
+  W.egDerive(ip, resp.down, { peerBig, known: peerBig, cf: true }, vnow);
   W.PS.note(host, ip, ok, vnow);
-  if (!ok && resp.down <= 2048 && peerBig) W.BLK.note(host, ip, vnow, resp.down, true);
+  if (!ok && resp.down <= 2048 && peerBig) W.BLK.note({ host, ip, down: resp.down, peerBig, at: vnow });
   // 拿到整页 ⇒ 判定表记一次通道胜利（judge 的真实写入点之一）。没有这一步，`coldSite` 永远成立，
   // 策略就会一直被 `cold-pin` 钉在第一条中继上 —— 实测过：400 条全是 cold-pin，学不到任何东西。
   if (ok) W.vSetState(host, "r:" + ip, 1, 1);

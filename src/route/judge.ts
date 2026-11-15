@@ -139,7 +139,7 @@ export class Judge {
     }
 
     // 整页是出口族的硬证据，必须在下面「整页直接 return」之前提取，否则永远走不到那条分支。
-    if (e.via === "node" && e.node) egDerive(e.node.slice(0, e.node.lastIndexOf(":")), e.down, { siteV4: DNS.v6Of(e.host) === 0 }, now);
+    if (e.via === "node" && e.node) egDerive(e.node.slice(0, e.node.lastIndexOf(":")), e.down, { siteV4: DNS.v6Of(e.host) === 0, cf: !!e.cf }, now);
     if (e.ok && e.down >= BIG) {
       cnt("trHit");
       S.bigByHost.set(e.host, now);
@@ -191,7 +191,7 @@ export class Judge {
       if (nip && e.cf) this.markNeg(CF_NEG, nip, now);
     }
     // 出口族只能从「这次真拿到了什么」反推：整页 ⇒ v4；同类小页且有整页对照 ⇒ v6。
-    if (e.via === "node" && e.node) egDerive(e.node.slice(0, e.node.lastIndexOf(":")), e.down, { peerBig: bigDiff, known, siteV4: DNS.v6Of(e.host) === 0 }, now);
+    if (e.via === "node" && e.node) egDerive(e.node.slice(0, e.node.lastIndexOf(":")), e.down, { peerBig: bigDiff, known, siteV4: DNS.v6Of(e.host) === 0, cf: !!e.cf }, now);
     if (!known) {
       queueVerify(e.host, chan); // 复核队列（PROBE_REQ=0 时只排队）
       if (n >= 2 || e.cf) S.needPx.set(e.host, now + PX_TTL); // 只提醒「下次优先中转」，不下判定
