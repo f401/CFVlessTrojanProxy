@@ -7588,5 +7588,48 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   ok("四份文件都从 core/http80 取解析", ["src/route/judge.ts", "src/route/factshadow.ts", "src/proxy/connection.ts", "src/proxy/fallback.ts"].every((f) => src264(f).includes('from "../core/http80"')));
 }
 
+﻿// 第 265 组：拆地址只准有一份实现（7.265）
+// 旧包上没有这个导出时用桩，让断言红而不断（否则整组 TypeError、数不出红条数）
+const px265 = typeof W.parseProxyIp === "function" ? W.parseProxyIp : () => ({ host: "<missing>", port: 0 });
+const src265 = (p) => fs.readFileSync(p, "utf8");
+const code265 = (p) =>
+  src265(p)
+    .split(/\r?\n/)
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join("\n");
+
+// splitRelay 的四种写法
+eq("拆地址：ipv4:port", W.splitRelay("1.2.3.4:8443", 443).join("|"), "1.2.3.4|8443");
+eq("拆地址：方括号 v6 + 端口", W.splitRelay("[2a06:98c0::103]:8443", 443).join("|"), "2a06:98c0::103|8443");
+eq("拆地址：裸 v6 不切段落", W.splitRelay("2a06:98c0::103", 443).join("|"), "2a06:98c0::103|443");
+eq("拆地址：裸 v4 用默认端口", W.splitRelay("1.2.3.4", 80).join("|"), "1.2.3.4|80");
+eq("拆地址：空串回默认端口", W.splitRelay("", 443).join("|"), "|443");
+eq("拆地址：方括号无端口", W.splitRelay("[2a06:98c0::103]", 443).join("|"), "2a06:98c0::103|443");
+
+// 五处调用点都改走同一份实现
+ok("调试探针不再内联拆地址", !code265("src/routes/debug.ts").includes('lastIndexOf(":")') && code265("src/routes/debug.ts").includes("const [ph, pp] = splitRelay(pr, 443);"));
+ok("池子探活不再内联拆地址", !code265("src/px/pool.ts").includes('lastIndexOf(":")') && code265("src/px/pool.ts").includes("splitRelay(k, 443)"));
+ok("名单打包不再内联拆地址", !code265("src/px/seed.ts").includes("k.slice(0, i)") && code265("src/px/seed.ts").includes("splitRelay(k, 443)"));
+ok("订阅渲染不再内联拆地址", !code265("src/views/sub.ts").includes('lastIndexOf(":")') && code265("src/views/sub.ts").includes("const [ip] = splitRelay(k, 443);"));
+
+eq("配代理 IP：裸 v6 不当作「主机:端口」", px265("2a06:98c0::103").host + "|" + px265("2a06:98c0::103").port, "2a06:98c0::103|443");
+eq("配代理 IP：方括号 v6 + 端口", px265("[2a06:98c0::103]:8443").host + "|" + px265("[2a06:98c0::103]:8443").port, "2a06:98c0::103|8443");
+eq("配代理 IP：ipv4 + 端口", px265("1.2.3.4:8443").host + "|" + px265("1.2.3.4:8443").port, "1.2.3.4|8443");
+eq("配代理 IP：主机名走默认端口", px265("px.example.com").host + "|" + px265("px.example.com").port, "px.example.com|443");
+// 全仓扫描：内联拆地址只允许出现在实现与「有没有端口」的守卫里
+const walk265 = (d, acc = []) => {
+  for (const f of fs.readdirSync(d, { withFileTypes: true })) {
+    const p = d + "/" + f.name;
+    if (f.isDirectory()) walk265(p, acc);
+    else if (p.endsWith(".ts")) acc.push(p);
+  }
+  return acc;
+};
+const allow265 = ["src/core/http80.ts", "src/px/seed.ts"];
+const bad265 = walk265("src")
+  .filter((p) => !allow265.includes(p.replace(/\\/g, "/")))
+  .filter((p) => code265(p).includes('lastIndexOf(":")'));
+ok("内联拆地址只剩实现与端口守卫", bad265.length === 0, bad265.join(","));
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

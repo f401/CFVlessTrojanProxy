@@ -2,6 +2,7 @@ import { S } from "../core/state";
 import { connect } from "cloudflare:sockets";
 import { CONNECT_MS, timeoutSignal, withTimeout } from "../core/util";
 import { isCfIp, isPrivateHost } from "../core/net";
+import { splitRelay } from "../core/http80";
 export { DENY_PORTS, checkTarget, isPrivateHost } from "../core/net";
 
 /** 查 AAAA 记录（用于绕过 CF 对 IPv4 的内部隔离） */
@@ -160,11 +161,10 @@ export const isV4Literal = (h: string) =>
 export function parseProxyIp(raw: string) {
   const s = String(raw || "").trim();
   if (!s) return null;
-  const m6 = /^\[([^\]]+)\](?::(\d+))?$/.exec(s);
-  if (m6) return { host: m6[1], port: Number(m6[2]) || 443 };
-  const i = s.lastIndexOf(":");
-  if (i > 0 && /^\d+$/.test(s.slice(i + 1))) return { host: s.slice(0, i), port: Number(s.slice(i + 1)) };
-  return { host: s, port: 443 };
+  // 拆法必须与 core/http80 的 splitRelay 一致：裸 IPv6 自带冒号，
+  // 内联 `lastIndexOf` 会把 `2a06:98c0::103` 读成主机 `2a06:98c0:` + 端口 103。
+  const [host, port] = splitRelay(s, 443);
+  return { host, port };
 }
 
 /**

@@ -5,6 +5,7 @@ import { PX_TTL, SEED_KEY, SEED_MAX, SEED_READ_MS, SEED_VER } from "./const";
 import { cntDelta, cntUnsend } from "../core/counter";
 import { costOf } from "../nodes/score";
 import { S } from "../core/state";
+import { splitRelay } from "../core/http80";
 import { kvGetStrict, kvSet } from "../store/index";
 
 /* 代理节点：信誉表分桶读写 */
@@ -36,8 +37,8 @@ export class SeedStore {
    */
   packName(k: string) {
     const a = (S.alive.get(k) || {}) as NodeEntry;
-    const i = k.lastIndexOf(":");
-    return { k, h: a.h || k.slice(0, i), p: a.p || Number(k.slice(i + 1)) || 443, cc: a.cc || "" };
+    const [partHost, partPort] = splitRelay(k, 443);
+    return { k, h: a.h || partHost, p: a.p || partPort, cc: a.cc || "" };
   }
 
   /**

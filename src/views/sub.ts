@@ -1,5 +1,6 @@
 import { X_EDGE_IPS, edgeCount, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf } from "./sub-common";
 import { S } from "../core/state";
+import { splitRelay } from "../core/http80";
 
 export * from "./sub-common";
 export { renderSingbox } from "./sub-singbox";
@@ -135,7 +136,7 @@ export function renderClash(
       if (!relayIps.includes(ip)) relayIps.push(ip);
     }
     for (const k of S.alive.keys()) {
-      const ip = k.includes(":") ? k.slice(0, k.lastIndexOf(":")) : k;
+      const [ip] = splitRelay(k, 443);
       if (/^[0-9.]{7,15}$/.test(ip) && !relayIps.includes(ip)) relayIps.push(ip);
       if (relayIps.length >= 8) break;
     }

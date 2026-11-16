@@ -1,5 +1,5 @@
 import { CONNECT_MS, errMsg, withTimeout } from "../core/util";
-import { probeHttp80 } from "../core/http80";
+import { probeHttp80, splitRelay } from "../core/http80";
 import { connect } from "cloudflare:sockets";
 import type { Socket } from "cloudflare:sockets";
 
@@ -288,9 +288,9 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
 
   const pr = url.searchParams.get("probe");
   if (pr) {
-    const idx = pr.lastIndexOf(":");
-    const ph = idx > 0 ? pr.slice(0, idx) : pr;
-    const pp = Number(idx > 0 ? pr.slice(idx + 1) : 443) || 443;
+    // 拆地址只准有一份实现：内联 lastIndexOf 会把 [v6]:443 当成主机名 "[v6]" 拒掉，
+    // 而 IPv6 中继恰恰是最需要用 ?probe= 量的那批（v6 出口是 CF 托管站点 403 的来源）。
+    const [ph, pp] = splitRelay(pr, 443);
     const bad = checkTarget(ph, pp);
     if (bad) return json({ probe: pr, ok: false, error: bad });
     const r = await probeProxy(ph, pp);

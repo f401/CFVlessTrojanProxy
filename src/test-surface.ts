@@ -142,6 +142,7 @@ export { FACTS, FactsStore } from "./route/factsstore";
 /** tunnelfetch 探针（出口族对照实验用） */
 export { probeTf } from "./core/tf";
 export { probeHttp80, relayIpOf, splitRelay } from "./core/http80";
+export { parseProxyIp } from "./proxy/dial";
 export { cfHttpCode, refreshCfHttp } from "./proxy/cfverdict";
 
 export { handleDns, trojanUdpFrame } from "./proxy/dns";

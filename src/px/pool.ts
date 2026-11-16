@@ -9,6 +9,7 @@ import { candsFor, capOf, invalidateRank, scoreParts, nsProbe, nsProbeFail, p90O
 import { BUCKET_DEF, SEEDS } from "./seed";
 import { MODES, keyOf } from "./const";
 import { S } from "../core/state";
+import { splitRelay } from "../core/http80";
 
 /* 代理节点：状态 / 信誉分桶 / 选择 / cron */
 
@@ -64,11 +65,11 @@ export async function pxGet(env: Env) {
     }
     for (const n of src.slice(0, SEED_COLD_N)) {
       if (!n || !n.k) continue;
-      const i = n.k.lastIndexOf(":");
+      const [host0, port0] = splitRelay(n.k, 443);
       // 名单只有"连得上"，没有延迟：统一按先验起步，由本 isolate 自己的样本收敛
       S.alive.set(n.k, {
-        h: n.h || n.k.slice(0, i),
-        p: n.p || Number(n.k.slice(i + 1)) || 443,
+        h: n.h || host0,
+        p: n.p || port0,
         cc: n.cc || "",
         ms: SC.P_TCP,
       });
@@ -261,8 +262,8 @@ export async function cronScan(env: Env, adm = 0) {
     S.reProbeN += again.length;
     const rr = await Promise.all(
       again.map(async (k) => {
-        const i = k.lastIndexOf(":");
-        return { k, r: await probeProxy(k.slice(0, i), Number(k.slice(i + 1)) || 443) };
+        const [probeHost, probePort] = splitRelay(k, 443);
+        return { k, r: await probeProxy(probeHost, probePort) };
       }),
     );
     for (const { k, r } of rr) {
@@ -360,8 +361,8 @@ export async function cronScan(env: Env, adm = 0) {
   const recheck = [cur, ...top3].filter(Boolean).slice(0, 4);
   const rres = await Promise.all(
     recheck.map(async (k) => {
-      const i = k.lastIndexOf(":");
-      return { k, r: await probeProxy(k.slice(0, i), Number(k.slice(i + 1)) || 443) };
+      const [probeHost2, probePort2] = splitRelay(k, 443);
+      return { k, r: await probeProxy(probeHost2, probePort2) };
     }),
   );
   for (const { k, r } of rres) {
@@ -383,8 +384,8 @@ export async function cronScan(env: Env, adm = 0) {
   for (const seg of chunks(rest, SC.PROBE_CONC)) {
     const rres2 = await Promise.all(
       seg.map(async (k) => {
-        const i = k.lastIndexOf(":");
-        return { k, r: await probeProxy(k.slice(0, i), Number(k.slice(i + 1)) || 443) };
+        const [probeHost, probePort] = splitRelay(k, 443);
+        return { k, r: await probeProxy(probeHost, probePort) };
       }),
     );
     for (const { k, r } of rres2) {
