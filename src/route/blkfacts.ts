@@ -27,6 +27,8 @@ export const BLK_MAX = 1024;
 export const BLK_SWEEP_MIN = 3;
 /** 静默时长 */
 export const BLK_MUTE = 30 * 60000;
+/** 静默表的容量上限：键是客户端带来的站点名，30 分钟 TTL 内可以灌任意多条（v7.230） */
+export const BLK_MUTE_MAX = 256;
 
 /** 累计中的一批 */
 interface Batch {
@@ -155,6 +157,11 @@ export class BlkFacts {
    */
   muted(host: string, now = Date.now()): boolean {
     const until = this.mute.get(host) || 0;
+    // 到期就删：这张表只在 note() 的总量守卫里被清，一条再也不会被查到的静默会一直占着
+    if (until && until <= now) {
+      this.mute.delete(host);
+      return false;
+    }
     return until > now;
   }
 
@@ -171,6 +178,11 @@ export class BlkFacts {
     for (const [h, until] of this.mute) if (until <= now) this.mute.delete(h);
     // 过期清不掉（短时间见过一大堆键）时按 `at` 兜底 —— 扔掉一条批进度最多丢两次投票，
     // 而真需要它确认的那条通道，下一次观测会重新开批。
+    // 静默表也要有兜底：`sweep()` 写它时不带守卫，30 分钟内见过的站点名可以任意多
+    if (this.mute.size > BLK_MUTE_MAX) {
+      const oldMute = [...this.mute.entries()].sort((a, b) => a[1] - b[1]).slice(0, this.mute.size - BLK_MUTE_MAX);
+      for (const [h] of oldMute) this.mute.delete(h);
+    }
     if (this.batch.size <= BLK_MAX) return;
     const old = [...this.batch.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, this.batch.size - BLK_MAX);
     for (const [k] of old) this.batch.delete(k);
@@ -201,6 +213,8 @@ export class BlkFacts {
       this.batch.delete(k);
     }
     this.mute.set(host, now + BLK_MUTE);
+    // 唯一一条不经过 note() 的写入：这里也得过一遍守卫，否则静默表只受 TTL 约束
+    if (this.mute.size > BLK_MUTE_MAX) this.trim(now);
     cnt("bizSweeps");
     return true;
   }

@@ -6193,5 +6193,38 @@ ok("分位索引用 nearest-rank", pendSrc.includes("Math.ceil(p * v.length) - 1
 ok("分位索引不再用 floor(p*n)", !pendSrc.includes("Math.floor(p * v.length)"));
 ok("索引下限夹到 0（p 很小时不能取负）", pendSrc.includes("Math.max(0, Math.ceil(p * v.length) - 1)"));
 
+
+/* ---------- 第 231 组：静默表的容量（v7.230 D187） ---------- */
+{
+  const blkSrc = fs.readFileSync("src/route/blkfacts.ts", "utf8");
+  const m = blkSrc.match(/export const BLK_MUTE_MAX = (\d+);/);
+  const cap = m ? Number(m[1]) : 0;
+  ok("静默表有独立上限", cap >= 64 && cap <= 4096, String(cap));
+  const t231 = Date.now();
+  W.BLK.clear();
+  const N231 = 300;
+  let swept231 = 0;
+  for (let i = 0; i < N231; i++) {
+    const host = `h${i}.g231.test`;
+    W.BLK.load([
+      { k: host + "|10.231.0.1", n: 3, at: t231 },
+      { k: host + "|10.231.0.2", n: 3, at: t231 },
+      { k: host + "|10.231.0.3", n: 3, at: t231 },
+    ]);
+    if (W.BLK.sweep(host, ["10.231.0.1", "10.231.0.2", "10.231.0.3"], t231)) swept231 += 1;
+  }
+  eq("sweep 全部生效", swept231, N231);
+  let muted231 = 0;
+  for (let i = 0; i < N231; i++) if (W.BLK.muted(`h${i}.g231.test`, t231 + 1000)) muted231 += 1;
+  ok("静默表不超过上限", muted231 <= cap && muted231 === cap, String(muted231));
+  eq("最早写入的静默被淘汰", W.BLK.muted("h0.g231.test", t231 + 1000), false);
+  eq("最新写入的静默仍在", W.BLK.muted(`h${N231 - 1}.g231.test`, t231 + 1000), true);
+  eq("静默到期后不再静音", W.BLK.muted(`h${N231 - 1}.g231.test`, t231 + 31 * 60000), false);
+  ok("常量在位", blkSrc.includes("export const BLK_MUTE_MAX = 256;"), "");
+  ok("sweep 写完也过守卫", blkSrc.includes("if (this.mute.size > BLK_MUTE_MAX) this.trim(now);"), "");
+  ok("trim 削静默表", blkSrc.includes("if (this.mute.size > BLK_MUTE_MAX) {"), "");
+  ok("muted 读到过期就删", blkSrc.includes("if (until && until <= now) {"), "");
+  W.BLK.clear();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
