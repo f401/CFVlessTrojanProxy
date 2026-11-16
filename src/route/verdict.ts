@@ -2,6 +2,7 @@
 // 状态机：0 unknown / 1 ok / 2 blocked / 3 dead。
 // 纪律：弱证据（traffic）不得把强证据（probe/client）的结论冲掉；封锁只能由「行为证据」判定。
 import { cnt } from "../core/counter";
+import { St } from "../core/enums";
 export type VState = 0 | 1 | 2 | 3;
 export type VSrc = 0 | 1 | 2; // 0 traffic 弱证据 / 1 probe 强证据 / 2 client 端到端
 
@@ -59,9 +60,9 @@ export class VerdictTable {
    * @returns 3（连不上）/ 1（2xx-3xx 可用）/ 2（4xx-5xx 被拦）
    */
   private static stateOf(code: number): VState {
-    if (code <= 0) return 3;
-    if (code >= 200 && code < 400) return 1;
-    return 2;
+    if (code <= 0) return St.Dead;
+    if (code >= 200 && code < 400) return St.Ok;
+    return St.Blocked;
   }
 
   /**
@@ -104,7 +105,7 @@ export class VerdictTable {
     const old = this.m.get(k);
     const ems = old ? Math.round(old.ms * 0.6 + ms * 0.4) : Math.round(ms);
     // 弱证据不得把强证据的 blocked/dead 冲掉，也不得把 ok 冲成 blocked
-    const st = src === 0 && old ? (old.state === 1 ? (code >= 200 ? 1 : old.state) : old.state) : VerdictTable.stateOf(code);
+    const st = src === 0 && old ? (old.state === St.Ok ? (code >= 200 ? St.Ok : old.state) : old.state) : VerdictTable.stateOf(code);
     this.m.set(k, { t, c, state: st, code, ms: ems, n: (old?.n || 0) + 1, at: Date.now(), src });
     if (this.m.size > this.max) this.trim();
   }
@@ -176,7 +177,7 @@ export class VerdictTable {
    * @returns 可用返回 true
    */
   ok(t: string, c: string): boolean {
-    return this.fresh(this.m.get(VerdictTable.key(t, c)))?.state === 1;
+    return this.fresh(this.m.get(VerdictTable.key(t, c)))?.state === St.Ok;
   }
 
   /**
@@ -187,7 +188,7 @@ export class VerdictTable {
    */
   bad(t: string, c: string): boolean {
     const e = this.fresh(this.m.get(VerdictTable.key(t, c)));
-    return !!e && (e.state === 2 || e.state === 3);
+    return !!e && (e.state === St.Blocked || e.state === St.Dead);
   }
 
   /**
@@ -200,7 +201,7 @@ export class VerdictTable {
     for (const v of this.m.values()) {
       if (v.t !== t) continue;
       if (!this.fresh(v)) continue;
-      if (v.state === 1) return false;
+      if (v.state === St.Ok) return false;
       seen++;
     }
     return seen > 0;
@@ -249,7 +250,7 @@ export class VerdictTable {
       const t = r.k.slice(0, i);
       // 远端行是不可信输入（可能来自旧版本 isolate）：通配行在这里就丢掉，不靠上游过滤
       if (VerdictTable.blockWild(t)) continue;
-      this.setState(t, r.k.slice(i + 1), (r.s === 3 ? 3 : 2) as VState, 1);
+      this.setState(t, r.k.slice(i + 1), (r.s === St.Dead ? St.Dead : St.Blocked) as VState, 1);
       n++;
     }
     this.trim();

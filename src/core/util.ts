@@ -25,7 +25,7 @@ export const CONNECT_MS = 2500;
  */
 export const UP_STALL_MS = 30000;
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐死
-export const VERSION = "7.249";
+export const VERSION = "7.250";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 

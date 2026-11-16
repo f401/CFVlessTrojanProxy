@@ -6,6 +6,8 @@
 // 把最新学到的证据饿死 —— `Object.entries` 是插入序，而合并只追加新键，所以新行的位置
 // 永远在最后（v7.177 的 pend 饥饿、v7.181 的 hl 淘汰留最旧、v7.187 的出口切片都是这个形状）。
 
+import { St } from "../core/enums";
+
 /** DO 里七张事实表的最小形状（只声明这里读到的东西） */
 export interface FactOutSrc {
   /** 判定表：`站点|通道` → 到期时间，或 `{ 状态, 到期时间 }`（老行是裸数字） */
@@ -78,7 +80,7 @@ export function factsOut(src: FactOutSrc, now = Date.now()): Record<string, unkn
   const vt: VtOutRow[] = [];
   for (const [k, v] of Object.entries(src.vt)) {
     const t = typeof v === "number" ? v : v.t;
-    const s = typeof v === "number" ? 2 : v.s === 3 ? 3 : 2;
+    const s = typeof v === "number" ? St.Blocked : v.s === St.Dead ? St.Dead : St.Blocked;
     if (t > now) vt.push({ k, s, t });
   }
   const hl: HlOutRow[] = Object.entries(src.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d, t: Number(x.t) || 0 }));

@@ -5,6 +5,7 @@
  * 而它只读写字面字段、不碰 storage —— 挪成自由函数后 `Meter.handle()` 只剩「快照 → 合并 → 落盘 → 失败回滚」。
  * 想改合并口径的人只需要读这一个文件。
  */
+import { St } from "../core/enums";
 import { mergeFacts } from "./factmerge";
 
 /** 合并目标：`Meter` 公开的账本字段（结构化即可，不要求是 `Meter` 实例） */
@@ -98,7 +99,7 @@ export function applyAdd(m: AddTarget, d: MeterBody): void {
           // 状态必须一起存（v7.164）：只存到期时间的话，`dead` 读回来一律变 `blocked`，
           // `policy` 里的硬排除退化成 ×6 降权，一条连不上的中继会继续占 `connect()` 名额。
           // 合并口径：更晚到期的那条胜；同一时刻取更严格的状态（3 > 2）。
-          const s = r.s === 3 ? 3 : 2;
+          const s = r.s === St.Dead ? St.Dead : St.Blocked;
           const old = m.vt[r.k];
           const oldT = typeof old === "number" ? old : old ? old.t : 0;
           const oldS = typeof old === "number" ? 2 : old ? old.s : 0;

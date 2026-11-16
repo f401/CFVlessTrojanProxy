@@ -10,6 +10,8 @@
  * 条目 10 分钟不用就失效（链路质量会变，旧样本没意义）。表有上限（MAX），
  * 满了先清过期、再按最旧淘汰，避免 isolate 长跑时无限涨。
  */
+import { Mode } from "../core/enums";
+
 export const REL_TTL = 600_000;
 
 /** 单条「站点 × 中继」样本 */
@@ -23,6 +25,9 @@ export interface RelSample {
   /** 最后一次更新的时刻 */
   at: number;
 }
+
+/** 站点无关的聚合表最多保留多少条（键是中继 IP，池子轮换会一直产生新 IP） */
+const BY_MAX = 256;
 
 /** 表内最多保留多少条「站点 × 中继」 */
 const MAX = 512;
@@ -53,7 +58,7 @@ export function relCostOf(s: RelSample | null): number {
  */
 export function relCostFor(mode: string, s: RelSample | null): number {
   if (!s) return 1e6;
-  if (mode === "lat") return s.ttfb;
+  if (mode === Mode.Lat) return s.ttfb;
   if (s.kbs <= 0) return s.ttfb + 2000;
   return s.ttfb + 512_000 / Math.max(32, s.kbs);
 }
@@ -78,7 +83,6 @@ export class RelPerfTable {
   note(host: string, ip: string, ttfb: number, kbs: number, now = Date.now()): void {
     if (!host || !ip) return;
     if (!(ttfb >= 0) || !(kbs >= 0)) return;
-    if (this.m.size > MAX) this.drop(now);
     const k = host + "|" + ip;
     const old = this.m.get(k);
     if (!old || now - old.at > REL_TTL) {
@@ -96,6 +100,11 @@ export class RelPerfTable {
     const a = this.by.get(ip);
     if (!a || now - a.at > REL_TTL) this.by.set(ip, { n: 1, ttfb, kbs, at: now });
     else this.by.set(ip, { n: Math.min(8, a.n + 1), ttfb: a.ttfb * 0.5 + ttfb * 0.5, kbs: this.mixKbs(a.kbs, kbs), at: now });
+    // 上限必须在插入**之后**判断：写在前面时表会稳定停在 MAX + 1（7.250 之前就是这样），
+    // 而且每来一条样本都要把整表排一遍 —— 这是每条连接 flush 都会走的热路径。
+    // 淘汰留 1/8 低水位，下一次排序要再攒 64 条才发生。
+    if (this.m.size > MAX) this.evict(this.m, MAX, now);
+    if (this.by.size > BY_MAX) this.evict(this.by, BY_MAX, now);
   }
 
   /**
@@ -205,15 +214,27 @@ export class RelPerfTable {
   }
 
   /**
-   * 淘汰：先删过期，仍超限就按 at 从旧到新删掉超出的部分。
+   * 淘汰：先删过期，仍超限就按 at 从旧到新收到「低水位」。
+   * @param map 要淘汰的表（站点 × 中继，或站点无关的聚合表）
+   * @param max 该表的上限
    * @param now 当前时刻
    * @returns 无
    */
-  private drop(now: number): void {
-    for (const [k, s] of this.m) if (now - s.at > REL_TTL) this.m.delete(k);
-    if (this.m.size <= MAX) return;
-    const rows = [...this.m].sort((a, b) => a[1].at - b[1].at);
-    for (const [k] of rows.slice(0, this.m.size - MAX)) this.m.delete(k);
+  private evict(map: Map<string, RelSample>, max: number, now = Date.now()): void {
+    for (const [k, s] of map) if (now - s.at > REL_TTL) map.delete(k);
+    if (map.size <= max) return;
+    // 低水位：一次淘汰留出 max/8 的余量，把「每条样本都排一次整表」摊薄成「每 64 条一次」
+    const low = Math.max(1, max - Math.floor(max / 8));
+    const rows = [...map].sort((a, b) => a[1].at - b[1].at);
+    for (const [k] of rows.slice(0, map.size - low)) map.delete(k);
+  }
+
+  /**
+   * 当前表规模（测试与面板用）。
+   * @returns 站点×中继的条数与聚合表的条数
+   */
+  size(): { rows: number; by: number } {
+    return { rows: this.m.size, by: this.by.size };
   }
 }
 

@@ -3657,7 +3657,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   d4.m.vt[K4] = now + 600000;
   const r4 = (await VT()).find((x) => x.k === K4) || {};
   eq("老格式（裸到期时间）读成 blocked", Number(r4.s), 2);
-  ok("DO 侧存状态（源码）", storeSrc().includes("r.s === 3 ? 3 : 2"));
+  ok("DO 侧存状态（源码）", storeSrc().includes("r.s === St.Dead ? St.Dead : St.Blocked"));
 }
 // ── 第 155 组：空关闭的门槛只该在「跨过那一条」上生效 ──
 {
@@ -7015,6 +7015,84 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   ok(`[${G}] 正证据写真实状态码`, tfbSrc249.includes("Number(row.status || 200)"));
   ok(`[${G}] 2xx/3xx 判据出现两处（tfVerdict + runTfb 的 okN）`, tfbSrc249.split("(x.status || 0) >= 200 && (x.status || 0) < 400").length - 1 === 2);
 }
+
+// ── 第 250 组：relperf 淘汰判据（D204）+ 判定状态改用枚举（D205）──────────
+{
+  // D204-1：上限必须在插入之后判断 —— 旧代码稳定停在 512 + 1
+  // A/B 时旧代码没有这个导出，用空桩把「红」限制在断言上，而不是让整组抛错中断
+  const mkRel250 = () =>
+    typeof W.RelPerfTable === "function"
+      ? new W.RelPerfTable()
+      : { note() {}, get() { return null; }, cost() { return 0; }, size() { return { rows: 0, by: 0 }; } };
+  const t250 = mkRel250();
+  ok("测试窗口导出了 RelPerfTable", typeof W.RelPerfTable === "function");
+  for (let i = 0; i < 600; i += 1) t250.note("h" + i + ".test", "10.9." + (i % 200) + "." + (i % 251), 100 + i, 1024, 1_000_000);
+  const sz250 = t250.size();
+  ok("淘汰后不超过上限 512", sz250.rows <= 512, JSON.stringify(sz250));
+  ok("淘汰留 1/8 低水位（不是每条样本都排整表）", sz250.rows >= 448, JSON.stringify(sz250));
+  ok("站点无关聚合表也有上限 256", sz250.by <= 256, JSON.stringify(sz250));
+  ok("两条表都真的装进了样本", sz250.rows > 0 && sz250.by > 0, JSON.stringify(sz250));
+
+  // D204-2：过期的样本不再参与决策（内存按上限收，过期靠读路径判活）
+  const t251 = mkRel250();
+  t251.note("old.test", "10.8.0.9", 100, 1024, 1_000);
+  ok("未过期的样本仍在", !!t251.get("old.test", "10.8.0.9", 1_500), JSON.stringify(t251.size()));
+  ok("过期的样本不再被选中", t251.get("old.test", "10.8.0.9", 1_000 + W.REL_TTL + 1) === null);
+
+  // D204-3：代价函数仍可用（淘汰改动不能把它弄坏）
+  const t252 = mkRel250();
+  t252.note("c.test", "10.6.0.1", 150, 4096, 1_000_000);
+  const c252 = t252.cost("c.test", "10.6.0.1", 1_000_001);
+  ok("没样本用聚合兜底，有样本用自己那条", Number.isFinite(c252) && c252 > 0, String(c252));
+
+  // D205-1：枚举是唯一真源，且能被当作数字/字符串用（既有调用点不变）
+  // A/B 时旧包没有这些导出，用「不可能相等」的桩让断言红而不是抛错
+  const ST250 = W.St || { Unknown: -1, Ok: -2, Blocked: -3, Dead: -4 };
+  const MD250 = W.Mode || { Tput: "__none__", Lat: "__none__" };
+
+  eq("St.Unknown 是 0", ST250.Unknown, 0);
+  eq("St.Ok 是 1", ST250.Ok, 1);
+  eq("St.Blocked 是 2", ST250.Blocked, 2);
+  eq("St.Dead 是 3", ST250.Dead, 3);
+  eq("St 反向映射保留语义名", ST250[3], "Dead");
+  eq("Mode.Tput 是 tput", MD250.Tput, "tput");
+  eq("Mode.Lat 是 lat", MD250.Lat, "lat");
+
+
+  // D205-2：行为面 —— 判定表写入与读取在枚举口径下仍一致
+  W.vClear();
+  W.vSetState("enum250.test", "d", ST250.Dead, 1);
+  eq("状态 3 记成 Dead", W.vState("enum250.test", "d"), ST250.Dead);
+  eq("Dead 不是「可用」", W.vOk("enum250.test", "d"), false);
+  eq("Dead 算「不可用」", W.vBad("enum250.test", "d"), true);
+  W.vSetState("enum250.test", "d", ST250.Ok, 1);
+  eq("状态 1 记成 Ok", W.vState("enum250.test", "d"), ST250.Ok);
+  eq("Ok 算「可用」", W.vOk("enum250.test", "d"), true);
+  W.vSetState("enum250.test", "d", ST250.Blocked, 1);
+  eq("状态 2 记成 Blocked", W.vState("enum250.test", "d"), ST250.Blocked);
+  W.vClear();
+
+  // D205-3：源码锁 —— 状态字面量不许再散落在判定路径上
+  const srcVer250 = fs.readFileSync("src/route/verdict.ts", "utf8");
+  ok("verdict.ts 用 St.Dead 而不是裸 3", srcVer250.includes("St.Dead") && !srcVer250.includes("return 3;"));
+  ok("verdict.ts 的 vOk/vBad 走枚举", srcVer250.includes("=== St.Ok") && srcVer250.includes("=== St.Blocked || e.state === St.Dead"));
+  const srcEnums250 = fs.readFileSync("src/core/enums.ts", "utf8");
+  ok(
+    "枚举文件在且是唯一真源",
+    srcEnums250.includes("export enum St") && srcEnums250.includes("export enum Mode"),
+    "St / Mode 必须都在 src/core/enums.ts",
+  );
+  ok("通道类型仍只有 channel.ts 一份", !srcEnums250.includes("ChanKind"));
+  const srcOut250 = fs.readFileSync("src/store/factout.ts", "utf8");
+  ok("factout.ts 的老格式按枚举读", srcOut250.includes("St.Blocked") && !srcOut250.includes("? v.s === 3 ? 3 : 2"));
+  const srcAdd250 = fs.readFileSync("src/store/meteradd.ts", "utf8");
+  ok("meteradd.ts 的老格式按枚举读", srcAdd250.includes("r.s === St.Dead ? St.Dead : St.Blocked"));
+  const srcRel250 = fs.readFileSync("src/route/relperf.ts", "utf8");
+  ok("relperf 的淘汰只有一处实现", srcRel250.includes("private evict(") && !srcRel250.includes("this.drop(now)"));
+  ok("relperf 的上限判断在插入之后", srcRel250.includes("if (this.m.size > MAX) this.evict(this.m, MAX, now);"));
+  ok("relperf 用 Mode 枚举判模式", srcRel250.includes("mode === Mode.Lat"));
+}
+
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
