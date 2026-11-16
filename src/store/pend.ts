@@ -85,9 +85,10 @@ export class PendingLedger {
    * 功能：把待上报账本 POST 给 DO。成功才 ack（否则 nack 以便重算），失败回滚流量。
    * @param env 环境变量
    * @param force 忽略节流
+   * @param max 本轮最多带几个用户（每人一次 DO 往返；由 `planRound` 按剩余额度分给这里）
    * @returns 无
    */
-  async flush(env: Env, force?: boolean): Promise<void> {
+  async flush(env: Env, force?: boolean, max: number = SC.PEND_MAX): Promise<void> {
     if (!env || !env.METER || !S.pend.size) return;
     if (!force && Date.now() - S.pendAt < S.pendMs) return;
     S.pendAt = Date.now();
@@ -97,7 +98,7 @@ export class PendingLedger {
     const all = [...S.pend.entries()];
     const start = all.length ? (S.pendIdx || 0) % all.length : 0;
     const rotated = all.slice(start).concat(all.slice(0, start));
-    const batch = rotated.slice(0, SC.PEND_MAX);
+    const batch = rotated.slice(0, Math.max(1, Math.min(SC.PEND_MAX, max)));
     S.pendIdx = all.length ? (start + batch.length) % all.length : 0;
     if (rotated.length > batch.length) cnt("pendSkip", rotated.length - batch.length);
     // 只摘掉这一批：在途期间新加的增量留在账本里，下一轮接着发（不是整表清空）
@@ -281,10 +282,11 @@ export function kickFlush(env: Env, id: string | null): void {
  * 功能：把待上报账本 POST 给 DO（薄包装，委托 PEND.flush）。
  * @param env 环境变量
  * @param force 忽略节流
+ * @param max 本轮最多带几个用户（由 `planRound` 的 pend 分账传入）
  * @returns 无
  */
-export async function pendFlush(env: Env, force?: boolean): Promise<void> {
-  await PEND.flush(env, force);
+export async function pendFlush(env: Env, force?: boolean, max: number = SC.PEND_MAX): Promise<void> {
+  await PEND.flush(env, force, max);
 }
 
 /**

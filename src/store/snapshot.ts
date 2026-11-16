@@ -32,9 +32,10 @@ export async function usageSnapGet(env: Env) {
  * @param env 环境变量
  * @param users 用户表（必须传：本地没有"全部用户"的表，不传等于什么都不写 —— v7.142 删掉
  *   门面方法就是因为 `usageSnapWrite(env)` 这个形态永远写不出东西，这里如实写清）
+ * @param max 本轮最多读几个用户的用量（每人一次 DO 往返，由 `planRound` 的 snap 分账传入）
  * @returns 无
  */
-export async function usageSnapWrite(env: Env, users?: UserRec[]) {
+export async function usageSnapWrite(env: Env, users?: UserRec[], max: number = SC.SNAP_MAX) {
   if (!env.STATS || !env.METER) return;
   // 读失败就跳过：拿空表继续写会把别的用户的历史用量覆盖掉
   let prev: UsageSnap;
@@ -50,8 +51,8 @@ export async function usageSnapWrite(env: Env, users?: UserRec[]) {
   // 超出的那批不读，但**必须把上一次快照里的数值原样搬过来** —— 直接跳过会让它们从灾备
   // 快照里消失，DO 重建之后再也恢复不回来（v7.174 之前就是这样：用户一多，尾部的
   // meterGet 全部失败，那些人的历史用量永远停在某一天，且没有任何计数）。
-  const head = list.slice(0, SC.SNAP_MAX);
-  const tail = list.slice(SC.SNAP_MAX);
+  const head = list.slice(0, Math.max(1, Math.min(SC.SNAP_MAX, max)));
+  const tail = list.slice(head.length);
   if (tail.length) cnt("snapSkip", tail.length);
   const out: UsageSnap = { ts: Date.now(), users: {} };
   // 同一个 num 不要每个用户重新建一次闭包

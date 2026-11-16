@@ -86,7 +86,7 @@ export {
 export { ERRS } from "./nodes/errlog";
 export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, srcNote, srcRank, srcHealth, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES } from "./px/probe";
 export { regionListAsync } from "./px/regions";
-export { PEND, clSnapshot, nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
+export { PEND, RESTORE_MAX, clSnapshot, nodeSnapGet, pendFlush, primaryId, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
 export { doFetch, meterGet } from "./store/meter-client";
 export { runCron } from "./routes/cron";
 export { renderStatsHtml } from "./views/panel";
@@ -104,7 +104,7 @@ export { DIRECT, chanKey, nodeKeyOf } from "./route/channel";
 export { decide, shadow, policyOn } from "./route/policy";
 export { pxDecision } from "./proxy/pxhook";
 export { HOOK } from "./core/hook";
-export { DNS_BATCH, TFB_CALLS, SUB_FIXED, SUB_FIXED_N, planRound, planView } from "./route/budget";
+export { DNS_BATCH, SHARE_PEND, SHARE_SNAP, TFB_CALLS, SUB_FIXED, SUB_FIXED_N, planRound, planView } from "./route/budget";
 export { chanPref, prefsOf, prefsJson, PREFS } from "./route/prefs";
 export { HEALTH, RelayHealth, ipOf } from "./route/relay-health";
 export { STORE, Store } from "./store/store";

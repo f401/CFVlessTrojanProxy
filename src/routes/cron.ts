@@ -11,7 +11,7 @@ import { TFB } from "../route/tfbbook";
 import { DNS } from "../route/dnsfacts";
 import { probeFam } from "../proxy/dial";
 import { SEL } from "../px/selector";
-import { RESTORE_MAX, flushSnap, pendFlush, restorePick, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
+import { flushSnap, pendFlush, restorePick, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
 import { loadUsers } from "../proxy/protocol";
 
 /**
@@ -104,7 +104,7 @@ async function cronOnce(env: Env): Promise<void> {
   }
   // 定时持久化的唯一入口：每轮 cron 最多各写 1 次
   try {
-    await pendFlush(env, true);
+    await pendFlush(env, true, plan.pend);
   } catch (e) {}
   // cronScan 内部已经落过一次 seed（且自带 55 分钟节流），这里只补写脏数据
   try {
@@ -120,7 +120,7 @@ async function cronOnce(env: Env): Promise<void> {
       const allIds = Object.keys(snap.users);
       // 一轮能续回多少个用户，由剩余 fetch 额度决定（plan.sub）：以前写死 12，
       // 与 48 的硬上限没有任何数量关系，加到第 5 个消费者时就会静默撞线（7.186）。
-      const pick = restorePick(allIds, Math.min(RESTORE_MAX, plan.sub));
+      const pick = restorePick(allIds, plan.restore);
       cnt("restore", pick.length);
       if (allIds.length > pick.length) cnt("restoreSkip", allIds.length - pick.length);
       await eachLimit(pick, 8, (id) => restoreUsage(env, id, snap).then(() => undefined));
@@ -128,7 +128,7 @@ async function cronOnce(env: Env): Promise<void> {
     const users = await loadUsers(env);
     // 读 KV 失败且没有完整缓存时 list 可能缺托管用户：此时写快照会把
     // 这些用户的历史用量整份抹掉，宁可这一轮不写
-    if (users.ok !== false) await usageSnapWrite(env, users.list);
+    if (users.ok !== false) await usageSnapWrite(env, users.list, plan.snap);
   } catch (e) {}
   // 不传 force：让 flushSnap 走「1h/2h + 全局 45 分钟闸门」的节奏
   try {

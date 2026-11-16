@@ -2106,7 +2106,8 @@ const sum = q.adm;
   eq("剩余 fetch 额度 = 硬上限 − 固定支出", l0.sub, W.SC.SCAN_SUB - W.SUB_FIXED_N);
   ok("剩余额度非负", l0.sub >= 0, String(l0.sub));
   ok("固定支出不到硬上限的一半", W.SUB_FIXED_N * 2 <= W.SC.SCAN_SUB, String(W.SUB_FIXED_N));
-  eq("固定支出含五项（源/判定批/DoH/上报/快照）", Object.keys(W.SUB_FIXED).length, 5);
+  eq("固定支出只剩三笔（源/判定批/DoH）", Object.keys(W.SUB_FIXED).length, 3);
+  ok("上报与快照不再算作固定支出（人数由分账决定）", W.SUB_FIXED.pend === undefined && W.SUB_FIXED.snap === undefined);
 }
 
 // 66) 入口偏好不在服务端做：整条探测链（EDGE_AUTO / edgeScan / edge:pref）已删除，
@@ -3347,7 +3348,7 @@ ok("状态表里不再有 tsMem 的键", !Object.prototype.hasOwnProperty.call(W
 {
   const g = "112";
   eq(`[${g}] 判定表 TTL 只有一个来源（调试端点不再抄裸魔数）`, W.VT_TTL_MS, 30 * 60 * 1000);
-  eq(`[${g}] 预算快照只回 adm/sub（判定额度那一维 7.149 已删）`, Object.keys(W.planView(400, 20)).join(","), "adm,sub,verds,site");
+  eq(`[${g}] 预算快照回 adm/sub + 三批分账（判定额度那一维 7.149 已删）`, Object.keys(W.planView(400, 20)).join(","), "adm,sub,pend,snap,restore,verds,site");
   const src = fs.readFileSync("test/_bundle.mjs", "utf8");
   ok(`[${g}] 调试端点不再回恒空字段 ips/nodes/rows`, !src.includes("ips: sw.ips") && !src.includes("nodes: sw.nodes"));
 }
@@ -3941,7 +3942,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
 {
   const pendSrc = fs.readFileSync("src/store/pend.ts", "utf8");
   eq("PEND_MAX 是 32：一轮最多 32 次 DO 往返，留出子请求余量", W.SC.PEND_MAX, 32);
-  ok("批次按轮转取，而不是永远取 Map 的前 N 个", pendSrc.includes("rotated.slice(0, SC.PEND_MAX)") && pendSrc.includes("(S.pendIdx || 0) % all.length"));
+  ok("批次按轮转取，且夹在本轮额度与 PEND_MAX 之间", pendSrc.includes("rotated.slice(0, Math.max(1, Math.min(SC.PEND_MAX, max)))") && pendSrc.includes("(S.pendIdx || 0) % all.length"));
   ok("只摘掉这一批，不整表清空（在途增量留在账本里）", pendSrc.includes("for (const [bid] of batch) S.pend.delete(bid);") && !pendSrc.includes("S.pend.clear();"));
   ok("被截断的人数会记进 pendSkip", pendSrc.includes('cnt("pendSkip", rotated.length - batch.length)'));
   const sent = [];
@@ -6444,9 +6445,9 @@ eq("DoH 解析服务仍是三个", eps239.length, 3);
 eq("每轮探测站点数是 2", batch239, 2);
 eq("SUB_FIXED.dns = 站点数 × 解析服务数", fixed239.dns, batch239 * eps239.length);
 ok("SUB_FIXED.dns 不再写死 2", fixed239.dns !== 2);
-eq("固定支出合计", W.SUB_FIXED_N, W.SUB_FIXED.refill + W.SUB_FIXED.tfb + W.SUB_FIXED.dns + W.SUB_FIXED.pend + W.SUB_FIXED.snap);
+eq("固定支出合计", W.SUB_FIXED_N, W.SUB_FIXED.refill + W.SUB_FIXED.tfb + W.SUB_FIXED.dns);
 eq("planRound 扣掉固定支出后的自由额度", W.planRound(0, 0).sub, 48 - W.SUB_FIXED_N);
-ok("最坏一轮（含 restore 上限 12）仍在 48 以内", W.SUB_FIXED_N + 12 <= 48);
+ok("最坏一轮（固定 + 三批分账）仍在 48 以内", W.SUB_FIXED_N + W.planRound(0, 0).pend + W.planRound(0, 0).snap + W.planRound(0, 0).restore <= 48);
 const budgetSrc239 = fs.readFileSync("src/route/budget.ts", "utf8");
 const cronSrc239 = fs.readFileSync("src/routes/cron.ts", "utf8");
 ok("budget.ts 里 dns 一笔由常量推导", budgetSrc239.includes("dns: DNS_BATCH * DOH_ENDPOINTS.length"));
@@ -6482,9 +6483,9 @@ ok("budget.ts 不再写死 refill: 6", !budgetSrc240.includes("refill: 6,"));
 const tfbCalls241 = W.TFB_CALLS || 0;
 eq("TFB_CALLS 是 2（直连探针 + 中继批）", tfbCalls241, 2);
 eq("SUB_FIXED.tfb 与常量同源", (W.SUB_FIXED || {}).tfb, tfbCalls241);
-eq("固定支出合计随 tfb 一笔更新", W.SUB_FIXED_N, (W.SUB_FIXED || {}).refill + (W.SUB_FIXED || {}).tfb + (W.SUB_FIXED || {}).dns + (W.SUB_FIXED || {}).pend + (W.SUB_FIXED || {}).snap);
+eq("固定支出合计随 tfb 一笔更新", W.SUB_FIXED_N, (W.SUB_FIXED || {}).refill + (W.SUB_FIXED || {}).tfb + (W.SUB_FIXED || {}).dns);
 eq("planRound 扣掉固定支出后的自由额度", W.planRound(0, 0).sub, W.SC.SCAN_SUB - W.SUB_FIXED_N);
-ok("最坏一轮（含 restore 上限 12）仍在 48 以内", W.SUB_FIXED_N + 12 <= W.SC.SCAN_SUB, String(W.SUB_FIXED_N + 12));
+ok("最坏一轮（固定 + 三批分账）仍在硬上限以内", W.SUB_FIXED_N + W.planRound(0, 0).pend + W.planRound(0, 0).snap + W.planRound(0, 0).restore <= W.SC.SCAN_SUB);
 // 行为面：真跑一批，数调用方这一侧发出的 DO 子请求次数
 {
   const hits241 = [];
@@ -6513,5 +6514,78 @@ ok("budget.ts 的 tfb 一笔由常量推导", budSrc241.includes("tfb: TFB_CALLS
 ok("budget.ts 不再写死 tfb: 1", !budSrc241.includes("tfb: 1,"));
 ok("dnsRound 文档按真实服务数表述", cronSrc241.includes("每个站点最多 DOH_ENDPOINTS.length 次 DoH"));
 ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 DoH 子请求"));
+
+// ===== 第 242 组：一轮 cron 的子请求账本（固定支出 + 三批「每人一次往返」的分账） =====
+{
+  const pl242 = W.planRound(1600, 8);
+  const fx242 = W.SUB_FIXED || {};
+  eq("固定支出只有源/判定批/DoH 三笔", Object.keys(fx242).length, 3);
+  eq("固定支出合计 = 三笔之和", W.SUB_FIXED_N, fx242.refill + fx242.tfb + fx242.dns);
+  eq("剩额 = 硬上限 − 固定支出", pl242.sub, W.SC.SCAN_SUB - W.SUB_FIXED_N);
+  eq("三批分账正好填满剩额", pl242.pend + pl242.snap + pl242.restore, pl242.sub);
+  ok("上报额度不超过 PEND_MAX", pl242.pend <= W.SC.PEND_MAX);
+  ok("快照额度不超过 SNAP_MAX", pl242.snap <= W.SC.SNAP_MAX);
+  ok("回填额度不超过 RESTORE_MAX", pl242.restore <= (W.RESTORE_MAX || 12));
+  ok("上报的额度不小于另外两批", pl242.pend >= pl242.snap && pl242.pend >= pl242.restore);
+  ok("旧口径（把三批当一次调用）会越界，这就是本条缺陷", 6 + 2 + 6 + W.SC.PEND_MAX + (1 + 1 + W.SC.SNAP_MAX + 1) + 12 > W.SC.SCAN_SUB);
+  ok("新口径守住硬上限", W.SUB_FIXED_N + pl242.pend + pl242.snap + pl242.restore <= W.SC.SCAN_SUB);
+  eq("上报占比常量在窗口里", W.SHARE_PEND, 0.5);
+  eq("快照占比常量在窗口里", W.SHARE_SNAP, 0.3);
+
+  // 行为面：两个消费者真的按额度截断，不传时回到各自的硬上限
+  const mkEnv242 = (sink) => ({
+    METER: {
+      idFromName: (n) => n,
+      get: () => ({
+        fetch: async (url) => {
+          sink.push(String(url));
+          return { ok: true, json: async () => ({ ok: true, up: 1, down: 2, conns: 1, d: new Date().toISOString().slice(0, 10) }) };
+        },
+      }),
+    },
+    STATS: { get: async () => ({ get: async () => null, put: async () => {} }), put: async () => {} },
+    uuids: "u242",
+    pwd: "p242",
+  });
+
+  const sent242 = [];
+  const env242 = mkEnv242(sent242);
+  W.S.pend.clear();
+  for (let i = 0; i < 20; i++) W.S.pend.set("p242-u" + i, { up: 10, down: 20, conns: 1 });
+  W.S.pendAt = 0;
+  W.S.pendMs = 0;
+  await W.pendFlush(env242, true, 5);
+  eq("给了 5 的额度就只发 5 次 DO 往返", sent242.length, 5);
+  eq("剩下的留在账本里等下一轮", W.S.pend.size, 15);
+  sent242.length = 0;
+  for (let i = 0; i < 40; i++) W.S.pend.set("p242-v" + i, { up: 1, down: 1, conns: 1 });
+  W.S.pendAt = 0;
+  W.S.pendMs = 0;
+  await W.pendFlush(env242, true);
+  eq("不传额度时回到 PEND_MAX", sent242.length, W.SC.PEND_MAX);
+
+  const reads242 = [];
+  const snapEnv242 = mkEnv242(reads242);
+  W.S.meterCache.clear();
+  await W.usageSnapWrite(snapEnv242, Array.from({ length: 20 }, (_x, i) => ({ id: "s242-" + i })), 3);
+  eq("快照给了 3 的额度就只读 3 个人的用量", reads242.length, 3);
+  reads242.length = 0;
+  W.S.meterCache.clear();
+  await W.usageSnapWrite(snapEnv242, Array.from({ length: 30 }, (_x, i) => ({ id: "t242-" + i })));
+  eq("不传额度时回到 SNAP_MAX", reads242.length, W.SC.SNAP_MAX);
+
+  // 源码锁：三处接线都在，且旧写法不再出现
+  const bud242 = fs.readFileSync("src/route/budget.ts", "utf8");
+  const cron242 = fs.readFileSync("src/routes/cron.ts", "utf8");
+  const pend242 = fs.readFileSync("src/store/pend.ts", "utf8");
+  const snap242 = fs.readFileSync("src/store/snapshot.ts", "utf8");
+  ok("budget 不再把上报/快照当固定支出", !bud242.includes("pend: 1,") && !bud242.includes("snap: 4,"));
+  ok("budget 有分账常量", bud242.includes("export const SHARE_PEND = 0.5;") && bud242.includes("export const SHARE_SNAP = 0.3;"));
+  ok("planRound 按占比切并夹到各自上限", bud242.includes("cap(sub * SHARE_PEND, SC.PEND_MAX)") && bud242.includes("cap(sub * SHARE_SNAP, SC.SNAP_MAX)"));
+  ok("cron 把三个额度分别传下去", cron242.includes("pendFlush(env, true, plan.pend)") && cron242.includes("usageSnapWrite(env, users.list, plan.snap)") && cron242.includes("restorePick(allIds, plan.restore)"));
+  ok("cron 不再自己夹 RESTORE_MAX", !cron242.includes("RESTORE_MAX"));
+  ok("pendFlush 尊重传入额度", pend242.includes("Math.min(SC.PEND_MAX, max)"));
+  ok("usageSnapWrite 尊重传入额度", snap242.includes("Math.min(SC.SNAP_MAX, max)"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
