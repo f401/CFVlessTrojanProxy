@@ -6444,7 +6444,7 @@ eq("DoH 解析服务仍是三个", eps239.length, 3);
 eq("每轮探测站点数是 2", batch239, 2);
 eq("SUB_FIXED.dns = 站点数 × 解析服务数", fixed239.dns, batch239 * eps239.length);
 ok("SUB_FIXED.dns 不再写死 2", fixed239.dns !== 2);
-eq("固定支出合计", W.SUB_FIXED_N, 6 + 1 + 6 + 1 + 4);
+eq("固定支出合计", W.SUB_FIXED_N, W.SUB_FIXED.refill + W.SUB_FIXED.tfb + W.SUB_FIXED.dns + W.SUB_FIXED.pend + W.SUB_FIXED.snap);
 eq("planRound 扣掉固定支出后的自由额度", W.planRound(0, 0).sub, 48 - W.SUB_FIXED_N);
 ok("最坏一轮（含 restore 上限 12）仍在 48 以内", W.SUB_FIXED_N + 12 <= 48);
 const budgetSrc239 = fs.readFileSync("src/route/budget.ts", "utf8");
@@ -6478,5 +6478,40 @@ ok("poolSources 截断自定义列表", probeSrc240.includes("return list.length
 ok("budget.ts 的 refill 由常量推导", budgetSrc240.includes("refill: REFILL_MAX,"));
 ok("budget.ts 不再写死 refill: 6", !budgetSrc240.includes("refill: 6,"));
 
+// ---- 241. 一批 tfbRound 在调用方这一侧要发两次 DO 子请求（直连探针 + 中继批）
+const tfbCalls241 = W.TFB_CALLS || 0;
+eq("TFB_CALLS 是 2（直连探针 + 中继批）", tfbCalls241, 2);
+eq("SUB_FIXED.tfb 与常量同源", (W.SUB_FIXED || {}).tfb, tfbCalls241);
+eq("固定支出合计随 tfb 一笔更新", W.SUB_FIXED_N, (W.SUB_FIXED || {}).refill + (W.SUB_FIXED || {}).tfb + (W.SUB_FIXED || {}).dns + (W.SUB_FIXED || {}).pend + (W.SUB_FIXED || {}).snap);
+eq("planRound 扣掉固定支出后的自由额度", W.planRound(0, 0).sub, W.SC.SCAN_SUB - W.SUB_FIXED_N);
+ok("最坏一轮（含 restore 上限 12）仍在 48 以内", W.SUB_FIXED_N + 12 <= W.SC.SCAN_SUB, String(W.SUB_FIXED_N + 12));
+// 行为面：真跑一批，数调用方这一侧发出的 DO 子请求次数
+{
+  const hits241 = [];
+  const env241 = {
+    METER: {
+      idFromName: () => "tf-probe",
+      get: () => ({
+        fetch: async (u) => {
+          hits241.push(String(u));
+          const body241 = String(u).includes("/meter/tf?") ? { ok: false, status: 0 } : { rows: [] };
+          return new Response(JSON.stringify(body241), { status: 200, headers: { "content-type": "application/json" } });
+        },
+      }),
+    },
+  };
+  if (W.runTfb) await W.runTfb({ env: env241 }, "test241.example.com", 2);
+  eq("一批只发两条 DO 子请求", hits241.length, 2);
+  ok("第一条是直连探针", hits241.length > 0 && String(hits241[0]).includes("/meter/tf?"), String(hits241[0] || ""));
+  ok("第二条是中继批", hits241.length > 1 && String(hits241[1]).includes("/meter/tfb?"), String(hits241[1] || ""));
+  eq("账本与真实次数一致", (W.SUB_FIXED || {}).tfb, hits241.length);
+}
+const budSrc241 = fs.readFileSync("src/route/budget.ts", "utf8");
+const cronSrc241 = fs.readFileSync("src/routes/cron.ts", "utf8");
+ok("budget.ts 导出 TFB_CALLS", budSrc241.includes("export const TFB_CALLS = 2;"));
+ok("budget.ts 的 tfb 一笔由常量推导", budSrc241.includes("tfb: TFB_CALLS,"));
+ok("budget.ts 不再写死 tfb: 1", !budSrc241.includes("tfb: 1,"));
+ok("dnsRound 文档按真实服务数表述", cronSrc241.includes("每个站点最多 DOH_ENDPOINTS.length 次 DoH"));
+ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 DoH 子请求"));
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

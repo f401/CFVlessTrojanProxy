@@ -64,7 +64,7 @@ async function tfbRound(env: Env): Promise<void> {
 /**
  * 功能：为待决策站点确证「有没有 AAAA」—— 纯 v4 站点在 v6 出口上结构性过不去，
  * 提前知道就能少发一条注定失败的请求、也少浪费一次探索预算。
- * 只处理 `needPx` 里尚未过期的站点、每轮最多 2 个（每个 1 次 DoH 子请求）。
+ * 只处理 `needPx` 里尚未过期的站点、每轮最多 DNS_BATCH 个（每个站点最多 DOH_ENDPOINTS.length 次 DoH：
  * @returns {Promise<void>}
  */
 async function dnsRound(): Promise<void> {

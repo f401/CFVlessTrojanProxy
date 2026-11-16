@@ -104,7 +104,7 @@ export { DIRECT, chanKey, nodeKeyOf } from "./route/channel";
 export { decide, shadow, policyOn } from "./route/policy";
 export { pxDecision } from "./proxy/pxhook";
 export { HOOK } from "./core/hook";
-export { DNS_BATCH, SUB_FIXED, SUB_FIXED_N, planRound, planView } from "./route/budget";
+export { DNS_BATCH, TFB_CALLS, SUB_FIXED, SUB_FIXED_N, planRound, planView } from "./route/budget";
 export { chanPref, prefsOf, prefsJson, PREFS } from "./route/prefs";
 export { HEALTH, RelayHealth, ipOf } from "./route/relay-health";
 export { STORE, Store } from "./store/store";

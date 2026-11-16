@@ -14,6 +14,15 @@ import { DOH_ENDPOINTS } from "../proxy/dial";
 import { REFILL_MAX } from "../px/probe";
 
 /**
+ * 一批 tfbRound 在**调用方**这一侧要发几次 DO 子请求。
+ *
+ * `runTfb` 先打一次 `/meter/tf` 让 DO 自己直连目标（直连也算一条通道：DO 的出口族与中继不同，
+ * 常常正好一个 403 一个 200），再打一次 `/meter/tfb` 让 DO 逐条中继去抓。两次都在 `cron` 的账上；
+ * DO 内部再向外抓的那几次记在 DO 自己那一笔（同一个免费额度池，但不由这里扣）。
+ */
+export const TFB_CALLS = 2;
+
+/**
  * 每轮最多给几个站点做 AAAA 探测。
  *
  * 单列出来是为了让 `SUB_FIXED.dns` 能按真实最坏情况推导：一个站点要依次试
@@ -28,7 +37,7 @@ export const DNS_BATCH = 2;
  */
 export const SUB_FIXED = {
   refill: REFILL_MAX, // refillPool：最多 REFILL_MAX 个池子源（冷却中的源在池子够多时会被跳过）
-  tfb: 1, // tfbRound：一次 DO 子请求（DO 内部的抓取记在它自己那笔账上）
+  tfb: TFB_CALLS, // tfbRound：一次直连探针 + 一次中继批（DO 内部的抓取记在它自己那笔账上）
   dns: DNS_BATCH * DOH_ENDPOINTS.length, // dnsRound：DNS_BATCH 个站点 × 每站点最多 DOH_ENDPOINTS.length 次 DoH
   pend: 1, // pendFlush：一次 DO 子请求
   snap: 4, // usageSnapGet / loadUsers / usageSnapWrite / flushPx

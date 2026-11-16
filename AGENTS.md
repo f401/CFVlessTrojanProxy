@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-仓库 **7.240**（自举审计一百二十批、共 194 个缺陷，均未部署）｜线上 **7.214**（已部署、可跑）：两者差 26 个版本，全部只改仓库。
+仓库 **7.241**（自举审计一百二十一批、共 195 个缺陷，均未部署）｜线上 **7.214**（已部署、可跑）：两者差 27 个版本，全部只改仓库。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
@@ -13,7 +13,7 @@
 2. **没有 2xx 就不写封禁。** 封锁证据只来自「同一时间窗内，同站点有通道拿到 2xx、另一条没有」；全 4xx / 全超时只能 `rotate` 换出口重采，绝不能把站点或出口标记成 blocked。业务 403（如 `api.github.com`）必须原样透传。
 3. **绝不部署明文包。** `tools/check-obf.js` 是发版硬闸（严格关键字必须 0、`a_0x >= 100`、无 `class Meter` 明文），已前置进部署脚本，失败即 `REFUSE`。用户对此有过明确指令。
 4. **入口偏好只能客户端实测。** Worker 访问自家域名必然 522 自环，所以服务端探「客户端→边缘」在物理上不成立。订阅发 `server: <ip>` 条目 + `🌐 入口优选`（`url: https://<host>/health`、`expected-status: 200`）让客户端自己挑；`?e=0` 关闭、手动 `nodes` 优先。
-5. **免费计划的三条额度必须留余量。** ① 同时打开的 `connect()` ≤ 6（`SC.PROBE_CONC = 6`，除非你确认改的是别的量）；② 一次调用 fetch 子请求 ≤ 50（硬上限 `SC.SCAN_SUB = 48`；固定支出见 `src/route/budget.ts` 的 `SUB_FIXED`：源 6 / 判定批 1 / DoH 6（2 个站点 × 3 个解析服务）/ 上报 1 / 快照 4 = 18，剩下的 `plan.sub = 30` 才是能自由分配的）；③ DO CPU 只有几十毫秒 —— 单发 TLS 握手只能走 `tunnelfetch`（`src/core/tf.ts`）；vendored `subtls` 与 `core/tlsprobe.ts` 已在 7.69 整体删除（免费计划必 1102），不要再引入 userland TLS。
+5. **免费计划的三条额度必须留余量。** ① 同时打开的 `connect()` ≤ 6（`SC.PROBE_CONC = 6`，除非你确认改的是别的量）；② 一次调用 fetch 子请求 ≤ 50（硬上限 `SC.SCAN_SUB = 48`；固定支出见 `src/route/budget.ts` 的 `SUB_FIXED`：源 6 / 判定批 2（直连探针 + 中继批）/ DoH 6（2 个站点 × 3 个解析服务）/ 上报 1 / 快照 4 = 19，剩下的 `plan.sub = 29` 才是能自由分配的）；③ DO CPU 只有几十毫秒 —— 单发 TLS 握手只能走 `tunnelfetch`（`src/core/tf.ts`）；vendored `subtls` 与 `core/tlsprobe.ts` 已在 7.69 整体删除（免费计划必 1102），不要再引入 userland TLS。
 6. **注释与文档是门禁，不是礼貌。** 每个函数/方法上方必须有 `/** 功能 / @param / @returns */`，`node tools/doc-audit.mjs --max 0` 不过就发不了版；函数体内也要写「这步在干嘛 / 为什么」，协议偏移与边界条件必须解释。
 
 ---
