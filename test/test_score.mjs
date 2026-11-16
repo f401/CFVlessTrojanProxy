@@ -5867,5 +5867,40 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   eq("静音丢弃有计数", blkSrc().includes("cnt(\"blkMutedSkip\")"), true);
   eq("blkMutedSkip 已登记", fs.readFileSync("src/core/state.ts", "utf8").includes("\"blkMutedSkip\","), true);
 }
+
+// ---------- 第 223 组：文档写了但代码没有的调试端点（v7.222） ----------
+{
+  const dbg = fs.readFileSync("src/routes/debug.ts", "utf8");
+  ok("debug 有 ?blk= 分支", dbg.includes('url.searchParams.get("blk")'));
+  ok("?blk= 按站点前缀过滤封锁行", dbg.includes("BLK.snap().filter((r) => r.k === bh || r.k.startsWith(bh + \"|\"))") || dbg.includes('r.k.startsWith(bh + "|")'));
+  ok("?blk= 报告自愈静音", dbg.includes("muted: BLK.muted(bh)"));
+  ok("debug 有 ?facts=1 分支", dbg.includes('url.searchParams.get("facts") === "1"'));
+  ok("?facts=1 发的是事实层快照", dbg.includes("tables: FACTS.snap()"));
+  ok("debug 有 ?plan=1 分支", dbg.includes('url.searchParams.get("plan") === "1"'));
+  ok("?plan=1 与 vt 分支同一口径", dbg.includes("planView(S.pool.length, S.alive.size)"));
+
+  // 分支背后那几张表真的会给出数据（不是恒空的桩）
+  W.BLK.clear();
+  ok("空表时 snap 是空数组", W.BLK.snap().length === 0);
+  const now223 = Date.now();
+  W.BLK.load([
+    { k: "a223.example.com|10.9.1.1", n: 3, at: now223 },
+    { k: "a223.example.com|10.9.1.2", n: 3, at: now223 },
+    { k: "a223.example.com|10.9.1.3", n: 3, at: now223 },
+  ]);
+  ok("load 后能查到该站点的行", W.BLK.snap().some((r) => String(r.k).startsWith("a223.example.com|")));
+  ok("未静音时 muted 为 false", W.BLK.muted("a223.example.com", now223) === false);
+  ok("sweep 触发自愈", W.BLK.sweep("a223.example.com", ["10.9.1.1", "10.9.1.2", "10.9.1.3"], now223) === true);
+  ok("自愈后 muted 为 true", W.BLK.muted("a223.example.com", now223) === true);
+  W.BLK.clear();
+  const fs223 = Object.keys(W.FACTS.snap() || {}).sort().join(",");
+  eq("事实层快照是五张表", fs223, "blk2,dead,dns,eg,ps");
+
+  // 文档口径：不能再声称一个服务端不存在的端点
+  const v8223 = fs.readFileSync("docs/v8.md", "utf8");
+  ok("v8.md 不再声称 ?edge=1 是可用的调试端点", !v8223.includes("`?edge=1`（入口探测"));
+  ok("v8.md 写明入口偏好没有服务端端点", v8223.includes("入口偏好没有服务端端点"));
+  ok("v8.md 列出了 ?blk=", v8223.includes("`?blk=<host>`"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

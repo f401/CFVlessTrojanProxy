@@ -16,6 +16,8 @@ import { cntView } from "../core/counter";
 import { planView } from "../route/budget";
 import { prefsJson } from "../route/prefs";
 import { REL_TTL, relSnap } from "../route/relperf";
+import { BLK } from "../route/blkfacts";
+import { FACTS } from "../route/factsstore";
 import { EG } from "../route/egfacts";
 import { psSnap } from "../route/psfacts";
 import { DEAD } from "../route/deadfacts";
@@ -59,6 +61,17 @@ export async function debug(c: UserCtx): Promise<Response> {
   if (url.searchParams.get("pss")) return json({ host: String(url.searchParams.get("pss")), rows: psSnap(String(url.searchParams.get("pss"))) });
   if (url.searchParams.get("eg")) return json({ rows: EG.snap() });
   if (url.searchParams.get("rt")) return json({ host: String(url.searchParams.get("rt") || "").slice(0, 80), rows: relSnap(String(url.searchParams.get("rt") || "").slice(0, 80)), alive: S.alive.size, ttl: REL_TTL });
+  // 站点 × 中继的封锁行（v7.222）：文档里从 v8 起就写着 `?blk=<host>`，代码里一直没有这个分支。
+  // 只读内存表，不打 DO：要看别处 isolate 回传的行得配合 `?do=1` 那条链（那里是 /meter/vt）。
+  if (url.searchParams.get("blk")) {
+    const bh = String(url.searchParams.get("blk") || "").slice(0, 80);
+    const rows = BLK.snap().filter((r) => r.k === bh || r.k.startsWith(bh + "|"));
+    return json({ host: bh, muted: BLK.muted(bh), rows: rows.slice(0, 60), ttl: BLK_TTL });
+  }
+  // 事实层五张表一次看全（v7.222）：eg / ps / dead / blk2 / dns，容量与条数都能直接看出来
+  if (url.searchParams.get("facts") === "1") return json({ tables: FACTS.snap(), counters: cntView() });
+  // 本轮预算分配（v7.222）：与 `?vt=<host>` 分支里的 plan 同一口径，省得为了看预算先造一个 host
+  if (url.searchParams.get("plan") === "1") return json({ plan: planView(S.pool.length, S.alive.size), counters: cntView() });
   if (vtHost) {
     // 只读表：userland TLS 探测已在 7.69 删除（免费计划必然 1102），证据一律来自真实流量与 tfb。
     // 这里曾经还回三个恒空字段（ips / nodes / rows）——它们来自已删除的扫描器，

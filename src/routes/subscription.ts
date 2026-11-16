@@ -25,8 +25,8 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
   const { env, url, id, host, pageKey, learned, regions } = c;
   switch (kind) {
     case "page": {
-      // 面板只显示「本 isolate 各自的当前节点」（\`S.curs\`，见下面两行）与存活条数。
-      // 池子的 \`px:cur\` 曾经也取来放进 info，但面板从来没渲染过它 —— 那个字段等于
+      // 面板只显示「本 isolate 各自的当前节点」（`S.curs`，见下面两行）与存活条数。
+      // 池子的 `px:cur` 曾经也取来放进 info，但面板从来没渲染过它 —— 那个字段等于
       // 让每次打开控制页都白付一次 KV/DO 往返（免费计划只有一个调用的子请求预算），7.205 去掉。
       const [st, alive] = await Promise.all([readStats(env, id), aliveList(env)]);
       const f: Record<string, number> = S.funnel || {};
