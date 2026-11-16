@@ -7324,5 +7324,40 @@ if (fs.existsSync(probe257)) fs.unlinkSync(probe257);
 eq("插入违规代码就红", bad257, 1);
 ok("报错点名了违规文件", badOut257.includes("__probe257"));
 ok("违规探针已清理", !fs.existsSync(probe257));
+// ---- 第 258 组：命名约定与门禁的双向一致 ----
+// 第 258 组：命名约定的「代码 → 文档」单向一致
+// 只查这一个方向：文档里多写普通词不算错，代码里偷偷放行一个没解释的短名才是错。
+const conv258 = "docs/命名约定.md";
+const gate258 = "tools/check-names.mjs";
+ok("命名约定文档存在", fs.existsSync(conv258));
+const convText258 = fs.existsSync(conv258) ? fs.readFileSync(conv258, "utf8") : "";
+const gateSrc258 = fs.readFileSync(gate258, "utf8");
+// 从门禁源码里抽出 ALLOW 的键，避免测试自己再抄一份（抄了就会漂）
+const allowKeys258 = [...gateSrc258.matchAll(/^\s*\["([a-z]+)",\s*"/gm)].map((m) => m[1]);
+ok("从门禁里解析出 ALLOW 键", allowKeys258.length >= 10, `got ${allowKeys258.length}`);
+const missing258 = allowKeys258.filter((k) => !convText258.includes("`" + k + "`"));
+eq("每个放行的短名都在文档里有解释", missing258.join(","), "");
+ok("门禁源码里有这条交叉检查", gateSrc258.includes("docs/命名约定.md") && gateSrc258.includes("没有解释"));
+ok("文档写了棘轮只许往下走", convText258.includes("棘轮"));
+
+// 行为面：干净时退出 0；把文档临时换成一个少了 `cl` 的副本就红，且点名 `cl`
+let clean258 = 0;
+try { execFileSync("node", [gate258], { encoding: "utf8" }); } catch (e) { clean258 = 1; }
+eq("干净时命名门禁通过", clean258, 0);
+const tmpDoc258 = ".tmp-sim/conv258.md";
+fs.mkdirSync(".tmp-sim", { recursive: true });
+fs.writeFileSync(tmpDoc258, convText258.split("`cl`").join("「连接样本表」") + "\n");
+let bad258 = 0;
+let badOut258 = "";
+try {
+  badOut258 = execFileSync("node", [gate258], { encoding: "utf8", env: { ...process.env, NAMES_DOC: tmpDoc258 } });
+} catch (e) {
+  bad258 = 1;
+  badOut258 = String(e.stdout || "") + String(e.stderr || "");
+}
+eq("文档漏解释就红", bad258, 1);
+ok("报错点名了漏掉的短名", badOut258.includes("cl"), badOut258.slice(0, 120));
+if (fs.existsSync(tmpDoc258)) fs.unlinkSync(tmpDoc258);
+ok("临时文档已清理", !fs.existsSync(tmpDoc258));
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

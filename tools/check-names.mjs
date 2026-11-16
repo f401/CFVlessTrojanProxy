@@ -79,3 +79,20 @@ if (found.length > limit) {
 } else {
   console.log("\n命名门禁通过（与基线一致）");
 }
+
+// 与 docs/命名约定.md 的双向一致：ALLOW 里放行的每个短名都必须在文档里有一条解释。
+// 只查「代码 → 文档」这一个方向：文档里多写几个普通词不算错，代码里偷偷放行一个没解释的短名才是错。
+const convPath = process.env.NAMES_DOC || path.join("docs", "命名约定.md");
+const conv = fs.existsSync(convPath) ? fs.readFileSync(convPath, "utf8") : "";
+if (!conv) {
+  console.log("\n命名门禁失败：找不到 docs/命名约定.md —— ALLOW 的每一条理由都写在那里，文件没了就没法校对。");
+  process.exitCode = 1;
+} else {
+  const missing = [...ALLOW.keys()].filter((k) => !conv.includes("`" + k + "`"));
+  if (missing.length) {
+    console.log(`\n命名门禁失败：${missing.length} 个放行的短名在 docs/命名约定.md 里没有解释：${missing.join(" / ")}`);
+    process.exitCode = 1;
+  } else {
+    console.log(`命名门禁：ALLOW 的 ${ALLOW.size} 条短名都已在 docs/命名约定.md 里写明理由`);
+  }
+}

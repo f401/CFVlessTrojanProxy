@@ -263,3 +263,6 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | [docs/吞吐诊断.md](吞吐诊断.md) | 三层链路测量与中继容量实测 |
 | [docs/LIMITS.md](LIMITS.md) | 免费计划额度与平台限制实测 |
 | [docs/本地验证.md](本地验证.md) | 哪些能本地验、哪些必须真 CF |
+| [docs/命名约定.md](命名约定.md) | 命名规则与 ALLOW 短名的理由表（`tools/check-names.mjs` 的判据来源） |
+| [docs/审计覆盖.md](审计覆盖.md) | 审计边界：哪些已系统性看过、哪些只能真机验、哪些判定过不必重开 |
+| [docs/命名约定.md](命名约定.md) | 命名规则与 ALLOW 短名的理由表（`tools/check-names.mjs` 的判据来源） |
