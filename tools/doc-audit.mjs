@@ -351,4 +351,61 @@ if (tableRows.ticks.length) {
   for (const r of tableRows.ticks) console.log(`  ${r.file}:${r.line} 反引号个数是奇数`);
   process.exitCode = 1;
 }
+// H6 表行号连续性：编号必须从 1 连续到最大值。7.231 的第 188 行与 7.233 的第 190 行都是
+// 我自己漏写的 —— 表格语法合法、列数与反引号都对，只是少了一行，靠肉眼扫才发现。
+const h6seq = (() => {
+  const file = "docs/v8实现清单.md";
+  if (!fs.existsSync(file)) return { max: 0, miss: [], dup: [] };
+  const nums = [];
+  for (const l of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const m = l.match(/^\|\s*(\d+)\s*\|/);
+    if (m) nums.push(Number(m[1]));
+  }
+  const max = nums.length ? Math.max(...nums) : 0;
+  const have = new Set(nums);
+  const miss = [];
+  // 从 1 开始逐个对，缺号即报（编号是人写的序号，不能有洞）
+  for (let i = 1; i <= max; i++) if (!have.has(i)) miss.push(i);
+  const dup = [...have].filter((n) => nums.filter((x) => x === n).length > 1);
+  return { max, miss, dup };
+})();
+if (h6seq.miss.length) {
+  console.log(`\nH6 表缺号（缺陷编号必须从 1 连续到 ${h6seq.max}）：${h6seq.miss.length} 个`);
+  console.log(`  缺：${h6seq.miss.join(", ")}`);
+  process.exitCode = 1;
+}
+if (h6seq.dup.length) {
+  console.log(`\nH6 表重号（同一编号出现多次）：${h6seq.dup.join(", ")}`);
+  process.exitCode = 1;
+}
+
+// 版本口径一致性：AGENTS.md 头部那句「仓库 **7.x**（自举审计…共 N 个缺陷）」必须与
+// src/core/util.ts 的 VERSION、H6 表最大编号三者对齐。7.233 那轮我漏改过版本号，
+// 结果是「仓库 7.231」挂在树上、而代码已经是 7.233 —— 没有任何门禁会因此变红。
+const headSync = (() => {
+  const util = fs.readFileSync("src/core/util.ts", "utf8");
+  const vm = util.match(/export const VERSION = "([0-9.]+)";/);
+  const agents = fs.readFileSync("AGENTS.md", "utf8");
+  const hm = agents.match(/仓库 \*\*([0-9.]+)\*\*（[^）]*?共 (\d+) 个缺陷/);
+  const om = agents.match(/线上 \*\*([0-9.]+)\*\*/);
+  const bad = [];
+  if (!vm || !hm) bad.push("解析失败：src/core/util.ts 的 VERSION 或 AGENTS.md 头部格式变了");
+  else {
+    if (hm[1] !== vm[1]) bad.push(`版本：AGENTS 写 ${hm[1]}，代码是 ${vm[1]}`);
+    if (Number(hm[2]) !== h6seq.max) bad.push(`缺陷数：AGENTS 写 ${hm[2]}，H6 表最大编号是 ${h6seq.max}`);
+    // 「两者差 N 个版本」也要对得上（7.x 的 x 是单调递增的小版本号）
+    if (om) {
+      const dm = agents.match(/两者差 (\d+) 个版本/);
+      const gap = Number(vm[1].split(".")[1]) - Number(om[1].split(".")[1]);
+      if (dm && Number(dm[1]) !== gap) bad.push(`版本差：AGENTS 写 ${dm[1]}，实际 ${gap}`);
+    }
+  }
+  return bad;
+})();
+if (headSync.length) {
+  console.log("\n版本口径不一致（AGENTS.md 头部 / VERSION / H6 编号三者必须对齐）：");
+  for (const b of headSync) console.log(`  ${b}`);
+  process.exitCode = 1;
+}
+
 process.exitCode = process.exitCode || 0;

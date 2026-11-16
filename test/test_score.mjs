@@ -6329,5 +6329,25 @@ ok("verdictsync 的读事实走 doFetch", vs233.includes("doFetch(env, raw, \"ht
   const st234 = fs.readFileSync("src/core/state.ts", "utf8");
   ok("logsDoFail 已登记进 cntKeys", st234.includes("\"logsDoFail\","), "");
 }
+// ── 第 235 组：H6 表连续性 + 版本口径一致性（两条新门禁） ──
+const auditSrc = fs.readFileSync("tools/doc-audit.mjs", "utf8");
+const docMd = fs.readFileSync("docs/v8实现清单.md", "utf8");
+const agentsMd = fs.readFileSync("AGENTS.md", "utf8");
+const utilTs = fs.readFileSync("src/core/util.ts", "utf8");
+const h6Nums = docMd.split(/\r?\n/).map((l) => (l.match(/^\|\s*(\d+)\s*\|/) || [])[1]).filter(Boolean).map(Number);
+const h6Max = h6Nums.length ? Math.max(...h6Nums) : 0;
+const h6Set = new Set(h6Nums);
+let h6Gap = 0;
+for (let i = 1; i <= h6Max; i++) if (!h6Set.has(i)) h6Gap += 1;
+eq("H6 表编号从 1 连续到最大值（缺号 0 个）", h6Gap, 0);
+ok("H6 表行数等于最大编号", h6Nums.length === h6Max, "行数 " + h6Nums.length + " vs 最大编号 " + h6Max);
+ok("doc-audit 里有 H6 缺号门禁", auditSrc.includes("H6 表缺号"), "没找到「H6 表缺号」");
+ok("doc-audit 里有 H6 重号门禁", auditSrc.includes("H6 表重号"), "没找到「H6 表重号」");
+ok("doc-audit 里有版本口径门禁", auditSrc.includes("版本口径不一致"), "没找到「版本口径不一致」");
+const vm235 = utilTs.match(/export const VERSION = "([0-9.]+)";/);
+const hm235 = agentsMd.match(/仓库 \*\*([0-9.]+)\*\*（[^）]*?共 (\d+) 个缺陷/);
+ok("AGENTS 头部能解析出版本与缺陷数", Boolean(hm235), "头部格式变了");
+eq("AGENTS 头部版本等于 VERSION", hm235 ? hm235[1] : "", vm235 ? vm235[1] : "");
+eq("AGENTS 头部缺陷数等于 H6 最大编号", Number(hm235 ? hm235[2] : -1), h6Max);
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
