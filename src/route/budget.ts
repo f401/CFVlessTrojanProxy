@@ -2,7 +2,7 @@
 // 这是两笔账，不能混：
 //   ① connect() 探活吃的是「同时打开的 socket」额度（SC.PROBE_CONC = 6），不占 fetch 子请求；
 //   ② fetch 子请求免费计划一次调用 50 个（SC.SCAN_SUB 取 48 留余量），由各消费者自己的上限
-//      保证：refillPool 最多 6 个源、tfbRound 1 批、dnsRound 2 次 DoH、pendFlush 1 次、
+//      保证：refillPool 最多 6 个源、tfbRound 1 批、dnsRound（DNS_BATCH × DoH 服务数）、pendFlush 1 次、
 //      快照 4 次。把这些固定支出从硬上限里扣掉，剩下来的才是可以自由分配的额度
 //      （restorePick 用它决定一轮能续回多少个用户）。
 // 7.186 之前这里还有一个 `cap` 字段自称「本轮总闸」，但它零读取点：单测拿它当上界做断言，
@@ -10,6 +10,16 @@
 import { SC } from "../core/const";
 import { S } from "../core/state";
 import { vAll } from "./verdict";
+import { DOH_ENDPOINTS } from "../proxy/dial";
+
+/**
+ * 每轮最多给几个站点做 AAAA 探测。
+ *
+ * 单列出来是为了让 `SUB_FIXED.dns` 能按真实最坏情况推导：一个站点要依次试
+ * `DOH_ENDPOINTS` 里的每个解析服务（前一个报错或非 NOERROR 才换下一个），
+ * 所以最坏是「站点数 × 解析服务数」次 fetch —— 7.239 之前这里写死 2，比真实最坏少了 4 次。
+ */
+export const DNS_BATCH = 2;
 
 /**
  * 一轮 cron 的固定 fetch 支出：每个数字都对应一个真实调用点，改动调用点就要同步这里。
@@ -18,7 +28,7 @@ import { vAll } from "./verdict";
 export const SUB_FIXED = {
   refill: 6, // refillPool：最多 6 个池子源（冷却中的源在池子够多时会被跳过）
   tfb: 1, // tfbRound：一次 DO 子请求（DO 内部的抓取记在它自己那笔账上）
-  dns: 2, // dnsRound：最多 2 次 DoH
+  dns: DNS_BATCH * DOH_ENDPOINTS.length, // dnsRound：DNS_BATCH 个站点 × 每站点最多 DOH_ENDPOINTS.length 次 DoH
   pend: 1, // pendFlush：一次 DO 子请求
   snap: 4, // usageSnapGet / loadUsers / usageSnapWrite / flushPx
 } as const;

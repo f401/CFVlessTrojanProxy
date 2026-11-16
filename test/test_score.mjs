@@ -6435,5 +6435,25 @@ eq("AGENTS 头部缺陷数等于 H6 最大编号", Number(hm235 ? hm235[2] : -1)
   const msSrc = fs.readFileSync("src/store/meter.ts", "utf8");
   ok("meter.ts 的代号行回到十个空格", msSrc.includes("\n          this.fs = Number((o as unknown as { fs?: number }).fs) || 0;"));
 
+// ---- 第 239 组：一轮 cron 的 fetch 子请求账本（D193）----
+// DNS 那一笔必须等于「站点数 × 解析服务数」：一个站点会依次试每个 DoH，前一个失败才换下一个。
+const eps239 = W.DOH_ENDPOINTS || [];
+const batch239 = W.DNS_BATCH || 0;
+const fixed239 = W.SUB_FIXED || {};
+eq("DoH 解析服务仍是三个", eps239.length, 3);
+eq("每轮探测站点数是 2", batch239, 2);
+eq("SUB_FIXED.dns = 站点数 × 解析服务数", fixed239.dns, batch239 * eps239.length);
+ok("SUB_FIXED.dns 不再写死 2", fixed239.dns !== 2);
+eq("固定支出合计", W.SUB_FIXED_N, 6 + 1 + 6 + 1 + 4);
+eq("planRound 扣掉固定支出后的自由额度", W.planRound(0, 0).sub, 48 - W.SUB_FIXED_N);
+ok("最坏一轮（含 restore 上限 12）仍在 48 以内", W.SUB_FIXED_N + 12 <= 48);
+const budgetSrc239 = fs.readFileSync("src/route/budget.ts", "utf8");
+const cronSrc239 = fs.readFileSync("src/routes/cron.ts", "utf8");
+ok("budget.ts 里 dns 一笔由常量推导", budgetSrc239.includes("dns: DNS_BATCH * DOH_ENDPOINTS.length"));
+ok("budget.ts 导出 DNS_BATCH", budgetSrc239.includes("export const DNS_BATCH = 2;"));
+ok("cron.ts 用 DNS_BATCH 切片", cronSrc239.includes(".slice(0, DNS_BATCH);"));
+ok("cron.ts 不再写死 slice(0, 2)", !cronSrc239.includes(".slice(0, 2);"));
+ok("cron.ts 从 budget 引入 DNS_BATCH", cronSrc239.includes("DNS_BATCH, planRound"));
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

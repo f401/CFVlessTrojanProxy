@@ -5,7 +5,7 @@ import { S } from "../core/state";
 import { cnt } from "../core/counter";
 import { CRONLOCK } from "../core/lock";
 import { cronScan, flushPx } from "../px/pool";
-import { planRound } from "../route/budget";
+import { DNS_BATCH, planRound } from "../route/budget";
 import { runTfb } from "../route/tfb";
 import { TFB } from "../route/tfbbook";
 import { DNS } from "../route/dnsfacts";
@@ -74,7 +74,7 @@ async function dnsRound(): Promise<void> {
       .filter(([, until]) => until > now)
       .map(([h]) => h)
       .filter((h) => DNS.v6Of(h, now) < 0)
-      .slice(0, 2);
+      .slice(0, DNS_BATCH);
     for (const h of hosts) {
       const r = await probeFam(h);
       if (r.answered) DNS.note(h, r.v6, now);
