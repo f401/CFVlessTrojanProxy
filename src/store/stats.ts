@@ -1,6 +1,7 @@
 import { S } from "../core/state";
 import { primaryId, pendAdd } from "./pend";
 import { getSnap, usageSnapGet } from "./snapshot";
+import { cnt } from "../core/counter";
 import { doFetch, meterGet } from "./meter-client";
 
 /* 用量视图：Meter DO 读取 / 本地缓存 / 面板口径 */
@@ -68,17 +69,28 @@ export async function readStats(env: Env, id: string) {
   let doTotal = await meterGet(env, id);
 
   // DO 被重置过（重建脚本会把命名空间一起删掉）→ 用 KV 快照回填一次
+  let seed: "ok" | "fail" | "none" = "none";
   if (doTotal && !(doTotal.up || doTotal.down || doTotal.conns)) {
     const snap = await usageSnapGet(env);
     const s = snap && snap.users && snap.users[id];
     if (s) {
+      // DO 里是空的、KV 快照里却有这个人的历史用量 ⇒ 正处在「DO 被重置」这个状态上。
+      // 回填失败时必须留痕：否则面板把 999 显示成 0，而且和「这个用户真的没用过流量」
+      // 完全同形（7.244 的 /proxyip?day=1、7.243 的快照写失败都是这一族）。
       try {
         const r = await doFetch(env, id, "https://meter/seed", { method: "POST", body: JSON.stringify(s) });
         if (r.ok) {
           doTotal = await r.json();
           S.meterCache.set(id, { v: doTotal, t: Date.now() });
+          seed = "ok";
+        } else {
+          seed = "fail";
+          cnt("statsSeedFail");
         }
-      } catch (e) {}
+      } catch (e) {
+        seed = "fail";
+        cnt("statsSeedFail");
+      }
     }
   }
 
@@ -99,7 +111,8 @@ export async function readStats(env: Env, id: string) {
       lastSeen: Math.max(doTotal.ts || 0, local.last) || null,
       isolateLocal: { up: local.up, down: local.down, conns: local.conns },
       backend: "do",
-      persisted: true,
+      persisted: seed !== "fail",
+      seed,
     };
   }
 
@@ -127,6 +140,7 @@ export async function readStats(env: Env, id: string) {
     isolateLocal: { up: local.up, down: local.down, conns: local.conns },
     backend: "kv",
     persisted: !!stored,
+    seed: "none" as const,
   };
 }
 

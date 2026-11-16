@@ -6774,5 +6774,88 @@ const wsOf245 = (state = 1) => ({ readyState: state, bufferedAmount: 0, send() {
   const fresh245 = new W.Connection({}, "u245b", "", "tput");
   eq("新连接的 notified 默认假", fresh245.notified, false);
 }
+
+// ── 第 246 组：DO 被重置后从快照回填用量失败，必须留下痕迹 ─────────────────────
+{
+  /** 内存版 KV（只实现这轮用到的四个方法） */
+  const kvStore246 = () => {
+    const m = new Map();
+    return {
+      m,
+      get: async (k) => (m.has(k) ? m.get(k) : null),
+      put: async (k, v) => {
+        m.set(k, v);
+      },
+      delete: async (k) => {
+        m.delete(k);
+      },
+      list: async () => ({ keys: [...m.keys()].map((name) => ({ name })), list_complete: true }),
+    };
+  };
+  /** 假计量 DO：/seed 的行为由 mode 决定 */
+  const meter246 = (getV, mode, seedV) => {
+    const stub = {
+      fetch: async (u) => {
+        const ep = String(u).replace(/^https:\/\/meter\//, "").split("?")[0];
+        if (ep === "seed") {
+          if (mode === "throw") throw new Error("do reset");
+          if (mode === "500") return new Response("boom", { status: 500 });
+          return new Response(JSON.stringify(seedV), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return new Response(JSON.stringify(getV), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    };
+    return { get: () => stub, idFromName: (n) => n };
+  };
+
+  const KEK246 = "probe-kek-246";
+  const ID246 = "u-246";
+  const today246 = new Date().toISOString().slice(0, 10);
+  const hist246 = { up: 999, down: 888, conns: 7, d: today246, dU: 111, dD: 222, first: 1700000000000, ts: Date.now() };
+  const zero246 = { up: 0, down: 0, conns: 0, d: today246, dU: 0, dD: 0, ts: Date.now() };
+  const kvp = kvStore246();
+
+  // 历史用量先进 KV 灾备快照（走真实 usageSnapWrite，封装格式与线上一致）
+  W.S.meterCache.clear();
+  await W.usageSnapWrite({ STATS: kvp, KEK: KEK246, METER: meter246(hist246, "ok", hist246) }, [{ id: ID246 }], 4);
+  ok("第246组·历史用量进了 KV 灾备快照", kvp.m.size > 0);
+
+  // ① DO 抛错：回填失败必须留痕，且不能声称已落盘
+  const c0 = W.cntView().statsSeedFail || 0;
+  W.S.meterCache.clear();
+  const sThrow = await W.readStats({ STATS: kvp, KEK: KEK246, METER: meter246(zero246, "throw", hist246) }, ID246);
+  eq("第246组·回填抛错时标记 fail", sThrow.seed, "fail");
+  eq("第246组·回填抛错时不能声称已落盘", sThrow.persisted, false);
+  eq("第246组·回填抛错计一次 statsSeedFail", (W.cntView().statsSeedFail || 0) - c0, 1);
+
+  // ② DO 回 500：同样要留痕（旧代码里只有 r.ok 那支，没有 else，这条路径连计数都没有）
+  W.S.meterCache.clear();
+  const s500 = await W.readStats({ STATS: kvp, KEK: KEK246, METER: meter246(zero246, "500", hist246) }, ID246);
+  eq("第246组·回填 5xx 时标记 fail", s500.seed, "fail");
+  eq("第246组·回填 5xx 计一次 statsSeedFail", (W.cntView().statsSeedFail || 0) - c0, 2);
+
+  // ③ 回填成功：数值必须真的从快照回到面板上
+  W.S.meterCache.clear();
+  const sOk = await W.readStats({ STATS: kvp, KEK: KEK246, METER: meter246(zero246, "ok", hist246) }, ID246);
+  eq("第246组·回填成功后累计用量来自快照", sOk.up, 999);
+  eq("第246组·回填成功后当日用量来自快照", sOk.todayUp, 111);
+  eq("第246组·回填成功后标记 ok", sOk.seed, "ok");
+  eq("第246组·回填成功后不再涨计数", (W.cntView().statsSeedFail || 0) - c0, 2);
+
+  // ④ 没有 METER 绑定时走 KV 兜底，口径里也要有 seed 字段（不留「这个字段在不在」的猜测）
+  W.S.meterCache.clear();
+  const sKv = await W.readStats({ STATS: kvp, KEK: KEK246 }, ID246);
+  eq("第246组·没有 DO 时走 KV 兜底", sKv.backend, "kv");
+  eq("第246组·KV 兜底分支也声明 seed = none", sKv.seed, "none");
+
+  // ⑤ 源码锁：两处失败分支都必须计数，且不再有空 catch
+  const srcStats246 = fs.readFileSync("src/store/stats.ts", "utf8");
+  eq("第246组·两处失败分支都计数", srcStats246.split('cnt("statsSeedFail")').length - 1, 2);
+  eq("第246组·stats.ts 不再有裸空 catch", srcStats246.includes("} catch (e) {}"), false);
+  ok("第246组·成功分支标记 ok", srcStats246.includes('seed = "ok"'));
+  const srcState246 = fs.readFileSync("src/core/state.ts", "utf8");
+  ok("第246组·statsSeedFail 已登记 cntKeys", srcState246.includes('"statsSeedFail"'));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

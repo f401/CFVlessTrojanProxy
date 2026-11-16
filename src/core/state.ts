@@ -76,6 +76,7 @@ export class AppState {
     "snapFlushFail",
     "snapUsersFail",
     "seedWriteFail",
+  "statsSeedFail",
   "admStatsSkip",
     "snapSkip",
     "srcSkip",
