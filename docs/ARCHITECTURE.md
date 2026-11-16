@@ -216,6 +216,19 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps） |
 | `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |
 | 预算分配（自由函数 `planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核）：判定额度这一项在 7.149 随 `round.ts` 一起删掉，现在只有 `adm` 与 `cap` |
+| `FactsStore`（`FACTS`） | `src/route/factsstore.ts` | 会同步事实表的门面：冷启动合并 → 上行增量 → ack/nack 三段生命周期 |
+| `EgFacts`（`EG`） | `src/route/egfacts.ts` | 出口族事实（中继 IP → v4/v6）与 ×40 的族偏置，含 pending/ack |
+| `DnsFacts`（`DNS`） | `src/route/dnsfacts.ts` | 「纯 v4 站点」确证（24 小时）与 v6 出口折价 |
+| `PsFacts`（`PS`） | `src/route/psfacts.ts` | 站点 × 中继「能不能过」成功率表（45 分钟半衰期） |
+| `BlkFacts`（`BLK`） | `src/route/blkfacts.ts` | 单 IP 封锁事实（键为站点 + 出口 IP、三批确认、只乘 6 倍代价、站点级自愈） |
+| `DeadFacts` | `src/route/deadfacts.ts` | 中继「连不上」事实（唯一允许把候选挪到队尾的事实） |
+| `CapFacts` | `src/route/capfacts.ts` | 吞吐容量表（相对池内中位数的容量比，带噪声门） |
+| `FactShadow` | `src/route/factshadow.ts` | 事实写入决策器的影子统计（% 形，不参与决策） |
+| `RelPerfTable` | `src/route/relperf.ts` | 站点 × 中继的实测性能表（首字节 / 吞吐，只有 ≥1 MB 的样本才记吞吐） |
+| `Prefs`（`PREFS`） | `src/route/prefs.ts` | 判定表折成「能打通 / 打不通」两栏，兼供 `chanPref` |
+| `LatObs` | `src/core/latobs.ts` | 首字节 / 总耗时 / 抖动三类窗口统计器 |
+| `FirstObs` | `src/core/firstobs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
+| `Attacher` | `src/proxy/attacher.ts` | 上游挂载与补救链：中转再试一条 → IPv6 兜底 → proxyip → 放弃 |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表 |
 | `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |

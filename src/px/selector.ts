@@ -44,7 +44,15 @@ export function dwellOf(env: Env, mode: Mode) {
   return Number.isFinite(n) && n > 0 ? n * 60000 : def;
 }
 
-/* 节点选择：挑谁 / 何时换 / 失败怎么办 */
+/**
+ * 节点选择器：把「挑哪台节点 / 什么时候换 / 失败怎么记」收在一处。
+ *
+ * 三条入口（生产代码只从这里走）：
+ * · `pick` —— 正常请求：地区硬要求 → 站点偏好 → 单层抽样（`px/ts` 的 `pickThom`）；
+ * · `region` —— `?rg=xx` 的地区通道，找不到就明确失败，绝不回落直连（否则用户拿到的不是该国 IP）；
+ * · `softFail` / `bumpFail` —— 失败记账：站点级失败只进站点画像，节点级失败同时推进快速失败窗口。
+ * 它自己不留跨请求状态（状态都在 `S` 里），收成类只是为了让每个步骤都能单独测。
+ */
 export class Selector {
   /** 按国家挑一个节点（地区硬要求：调用方不得回落到直连/全球） */
   async region(env: Env, cc: string | null, mode: Mode = "tput", avoid = "") {

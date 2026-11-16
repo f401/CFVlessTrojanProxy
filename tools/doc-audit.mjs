@@ -40,6 +40,9 @@ function hasDoc(lines, i) {
 
 const FN = /^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/;
 const METH = /^  (?:async\s+)?(?:private\s+|public\s+|protected\s+|static\s+)*(?!constructor\b)([A-Za-z0-9_$]+)\s*\([^)]*\)\s*:\s*[^{;]+[{;]\s*$/;
+// 导出类同样要有一份文档：它是 OOP 结构的骨架（ARCHITECTURE 的类表列的就是它们）。
+// 7.194 之前这个门禁只管函数，`Prefs` / `RelayHealth` / `Store` 三个类因此一直没有自己的说明。
+const CLS = /^\s*export\s+class\s+([A-Za-z0-9_$]+)/;
 
 /**
  * 孤儿文档：文档块结束后（跳过空行）紧跟 `}` 或文件结束，说明它在为一个不存在的东西写文档。
@@ -146,6 +149,7 @@ function livingRefs(files, srcAll, constText) {
 
 const rows = [];
 let total = 0;
+let totalCls = 0;
 const orphanRows = [];
 const stackedRows = [];
 for (const file of walk(root)) {
@@ -154,9 +158,16 @@ for (const file of walk(root)) {
   const miss = [];
   lines.forEach((line, i) => {
     const m = line.match(FN) || line.match(METH);
-    if (!m) return;
-    total++;
-    if (!hasDoc(lines, i)) miss.push({ name: m[1], line: i + 1 });
+    if (m) {
+      total++;
+      if (!hasDoc(lines, i)) miss.push({ name: m[1], line: i + 1 });
+      return;
+    }
+    // 导出类单独计数：它不算函数，但缺文档一样要拦（与函数共用同一份 miss 列表）
+    const c = line.match(CLS);
+    if (!c) return;
+    totalCls++;
+    if (!hasDoc(lines, i)) miss.push({ name: c[1], line: i + 1 });
   });
   if (miss.length) rows.push({ file, miss, n: miss.length });
   const orph = orphanDocs(lines);
@@ -167,7 +178,9 @@ for (const file of walk(root)) {
 
 rows.sort((a, b) => b.n - a.n);
 const sum = rows.reduce((a, r) => a + r.n, 0);
-console.log(`函数总数 ${total}，缺注释 ${sum}（${((sum / total) * 100).toFixed(1)}%），涉及 ${rows.length} 个文件\n`);
+console.log(
+  `函数/方法 ${total} 个、导出类 ${totalCls} 个，缺注释 ${sum}（${((sum / (total + totalCls)) * 100).toFixed(1)}%），涉及 ${rows.length} 个文件\n`,
+);
 for (const r of rows.slice(0, TOP)) {
   console.log(`${String(r.n).padStart(3)}  ${r.file}`);
   if (TOP <= 8) for (const m of r.miss.slice(0, 12)) console.log(`       ${m.line}: ${m.name}`);
@@ -209,6 +222,75 @@ const livingRows = (() => {
 if (livingRows.length) {
   console.log(`\n活文档引用（文档在给不存在的东西作证）：${livingRows.length} 处`);
   for (const r of livingRows) console.log(`  ${r.file}:${r.line} \`${r.tok}\` → ${r.why}`);
+  process.exitCode = 1;
+}
+// 类表反向缺口：src 里的每个导出类都必须在 ARCHITECTURE 里出现。
+// 原来只查「表 → 代码」方向（表里的类不存在就报错），反方向没人管：v8 落地之后
+// 13 个类（五个事实表 + 门面 + 影子 + 三个观察器 + Attacher / Prefs / RelPerfTable）
+// 从来没进过那张表，读者按表去找 `FactsStore` 会一无所获。
+const classTableMiss = (() => {
+  const arch = fs.existsSync("docs/ARCHITECTURE.md") ? fs.readFileSync("docs/ARCHITECTURE.md", "utf8") : "";
+  const names = [];
+  for (const file of walk(root)) {
+    if (only && !file.includes(only)) continue;
+    for (const m of fs.readFileSync(file, "utf8").matchAll(/^export class ([A-Za-z_$][\w$]*)/gm)) names.push(m[1]);
+  }
+  return names.filter((n) => !new RegExp("\\b" + n + "\\b").test(arch));
+})();
+if (classTableMiss.length) {
+  console.log(`\n类表缺口（导出类没进 docs/ARCHITECTURE.md）：${classTableMiss.length} 个`);
+  for (const n of classTableMiss) console.log(`  ${n}`);
+  process.exitCode = 1;
+}
+// 表格列数门禁：markdown 里某一行的分栏数与表头不一致，渲染时整行会右移，
+// 「证据」「修法」会错位到相邻列。历史上 H6 表 138 行数据里 74 行不符
+// （77 行缺「证据」列、5 行把版本/涉及文件/后果拆成了独立列、3 行尾部多了
+// 自引用列、7 行的代码跨度里 `|` 没转义）。规范化之后这里守着不再复发。
+const tableRows = (() => {
+  const doc = "docs/v8实现清单.md";
+  const empty = { cols: [], ticks: [] };
+  if (!fs.existsSync(doc)) return empty;
+  const lines = fs.readFileSync(doc, "utf8").split(/\r?\n/);
+  const TICK = String.fromCharCode(96);
+  /** 数一行的分栏数：转义过的 `\|` 不算分隔符 */
+  const cellCount = (line) => {
+    let n = 0;
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] === "\\" && line[i + 1] === "|") {
+        i++;
+        continue;
+      }
+      if (line[i] === "|") n++;
+    }
+    return n - 1;
+  };
+  const head = lines.findIndex((l) => l.startsWith("| # |"));
+  if (head < 0) return empty;
+  const want = cellCount(lines[head]);
+  const cols = [];
+  const ticks = [];
+  for (let i = head + 2; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.startsWith("|")) {
+      if (l.startsWith("#")) break;
+      continue;
+    }
+    // 反引号必须成对：一个没闭合的 ` 会把后面的分隔符一起吞进代码跨度，
+    // 于是整行少一格（第 23 行的 `/meter/{dbt,raw,hold,cont}， 就是这么坏的）
+    if ((l.split(TICK).length - 1) % 2 === 1) ticks.push({ file: doc, line: i + 1 });
+    const got = cellCount(l);
+    if (got !== want) cols.push({ file: doc, line: i + 1, got, want });
+  }
+  return { cols, ticks };
+})();
+if (tableRows.cols.length) {
+  console.log(`\n表格列数（分栏数与表头不一致，渲染会整行错位）：${tableRows.cols.length} 行`);
+  for (const r of tableRows.cols) console.log(`  ${r.file}:${r.line} ${r.got} 列 ≠ 表头 ${r.want} 列`);
+  process.exitCode = 1;
+}
+if (tableRows.ticks.length) {
+  console.log(`\n表格反引号未闭合（会把后面的分栏吞进代码跨度）：${tableRows.ticks.length} 行`);
+  for (const r of tableRows.ticks) console.log(`  ${r.file}:${r.line} 反引号个数是奇数`);
   process.exitCode = 1;
 }
 process.exitCode = process.exitCode || 0;

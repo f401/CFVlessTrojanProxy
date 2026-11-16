@@ -28,6 +28,15 @@ const BIG = 20000;
 const MAX_IP = 200;
 const HL_MS = 30 * 60_000; // 存活证据的半衰期：30 分钟不动就回到中性
 
+/**
+ * 中继健康表：按「有没有拿到整页、有没有零字节关闭」给每条中继打一个与站点无关的分。
+ *
+ * 三张表分工（缺一张就会重复计数或者丢批次）：
+ * · `m` —— 合并后的累计证据（ok / bad / dead 与最后观测时间）；
+ * · `sent` —— 上次上行时的计数快照，用来算出「这一批该发哪些行」；
+ * · `pending` —— 已交给调用方、还没等到 ack 的行，nack 时按它回滚。
+ * 只在本 isolate 内使用（硬约束：统计不跨 isolate 共享），随上报管道同步给 DO 做展示。
+ */
 export class RelayHealth {
   private m = new Map<string, RelayStat>();
   /** 上次上报时的计数快照（决定 delta 里带哪些行） */

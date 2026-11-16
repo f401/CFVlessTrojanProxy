@@ -5,6 +5,13 @@ import { clSnapshot, kickFlush, pendAdd, pendFlush, primaryId, scheduleFlush } f
 import { flushSnap, getSnap, restoreUsage, usageSnapGet } from "./snapshot";
 import { nodeSnapGet, readStats, statBump } from "./stats";
 
+/**
+ * store 层的门面：KV / 快照 / 用量累积 / Meter 客户端都从这一个对象走。
+ *
+ * 为什么要有它：这些能力分属五个文件（`kv` / `snapshot` / `pend` / `stats` / `meter-client`），
+ * 上层（routes、proxy）如果各自 import，换实现（KV → DO、快照格式变更）就要全仓库改。
+ * 每个方法都只是薄委托，真正的逻辑仍在原文件里，所以单测可以直接打底层函数。
+ */
 export class Store {
   // —— KV ——
   get<T = unknown>(env: Env, key: string): Promise<T | null> {

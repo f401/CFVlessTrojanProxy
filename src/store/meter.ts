@@ -3,7 +3,13 @@ import { factsOut } from "./factout";
 import { seal, unseal } from "./index";
 import { probeTf } from "../core/tf";
 
-/* do */
+/**
+ * 用量账本（Durable Object，全局唯一）：一个用户一个实例，只有它能回答「已用多少字节」。
+ *
+ * 为什么必须是 DO：KV 最终一致、无法原子累加，多个 isolate 并发上报同一用户时只有单实例
+ * 能把增量串行合并；配额判断与快照回写也在这一次串行里完成。
+ * 与 `PendingLedger` 的分工：isolate 侧只攒增量、失败回滚；DO 侧落账、判额度、维护内存快照。
+ */
 export class Meter {
   st: DurableObjectState;
   env: Env;
