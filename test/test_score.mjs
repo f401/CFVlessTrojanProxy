@@ -1776,8 +1776,8 @@ W.vClear();
   W.vSetState("a.com", "r:9.9.9.3", 2, 1);
   eq("实测打不通的通道 = 2", W.chanPref("9.9.9.3", "a.com"), 2);
   const pf = W.prefsJson(20);
-  eq("偏好表能打通一栏含该通道", pf.ok.some((x) => x.c === "r:9.9.9.2"), true);
-  eq("偏好表打不通一栏含该通道", pf.bad.some((x) => x.c === "r:9.9.9.3"), true);
+  eq("偏好表能打通一栏含该通道", pf.ok.some((x) => x.channel === "r:9.9.9.2"), true);
+  eq("偏好表打不通一栏含该通道", pf.bad.some((x) => x.channel === "r:9.9.9.3"), true);
   W.vClear();
 }
 
@@ -7526,5 +7526,27 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   ok("类型里有 idx 字段", fs.readFileSync("types/app.d.ts", "utf8").includes("idx?: number;"), "");
 }
 
+// ═══ 第 263 组：偏好行的字段名能读出含义（c/s/at → channel/state/updatedAt）═══
+{
+  W.vClear();
+  W.vSetState("r263.test", "r:7.7.7.1", 1, 10);
+  W.vSetState("r263.test", "r:7.7.7.2", 2, 20);
+  const pf = W.PREFS.of("r263.test", 10);
+  const row = pf.ok[0] || {};
+  eq("偏好行有 channel", typeof row.channel, "string");
+  eq("偏好行有 state", typeof row.state, "number");
+  eq("偏好行有 updatedAt", typeof row.updatedAt, "number");
+  eq("偏好行不再用 c 这个短名", "c" in row, false);
+  eq("偏好行不再用 s 这个短名", "s" in row, false);
+  eq("偏好行不再用 at 这个短名", "at" in row, false);
+  eq("能打通的通道 state 是 1", row.state, 1);
+  eq("打不通的通道 state 是 2", (pf.bad[0] || {}).state, 2);
+  const json263 = W.prefsJson(10);
+  eq("JSON 出口也用新名", Object.keys(json263.ok[0] || {}).sort().join(","), "channel,state,updatedAt");
+  const src263 = fs.readFileSync("src/route/prefs.ts", "utf8");
+  ok("源码里偏好行是语义名", src263.includes("channel: string;") && src263.includes("updatedAt: number;"), src263.slice(0, 0));
+  ok("源码里没有旧的 c/s/at 三行", !/^  c: string;$/m.test(src263) && !/^  s: number;$/m.test(src263) && !/^  at: number;$/m.test(src263), src263.slice(0, 0));
+  W.vClear();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -7,11 +7,11 @@ import { vAll, vState } from "./verdict";
 /** 一条通道的偏好记录 */
 export interface PrefRow {
   /** 通道键：d（直连）/ r:<ip>（中继） */
-  c: string;
+  channel: string;
   /** 1 = 实测能打通；2/3 = 实测打不通 */
-  s: number;
+  state: number;
   /** 最近一次实测的时间戳 */
-  at: number;
+  updatedAt: number;
 }
 
 /**
@@ -33,10 +33,10 @@ export class Prefs {
     for (const r of vAll()) {
       if (host && r.target !== host) continue;
       const prev = pick.get(r.channel);
-      if (!prev || r.updatedAt > prev.at) pick.set(r.channel, { c: r.channel, s: r.state, at: r.updatedAt });
+      if (!prev || r.updatedAt > prev.updatedAt) pick.set(r.channel, { channel: r.channel, state: r.state, updatedAt: r.updatedAt });
     }
-    const all = [...pick.values()].sort((a, b) => b.at - a.at);
-    return { ok: all.filter((x) => x.s === 1).slice(0, limit), bad: all.filter((x) => x.s >= 2).slice(0, limit) };
+    const all = [...pick.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+    return { ok: all.filter((x) => x.state === 1).slice(0, limit), bad: all.filter((x) => x.state >= 2).slice(0, limit) };
   }
 
   /**
