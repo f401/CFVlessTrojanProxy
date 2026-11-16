@@ -9,8 +9,7 @@ import { trojanPasswordOf } from "../views/sub";
 import { SUBVIEW } from "../views/subview";
 import { readStats, nodeSnapGet } from "../store/index";
 import { statsNodeRows } from "../nodes/stats-rows";
-import { aliveList, nsOf, pxGet } from "../px/pool";
-import { cntView } from "../core/counter";
+import { aliveList, nsOf } from "../px/pool";
 import { CSP_STATIC, html, json, text } from "../edge/respond";
 import type { UserCtx } from "../edge/types";
 
@@ -26,20 +25,18 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
   const { env, url, id, host, pageKey, learned, regions } = c;
   switch (kind) {
     case "page": {
-      // 注意：不要写成 (await pxGet(env)).cur —— 那会在数组字面量里
-      // 先串行 await 一次，Promise.all 就只剩两个成员了。
-      const px0 = pxGet(env).then((x) => x.cur);
-      const [st, curPx, alive] = await Promise.all([readStats(env, id), px0, aliveList(env)]);
+      // 面板只显示「本 isolate 各自的当前节点」（\`S.curs\`，见下面两行）与存活条数。
+      // 池子的 \`px:cur\` 曾经也取来放进 info，但面板从来没渲染过它 —— 那个字段等于
+      // 让每次打开控制页都白付一次 KV/DO 往返（免费计划只有一个调用的子请求预算），7.205 去掉。
+      const [st, alive] = await Promise.all([readStats(env, id), aliveList(env)]);
       const f: Record<string, number> = S.funnel || {};
       const ftot = (f.direct || 0) + (f.node || 0) + (f.v6 || 0);
       const pctOf = (x: number) => (ftot > 0 ? Math.round((x / ftot) * 1000) / 10 + "%" : "-");
       const info = {
         regions,
-        curPx,
         curLat: S.curs.lat || "（未定）",
         curTput: S.curs.tput || "（未定）",
         colo: S.colo || "??",
-        cnt: cntView(),
         funnel: `直连 ${pctOf(f.direct || 0)} · 中转 ${pctOf(f.node || 0)}` + (f.v6 ? ` · v6 ${pctOf(f.v6)}` : ""),
         aliveCount: alive.length,
         used: fmtBytes((st.up || 0) + (st.down || 0)),

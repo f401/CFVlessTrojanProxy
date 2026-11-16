@@ -5090,5 +5090,51 @@ console.log("\n191b) 中继健康表的 merge 口径");
   ok("测试窗口里也没有它", typeof W.JUDGE.okAge, "undefined");
 }
 
+// 第 206 组：面板数据的每个字段都必须有渲染点（7.205）
+
+// 旧形状：`subscription.ts` 在打开控制页时 `Promise.all` 里多取了一次池子的当前中继
+// （`pxGet` 是一次 KV/DO 往返），还顺手塞了 `cntView()`，而 `panel.ts` 从来没渲染这两个字段。
+{
+  const srcSub = fs.readFileSync("src/routes/subscription.ts", "utf8");
+  ok("面板路径不再取池子的当前中继", srcSub.includes("pxGet(") === false, "");
+  ok("面板路径不再塞计数器快照", srcSub.includes("cntView(") === false, "");
+
+  const srcTypes = fs.readFileSync("types/app.d.ts", "utf8");
+  const srcPanel = fs.readFileSync("src/views/panel.ts", "utf8");
+  const head = srcTypes.indexOf("interface PanelInfo");
+  ok("PanelInfo 类型还在", head > 0, "");
+  const body = srcTypes.slice(head, srcTypes.indexOf("}", head));
+  const fields = [];
+  for (const line of body.split("\n")) {
+    const m = line.match(/^\s{2}([a-z][A-Za-z0-9]*)\s*:/);
+    if (m) fields.push(m[1]);
+  }
+  eq("PanelInfo 字段都被解析到", fields.length > 8, true);
+  const missing = fields.filter((f) => srcPanel.includes("i." + f) === false);
+  eq("每个字段都有渲染点", missing.join(","), "");
+  eq("curPx 已从类型里删掉", /\bcurPx\b/.test(srcTypes), false);
+
+  // 行为面：面板真的还能渲染，且没有把 undefined 印到页面上
+  const env = { nodes: "", uuids: "" };
+  const url = new URL("https://panel.example.com/u1");
+  const info = {
+    regions: ["HK"],
+    curLat: "1.2.3.4",
+    curTput: "5.6.7.8",
+    colo: "HKG",
+    funnel: "直连 50% · 中转 50%",
+    aliveCount: 3,
+    used: "1 MB",
+    today: "1 MB",
+    quota: "100 MB",
+    expire: "长期",
+    policy: "滞回 15%",
+  };
+  const html = W.PAGES.panel(env, url, "u1", "panel.example.com", "k", info);
+  ok("面板渲染出当前节点行", html.includes("当前节点 · 吞吐优先"), "");
+  ok("面板里没有 undefined", html.includes("undefined") === false, "");
+  ok("存活条数进了页面", html.includes("3"), "");
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -23,11 +23,9 @@ interface DiagRow {
 /** 控制页模板的数据 */
 interface PanelInfo {
   regions: string[];
-  curPx: string;
   curLat: string;
   curTput: string;
   colo: string;
-  cnt: Record<string, unknown>;
   funnel: string;
   aliveCount: number;
   used: string;
