@@ -5625,5 +5625,24 @@ try {
   ok("ClRec 声明了更新时间", appTypes.includes("t?: number; // 最近一次更新的时间"));
 }
 
+// 中继健康表出站按证据时间切片（v7.216）
+{
+  const d = mkDO();
+  const now = Date.now();
+  const heavy = Array.from({ length: 120 }, (_, i) => ({ i: "10.1.1." + i, o: 9, b: 0, d: 0, t: now - 10 * 60000 }));
+  const fresh = Array.from({ length: 30 }, (_, i) => ({ i: "10.2.2." + i, o: 1, b: 0, d: 0, t: now - 5000 }));
+  const stale = Array.from({ length: 5 }, (_, i) => ({ i: "10.3.3." + i, o: 7, b: 0, d: 0 })); // 不带 t：DO 收到时补当前时间
+  await d.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ hl: heavy.concat(fresh).concat(stale) }) }));
+  const hl = (await (await d.m.fetch(new Request("https://m/hl"))).json()).hl || [];
+  eq("出站上限仍是 120 行", hl.length, 120);
+  eq("刚出现过的新证据全部发出去", hl.filter((r) => r.i.startsWith("10.2.2.")).length, 30);
+  ok("第一条是最近被记过的证据", (hl[0].t || 0) >= now - 60000, JSON.stringify(hl[0]));
+  ok("不带 t 的老行由 DO 按收到时间补", hl.some((r) => r.i.startsWith("10.3.3.") && (r.t || 0) >= now - 60000), String(hl.filter((r) => r.i.startsWith("10.3.3.")).length));
+  ok("按证据时间降序", hl.every((r, k) => k === 0 || (hl[k - 1].t || 0) >= (r.t || 0)));
+  const meterSrc = fs.readFileSync("src/store/meter.ts", "utf8");
+  ok("出站排序按 t 降序", meterSrc.includes("rows.sort((a, b) => b.t - a.t || b.d + b.b - (a.d + a.b));"));
+  ok("不再按坏证据条数单独排序", !meterSrc.includes("rows.sort((a, b) => b.d + b.b - (a.d + a.b));"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

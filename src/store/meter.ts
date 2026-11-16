@@ -438,7 +438,12 @@ export class Meter {
     }
     if (p.endsWith("/hl")) {
       const rows = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d, t: Number(x.t) || 0 }));
-      rows.sort((a, b) => b.d + b.b - (a.d + a.b));
+      // 按证据时间降序出站（v7.216）：以前按「坏证据条数」排，于是表里超过 120 条中继时，
+      // 只有一两条新证据的中继永远排在最后、一条都发不出去 —— 而「这条中继刚刚成功过」正是
+      // 最该扩散给别的 isolate 的那条证据（30 分钟半衰期，还没等它排上队就过期了）。
+      // 存储侧本来就只留最新的 200 条（同一条判据），出站再按新鲜度切才自洽；
+      // 条数只当并列时的次序，避免同一毫秒写入的行顺序抖动。
+      rows.sort((a, b) => b.t - a.t || b.d + b.b - (a.d + a.b));
       return Response.json({ hl: rows.slice(0, 120) });
     }
     // 七张表的出站形状与切片顺序都在 src/store/factout.ts（v7.187）
