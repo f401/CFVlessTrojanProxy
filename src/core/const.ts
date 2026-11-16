@@ -45,6 +45,9 @@ export const SC = {
   SNAP_MAX: 24, // 灾备快照一次最多读多少人的用量：每人 1 次 DO 往返；超出的那批沿用上一次快照的数值（不读、也不从快照里消失）
   HOST_MEM_MAX: 512, // 按站点记的内存表（pin/seq/bigByHost/cfHost/vtSent）最多留多少行：站点名来自客户端，不是有限集合
   PX_MAX: 300, // 「这个站点下次得走中转」的记忆（S.needPx）最多留多少个站点：键是客户端带来的站点名，不封顶时 6 小时内能涨到任意条数
+  // 窗口只留一份：attacher 的失败学习与 judge 的两条写入路径都读它（7.226 之前 attacher 内联 6 * 3600e3、
+  // judge 自带一份 21_600_000，改一处另一处不会跟；`src/px/const.ts` 里的 PX_TTL 是 KV 到期秒数，与此无关）
+  PX_LEARN: 21_600_000,
   // cron 闸门的超时：一轮正常几十秒，8 分钟还没收尾说明卡在不会返回的子请求上（DO fetch 没有超时），
   // 允许下一轮接管并计 cronStale —— 否则这个 isolate 的 cron 会永久停摆
   CRON_STALE_MS: 8 * 60_000,

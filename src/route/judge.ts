@@ -24,7 +24,6 @@ const BIG = PAGE_ABS.big; // 整页（含握手）的下限
 const SMALL_MAX = 12000; // 小响应上限：再大就不当封锁证据
 const JUNK_MAX = 6000; // 中继自家默认页的量级
 const BASE_TTL = 6 * 3600_000; // 「站点能出整页」的记忆
-const PX_TTL = 21_600_000; // 下次优先中转的提示位
 const NEG_TTL = 600_000; // 短负面记忆：10 分钟后自动失效（只降权，不写封禁）
 /** 正记忆：刚出过整页的中继在 10 分钟内优先复用；冷 isolate 的「每连接盲选」是主要残差来源 */
 const POS_TTL = 600_000;
@@ -217,7 +216,7 @@ export class Judge {
     if (!known) {
       if (n >= 2 || e.cf) {
         // 只提醒「下次优先中转」，不下判定
-        S.needPx.set(e.host, now + PX_TTL);
+        S.needPx.set(e.host, now + SC.PX_LEARN);
         // 键是客户端带来的站点名，不是有限集合：以前只有 attacher 那条路封顶，
         // 这里两条路都能写，过期行又只有 cron 会清 —— 统一按 SC.PX_MAX 压回去。
         trimAged(S.needPx, SC.PX_MAX);
@@ -243,7 +242,7 @@ export class Judge {
   private markBlocked(e: TrafficEvt, chan: Chan, ck: string, now: number): void {
     S.smCnt.delete(ck);
     recordBlock({ target: e.host, chan, down: e.down, ok: false });
-    S.needPx.set(e.host, now + PX_TTL);
+    S.needPx.set(e.host, now + SC.PX_LEARN);
     trimAged(S.needPx, SC.PX_MAX);
   }
 

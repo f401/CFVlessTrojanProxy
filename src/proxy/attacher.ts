@@ -135,9 +135,10 @@ export class Attacher {
       st.retried = true;
       st.pxTries = 1;
       // 记住"这个站必须走中转"：6 小时覆盖一次浏览会话，真变回可直连也只是多走一跳。
+      // 窗口读 SC.PX_LEARN —— 7.226 之前这里内联 6 * 3600e3，judge 里另有一份 21_600_000。
       // 上限用 SC.PX_MAX：以前这里手写一段「先清过期、再删最旧一条」，而 judge 写
       // 同一张表的两条路径完全绕过了它（7.182 统一成 trimAged，按最早过期先删）。
-      S.needPx.set(host, Date.now() + 6 * 3600e3);
+      S.needPx.set(host, Date.now() + SC.PX_LEARN);
       trimAged(S.needPx, SC.PX_MAX);
       logErr(`empty close -> proxyip ${px.host}`, host);
       if (checkTarget(px.host, px.port)) {

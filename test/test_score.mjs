@@ -6020,5 +6020,42 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   ok("扫的时候先看 TTL", poolSrc226.includes("if (now - v.at > SC.PROBE_BAD_TTL) {"));
   ok("超上限按 at 升序淘汰", poolSrc226.includes("sort((a, b) => a[1].at - b[1].at)"));
 }
+// ---------- 第 227 组：S.needPx 的窗口只有一个真源（7.226） ----------
+{
+  // 注释里会引用旧写法，判源码前先滤掉注释行
+  const codeOf = (rel) =>
+    fs
+      .readFileSync(rel, "utf8")
+      .split(/\r?\n/)
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join("\n");
+  eq("窗口常量是 6 小时", W.SC.PX_LEARN, 21_600_000);
+  const constSrc227 = codeOf("src/core/const.ts");
+  ok("常量声明在 core/const.ts", constSrc227.includes("PX_LEARN: 21_600_000,"));
+  const judgeSrc227 = codeOf("src/route/judge.ts");
+  ok("judge 不再自带 PX_TTL", /\bPX_TTL\b/.test(judgeSrc227) === false);
+  eq("judge 两条写入路径都读同一个常量", (judgeSrc227.match(/now \+ SC\.PX_LEARN/g) || []).length, 2);
+  const attSrc227 = codeOf("src/proxy/attacher.ts");
+  eq("attacher 的失败学习也读同一个常量", (attSrc227.match(/Date\.now\(\) \+ SC\.PX_LEARN/g) || []).length, 1);
+  ok("attacher 不再内联 6 小时", attSrc227.includes("6 * 3600e3") === false);
+  // 全仓守卫：往 S.needPx 写数字字面量的写法一律不允许（写死了就和常量脱钩）
+  const needPxWrites = [];
+  for (const rel of ["src/route/judge.ts", "src/proxy/attacher.ts"]) {
+    for (const l of codeOf(rel).split("\n")) {
+      if (/S\.needPx\.set\(/.test(l)) needPxWrites.push(l.trim());
+    }
+  }
+  eq("S.needPx 的三条写入点都引用同一个常量", needPxWrites.length, 3);
+  ok("每条写入都引用 SC.PX_LEARN", needPxWrites.every((l) => l.includes("SC.PX_LEARN")));
+  // 同名不同义：px/const.ts 的 PX_TTL 是 KV 到期秒数（30 天），与这里的毫秒窗口无关
+  const pxConstSrc227 = codeOf("src/px/const.ts");
+  ok("px/const.ts 的 PX_TTL 仍是 KV 到期秒数", pxConstSrc227.includes("export const PX_TTL = 86400 * 30;"));
+  // 行为面：按常量写进去的窗口确实等于 6 小时
+  W.S.needPx.clear();
+  const t227 = Date.now();
+  W.S.needPx.set("learn227.example.com", t227 + W.SC.PX_LEARN);
+  eq("写入窗口等于常量", W.S.needPx.get("learn227.example.com") - t227, W.SC.PX_LEARN);
+  W.S.needPx.clear();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
