@@ -6170,5 +6170,28 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   ok("残留片不会被当成事实", (W.cntView().shardBad || 0) >= after229);
 }
 
+
+// ── 第 230 组：连接观测的分位索引（p50/p95 用 nearest-rank，不能用 floor(p*n)） ──
+const clPut = (k, v) => W.S.cagg.set(k, { n: v.length, ok: v.length, dn: 0, v });
+W.S.cagg.clear();
+clPut("p230.two", [100, 900]);
+clPut("p230.ten", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+clPut("p230.big", Array.from({ length: 64 }, (_, i) => (i + 1) * 10));
+const clRows = W.clSnapshot(40);
+const clBy = Object.fromEntries(clRows.map((r) => [r.k, r]));
+eq("两个样本时 p50 是较小那个（不是最大值）", clBy["p230.two"].p50, 100);
+eq("两个样本时 p95 才是最大值", clBy["p230.two"].p95, 900);
+eq("十个样本时 p50 是第 5 小", clBy["p230.ten"].p50, 5);
+eq("十个样本时 p95 是最大值", clBy["p230.ten"].p95, 10);
+eq("64 个样本时 p50 是第 32 个", clBy["p230.big"].p50, 320);
+W.S.cagg.delete("p230.zero");
+W.S.cagg.set("p230.zero", { n: 0, ok: 0, dn: 0, v: [] });
+eq("没有样本的行不会进快照", W.clSnapshot(40).some((r) => r.k === "p230.zero"), false);
+W.S.cagg.clear();
+const pendSrc = fs.readFileSync("src/store/pend.ts", "utf8");
+ok("分位索引用 nearest-rank", pendSrc.includes("Math.ceil(p * v.length) - 1"));
+ok("分位索引不再用 floor(p*n)", !pendSrc.includes("Math.floor(p * v.length)"));
+ok("索引下限夹到 0（p 很小时不能取负）", pendSrc.includes("Math.max(0, Math.ceil(p * v.length) - 1)"));
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

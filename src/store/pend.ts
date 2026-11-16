@@ -194,7 +194,14 @@ export class PendingLedger {
       if (!g.n) continue;
       const v = g.v.slice().sort((a, b) => a - b);
       // 分位用「上取整」索引：样本少时也要给出一个真实观测值，而不是 0
-      const q = (p: number) => (v.length ? v[Math.min(v.length - 1, Math.floor(p * v.length))] : 0);
+      // 分位用 nearest-rank：索引 = ceil(p*n) - 1（下限 0、上限 n-1）。
+      // 旧写法 floor(p*n) 在小样本上系统性偏慢一位：n=2 时 p50 直接等于最大值，n=10 时等于第 6 小；
+      // 面板与 DO 里的 p50 是给「这个节点的首字节到底多慢」定性的，偏慢一位会把快节点也报成慢。
+      const q = (p: number) => {
+        if (!v.length) return 0;
+        const i = Math.min(v.length - 1, Math.max(0, Math.ceil(p * v.length) - 1));
+        return v[i];
+      };
       out.push({ k, n: g.n, ok: g.ok, p50: q(0.5), p95: q(0.95), dn: g.dn });
     }
     out.sort((a, b) => b.n - a.n);
