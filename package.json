@@ -8,6 +8,7 @@
     "build": "node tools/tsc.js && node tools/bundle.js",
     "test": "node test/mk_test.mjs && node test/test_v3.mjs && node test/smoke_v3.mjs && node test/test_score.mjs && node test/sim_v3.mjs && node test/golden.mjs",
     "arch": "node tools/check-arch.js",
+  "dead": "node tools/check-dead.mjs",
     "format": "prettier --write \"src/**/*.ts\" \"types/*.d.ts\"",
     "obf": "node obf/pre.js && node obf/obf_mid.js",
     "all": "npm run arch && npm run build && npm test && npm run obf",

@@ -53,7 +53,6 @@ export const ZERO_STAT: NodeStats = {
 };
 
 export const TEN_MB = 10 * 1048576;
-export const E10_PRIOR = (TEN_MB / SC.PRIOR_BPS) * 1000;   // 无吞吐样本时的先验代价（≈5 秒，PRIOR_BPS=2MB/s）
 /** 经中转的空关闭累计到多少次算「这条通道可疑」（跨过那一条才作废站点排行缓存） */
 export const EMPTY_CLOSE_BAD = 5;
 

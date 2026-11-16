@@ -54,7 +54,7 @@ export class VerdictTable {
   }
 
   /**
-   * 功能：由 HTTP 状态码推断状态机取值（无状态码视为连不上）。
+   * 功能：由 HTTP 状态码推断状态机取值（无状态码视为连不上）—— 全仓唯一实现。
    * @param code HTTP 状态码，0 表示连接失败/没拿到响应
    * @returns 3（连不上）/ 1（2xx-3xx 可用）/ 2（4xx-5xx 被拦）
    */
@@ -300,13 +300,6 @@ export class VerdictTable {
 
 /** 进程内唯一判定表 */
 export const VT = new VerdictTable();
-
-/**
- * 功能：由状态码推导状态机取值（与 VerdictTable 内部规则一致，供外部模块复用）。
- * @param code HTTP 状态码，0 表示没拿到
- * @returns 3 / 1 / 2
- */
-export const stateOfCode = (code: number): VState => (code <= 0 ? 3 : code >= 200 && code < 400 ? 1 : 2);
 
 /**
  * 功能：写入一条带状态码的观察。

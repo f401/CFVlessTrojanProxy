@@ -4025,8 +4025,12 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   ok("probeTf 有自己的时间预算", tfSrc.includes("const TF_MS = 8000;") && tfSrc.includes("withTimeout(work, TF_MS"));
   const h80 = fs.readFileSync("src/core/http80.ts", "utf8");
   ok("probeHttp80 用 splitRelay 解析中继", /relay \? splitRelay\(relay, 80\)/.test(h80));
-  const vsSrc = fs.readFileSync("src/route/verdictsync.ts", "utf8");
-  ok("FactsBody.ps 的类型带上 top（7.163 漏的跟随）", vsSrc.includes("at: number; top?: number }>"));
+  // ps 行的线格式只有一份（psfacts.ts 的 PsWire），出站必须真的带上 top（7.163 漏的跟随）
+  const psSrc = fs.readFileSync("src/route/psfacts.ts", "utf8");
+  ok("PsWire 带上 top（曾经行过的证据要能跨 isolate）", /\/\*\*[\s\S]*?\*\/[\s\S]*?top\?:/.test(psSrc) && psSrc.includes("export interface PsWire"));
+  ok("PsWire 声明了 top 字段", /top\?: number;/.test(psSrc));
+  const foSrc = fs.readFileSync("src/store/factout.ts", "utf8");
+  ok("factsOut 真的把 top 发出去", foSrc.includes("top: Number(x.top) || 0"), "出站丢了 top");
 }
 
 
@@ -4612,6 +4616,46 @@ console.log("\n191b) 中继健康表的 merge 口径");
   S.pool = poolBak;
   S.alive.clear();
   for (const [k, v] of aliveBak) S.alive.set(k, v);
+}
+
+// ── 第 194 组：死导出与线协议类型的单一来源（7.195） ──
+{
+  // ① 状态码→状态只有一处实现：导出的副本 stateOfCode 已删除，剩下的私有实现必须唯一
+  const srcVt = fs.readFileSync("src/route/verdict.ts", "utf8");
+  eq("verdict.ts 不再有 stateOfCode 死导出", srcVt.includes("stateOfCode"), false);
+  eq("「2xx-3xx 可用」的映射全仓只写一次", srcVt.split("code >= 200 && code < 400").length - 1, 1);
+  // 删副本不许改行为：三条映射仍要落在 1 / 2 / 3
+  W.vClear();
+  W.VT.set("s195.test", "d", 200, 40, 1);
+  eq("200 仍是可用", W.vState("s195.test", "d"), 1);
+  W.VT.set("s195.test", "d", 403, 140, 1);
+  eq("403 仍是被拦", W.vState("s195.test", "d"), 2);
+  W.VT.set("s195.test", "d", 0, 0, 1);
+  eq("没有状态码仍是连不上", W.vState("s195.test", "d"), 3);
+  W.vClear();
+
+  // ② 没人读的代价先验常量已删除（代价先验由 score.ts 自己算，两份会分叉）
+  const srcStat = fs.readFileSync("src/nodes/stat.ts", "utf8");
+  eq("stat.ts 不再有 E10_PRIOR 死导出", srcStat.includes("E10_PRIOR"), false);
+  ok("TEN_MB 仍导出（score/metrics 都在用）", srcStat.includes("export const TEN_MB"), "TEN_MB 定义没了");
+
+  // ③ 线协议类型只有一份：verdictsync 借用 factsstore 的 FactsBody，不再本地重声明
+  const srcVs = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+  eq("verdictsync 不再自带 FactsBody 声明", srcVs.includes("interface FactsBody"), false);
+  ok("verdictsync 从 factsstore 借类型", srcVs.includes("type FactsBody") && srcVs.includes("type WireBody = FactsBody &"), "借用没接上");
+  // 行为面：七张表里最容易漏的那张（dns）必须真能穿过车身进表
+  W.DNS.clear();
+  const now195 = Date.now();
+  const n195 = W.FACTS.load({ dns: [{ h: "d195.test", v: 1, at: now195 }], eg: [{ i: "9.9.9.9", f: 6, at: now195 }] });
+  eq("车身里的 dns 事实被读入", n195.dns, 1);
+  eq("车身里的 eg 事实被读入", n195.eg, 1);
+  eq("dns 事实真的进了 DNS 表", W.DNS.v6Of("d195.test"), 1);
+  W.DNS.clear();
+
+  // ④ 闸门本身在位：死导出扫描必须挂在总闸上，否则下一次死导出照样能发版
+  ok("死导出闸门脚本存在", fs.existsSync("tools/check-dead.mjs"), "tools/check-dead.mjs 不见了");
+  const srcPf = fs.readFileSync("tools/preflight.mjs", "utf8");
+  ok("死导出闸门接进了 preflight", srcPf.includes("tools/check-dead.mjs"), "preflight 里没有这一步");
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

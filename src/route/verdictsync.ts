@@ -3,9 +3,8 @@
 import { S } from "../core/state";
 import { vAll, vImport, VT_TTL_MS } from "./verdict";
 import { HEALTH } from "./relay-health";
-import { FACTS } from "./factsstore";
+import { FACTS, type FactsBody } from "./factsstore";
 import { EG } from "./egfacts";
-import type { EgRow } from "./egfacts";
 import { cnt } from "../core/counter";
 import { dropExpired, trimAged } from "../core/hostmem";
 
@@ -87,15 +86,16 @@ export async function vtLoad(env: Env): Promise<void> {
   return S.vtFlight;
 }
 
-/** 远端事实的响应体形状（五种事实 + 判定表 + 中继健康度） */
-interface FactsBody {
+/**
+ * 远端事实的响应体形状：五张事实表的字段从 factsstore 借用，再叠上判定表与中继健康度。
+ * 为什么不再本地重声明一遍：本文件原来有一份自己的 FactsBody，五张表里漏了 dns ——
+ * factsOut 明明发七张表，类型却只承认六张。tsc 不会报错（FACTS.load 收更宽的类型），
+ * 于是照这份声明写收发代码的人就会把 DNS 事实丢掉，而「跨界传值丢维度」正是这批缺陷的固定形状。
+ */
+type WireBody = FactsBody & {
   vt?: VtRow[];
   hl?: Array<{ i: string; o: number; b: number; d: number; t?: number }>;
-  eg?: EgRow[];
-  ps?: Array<{ k: string; q: number; n: number; at: number; top?: number }>;
-  dead?: Array<{ i: string; n: number; at: number }>;
-  blk2?: Array<{ k: string; n: number; at: number }>;
-}
+};
 
 /**
  * 功能：真正的一次读取（single-flight 的内核）—— 先看 colo 缓存，未命中再问 DO，并顺手回写缓存。
@@ -110,18 +110,18 @@ async function vtFetch(env: Env): Promise<void> {
       caches?: { default?: { match: (r: Request) => Promise<Response | undefined>; put: (r: Request, x: Response) => Promise<void> } };
     }).caches;
     const cache = cs && cs.default ? cs.default : null;
-    let jj: FactsBody | null = null;
+    let jj: WireBody | null = null;
     if (cache) {
       const hit = await cache.match(ckey);
       if (hit) {
-        jj = (await hit.json()) as FactsBody;
+        jj = (await hit.json()) as WireBody;
         cnt("factsCacheHit");
       }
     }
     if (!jj) {
       const raw = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
       const rr = await env.METER.get(env.METER.idFromName(raw)).fetch("https://meter/vt");
-      jj = (await rr.json()) as FactsBody;
+      jj = (await rr.json()) as WireBody;
       cnt("factsDo");
       // 回写缓存不阻塞连接：写失败（无 Cache API / 配额）也不影响本次结果
       if (cache) void cache.put(ckey, new Response(JSON.stringify(jj), { headers: { "cache-control": "max-age=90" } })).catch(() => {});

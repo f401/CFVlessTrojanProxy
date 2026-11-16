@@ -68,6 +68,7 @@ fetch(request)
 tools/tsc.js      tsc（strict:true + noUnusedLocals/Parameters，0 error 才继续）
 tools/bundle.js   esbuild → dist/_worker.js（生产）/ dist/_test.js（测试出口）
 tools/check-arch.js 分层 / 循环 / 顶层 let / 体积
+tools/check-dead.mjs 死导出（导出函数/常量必须在全仓有真实引用）
 test/*.mjs        473 断言 + 8 项逐字节 golden（含数据面模拟）；`src` 与 `types` 的 any 数量均为 0
 obf/*.js          预处理 + 混淆（Meter 类名保留）
 scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → obf → PUT
