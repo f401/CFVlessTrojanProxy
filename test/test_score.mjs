@@ -5433,5 +5433,36 @@ try {
   ok("上游写上限的行为段可执行（旧代码没有 upWrite）", false, String((e && e.message) || e));
 }
 
+// 第 212 组：大池分片重建期间，S.candN 只反映「已经扫过的那一段」——它不能被当成池子大小（7.211）
+{
+  const bak212 = [...W.S.alive.entries()];
+  const bakN212 = W.S.candN;
+  const N212 = 1500;
+  W.S.alive.clear();
+  for (let i = 0; i < N212; i++) {
+    const h = "10." + (i >> 8) + "." + (i & 255);
+    W.S.alive.set(h + ":443", { h, p: 443, cc: "", ms: 100 });
+  }
+  W.S.candN = 0;
+  W.invalidateRank();
+  W.candsFor("lat");
+  eq("切片中途不写 candN（旧代码会把 128 当池子大小）", W.S.candN, 0);
+  let calls212 = 1;
+  while (W.S.candN === 0 && calls212 < 40) {
+    W.candsFor("lat");
+    calls212++;
+  }
+  eq("扫完整轮才写 candN", W.S.candN, N212);
+  ok("整轮确实是分片扫的", calls212 > 1, "calls=" + calls212);
+  const ts212 = fs.readFileSync("src/px/ts.ts", "utf8");
+  const sc212 = fs.readFileSync("src/nodes/score.ts", "utf8");
+  ok("pickThom 的分母是存活表大小", ts212.includes("const nPool = S.alive.size ||"), "");
+  ok("score 只在扫完时写 candN", sc212.includes("if (st.pos >= st.keys.length) S.candN = st.ok;"), "");
+  ok("注释写明不能用 candN 当池子大小", ts212.includes("只反映「已经扫过的那一段」"), "");
+  W.S.alive.clear();
+  for (const [k212, v212] of bak212) W.S.alive.set(k212, v212);
+  W.S.candN = bakN212;
+  W.invalidateRank();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

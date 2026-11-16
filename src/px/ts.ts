@@ -27,8 +27,10 @@ export function pickThom(mode: Mode, bytes = 0): string {
   // 抽样池宽度按池子大小分档：300~800 的池子里前 64 名含大量明显更差的节点（300 池实测
   // 1.16x → 32 名 1.14x → 16 名 1.13x），收窄能集中采样；2000 池前 64 只占 3%，
   // 收窄反而丢掉"可能变好"的候选（1.16x → 32 名 1.20x → 16 名 1.22x）。
-  // 注意分母是**池子**大小（S.candN），不是 list.length —— 后者已被 CAND_KEEP 截到 ≤288。
-  const nPool = S.candN || S.alive.size || list.length;
+  // 分母必须是**池子**大小：list.length 已被 CAND_KEEP 截到 ≤288；也不能用 S.candN ——
+  // 大池分片重建期间它只反映「已经扫过的那一段」（2000 池实测 128 → 2000 之间跳），
+  // β 与抽样宽度会随切片进度变化 3 倍以上，等于把调好的大池参数作废（7.211）。
+  const nPool = S.alive.size || S.candN || list.length;
   const kMax = nPool >= SC.TS_K_BIG_MIN ? (mode === "tput" ? SC.TS_K : SC.TS_K_LAT) : SC.TS_K_SMALL;
   const opt = SC.TS_BETA * Math.sqrt(Math.min(1, kMax / Math.max(1, nPool)));
   // 池内见过的最快带宽：给"还没测过带宽"的臂算乐观代价用。

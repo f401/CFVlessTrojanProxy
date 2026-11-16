@@ -247,7 +247,9 @@ export class Scorer {
     }
   }
   st.pos = end;
-  S.candN = st.ok;
+  // 只有整轮扫完才写 S.candN：切片中途的 st.ok 只是「扫过这一段」里的可用数，
+  // 被 pickThom 当成池子大小会让抽样宽度（kMax 档）与 β 在同一个池子里来回跳（7.211）
+  if (st.pos >= st.keys.length) S.candN = st.ok;
   if (st.pos < st.keys.length) {
     // 半程不重发表格（省掉每 pick 一次 concat）；只有冷启动时才把半程结果先用起来
     if (cached) return cached;
