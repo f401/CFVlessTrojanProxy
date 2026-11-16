@@ -5464,5 +5464,56 @@ try {
   W.S.candN = bakN212;
   W.invalidateRank();
 }
+
+// ---- 第 213 组：站点冷启动的影子试探（lastTry 只写不读）+ 节点统计里的僵尸字段 ----
+{
+  const g213keys = ["10.213.0.1:443", "10.213.0.2:443", "10.213.0.3:443"];
+  const g213host = "h213.test";
+  const oldAlive = W.S.alive;
+  const oldRank = W.S.rankCache;
+  const setup213 = () => {
+    W.S.alive = new Map();
+    for (const k of g213keys) W.S.alive.set(k, { h: k.slice(0, k.lastIndexOf(":")), p: 443, cc: "HK" });
+    W.S.hostNode.delete(g213host);
+    W.S.rankCache = { t: 0, at: {}, v: {}, step: {} };
+  };
+  setup213();
+  const a213 = W.hostUntried(g213host, "lat");
+  ok("影子试探先给全局排行第一名", Boolean(a213), a213);
+  W.nsGet(a213).lastTry = Date.now();
+  const b213 = W.hostUntried(g213host, "lat");
+  ok("刚试过的节点不会被第二条并发请求立刻再选一次", b213 !== a213, a213 + " / " + b213);
+  ok("换到的是另一条真实候选", g213keys.includes(b213), b213);
+  W.nsGet(a213).lastTry = Date.now() - 60000;
+  eq("过了窗口期可以再用它", W.hostUntried(g213host, "lat"), a213);
+  setup213();
+  for (const k of g213keys) W.nsGet(k).lastTry = Date.now();
+  const c213 = W.hostUntried(g213host, "lat");
+  ok("全都在窗口内时退回一条，不能返回空串", Boolean(c213), c213);
+  W.S.alive = new Map([[g213keys[0], { h: "10.213.0.1", p: 443, cc: "HK" }]]);
+  W.S.hostNode.delete(g213host);
+  W.S.rankCache = { t: 0, at: {}, v: {}, step: {} };
+  eq("只有一条候选时在同一条上再试", W.hostUntried(g213host, "lat"), g213keys[0]);
+  W.S.alive = oldAlive;
+  W.S.rankCache = oldRank;
+
+  const stSrc = fs.readFileSync("src/nodes/stat.ts", "utf8");
+  const stCode = stSrc.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\/\/.*$/, "")).join("\n");
+  ok("节点统计里不再有 eCloseD（只写不读）", !stCode.includes("eCloseD"));
+  ok("影子试探的窗口常量进了 SC", fs.readFileSync("src/core/const.ts", "utf8").includes("UNTRIED_GAP: 20000"));
+  ok("untried 会读 lastTry", fs.readFileSync("src/nodes/metrics.ts", "utf8").includes("SC.UNTRIED_GAP"));
+  ok("selector 仍在返回前记 lastTry", fs.readFileSync("src/px/selector.ts", "utf8").includes("nsGet(t0).lastTry = Date.now();"));
+  ok("直连空关闭的全局计数保留", fs.readFileSync("src/proxy/attacher.ts", "utf8").includes('cnt("eCloseD")'));
+  ok("类型里也没有 eCloseD", !fs.readFileSync("types/app.d.ts", "utf8").includes("eCloseD"));
+  const k213 = "10.213.9.9:443";
+  W.S.nstat.delete(k213);
+  W.nsEmptyClose(k213, false);
+  const r213 = W.S.nstat.get(k213);
+  eq("直连空关闭不增加中转侧的计数", r213.eCloseP, 0);
+  ok("节点统计里没有 eCloseD 这个键", !Object.prototype.hasOwnProperty.call(r213, "eCloseD"));
+  W.nsEmptyClose(k213, true);
+  eq("中转空关闭会加一", W.S.nstat.get(k213).eCloseP, 1);
+  W.S.nstat.delete(k213);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

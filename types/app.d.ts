@@ -103,7 +103,6 @@ interface NodeStats {
   okW: number;
   failW: number;
   eCloseP: number;
-  eCloseD: number;
 
   /** 吞吐：直方图 + 卡顿 */
   stallMs: number;

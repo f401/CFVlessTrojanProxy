@@ -45,7 +45,7 @@ function bumpWin(s: NodeStats, now: number, ok: boolean) {
 /** 全零统计行：新建节点、单测与「没有任何样本」的兜底，字段必须与 NodeStats 一致 */
 export const ZERO_STAT: NodeStats = {
   ok: 0, fail: 0, at: 0, msLocal: 0, streak: 0, blackUntil: 0, freeUntil: 0, lastTry: 0,
-  pN: 0, pSum: 0, pSumSq: 0, pF: 0, cus: 0, cusB: 0, tcp: 0, tls: 0, tS: 0, tF: 0, okW: 0, failW: 0, eCloseP: 0, eCloseD: 0,
+  pN: 0, pSum: 0, pSumSq: 0, pF: 0, cus: 0, cusB: 0, tcp: 0, tls: 0, tS: 0, tF: 0, okW: 0, failW: 0, eCloseP: 0,
   stallMs: 0, runMs: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0),
   sumW: 0, sumW2: 0, recentBytesW: 0, lastSampleAt: 0,
   counted: 0,
@@ -74,7 +74,7 @@ export class NodeStatsTable {
       tcp: 0, tls: 0, okW: 0, failW: 0, stallMs: 0, runMs: 0,
       pN: 0, pSum: 0, pSumSq: 0, pF: 0, cus: 0, cusB: 0,   // 探活样本 / ttfb 矩 / 变点
       tS: 0, tF: 0,                            // 真实流量（只用于可用性）
-      eCloseP: 0, eCloseD: 0,                  // 空关闭：中转后 / 直连
+      eCloseP: 0,                               // 空关闭：只记「走了中转」的口径（直连侧走 cnt("eCloseD")，不进节点统计）
       bytesDown: 0, hist: new Array(HIST_N).fill(0),
       sumW: 0, sumW2: 0, recentBytesW: 0, lastSampleAt: 0,
       counted: 0,
@@ -101,7 +101,7 @@ export class NodeStatsTable {
   // pSum/pSumSq 是真实首字节的 EWMA 一二阶矩（nsLatency 写），不是权重，不随半衰期缩放
   // 空关闭计数必须一起衰减：tS 衰减而它不衰减，比值会单调涨，
   // 最终把曾经抽风过一次的节点永久踢出候选表。
-  s.eCloseP *= k; s.eCloseD *= k;
+  s.eCloseP *= k;
   s.sumW *= k; s.sumW2 *= k * k; s.recentBytesW *= k;
   if (s.hist) for (let i = 0; i < HIST_N; i++) s.hist[i] *= k;
   s.at = now;
@@ -143,8 +143,9 @@ export class NodeStatsTable {
   const s = nsGet(k), now = Date.now();
   nsDecay(s, now);
   const before = s.eCloseP || 0;
+  // 只记「走了中转」这一口径：直连空关闭是目标站的问题，不进节点统计
+  // （全局计数走 cnt("eCloseD")，与这张表不是同一份数据）
   if (viaP) s.eCloseP = before + 1;
-  else s.eCloseD = (s.eCloseD || 0) + 1;
   // 只有「这一条刚好把计数推过门槛」才作废缓存。
   // 原写法判的是 `eCloseP >= 5`，而 eCloseP 按 `SC.HL`（6 小时）半衰期衰减 ——
   // 一旦跨过就至少挂几个小时，这段时间里**每一条**空关闭都会清掉整张站点排行缓存

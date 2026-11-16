@@ -308,10 +308,23 @@ export class HostProfile {
     // 直接用全局排行（20 秒缓存）：它就是按 costOf 升序排好的，
     // 取第一个没在这个站试过的即可。以前这里对每个节点现算 costOf，
     // 200 个候选时单次 pick 要 1 ms，全花在重复计算上。
+    //
+    // 「刚试过」也要跳过：站点画像是在连接结束时才写 S.hostNode，而冷启动的
+    // 影子试探可能在同一秒里并发两三条 —— 只看 hostNode 会让它们挑到同一个节点，
+    // 试探就白做了（这个站只多了一行样本）。lastTry 正是为此写的，7.212 接上。
+    const now = Date.now();
+    let recent = "";
     for (const r of candsFor(mode)) {
-      if (!m || !m.has(r.k)) return r.k;
+      if (m && m.has(r.k)) continue;
+      const s = S.nstat.get(r.k);
+      if (s && now - (s.lastTry || 0) < SC.UNTRIED_GAP) {
+        if (!recent) recent = r.k;
+        continue;
+      }
+      return r.k;
     }
-    return "";
+    // 全都在窗口内（池子很小）时退回第一个：宁可在同一条上再试，也不要返回空串
+    return recent;
   }
 }
 
