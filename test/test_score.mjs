@@ -6057,5 +6057,50 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   eq("写入窗口等于常量", W.S.needPx.get("learn227.example.com") - t227, W.SC.PX_LEARN);
   W.S.needPx.clear();
 }
+
+// ===== 第 228 组：负面/正记忆表必须压回上限（7.227 D184）=====
+{
+  const judgeSrc = fs.readFileSync("src/route/judge.ts", "utf8");
+  const code = judgeSrc
+    .split(/\r?\n/)
+    .filter((l) => {
+      const t = l.trim();
+      return !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+    })
+    .join("\n");
+  ok("neg 写入后删过期", code.includes("dropExpired(this.neg);"));
+  ok("neg 写入后压回上限", code.includes("trimAged(this.neg, SC.HOST_MEM_MAX);"));
+  ok("pos 也走同一套淘汰", code.includes("trimAged(this.pos, SC.HOST_MEM_MAX);"));
+  ok("pos 不再整表清空", !code.includes("this.pos.clear();"));
+  ok("hostmem 的 dropExpired 已引入", judgeSrc.includes("dropExpired"));
+
+  const nowNeg = Date.now();
+  const pairs228 = [];
+  for (let i = 0; i < 600; i++) {
+    const h = `n228-${i}.example.com`;
+    const ip = `10.31.${Math.floor(i / 250)}.${i % 250}`;
+    W.JUDGE.markNeg(h, ip, nowNeg);
+    pairs228.push([h, ip]);
+  }
+  let alive228 = 0;
+  for (const [h, ip] of pairs228) if (W.JUDGE.negOn(h, ip, nowNeg + 1000)) alive228 += 1;
+  ok("600 个站点×中继不会被全留住", alive228 <= W.SC.HOST_MEM_MAX, `alive=${alive228} cap=${W.SC.HOST_MEM_MAX}`);
+  ok("最新那条负面记忆还在", W.JUDGE.negOn(pairs228[599][0], pairs228[599][1], nowNeg + 1000));
+  ok("最旧那条已被淘汰", !W.JUDGE.negOn(pairs228[0][0], pairs228[0][1], nowNeg + 1000));
+
+  const nowPos = Date.now();
+  const posPairs = [];
+  for (let i = 0; i < 600; i++) {
+    const h = `p228-${i}.example.com`;
+    const ip = `10.32.${Math.floor(i / 250)}.${i % 250}`;
+    W.JUDGE.markPos(h, ip, nowPos);
+    posPairs.push([h, ip]);
+  }
+  ok("正记忆压回上限后最新仍在", W.JUDGE.posOn(posPairs[599][0], posPairs[599][1], nowPos + 1000));
+  ok("正记忆也淘汰最旧", !W.JUDGE.posOn(posPairs[0][0], posPairs[0][1], nowPos + 1000));
+  const alivePos = posPairs.filter(([h, ip]) => W.JUDGE.posOn(h, ip, nowPos + 1000)).length;
+  ok("正记忆规模不超过上限", alivePos <= W.SC.HOST_MEM_MAX, `alive=${alivePos}`);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

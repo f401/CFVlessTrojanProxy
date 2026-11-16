@@ -5,7 +5,7 @@
 import { S } from "../core/state";
 import { PAGE_ABS } from "../core/facts";
 import { SC } from "../core/const";
-import { trimAged } from "../core/hostmem";
+import { dropExpired, trimAged } from "../core/hostmem";
 import { TrafficEvt } from "../core/hook";
 import { Chan, DIRECT, chanKey } from "./channel";
 import { vBad } from "./verdict";
@@ -55,6 +55,14 @@ export class Judge {
   markNeg(host: string, ip: string, now: number): void {
     if (!host || !ip) return;
     this.neg.set(host + "|r:" + ip, now + NEG_TTL);
+    // 键是「客户端带来的站点名 × 中继出口」，两个维度都会涨：过期清理只发生在
+    // `negOn` 里，而一个再也不会被重试的（站点, 中继）永远不会被查询到 ——
+    // 于是这张表在长命 isolate 里只增不减（7.227）。先删真正过期的，再按
+    // 「最早过期」压回上限：丢掉一条马上要过期的负面记忆没有代价。
+    if (this.neg.size > SC.HOST_MEM_MAX) {
+      dropExpired(this.neg);
+      trimAged(this.neg, SC.HOST_MEM_MAX);
+    }
   }
 
   /**
@@ -82,8 +90,13 @@ export class Judge {
    */
   markPos(host: string, ip: string, now: number): void {
     if (!host || !ip) return;
-    if (this.pos.size > 400) this.pos.clear(); // 有界：满了整表清空（正记忆丢了只是回到盲选，不致命）
     this.pos.set(host + "|r:" + ip, now + POS_TTL);
+    // 与 neg 同一套口径：满表清空会连刚记下的正记忆一起扔掉，改成按「最早过期」淘汰。
+    // 裁剪必须在 set 之后：放在前面会让表停在 cap + 1（7.227 的单测抓到 alive=513）。
+    if (this.pos.size > SC.HOST_MEM_MAX) {
+      dropExpired(this.pos);
+      trimAged(this.pos, SC.HOST_MEM_MAX);
+    }
   }
 
   /**
