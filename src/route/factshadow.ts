@@ -16,6 +16,7 @@ import { S } from "../core/state";
 import type { TrafficEvt } from "../core/hook";
 import { BIG_WIN, commitFact, factKey, type FactCtx, type FactObs, type FactOut } from "./commitfact";
 import type { SampleCount } from "../core/types";
+import { relayIpOf } from "../core/http80";
 
 /** 影子统计的一次快照 */
 export interface FactShadowSnap {
@@ -40,7 +41,7 @@ export interface FactShadowSnap {
  * @returns {FactObs} 观测
  */
 export function shadowObs(e: TrafficEvt, now: number): FactObs {
-  const relay = e.node ? e.node.slice(0, e.node.lastIndexOf(":")) : "";
+  const relay = e.node ? relayIpOf(e.node) : "";
   return {
     kind: e.via === "node" ? "relay" : "direct",
     host: e.host,

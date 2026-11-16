@@ -11,6 +11,7 @@ import { markSeedDirty } from "../px/seed";
 import { S } from "../core/state";
 import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";
 import { UP_STALL_MS, WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS, closeQuietly, releaseAll, withTimeout } from "../core/util";
+import { relayIpOf } from "../core/http80";
 
 
 /** 每收到多少字节触发一次 tick */
@@ -358,7 +359,7 @@ export class Connection {
         // 记下这次的首字节与下行速率，供决策层按站点挑中继；只在本 isolate 内，不跨 isolate 共享。
         if (this.node && this.host && this.down > 0) {
           const ms = Math.max(1, Date.now() - this.tAttach);
-          const ip = this.node.includes(":") ? this.node.slice(0, this.node.lastIndexOf(":")) : this.node;
+          const ip = relayIpOf(this.node);
           const t0 = this.ttfb > 0 ? this.ttfb : ms;
           // 吞吐只在「真的传了一大段」时才有意义：45KB 的正常首页在 2.5 秒里只有 18KB/s，
           // 而 4 字节的 403 页在 80 毫秒里也有 46KB/s —— 小样本算出来的速率会反向排序。

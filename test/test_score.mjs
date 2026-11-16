@@ -7548,5 +7548,45 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   ok("源码里没有旧的 c/s/at 三行", !/^  c: string;$/m.test(src263) && !/^  s: number;$/m.test(src263) && !/^  at: number;$/m.test(src263), src263.slice(0, 0));
   W.vClear();
 }
+// ── 264. 「node → IP」的解析只准有一份（v7.264） ─────────────────────────────
+// 7.260 把中继健康表与选路的三处解析收口到 relayIpOf，但 judge / factshadow / connection / fallback
+// 还各留着一份内联写法：方括号 IPv6（`[2a06:98c0::103]:443`）会带着方括号进键，读端按裸 IP 查永远 -1。
+{
+  const t264 = Date.now();
+  // 解析本身：方括号只在这里被剥掉，裸 v6 不带端口也认
+  eq("relayIpOf 剥掉方括号与端口", W.relayIpOf("[2a06:98c0::103]:443"), "2a06:98c0::103");
+  eq("relayIpOf 认裸 IPv6", W.relayIpOf("2a06:98c0::103"), "2a06:98c0::103");
+  eq("splitRelay 拆方括号写法", W.splitRelay("[2a06:98c0::9]:8443", 443).join("|"), "2a06:98c0::9|8443");
+  eq("splitRelay 裸 v6 无端口给默认端口", W.splitRelay("2a06:98c0::9", 443).join("|"), "2a06:98c0::9|443");
+
+  // 行为面：v6 中继的证据必须落在裸 IP 这个键上（改前落在 `[v6]`，读端全部查不到）
+  W.PS.clear();
+  W.JUDGE.onTraffic({ host: "v6relay.test", node: "[2a06:98c0::103]:443", down: 50000, ok: true, via: "node", life: 800, up: 200, at: t264 });
+  const rows264 = W.PS.snap("v6relay.test").map((r) => String(r.k));
+  ok("站点证据的键是裸 IP（不带方括号）", rows264.length === 1 && rows264[0] === "v6relay.test|2a06:98c0::103", JSON.stringify(rows264));
+  ok("按裸 IP 能查到这条证据", W.PS.okOf("v6relay.test", "2a06:98c0::103", t264) >= 0);
+  eq("按方括号查不到（键空间没有它）", W.PS.okOf("v6relay.test", "[2a06:98c0::103]", t264), -1);
+
+  // 中继健康表：同一份解析（7.260 已收口，这里锁住口径不倒退）
+  W.HEALTH.clear();
+  W.HEALTH.note("[2a06:98c0::9]:443", 50000, true);
+  const hl264 = W.HEALTH.json().map((r) => String(r.ip || ""));
+  ok("中继健康表的键也是裸 IP", hl264.includes("2a06:98c0::9") && !hl264.some((x) => x.includes("[")), JSON.stringify(hl264));
+
+  // 源码锁：四份文件里不再有内联的 lastIndexOf(":")（注释里提到不算），且都从 core/http80 取解析
+  const src264 = (p) => fs.readFileSync(p, "utf8");
+  for (const f of ["src/route/judge.ts", "src/route/factshadow.ts", "src/proxy/connection.ts", "src/proxy/fallback.ts"]) {
+    const body = src264(f)
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
+      .join("\n");
+    ok(`${f} 不再内联解析 node → IP`, !body.includes('lastIndexOf(":")'), f);
+  }
+  ok("judge.ts 用 relayIpOf", src264("src/route/judge.ts").includes("relayIpOf(e.node)"));
+  ok("connection.ts 用 relayIpOf", src264("src/proxy/connection.ts").includes("relayIpOf(this.node)"));
+  ok("fallback.ts 用 splitRelay 拆补救链地址", src264("src/proxy/fallback.ts").includes("const [host, port] = splitRelay(alt, 443);"));
+  ok("四份文件都从 core/http80 取解析", ["src/route/judge.ts", "src/route/factshadow.ts", "src/proxy/connection.ts", "src/proxy/fallback.ts"].every((f) => src264(f).includes('from "../core/http80"')));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

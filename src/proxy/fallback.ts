@@ -7,6 +7,7 @@ import { checkTarget } from "./dial";
 import { HOOK } from "../core/hook";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
+import { splitRelay } from "../core/http80";
 
 /** CF 托管目标换节点时最多试几个候选：每个都是一次 connect()，别把免费计划的 6 并发吃光。 */
 const ALT_TRIES = 4;
@@ -34,9 +35,7 @@ export async function dialAnother(
     const alt = nextNode(mode, avoid, cc);
     if (!alt || alt === avoid) return null;
     avoid = alt;
-    const i = alt.lastIndexOf(":");
-    const host = alt.slice(0, i);
-    const port = Number(alt.slice(i + 1)) || 443;
+    const [host, port] = splitRelay(alt, 443);
     // 池子可能被污染：内网/禁用端口一律不拨。这里是 continue 不是 return ——
     // 一条被污染的条目不该让整条补救链放弃（调用方回落到直连，等于白丢这次请求）。
     if (checkTarget(host, port)) continue;

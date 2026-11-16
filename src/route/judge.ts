@@ -19,6 +19,7 @@ import { PS } from "./psfacts";
 import { DNS } from "./dnsfacts";
 import { egDerive } from "./egfacts";
 import { BLK } from "./blkfacts";
+import { relayIpOf } from "../core/http80";
 
 const BIG = PAGE_ABS.big; // 整页（含握手）的下限
 const SMALL_MAX = 12000; // 小响应上限：再大就不当封锁证据
@@ -136,7 +137,7 @@ export class Judge {
       /* 影子统计绝不影响真实判定 */
     }
     if (e.via === "node" && e.node && e.host) {
-      const pip = e.node.slice(0, e.node.lastIndexOf(":"));
+      const pip = relayIpOf(e.node);
       if (pip) {
         // 只有「拿到完整响应」才记成功率；tiny 的负样本由 blk 的批次投票负责（§5.1 D14）
         if (out.write && out.write.kind === "ps" && out.write.j.ok) PS.note(e.host, pip, true, ty);
@@ -153,7 +154,7 @@ export class Judge {
     // v8 的 blk：只有「本通道 tiny + 同窗口另一通道出过整页」才投票（三批独立确认后才写行）。
     // 这里只喂证据，不决定顺序 —— 后果是代价 ×6（policy 里乘），候选永远不会被移出。
     if (e.via === "node" && e.node && e.host) {
-      const nip = e.node.slice(0, e.node.lastIndexOf(":"));
+      const nip = relayIpOf(e.node);
       const row = S.peers.get(e.host);
       // 用事件时间 `ty` 而不是 `Date.now()`：回放/聚合的事件按发生时间判窗口，
       // 否则「同一批事件」在回放时永远看不到对照（与上面归批时钟是同一个坑）。
@@ -163,7 +164,7 @@ export class Judge {
     }
 
     // 整页是出口族的硬证据，必须在下面「整页直接 return」之前提取，否则永远走不到那条分支。
-    if (e.via === "node" && e.node) egDerive(e.node.slice(0, e.node.lastIndexOf(":")), e.down, { siteV4: DNS.v6Of(e.host) === 0, cf: !!e.cf }, now);
+    if (e.via === "node" && e.node) egDerive(relayIpOf(e.node), e.down, { siteV4: DNS.v6Of(e.host) === 0, cf: !!e.cf }, now);
     if (e.ok && e.down >= BIG) {
       cnt("trHit");
       S.bigByHost.set(e.host, now);
@@ -179,7 +180,7 @@ export class Judge {
       recordPass({ target: e.host, chan, down: e.down, ok: true });
       // 正记忆：这条中继刚给本站出过整页 —— 10 分钟内优先复用它。
       // 依据只有本 isolate 的观测，不跨 isolate 共享（各 isolate 的出口质量不同）。
-      if (e.via === "node" && e.node) this.markPos(e.host, e.node.slice(0, e.node.lastIndexOf(":")), now);
+      if (e.via === "node" && e.node) this.markPos(e.host, relayIpOf(e.node), now);
       return;
     }
     if (e.down <= 0 || e.down >= SMALL_MAX || e.life > 8000 || e.up > 16384) return;
@@ -214,7 +215,7 @@ export class Judge {
     // 短负面记忆：只要「站点确实能出整页」的旁证成立，就把这条通道对该站点软降权 10 分钟。
     // 它是选路层的排序依据，不是封锁结论 —— 突发负载下一条连接就会换别的通道。
     if (known && e.via === "node") {
-      const nip = e.node ? e.node.slice(0, e.node.lastIndexOf(":")) : "";
+      const nip = e.node ? relayIpOf(e.node) : "";
       // 只做本 isolate 的软降权（10 分钟），**不写通配封锁**：
       // 曾经试过用 `*|r:<中继>` 把「这条中继出口走 v6」共享给其他 isolate，实测副作用更大 ——
       // 通配行 30 分钟才过期，几轮突发就能把大半中继标死，可用池变薄后连接反而更差（失败率 10→20%）。
@@ -225,7 +226,7 @@ export class Judge {
       if (nip && e.cf) this.markNeg(CF_NEG, nip, now);
     }
     // 出口族只能从「这次真拿到了什么」反推：整页 ⇒ v4；同类小页且有整页对照 ⇒ v6。
-    if (e.via === "node" && e.node) egDerive(e.node.slice(0, e.node.lastIndexOf(":")), e.down, { peerBig: bigDiff, known, siteV4: DNS.v6Of(e.host) === 0, cf: !!e.cf }, now);
+    if (e.via === "node" && e.node) egDerive(relayIpOf(e.node), e.down, { peerBig: bigDiff, known, siteV4: DNS.v6Of(e.host) === 0, cf: !!e.cf }, now);
     if (!known) {
       if (n >= 2 || e.cf) {
         // 只提醒「下次优先中转」，不下判定
@@ -265,7 +266,7 @@ export class Judge {
    * @returns 通道对象
    */
   private chanOf(e: TrafficEvt): Chan {
-    const ip = e.node ? e.node.slice(0, e.node.lastIndexOf(":")) : "";
+    const ip = e.node ? relayIpOf(e.node) : "";
     return e.via === "node" && ip ? { kind: "r", ip } : DIRECT;
   }
 }
