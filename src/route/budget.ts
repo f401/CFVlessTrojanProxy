@@ -11,6 +11,7 @@ import { SC } from "../core/const";
 import { S } from "../core/state";
 import { vAll } from "./verdict";
 import { DOH_ENDPOINTS } from "../proxy/dial";
+import { REFILL_MAX } from "../px/probe";
 
 /**
  * 每轮最多给几个站点做 AAAA 探测。
@@ -26,7 +27,7 @@ export const DNS_BATCH = 2;
  * 不把「探活」算进来，是因为探活走 connect()，不吃 fetch 子请求额度。
  */
 export const SUB_FIXED = {
-  refill: 6, // refillPool：最多 6 个池子源（冷却中的源在池子够多时会被跳过）
+  refill: REFILL_MAX, // refillPool：最多 REFILL_MAX 个池子源（冷却中的源在池子够多时会被跳过）
   tfb: 1, // tfbRound：一次 DO 子请求（DO 内部的抓取记在它自己那笔账上）
   dns: DNS_BATCH * DOH_ENDPOINTS.length, // dnsRound：DNS_BATCH 个站点 × 每站点最多 DOH_ENDPOINTS.length 次 DoH
   pend: 1, // pendFlush：一次 DO 子请求

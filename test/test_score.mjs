@@ -6455,5 +6455,28 @@ ok("cron.ts 用 DNS_BATCH 切片", cronSrc239.includes(".slice(0, DNS_BATCH);"))
 ok("cron.ts 不再写死 slice(0, 2)", !cronSrc239.includes(".slice(0, 2);"));
 ok("cron.ts 从 budget 引入 DNS_BATCH", cronSrc239.includes("DNS_BATCH, planRound"));
 
+// ---- 第 240 组：池子源的条数上界与账本（D194）----
+// env.poolSrc 能覆盖源列表，但一次 cron 的 fetch 子请求有硬上限 48：条数必须由常量封顶。
+const cap240 = W.REFILL_MAX || 0;
+eq("REFILL_MAX 是 6", cap240, 6);
+eq("SUB_FIXED.refill 与常量同源", (W.SUB_FIXED || {}).refill, cap240);
+const many240 = Array.from({ length: 20 }, (_, i) => "https://src" + i + ".example.com/proxy.txt");
+const srcs240 = W.poolSources({ poolSrc: many240.join(",") });
+ok("自定义源列表被截断到上界", srcs240.length <= cap240 && srcs240.length > 0, srcs240.length);
+const realFetch240 = globalThis.fetch;
+let hits240 = 0;
+globalThis.fetch = async () => { hits240 += 1; return new Response("10.9.0.1\n", { status: 200 }); };
+W.S.pool = [];
+W.S.alive.clear();
+try { await W.refillPool({ poolSrc: many240.join(",") }, 0); } finally { globalThis.fetch = realFetch240; }
+ok("抓取次数等于源列表长度", hits240 === srcs240.length, hits240 + " vs " + srcs240.length);
+ok("抓取次数不超过上界", hits240 <= cap240 && hits240 > 0, hits240);
+const probeSrc240 = fs.readFileSync("src/px/probe.ts", "utf8");
+const budgetSrc240 = fs.readFileSync("src/route/budget.ts", "utf8");
+ok("probe.ts 有 REFILL_MAX 常量", probeSrc240.includes("export const REFILL_MAX = 6;"));
+ok("poolSources 截断自定义列表", probeSrc240.includes("return list.length ? list.slice(0, REFILL_MAX) : POOL_SOURCES;"));
+ok("budget.ts 的 refill 由常量推导", budgetSrc240.includes("refill: REFILL_MAX,"));
+ok("budget.ts 不再写死 refill: 6", !budgetSrc240.includes("refill: 6,"));
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -33,6 +33,16 @@ export const POOL_SOURCES = [
   "https://ipdb.api.030101.xyz/?type=proxy",
 ];
 
+/**
+ * 一轮最多抓几个池子源。
+ *
+ * `env.poolSrc` 可以覆盖源列表，但抓取次数必须有个上界：一次 cron 调用的 fetch 子请求
+ * 硬上限是 50（`SC.SCAN_SUB = 48` 留余量），而固定支出里「源」那一笔是按这个常量记的。
+ * 7.240 之前自定义源列表不限条数、`refillPool` 又逐个抓 —— 配 30 个源就是 30 次 fetch，
+ * 加上恢复用量（12）、DoH（6）与快照（4）会直接越过硬上限、整轮 cron 1102。
+ */
+export const REFILL_MAX = 6;
+
 // 一行候选：IP[:PORT][#CC | ,… | :CC | 空白]
 export const PX_LINE = /^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?(?:[#,:]|\s|$)/;
 
@@ -260,7 +270,8 @@ export function poolSources(env: Env): string[] {
   const custom = String(env.poolSrc || "").trim();
   if (!custom) return POOL_SOURCES;
   const list = custom.split(/[,\s]+/).filter((x) => /^https?:\/\//.test(x));
-  return list.length ? list : POOL_SOURCES;
+  // 只取前 REFILL_MAX 条：rank / 冷却记账与实际抓取必须是同一个集合，多出来的源等于没配
+  return list.length ? list.slice(0, REFILL_MAX) : POOL_SOURCES;
 }
 
 /**

@@ -84,7 +84,7 @@ export {
   errHist,
 } from "./nodes/metrics";
 export { ERRS } from "./nodes/errlog";
-export { tlsHello, probeProxy, probeSni, refillPool, chunks, srcNote, srcRank, srcHealth, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES } from "./px/probe";
+export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, srcNote, srcRank, srcHealth, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES } from "./px/probe";
 export { regionListAsync } from "./px/regions";
 export { PEND, clSnapshot, nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
 export { doFetch, meterGet } from "./store/meter-client";
