@@ -6689,5 +6689,90 @@ ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 D
   ok("cntKeys 登记了 dayDoFail", st244.includes('"dayDoFail"'));
 }
 
+/** 245 组的连接桩：只带 pipeBack 会用到的字段 */
+const mkSt245 = (W, down) => {
+  const st = new W.Connection({}, "u245", "", "tput");
+  st.down = down;
+  st.node = "198.51.100.1:443";
+  st.host = "example.com";
+  st.mark = 1e9;
+  st.tAttach = Date.now();
+  return st;
+};
+
+/** 245 组的 socket 桩：可读流一起来就报错，模拟「连上就断」 */
+const sockOf245 = (msg) => ({
+  readable: new ReadableStream({
+    start(c) {
+      c.error(new Error(msg));
+    },
+  }),
+  close() {},
+  closed: Promise.resolve(),
+  writable: { getWriter: () => ({ write: async () => {}, releaseLock() {} }) },
+});
+
+/** 245 组的 WS 桩：readyState 1 = 开着，3 = 已关 */
+const wsOf245 = (state = 1) => ({ readyState: state, bufferedAmount: 0, send() {}, close() {} });
+// ── 245. pipe 在「连上就断、零字节」时补记账簿（7.245 / D199）──────────────────
+{
+  const cut0 = W.cntView().cut || 0;
+  const ccut0 = W.cntView().ccut || 0;
+
+  // ① 零字节 + 客户端还在：必须走 onClose(false)，让 attacher 的 0 字节账本（eCloseP /
+  //    nsEmptyClose / 换中继重试）接管；7.245 之前这里什么都不做。
+  {
+    const st = mkSt245(W, 0);
+    const calls = [];
+    W.pipeBack(sockOf245("origin reset"), wsOf245(), st, (got) => calls.push(got));
+    await new Promise((r) => setTimeout(r, 90));
+    eq("零字节 pipe 错误会走 onClose(false)", calls.length, 1);
+    eq("onClose 收到 gotData=false", calls[0], false);
+    ok("零字节那条不算 cut（交给 attacher 记 eCloseP）", (W.cntView().cut || 0) - cut0 === 0);
+    eq("通知后 st.notified 置真", st.notified, true);
+    eq("零字节那条不置 failed（由 onClose 决定）", st.failed, false);
+  }
+
+  // ② 有下行字节：语义不变 —— 记 cut + 手工降权，不回调 onClose（中途断流没法重放）
+  {
+    const st = mkSt245(W, 4096);
+    const calls = [];
+    W.pipeBack(sockOf245("mid reset"), wsOf245(), st, (got) => calls.push(got));
+    await new Promise((r) => setTimeout(r, 90));
+    eq("中途断流不回调 onClose", calls.length, 0);
+    eq("中途断流记 cut", (W.cntView().cut || 0) - cut0, 1);
+    eq("中途断流置 failed", st.failed, true);
+  }
+
+  // ③ 客户端已经走了：记 ccut，不回调 onClose（不是节点的问题，也不该再替它拨号）
+  {
+    const st = mkSt245(W, 0);
+    const calls = [];
+    W.pipeBack(sockOf245("origin reset"), wsOf245(3), st, (got) => calls.push(got));
+    await new Promise((r) => setTimeout(r, 90));
+    eq("客户端已走时记 ccut", (W.cntView().ccut || 0) - ccut0, 1);
+    eq("客户端已走时不回调 onClose", calls.length, 0);
+  }
+
+  // ④ 同一条连接只通知一次（close 与 error 两条路径共用 st.notified）
+  {
+    const st = mkSt245(W, 0);
+    const calls = [];
+    st.notified = true;
+    W.pipeBack(sockOf245("origin reset"), wsOf245(), st, (got) => calls.push(got));
+    await new Promise((r) => setTimeout(r, 90));
+    eq("已经通知过的连接不再回调", calls.length, 0);
+  }
+
+  // ⑤ 源码锁
+  const srcTun245 = fs.readFileSync("src/proxy/tunnel.ts", "utf8");
+  ok("close 只在未通知时回调", srcTun245.includes("if (onClose && !st.notified) {"));
+  ok("error 路径有零字节分支", srcTun245.includes("} else if (st.down === 0 && onClose) {"));
+  ok("error 路径整体受 notified 守卫", srcTun245.includes("if (st && !st.notified) {"));
+  const srcConn245 = fs.readFileSync("src/proxy/connection.ts", "utf8");
+  ok("Connection 有 notified 标记", srcConn245.includes("notified = false;"));
+  const fresh245 = new W.Connection({}, "u245b", "", "tput");
+  eq("新连接的 notified 默认假", fresh245.notified, false);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

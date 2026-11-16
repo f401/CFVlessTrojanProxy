@@ -62,6 +62,7 @@ export class Connection {
   // —— 生命周期 ——
   markedOk = false;
   markedFail = false;
+  notified = false; // onClose 已经通知过（close 与 pipe 的 error 路径互斥，见 tunnel.ts）
   failed = false; // 中途断流/异常（由 pipeBack 的 catch 置位），不算成功
   siteFail = false; // 失败归因：连上了节点但目标侧拒绝（只轻记全局）
   hostTrial = false; // 站点级试探：失败只记账，不动全局游标/不冻结

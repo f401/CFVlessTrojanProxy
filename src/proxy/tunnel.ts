@@ -44,7 +44,9 @@ export function pipeBack(
           }
         },
         close() {
-          if (onClose) {
+          if (onClose && !st.notified) {
+            // 只通知一次：pipe 的 error 路径也会走到同一个 onClose（见下面的 catch）
+            st.notified = true;
             // onClose 是 async（可能再拨号 / attach）：这里必须接住 rejection，
             // 否则会在事件回调里变成 unhandled rejection，Workers 直接记 1101。
             try {
@@ -69,11 +71,22 @@ export function pipeBack(
       logErr("pipe: " + errMsg(err), st && st.node ? st.node : "");
       closeQuietly(sock);
       const clientGone = !ws || ws.readyState !== WS_OPEN;
-      if (st && st.down > 0) {
+      if (st && !st.notified) {
         if (clientGone) {
           // 客户端自己走了（切网 / 关标签 / 取消）：不是节点的问题，不记失败、不冻结
+          st.notified = true;
           cnt("ccut");
-        } else {
+        } else if (st.down === 0 && onClose) {
+          // 连上了却一个下行字节都没给就报错：与「上游正常关闭、零字节」（close 路径）
+          // 是同一种可观察事实，必须走同一本账 —— attacher 的 onClose 会记 eCloseP、
+          // 给 nsEmptyClose 降权、并换一条中继重试。7.245 之前这里什么都不做，于是
+          // 「接受连接后立刻 RST」的节点既不计数也不降权，客户端只收到 1011。
+          st.notified = true;
+          Promise.resolve(onClose(false)).catch((e) => {
+            logErr("pipe close: " + errMsg(e), st.node || "");
+          });
+        } else if (st.down > 0) {
+          st.notified = true;
           st.failed = true;
           cnt("cut");
           if (st.node) {
