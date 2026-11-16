@@ -7466,5 +7466,65 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   ok("诊断端点把三张表的规模一起报出来", dbgSrc.includes("sizes: HEALTH.counts()"), "debug 没带 sizes");
 }
 
+
+// === 第 262 组：灾备快照的每轮上限要轮转，否则排在后面的用户永远停在旧水位 ===
+{
+  const kv262 = new Map();
+  const ids262 = Array.from({ length: 60 }, (_x, i) => "u262-" + String(i).padStart(3, "0"));
+  const seen262 = new Set();
+  const env262 = {
+    STATS: {
+      get: async (k) => kv262.get(k) || null,
+      put: async (k, v) => {
+        kv262.set(k, v);
+      },
+    },
+    METER: {
+      idFromName: (x) => x,
+      get: (id) => ({
+        fetch: async () => {
+          seen262.add(String(id));
+          return { ok: true, json: async () => ({ up: 500, down: 600, conns: 1, first: 0 }) };
+        },
+      }),
+    },
+  };
+  const realNow262 = Date.now;
+  let clock262 = 1_700_000_000_000;
+  Date.now = () => clock262;
+  const users262 = ids262.map((id) => ({ id }));
+  W.S.meterCache.clear();
+  const skipBefore262 = W.cntView().snapSkip || 0;
+  const round262 = async (n) => {
+    clock262 += 3 * 3600e3;
+    W.S.meterCache.clear();
+    await W.usageSnapWrite(env262, users262, n);
+    return JSON.parse(kv262.get("usage:snap") || "{}");
+  };
+  seen262.clear();
+  const d1 = await round262(24);
+  eq("第一轮读的是最前面那批", [...seen262].sort()[0], ids262[0]);
+  eq("第一轮只读上限那么多", seen262.size, 24);
+  eq("第一轮尾巴被计数", (W.cntView().snapSkip || 0) - skipBefore262, 60 - 24);
+  seen262.clear();
+  const d2 = await round262(24);
+  ok("第二轮从上一轮的落点接着读", seen262.has(ids262[24]) && !seen262.has(ids262[0]), [...seen262].slice(0, 2).join(","));
+  eq("第二轮仍是上限那么多", seen262.size, 24);
+  seen262.clear();
+  const d3 = await round262(24);
+  ok("第三轮绕回队首", seen262.has(ids262[48]) && seen262.has(ids262[0]), [...seen262].slice(0, 2).join(","));
+  eq("三轮下来每个人都至少被读过一次", new Set([...Object.keys(d1.users), ...Object.keys(d2.users), ...Object.keys(d3.users)]).size, 60);
+  eq("游标推进到第三轮之后（48 + 24 取模 60）", d3.idx, 12);
+  const d4 = await (async () => { clock262 += 3 * 3600e3; W.S.meterCache.clear(); await W.usageSnapWrite(env262, users262, 24); return JSON.parse(kv262.get("usage:snap")); })();
+  eq("第四轮接着从 12 开始（走完一圈也不会停在同一批）", d4.idx, 36);
+  const small262 = await (async () => { clock262 += 3 * 3600e3; W.S.meterCache.clear(); await W.usageSnapWrite(env262, users262.slice(0, 5), 24); return JSON.parse(kv262.get("usage:snap")); })();
+  eq("用户数没超上限时不轮转（游标归零）", small262.idx, 0);
+  Date.now = realNow262;
+  const srcSnap262 = fs.readFileSync("src/store/snapshot.ts", "utf8");
+  ok("写入侧按游标轮转", srcSnap262.includes("list.slice(start).concat(list.slice(0, start))"), "");
+  ok("游标落盘（idx）", srcSnap262.includes("(start + head.length) % list.length"), "");
+  ok("类型里有 idx 字段", fs.readFileSync("types/app.d.ts", "utf8").includes("idx?: number;"), "");
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

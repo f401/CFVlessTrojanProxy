@@ -54,10 +54,18 @@ export async function usageSnapWrite(env: Env, users?: UserRec[], max: number = 
   // 超出的那批不读，但**必须把上一次快照里的数值原样搬过来** —— 直接跳过会让它们从灾备
   // 快照里消失，DO 重建之后再也恢复不回来（v7.174 之前就是这样：用户一多，尾部的
   // meterGet 全部失败，那些人的历史用量永远停在某一天，且没有任何计数）。
-  const head = list.slice(0, Math.max(1, Math.min(SC.SNAP_MAX, max)));
-  const tail = list.slice(head.length);
+  const cap = Math.max(1, Math.min(SC.SNAP_MAX, max));
+  // 每轮从上次的落点往后数 cap 个（用户数 ≤ cap 时不轮转）。
+  // 为什么必须轮转：`loadUsers` 的顺序是稳定的（KV 里按创建序），永远取前 cap 个的话，
+  // 创建得早的那批每轮都被刷新、排在后面的永远停在第一次读到的水位 ——
+  // 7.177 的 `PendingLedger` 尾部饥饿是同一个形状（那里用游标轮转修的）。
+  const start = list.length > cap ? (Number(prev.idx) || 0) % list.length : 0;
+  const rotated = start ? list.slice(start).concat(list.slice(0, start)) : list;
+  const head = rotated.slice(0, cap);
+  const tail = rotated.slice(head.length);
   if (tail.length) cnt("snapSkip", tail.length);
-  const out: UsageSnap = { ts: Date.now(), users: {} };
+  // 游标推进到本轮之后（走完一圈回到 0），下一轮从这批之后接着读
+  const out: UsageSnap = { ts: Date.now(), users: {}, idx: list.length > cap ? (start + head.length) % list.length : 0 };
   // 同一个 num 不要每个用户重新建一次闭包
   const num = (x: unknown) => {
     const n = Number(x);

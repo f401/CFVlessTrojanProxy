@@ -276,6 +276,8 @@ interface RttEntry {
 /** usage:snap —— 各用户的用量水位（只增不减；d/dU/dD 用于同日灾备） */
 interface UsageSnap {
   ts: number;
+  /** 下一轮的起点（用户数超过每轮上限时轮转；没有它，排在后面的用户永远停在旧水位） */
+  idx?: number;
   users: Record<
     string,
     { up: number; down: number; conns: number; first?: number; d?: string; dU?: number; dD?: number }
