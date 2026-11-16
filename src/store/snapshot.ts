@@ -42,6 +42,9 @@ export async function usageSnapWrite(env: Env, users?: UserRec[], max: number = 
   try {
     prev = (await kvGetStrict<UsageSnap>(env, USAGE_SNAP_KEY)) || ({ users: {}, ts: 0 } as UsageSnap);
   } catch (e) {
+    // 读不到就整轮不写（拿空表覆盖会抹掉所有人的历史用量），但这个早退以前完全不可见：
+    // 连着失败的表现就是「用量快照停更」，与「这一轮没人有增量」一模一样
+    cnt("snapReadFail");
     return;
   }
   // 灾备快照，2 小时一次足够（cron 是 30 分钟一轮，别每轮都写一遍）
@@ -97,7 +100,9 @@ export async function usageSnapWrite(env: Env, users?: UserRec[], max: number = 
   try {
     await kvSet(env, USAGE_SNAP_KEY, out, { expirationTtl: 86400 * 90 });
   } catch (e) {
-    /* 额度耗尽：下次再写 */
+    // 额度耗尽/熔断时这里本来只是「下次再写」，但连续失败与「这一轮没人有增量」不可区分：
+    // 快照停更的表现是重装脚本后用量从 0 起算，属于事后才发现的损失，所以留一个计数
+    cnt("snapWriteFail");
   }
 }
 
@@ -199,6 +204,8 @@ async function writeSnap(env: Env, now: number, force = false): Promise<void> {
   try {
     prev = (await kvGetStrict<SnapDoc>(env, "snap")) || { v: 1, ts: 0, date: "", stats: {}, rtt: {}, errs: [] };
   } catch (e) {
+    // 同 usageSnapWrite：读失败时不写（防止覆盖别的 isolate 的当日统计），但要让失败可观察
+    cnt("snapFlushReadFail");
     return;
   }
   // force 同样要绕开全局闸门：这是"现在就要写"的意思，被挡掉等于没写（调用方拿不到任何反馈）
@@ -271,7 +278,8 @@ async function writeSnap(env: Env, now: number, force = false): Promise<void> {
     S.rtt.clear();
     S.errs.length = 0;
   } catch (e) {
-    /* 额度耗尽：保持内存，下次再试 */
+    // 同 usageSnapWrite：KV 写不上去时快照停在旧值，事后只能从「重装后用量从 0 起算」发现
+    cnt("snapFlushFail");
   }
 }
 

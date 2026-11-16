@@ -6587,5 +6587,57 @@ ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 D
   ok("pendFlush 尊重传入额度", pend242.includes("Math.min(SC.PEND_MAX, max)"));
   ok("usageSnapWrite 尊重传入额度", snap242.includes("Math.min(SC.SNAP_MAX, max)"));
 }
+// ---- 第 243 组：定时持久化的失败必须可见（7.243 / D197） ----
+{
+  const cntAll = () => W.cntView ? W.cntView() : {};
+  const boom = (m) => async () => { throw new Error(m); };
+  const envDown = {
+    uuids: "u243", pwd: "p243",
+    STATS: { get: boom("kv get down"), put: boom("kv put down"), list: boom("kv list down") },
+    METER: { idFromName: (n) => n, get: () => ({ fetch: boom("do down") }) },
+  };
+  const envW = {
+    uuids: "u243", pwd: "p243",
+    STATS: { get: async () => null, put: boom("kv put down"), list: async () => ({ keys: [] }) },
+    METER: { idFromName: (n) => n, get: () => ({ fetch: async () => ({ ok: true, json: async () => ({ up: 5, down: 7, conns: 1 }) }) }) },
+  };
+  const before243 = cntAll();
+  const d243 = (k) => (Number(cntAll()[k]) || 0) - (Number(before243[k]) || 0);
+  // 账本上报：内层把每个用户的失败回滚 + 退避，以前一个计数都没有
+  W.S.pend.clear();
+  W.S.pend.set("u243a", { up: 10, down: 20, conns: 1 });
+  W.S.pendAt = 0;
+  W.S.pendMs = 0;
+  await W.pendFlush(envDown, true, 5);
+  ok("账本上报失败有计数", d243("pendFail") >= 1, String(d243("pendFail")));
+  // 用量快照：读失败早退 / 写失败各一个计数
+  await W.usageSnapWrite(envDown, [{ id: "u243a" }], 2);
+  ok("用量快照读失败有计数", d243("snapReadFail") >= 1, String(d243("snapReadFail")));
+  await W.usageSnapWrite(envW, [{ id: "u243a" }], 2);
+  ok("用量快照写失败有计数", d243("snapWriteFail") >= 1, String(d243("snapWriteFail")));
+  // 整体快照：先塞一行本地数据（否则 hasData 提前返回是正常行为，不是失败）
+  const seed243 = () => { W.S.stats.set("n243", { up: 1, down: 2, conns: 1, first: 1, last: 2 }); W.S.snapBusy = false; W.S.snapChecked = 0; W.S.snapWritten = 0; };
+  seed243();
+  await W.flushSnap(envDown, true);
+  ok("整体快照读失败有计数", d243("snapFlushReadFail") >= 1, String(d243("snapFlushReadFail")));
+  seed243();
+  await W.flushSnap(envW, true);
+  ok("整体快照写失败有计数", d243("snapFlushFail") >= 1, String(d243("snapFlushFail")));
+  // 计数键必须登记，否则 cnt() 会当成未知键丢掉
+  for (const k243 of ["pendFail", "snapReadFail", "snapWriteFail", "snapFlushReadFail", "snapFlushFail", "snapUsersFail", "seedWriteFail"]) {
+    ok(`计数键已登记：${k243}`, W.S.cntKeys.includes(k243));
+  }
+  // 源码锁：四处真实吞掉点与 cron 的返回值检查
+  const srcPend = fs.readFileSync("src/store/pend.ts", "utf8");
+  const srcSnap = fs.readFileSync("src/store/snapshot.ts", "utf8");
+  const srcCron243 = fs.readFileSync("src/routes/cron.ts", "utf8");
+  ok("pendFlush 失败计数在位", srcPend.includes('cnt("pendFail", bad)'));
+  ok("用量快照读失败计数在位", srcSnap.includes('cnt("snapReadFail")'));
+  ok("用量快照写失败计数在位", srcSnap.includes('cnt("snapWriteFail")'));
+  ok("整体快照读失败计数在位", srcSnap.includes('cnt("snapFlushReadFail")'));
+  ok("整体快照写失败计数在位", srcSnap.includes('cnt("snapFlushFail")'));
+  ok("cron 检查 flushPx 返回值", srcCron243.includes("const fx = await flushPx(env);") && srcCron243.includes("if (!fx.ok)"));
+  ok("cron 记录用户表读失败", srcCron243.includes('cnt("snapUsersFail")'));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

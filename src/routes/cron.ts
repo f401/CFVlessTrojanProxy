@@ -108,7 +108,15 @@ async function cronOnce(env: Env): Promise<void> {
   } catch (e) {}
   // cronScan 内部已经落过一次 seed（且自带 55 分钟节流），这里只补写脏数据
   try {
-    if (S.seedDirty) await flushPx(env);
+    if (S.seedDirty) {
+      // flushPx 不抛错，只用返回值报告失败（seed 读失败、KV 写失败都在里面）：
+      // 以前直接把返回值丢掉，于是「池子代际没前进」在别处表现为「选路慢慢变差」，查不到源头
+      const fx = await flushPx(env);
+      if (!fx.ok) {
+        cnt("seedWriteFail");
+        logErr(`seed write: ${fx.err || "unknown"}`);
+      }
+    }
   } catch (e) {}
   try {
     // 先把快照续回 DO（重建脚本后不会从 0 开始），再写新快照。
@@ -129,6 +137,7 @@ async function cronOnce(env: Env): Promise<void> {
     // 读 KV 失败且没有完整缓存时 list 可能缺托管用户：此时写快照会把
     // 这些用户的历史用量整份抹掉，宁可这一轮不写
     if (users.ok !== false) await usageSnapWrite(env, users.list, plan.snap);
+    else cnt("snapUsersFail"); // 用户表读失败 → 这轮不写快照（防抹掉用量），但要能看见
   } catch (e) {}
   // 不传 force：让 flushSnap 走「1h/2h + 全局 45 分钟闸门」的节奏
   try {

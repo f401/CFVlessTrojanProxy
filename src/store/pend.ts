@@ -179,7 +179,12 @@ export class PendingLedger {
       }
     });
     // 自适应退避：失败了就把间隔翻倍（最多 60s），成功了慢慢降回 30s
-    if (bad) S.pendMs = Math.min(S.pendMs * 2, 60000);
+    if (bad) {
+      // 失败批次已经回滚进账本、间隔也翻倍了，但「这一轮一个都没发出去」与「这一轮没人有增量」
+      // 在面板上完全一样。计数是唯一能区分两者的量：它连着涨说明 DO 侧一直没接受上报。
+      cnt("pendFail", bad);
+      S.pendMs = Math.min(S.pendMs * 2, 60000);
+    }
     else S.pendMs = Math.max(30000, Math.round(S.pendMs / 2));
   }
 

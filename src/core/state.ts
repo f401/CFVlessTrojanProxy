@@ -69,6 +69,13 @@ export class AppState {
   cntKeys = [
     "restore",
     "restoreSkip",
+    "pendFail",
+    "snapWriteFail",
+    "snapReadFail",
+    "snapFlushReadFail",
+    "snapFlushFail",
+    "snapUsersFail",
+    "seedWriteFail",
   "admStatsSkip",
     "snapSkip",
     "srcSkip",
