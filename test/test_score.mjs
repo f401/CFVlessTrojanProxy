@@ -3273,9 +3273,9 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
 {
   const d = mkDO();
   // 让 put 失败一次：模拟 DO 存储写入被拒（免费计划上偶发）
-  const put0 = d.m.st.storage.put;
+  const put0 = d.m.state.storage.put;
   let failPut = true;
-  d.m.st.storage.put = async (k, v) => {
+  d.m.state.storage.put = async (k, v) => {
     if (failPut) throw new Error("storage down");
     return put0(k, v);
   };
@@ -3715,8 +3715,8 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
 // 拨号器把试过的键传下去，并且钉住 ?rx= 时只试一次
 {
   const dsrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
-  ok("拨号器把已试过的键传给选择器", dsrc.includes("SEL.current(env, mode, st, host, cfHost, tried)"));
-  ok("钉住的 ?rx= 只试一次（诊断语义：我就要这一条）", dsrc.includes("const maxTries = st.forceRelayIp ? 1 : 2;"));
+  ok("拨号器把已试过的键传给选择器", dsrc.includes("SEL.current(env, mode, conn, host, cfHost, tried)"));
+  ok("钉住的 ?rx= 只试一次（诊断语义：我就要这一条）", dsrc.includes("const maxTries = conn.forceRelayIp ? 1 : 2;"));
   ok("同一条不会试第二次", dsrc.includes("if (tried.has(key)) break;"));
 }
 
@@ -3765,8 +3765,8 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   ok("换节点重试也给 connect() 加了超时", fSrc.includes("withTimeout(pk, CONNECT_MS)"));
   ok("换节点失败要给这条候选记一笔（否则一直被挑回来）", fSrc.includes("nsFail(alt)"));
   ok("超时迟到成功的 socket 会被关掉（fallback）", fSrc.includes("pk.then((s) =>"));
-  const iRel = aSrc.indexOf("releaseAll(st)");
-  const iSet = aSrc.indexOf("st.sock = sock;");
+  const iRel = aSrc.indexOf("releaseAll(conn)");
+  const iSet = aSrc.indexOf("conn.sock = sock;");
   ok("递归重试前先释放上一跳的 socket 与写锁", iRel >= 0 && iSet > iRel);
   ok("IPv6 兜底也有超时", aSrc.includes("withTimeout(p6, CONNECT_MS)"));
   ok("proxyip 兜底也有超时", aSrc.includes("withTimeout(p3, CONNECT_MS)"));
@@ -3781,7 +3781,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   const ssSrc = fs.readFileSync("src/proxy/session.ts", "utf8");
   eq("地区分流的两条拨号都加了 2.5 秒上限", (rgSrc.match(/withTimeout\(/g) || []).length, 2);
   eq("地区分流里不再有裸 connect（超时迟到成功的 socket 必须有人关）", (rgSrc.match(/await connect\(/g) || []).length, 0);
-  ok("同一个节点一次失败只罚一次（否则冷却跳两档）", rgSrc.includes("st.node !== failed"));
+  ok("同一个节点一次失败只罚一次（否则冷却跳两档）", rgSrc.includes("conn.node !== failed"));
   ok("地区失败单独计数，不混进「目标不可达」", ssSrc.includes('cnt("rgFail")') && W.S.cntKeys.includes("rgFail"));
 }
 
@@ -5278,7 +5278,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   const runOne = async () => {
     const t = Date.now();
     const r = await Promise.race([
-      W.DIALER.open({ env: envD, request: reqD, st: mkSt(), mode: "tput", host: "example.com", port: 80, pxForce: -1 })
+      W.DIALER.open({ env: envD, request: reqD, conn: mkSt(), mode: "tput", host: "example.com", port: 80, pxForce: -1 })
         .then(() => "ok")
         .catch((e) => "err:" + String(e && e.message)),
       new Promise((res) => setTimeout(() => res("hang"), 4500)),
@@ -5382,7 +5382,7 @@ ok("上游写上限常量是 30 秒", srcUtil211.includes("export const UP_STALL
 ok("ustall 已登记（否则计数会被静默丢掉）", srcState211.includes('"ustall",'));
 ok("泵里改调 upWrite", srcSess211.includes("return st.upWrite(chunk);"));
 ok("泵里不再直接写 writer", srcSess211.includes("w.write(chunk)") === false);
-ok("首包写也走 upWrite", srcAtt211.includes("await st.upWrite(payload);"));
+ok("首包写也走 upWrite", srcAtt211.includes("await conn.upWrite(payload);"));
 ok("blackhole 的超时消息可辨认", srcConn211.includes("withTimeout(p, ms, \"up stall\")"));
 try {
   const mkSock211 = () => { const o = { closed: 0, close() { o.closed += 1; } }; return o; };
@@ -5775,9 +5775,9 @@ ok("单键路径写 fs: 0", msSrc220.includes("await st.put(\"a\", await seal(en
 ok("分片路径用同一个代号", msSrc220.includes("const fs = Date.now();") && msSrc220.includes("await st.put(\"f2\", await seal(env as Env, { fs, ...f2 }));"));
 ok("读分片时比代号", msSrc220.includes("if (Number(o.fs) !== want) {") && msSrc220.includes("cnt(\"shardBad\");"));
 ok("代号为 0 就不读分片", msSrc220.includes("if (!want) return out;"));
-ok("save 之后记住本次代号", storeSrc().includes("this.fs = await saveState(this.env, this.st.storage, {"));
+ok("save 之后记住本次代号", storeSrc().includes("this.fs = await saveState(this.env, this.state.storage, {"));
 ok("恢复时把 a 里的代号读出来", storeSrc().includes("this.fs = Number((o as unknown as { fs?: number }).fs) || 0;"));
-ok("loadShards 把代号传下去", storeSrc().includes("readShards(this.env, this.st.storage, this.fs)"));
+ok("loadShards 把代号传下去", storeSrc().includes("readShards(this.env, this.state.storage, this.fs)"));
 // ── 第 221 组：账本解不开时不能静默从零开始（换 kek / 值损坏）
 const mkMeter = (store, kek) => {
   let gate = Promise.resolve();
@@ -5836,7 +5836,7 @@ const meterSrc221 = storeSrc();
 ok("配置里登记了 doBad", fs.readFileSync("src/core/state.ts", "utf8").includes("\"doBad\","));
 ok("构造函数里有 else 分支", meterSrc221.includes("cnt(\"doBad\");"));
 ok("留底带着原值", meterSrc221.includes("this.bakRaw = all;"));
-ok("落盘前备份 a_bak", meterSrc221.includes("await this.st.storage.put(\"a_bak\", this.bakRaw);"));
+ok("落盘前备份 a_bak", meterSrc221.includes("await this.state.storage.put(\"a_bak\", this.bakRaw);"));
 
 // ---- 第 222 组：站点级自愈（sweep → mute）不能被别处回传的封锁事实撤销（v7.221）----
 const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
@@ -6885,7 +6885,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
     await W.DIALER.open({
       env: { STATS: { get: async () => null, put: async () => {}, list: async () => ({ keys: [] }) }, proxyip: "auto" },
       request: new Request("https://" + H247 + "/"),
-      st: st247,
+      conn: st247,
       mode: "tput",
       host: H247,
       port: 443,
@@ -6914,7 +6914,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   ok("跳过分支只计数、不再写 logErr",
     /cnt\("skipCfRelay"\);\s*\r?\n\s*continue;/.test(dsrc) && !/logErr\(`skip cf-edge relay/.test(dsrc), true);
   ok("st.pxTries 记的是真实尝试次数（不再用下标 +1）",
-    dsrc.includes("st.pxTries = tries;") && !dsrc.includes("st.pxTries = tries + 1;"), true);
+    dsrc.includes("conn.pxTries = tries;") && !dsrc.includes("conn.pxTries = tries + 1;"), true);
   ok("skipCfRelay 在 cntKeys 里登记", fs.readFileSync("src/core/state.ts", "utf8").includes('"skipCfRelay",'), true);
 }
 // ── 第 248 组：/debug 把 DO 的 5xx 当成成功（D202）────────────────────────────
@@ -7193,7 +7193,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 
   // 棘轮基线：本轮从 100 降到 86，门禁必须与之一致
   const base252 = JSON.parse(fs.readFileSync("tools/naming-baseline.json", "utf8"));
-  eq("命名基线降到 80", base252.opaque, 80);
+  eq("命名基线清零（只剩登记过的线协议键）", base252.opaque, 0);
   ok("命名门禁已接进 preflight", fs.readFileSync("tools/preflight.mjs", "utf8").includes("check-names.mjs"), "");
 }
 
@@ -7359,5 +7359,25 @@ eq("文档漏解释就红", bad258, 1);
 ok("报错点名了漏掉的短名", badOut258.includes("cl"), badOut258.slice(0, 120));
 if (fs.existsSync(tmpDoc258)) fs.unlinkSync(tmpDoc258);
 ok("临时文档已清理", !fs.existsSync(tmpDoc258));
+
+// 259. 内部参数改成语义名 + 线协议键登记（v7.259）
+{
+  const attSrc = fs.readFileSync("src/proxy/attacher.ts", "utf8");
+  const dSrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
+  const rSrc = fs.readFileSync("src/proxy/region.ts", "utf8");
+  const mSrc = fs.readFileSync("src/store/meter.ts", "utf8");
+  const gateSrc = fs.readFileSync("tools/check-names.mjs", "utf8");
+  const docSrc = fs.readFileSync("docs/命名约定.md", "utf8");
+  const baseSrc = JSON.parse(fs.readFileSync("tools/naming-baseline.json", "utf8"));
+  ok("attacher 的连接参数叫 conn", attSrc.includes("conn: Connection") && !/\bst:\s*Connection/.test(attSrc));
+  ok("attacher 的客户端连接叫 clientSocket", attSrc.includes("clientSocket: WebSocketLike") && !/\bws:\s*WebSocketLike/.test(attSrc), "ws");
+  ok("拨号器与地区选择器也用 conn", dSrc.includes("conn: Connection") && rSrc.includes("conn: Connection"), "dialer/region");
+  ok("计量 DO 的状态字段叫 state", mSrc.includes("state: DurableObjectState;") && !mSrc.includes("this.st."), "meter");
+  ok("会话把字段名对上了（clientSocket / conn）", fs.readFileSync("src/proxy/session.ts", "utf8").includes("clientSocket: serverWS, conn: st"), "session");
+  ok("命名门禁的 ALLOW 覆盖了线协议键", gateSrc.includes('["at", "观测时刻（线协议键）"]') && gateSrc.includes('["v6", "IPv6 观测计数（线协议键）"]'), "allow");
+  ok("登记过的短名要求文档写明含义", docSrc.includes("## 7. 线协议键（登记例外）") && docSrc.includes("| `at` |") && docSrc.includes("| `v6` |"), "doc");
+  ok("文档写明新增短名两处都要登记", docSrc.includes("`tools/check-names.mjs`") && docSrc.includes("`ALLOW`"), "doc2");
+  eq("命名基线归零（剩余过短成员只剩登记过的线协议键）", baseSrc.opaque, 0);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

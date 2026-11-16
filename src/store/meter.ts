@@ -13,7 +13,7 @@ import { readShards, saveState } from "./metershard";
  * 与 `PendingLedger` 的分工：isolate 侧只攒增量、失败回滚；DO 侧落账、判额度、维护内存快照。
  */
 export class Meter {
-  st: DurableObjectState;
+  state: DurableObjectState;
   env: Env;
   c: UsageMeter;
   g: CounterDoc;
@@ -50,7 +50,7 @@ export class Meter {
    * @param {DurableObjectState} state DO 状态对象（storage / blockConcurrencyWhile）
    */
   constructor(state: DurableObjectState, env: Env) {
-    this.st = state;
+    this.state = state;
     this.env = env;
     this.c = { up: 0, down: 0, conns: 0, first: 0, ts: 0, d: "", dU: 0, dD: 0 };
     this.g = { d: "" }; // 全局日计数（连接/走节点/断流…）
@@ -66,11 +66,11 @@ export class Meter {
     this.dead = {};
     this.dns = {};
     this.blk2 = {};
-    this.st.blockConcurrencyWhile(async () => {
+    this.state.blockConcurrencyWhile(async () => {
       // 单键存储：每次 /add 只写 1 行。
       // 以前是 c/g/s/e 四个键 = 4 行，SQLite DO 的「行写入」额度（免费 10 万/天）
       // 会被吃掉 4 倍；一个持续活跃的 isolate 就要 3.4 万行/天。
-      const all = await this.st.storage.get("a");
+      const all = await this.state.storage.get("a");
       if (all) {
         const o = await unseal<MeterBody>(env, all);
         if (o && typeof o === "object") {
@@ -102,7 +102,7 @@ export class Meter {
       }
       // 老结构（c/e/s/g 四个键）：读出来顺手迁到新键，再删掉旧的
       let migrated = false;
-      const v = await this.st.storage.get("c");
+      const v = await this.state.storage.get("c");
       if (v) {
         const obj = await unseal<Record<string, number>>(env, v); // 兼容老的明文对象
         if (obj) {
@@ -110,7 +110,7 @@ export class Meter {
           migrated = true;
         }
       }
-      const ev = await this.st.storage.get("e");
+      const ev = await this.state.storage.get("e");
       if (ev) {
         const o4 = await unseal<ErrItem[]>(env, ev);
         if (Array.isArray(o4)) {
@@ -118,7 +118,7 @@ export class Meter {
           migrated = true;
         }
       }
-      const sv = await this.st.storage.get("s");
+      const sv = await this.state.storage.get("s");
       if (sv) {
         const o3 = await unseal<Record<string, NodeSnap>>(env, sv);
         if (o3 && typeof o3 === "object") {
@@ -126,7 +126,7 @@ export class Meter {
           migrated = true;
         }
       }
-      const gv = await this.st.storage.get("g");
+      const gv = await this.state.storage.get("g");
       if (gv) {
         const obj2 = await unseal<Record<string, number>>(env, gv);
         if (obj2 && typeof obj2 === "object") {
@@ -137,7 +137,7 @@ export class Meter {
       if (migrated) {
         try {
           await this.save();
-          for (const k of ["c", "e", "s", "g"]) await this.st.storage.delete(k);
+          for (const k of ["c", "e", "s", "g"]) await this.state.storage.delete(k);
         } catch (e) {}
       // 老布局的分片同样要读：从 7.218 起事实表可能只存在于 f1/f2/f3 里
         await this.loadShards();
@@ -152,7 +152,7 @@ export class Meter {
    * @returns {Promise<void>}
    */
   private async loadShards(): Promise<void> {
-    Object.assign(this, await readShards(this.env, this.st.storage, this.fs));
+    Object.assign(this, await readShards(this.env, this.state.storage, this.fs));
   }
 
   /**
@@ -163,10 +163,10 @@ export class Meter {
   async save() {
     // 解不开的旧值只备份一次：`a_bak` 只给人工抢救用，不进任何读路径
     if (this.bakRaw !== null) {
-      await this.st.storage.put("a_bak", this.bakRaw);
+      await this.state.storage.put("a_bak", this.bakRaw);
       this.bakRaw = null;
     }
-    this.fs = await saveState(this.env, this.st.storage, {
+    this.fs = await saveState(this.env, this.state.storage, {
       c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl,
       vt: this.vt, hl: this.hl, eg: this.eg, ps: this.ps,
       dead: this.dead, blk2: this.blk2, dns: this.dns,
@@ -230,7 +230,7 @@ export class Meter {
     // TLS 探测走 DO：请求路径只有 10ms CPU 预算，DO 有独立且大得多的预算。
     // 一次探测不落盘、不额外写 DO（结果由调用方并入既有批次），不增加 KV 写。
     if (p.endsWith("/stage")) {
-      const v = await this.st.storage.get("pstage");
+      const v = await this.state.storage.get("pstage");
       return Response.json({ stage: v || null });
     }
     if (p.endsWith("/tim")) {

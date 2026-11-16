@@ -20,7 +20,7 @@ import { pxDecision } from "./pxhook";
 export interface DialOpts {
   env: Env;
   request: Request;
-  st: Connection;
+  conn: Connection;
   mode: Mode;
   host: string;
   port: number;
@@ -35,10 +35,10 @@ export interface DialOpts {
 export class Dialer {
   /**
    * 打开到目标的出站连接；失败抛错（由调用方决定是否回落到中继/断开）。
-   * 返回值非空即成功，`st.node/via/pxTries` 已在内部写好。
+   * 返回值非空即成功，`conn.node/via/pxTries` 已在内部写好。
    */
   async open(o: DialOpts): Promise<Socket> {
-    const { env, request, st, mode, host, port, pxForce } = o;
+    const { env, request, conn, mode, host, port, pxForce } = o;
     let sock: Socket | null = null;
 
     // 难直连目标（如 x.com）：判据 = 名单 / 6h 学习 / CF 网段 / ?px=1，?px=0 一律直连
@@ -71,9 +71,9 @@ export class Dialer {
     }
     const win = HOOK.win ? HOOK.win(host) : { d: false, r: false };
     const relWin = win.r;
-    if (cfHost) refreshCfHttp(host, st.ctx);
+    if (cfHost) refreshCfHttp(host, conn.ctx);
     // 判定层要知道目标是 CF 托管：直连被自家边缘拒时一次即判，所以放在分支外
-    st.cf = cfHost;
+    conn.cf = cfHost;
     // CF 托管目标：直连与中继谁更可能被拒，取决于**出口地址族**，与客户端族无关
     // （隧道是原始 TCP，客户端 IP 不进隧道——7.85 用 clientV6 卡过一次，是错的）。
     // 2026-11-15 04:14 实测：强制直连 2/6、强制中继 4/6、默认 5/6；且用户网络无 v6
@@ -96,13 +96,13 @@ export class Dialer {
       // 两次调用返回的是同一条，而 nsFail 的惩罚不足以让它掉出第一 —— 所以把试过的键传下去。
       const tried = new Set<string>();
       // 钉住的 ?rx= 只试一次：它本来就是「我就要这一条」的诊断语义
-      const maxTries = st.forceRelayIp ? 1 : 2;
+      const maxTries = conn.forceRelayIp ? 1 : 2;
       // 名额的语义是「真的拨了几次」。以前用循环下标当名额，于是下面那个
       // 「跳过 CF 边缘中继」的 continue 也会吃掉一次 —— 候选里排着 CF 边缘时，
       // 「最多试两条」实际只试了一条，剩下那条能用的中继根本没被拨过。
       let tries = 0;
       for (let guard = 0; guard < maxTries + 4 && tries < maxTries && !sock; guard++) {
-        const p = parseProxyIp(st.forceRelayIp || (await SEL.current(env, mode, st, host, cfHost, tried)));
+        const p = parseProxyIp(conn.forceRelayIp || (await SEL.current(env, mode, conn, host, cfHost, tried)));
         if (!p || checkTarget(p.host, p.port)) break;
         const key = p.host + ":" + p.port;
         // 没有别的候选了（选择器回空或回同一条）：不要再花 2.5 秒试同一条
@@ -120,10 +120,10 @@ export class Dialer {
         try {
           // 拨号必须有上限：connect() 自己没有超时，挂死的中继会把整个请求拖到客户端放弃为止。
           sock = await withTimeout(pk, CONNECT_MS);
-          st.node = key;
-          st.via = "node";
-          st.retried = true;
-          st.pxTries = tries;
+          conn.node = key;
+          conn.via = "node";
+          conn.retried = true;
+          conn.pxTries = tries;
           cnt("pxf");
           // 连上了：把这条中继的「连不上」计数清零（复活只可能由真实连接触发）
           HOOK.deadNote?.(p.host, true);

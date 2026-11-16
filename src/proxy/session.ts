@@ -154,13 +154,13 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
                 serverWS.close(1011, msg);
               } catch (e) {}
             };
-            const picked = await REGION.open({ env, mode, region: ipRegion, st, onFail: failRegion });
+            const picked = await REGION.open({ env, mode, region: ipRegion, conn: st, onFail: failRegion });
             if (!picked) return;
             sock = picked;
           } else {
             try {
               // 拨号策略整体在 Dialer 里：判难直连 → 选中继 → 退 IPv4 拨号 → 退直连（P5）
-              sock = await DIALER.open({ env, request, st, mode, host: r.host, port: r.port, pxForce });
+              sock = await DIALER.open({ env, request, conn: st, mode, host: r.host, port: r.port, pxForce });
             } catch (e) {
               const px0 = parseProxyIp(await SEL.current(env, mode, st, r.host, st.cf));
               if (!px0) {
@@ -215,7 +215,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
           // 实际只可能是「两条路都没给出 socket」——同一个错标签在 dialer 里也有一份（v7.168）。
           if (!sock) throw new Error("dial returned null");
           await ATTACHER.run(
-            { env, ws: serverWS, st, mode, host: r.host, port: r.port, region: ipRegion, payload },
+            { env, clientSocket: serverWS, conn: st, mode, host: r.host, port: r.port, region: ipRegion, payload },
             sock,
           );
         },
