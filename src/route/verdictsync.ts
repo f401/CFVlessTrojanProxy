@@ -8,6 +8,7 @@ import { EG } from "./egfacts";
 import { cnt } from "../core/counter";
 import { dropExpired, trimAged } from "../core/hostmem";
 import { doFetch } from "../store/meter-client";
+import { St } from "../core/enums";
 
 export interface VtRow {
   k: string; // `target|chan`
@@ -31,7 +32,7 @@ export function vtDelta(): VtRow[] {
     // 上限判断放在压入之前：写在压入之后时，`vtPend` 里已有 60 行就会返回 61 行
     // （与 7.161 修的 `delta()` 是同一个 shape，车身每多一行都超预算）
     if (out.length >= 60) break;
-    if (v.state < 2) continue;
+    if (v.state < St.Blocked) continue;
     // 表里不可能再有通配行：写入入口（`VerdictTable.blockWild`）直接拒绝 `*`。
     // 站点级证据（`站点|通道`）照旧同步 —— 那才是「这个站点这条通道被封」的可信事实。
     const k = v.target + "|" + v.channel;

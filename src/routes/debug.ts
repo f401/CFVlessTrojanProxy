@@ -31,6 +31,7 @@ import { adminOnly } from "../edge/auth";
 
 import type { Chan } from "../route/channel";
 import type { RouteCtx } from "../edge/types";
+import { St } from "../core/enums";
 
 type UserCtx = RouteCtx & { id: string };
 
@@ -241,7 +242,7 @@ export async function debug(c: UserCtx): Promise<Response> {
     // 该站点在中继上被判 blocked/dead 的条目（来自判定表，带来源与时间）
     const relayBlocked: Array<{ node: string; state: number; src: number; left: number }> = [];
     for (const v of vAll()) {
-      if (!v.channel.startsWith("r:") || v.state < 2) continue;
+      if (!v.channel.startsWith("r:") || v.state < St.Blocked) continue;
       relayBlocked.push({ node: v.channel.slice(2) + ":443", state: v.state, src: v.src, left: Math.round((v.updatedAt + VT_TTL_MS - Date.now()) / 1000) });
     }
     // &do=1：把 DO 里跨 isolate 的那份判定也拉出来看（否则只能看到本 isolate 学到的）

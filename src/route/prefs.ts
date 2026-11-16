@@ -3,6 +3,7 @@
 // （入口）两种：前者 7.57 把池子打薄后写入点全部删除、7.133 之后连写入入口都直接拒绝；后者随
 // 入口偏好表一起删除。这里只剩中继通道，读到 `*`/`e:` 的代码已经是死分支，一并去掉。
 import { vAll, vState } from "./verdict";
+import { St } from "../core/enums";
 
 /** 一条通道的偏好记录 */
 export interface PrefRow {
@@ -36,7 +37,7 @@ export class Prefs {
       if (!prev || r.updatedAt > prev.updatedAt) pick.set(r.channel, { channel: r.channel, state: r.state, updatedAt: r.updatedAt });
     }
     const all = [...pick.values()].sort((a, b) => b.updatedAt - a.updatedAt);
-    return { ok: all.filter((x) => x.state === 1).slice(0, limit), bad: all.filter((x) => x.state >= 2).slice(0, limit) };
+    return { ok: all.filter((x) => x.state === St.Reachable).slice(0, limit), bad: all.filter((x) => x.state >= St.Blocked).slice(0, limit) };
   }
 
   /**
@@ -49,9 +50,9 @@ export class Prefs {
    */
   chan(ip: string, host: string): 0 | 1 | 2 {
     if (!ip || !host) return 1;
-    const s = vState(host, "r:" + ip);
-    if (s === 1) return 0;
-    return s >= 2 ? 2 : 1;
+    const state = vState(host, "r:" + ip);
+    if (state === St.Reachable) return 0;
+    return state >= St.Blocked ? 2 : 1;
   }
 
   /**

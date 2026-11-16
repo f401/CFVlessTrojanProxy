@@ -7643,5 +7643,38 @@ ok("死亡事实的 load 写了体内步骤", dead266.includes("坏行整条跳�
 ok("出口族事实的 load 写了体内步骤", dns266.includes("三件事任一不成立就整条跳过") && dns266.includes("更晚的观测胜出"));
 ok("自证探针已清理", !fs.existsSync("src/__probe-body.ts"));
 
+
+// ---- 第 267 组：判定状态只用枚举（消费端不再写裸数字） ----
+﻿// 第 267 组：判定状态只用枚举 + 门禁在位
+const ST = W.St || { Unknown: -1, Reachable: -2, Blocked: -3, Dead: -4 };
+const host267 = "enum267.test";
+// 行为面：prefs 的两栏与 chan() 的三态都在枚举口径下成立
+W.vSetState(host267, "r:10.9.9.1", ST.Reachable, 1);
+W.vSetState(host267, "r:10.9.9.2", ST.Blocked, 1);
+const rows267 = W.prefsOf(host267, 40);
+eq("可用的那条落在 ok 栏", rows267.ok.length, 1);
+eq("打不通的那条落在 bad 栏", rows267.bad.length, 1);
+eq("ok 栏的 state 就是 St.Reachable", rows267.ok[0].state, ST.Reachable);
+eq("bad 栏的 state 就是 St.Blocked", rows267.bad[0].state, ST.Blocked);
+eq("chanPref 对可用中继回 0", W.chanPref("10.9.9.1", host267), 0);
+eq("chanPref 对判死中继回 2", W.chanPref("10.9.9.2", host267), 2);
+eq("chanPref 对没测过的中继回 1（未知不惩罚）", W.chanPref("10.9.9.3", host267), 1);
+
+// 源码锁：四个消费端都改走枚举
+const srcPol267 = fs.readFileSync("src/route/policy.ts", "utf8");
+const srcPref267 = fs.readFileSync("src/route/prefs.ts", "utf8");
+const srcVs267 = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+const srcDbg267 = fs.readFileSync("src/routes/debug.ts", "utf8");
+ok("policy 用 St.Reachable 过滤判定行", srcPol267.includes("v.state !== St.Reachable"), "");
+ok("prefs 用 St.Reachable/St.Blocked 分栏", srcPref267.includes("x.state === St.Reachable") && srcPref267.includes("x.state >= St.Blocked"), "");
+ok("prefs 的 chan() 用 St.Reachable", srcPref267.includes("if (state === St.Reachable) return 0;"), "");
+ok("verdictsync 用 St.Blocked", srcVs267.includes("if (v.state < St.Blocked) continue;"), "");
+ok("debug 的中继封锁列表用 St.Blocked", srcDbg267.includes("|| v.state < St.Blocked) continue;"), "");
+
+// 门禁在位且真会红（行为由 .tmp-sim 自证，这里锁存在性）
+const gate267 = fs.readFileSync("tools/check-names.mjs", "utf8");
+ok("命名门禁里有判定状态裸数字判据", gate267.includes("rawStateLiterals") && gate267.includes("判定状态用裸数字"), "");
+ok("判据排除枚举文件自身", gate267.includes("src/core/enums.ts"), "");
+ok("文档写明判定状态只用枚举", fs.readFileSync("docs/命名约定.md", "utf8").includes("判定状态"), "");
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

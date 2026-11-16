@@ -24,6 +24,7 @@ import { FACT_ALL, factOnce } from "./factflags";
 /** 全开的默认集合：没有读到 `env.facts` 时用它，等价于「不裁剪」。 */
 const FULL_ON: ReadonlySet<string> = new Set<string>(FACT_ALL);
 import { cnt } from "../core/counter";
+import { St } from "../core/enums";
 
 export interface Ctx {
   host: string;
@@ -339,7 +340,7 @@ export class Policy {
     let d = false;
     let r = false;
     for (const v of vAll()) {
-      if (v.target !== host || v.state !== 1) continue;
+      if (v.target !== host || v.state !== St.Reachable) continue;
       if (v.channel === "d") d = true;
       else if (v.channel.startsWith("r:")) {
         r = true;

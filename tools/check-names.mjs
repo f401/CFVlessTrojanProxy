@@ -117,3 +117,42 @@ if (!conv) {
     console.log(`命名门禁：ALLOW 的 ${ALLOW.size} 条短名都已在 docs/命名约定.md 里写明理由`);
   }
 }
+
+/**
+ * 扫「判定状态用裸数字比较」：`v.state === 1` / `state: 2` 这类写法。
+ *
+ * 为什么要单独一条：`St` 是 7.250 建立的唯一闭集合，但同一批只改了判定表自身，
+ * 消费端（policy / prefs / verdictsync / debug）继续写 `state >= 2` —— 一旦枚举增删成员，
+ * 这些地方不会报错，只会静默按旧数字走（7.162 / 7.164 的 `dead` 被降级成 `blocked` 就是这么来的）。
+ * @returns 违规点列表（文件 / 行 / 原文）
+ */
+function rawStateLiterals() {
+  const out = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      if (!p.endsWith(".ts") || p.replace(/\\/g, "/") === "src/core/enums.ts") continue;
+      const lines = fs.readFileSync(p, "utf8").split(/\r?\n/);
+      lines.forEach((line, i) => {
+        const t = line.trim();
+        // 注释行不算：这些判据的说明里本来就要举例
+        if (t.startsWith("//") || t.startsWith("*")) return;
+        if (/(?:^|[^.\w])state\s*(?:===|!==|==|<|<=|>|>=)\s*[0123]\b/.test(t) || /\bstate\s*:\s*[0123]\b/.test(t)) {
+          out.push({ file: p.replace(/\\/g, "/"), line: i + 1, text: t.slice(0, 100) });
+        }
+      });
+    }
+  };
+  walk("src");
+  return out;
+}
+
+const rawState = rawStateLiterals();
+if (rawState.length) {
+  console.log(`\n命名门禁失败：${rawState.length} 处判定状态用裸数字（改用 St.Reachable / St.Blocked / St.Dead）：`);
+  for (const r of rawState) console.log(`  ${r.file}:${r.line}  ${r.text}`);
+  process.exitCode = 1;
+} else {
+  console.log("命名门禁：判定状态没有裸数字");
+}
