@@ -53,14 +53,18 @@ const SEED = ["185.253.117.147", "45.136.117.194", "91.215.154.80"];
 const stub0 = (c: RouteCtx) => c.env.METER.get(c.env.METER.idFromName("tf-probe"));
 
 /**
- * 判定收敛：200 与 403 并存才升级为 IP 级封锁证据；全 403 说明是站点级，不写封禁。
- *  · 全部 200        → ok（站点可达）
+ * 判定收敛：2xx/3xx 与 4xx 并存才升级为 IP 级封锁证据；全 4xx 说明是站点级，不写封禁。
+ *  · 全部 2xx/3xx    → ok（站点可达；含 301/302，探测用 redirect: "manual"）
  *  · 200 与 403 并存 → 403 的那些通道判被封（这才是「IP 级」证据）
  *  · 全部 403        → 站点层面的拒绝（业务 403 常见形态），**不写任何封禁**，只记 suspect
  *  · 全部失败        → unknown（中继或网络问题，不冤枉任何一方）
  */
 export function tfVerdict(rows: Array<{ ok: boolean; status?: number; bytes?: number }>): "ok" | "chan" | "site" | "unknown" {
-  const okN = rows.filter((x) => x.ok && x.status === 200).length;
+  // 「站点应答了」= 2xx 与 3xx 都算：探测走 redirect: "manual"（src/core/tf.ts），
+  // 301/302 是我们看到的正常形态（根路径转语言目录、http→https、apex→www），不是失败。
+  // 只认 200 时这类站点每一批都落进「既非 ok 也非 bad」的空档 ⇒ verdict=unknown ⇒
+  // escalate=rotate，于是 cron 每轮都在给它换出口，而中继永远拿不到一条正证据（7.249）。
+  const okN = rows.filter((x) => x.ok && (x.status || 0) >= 200 && (x.status || 0) < 400).length;
   const badN = rows.filter((x) => (x.status || 0) >= 400).length;
   return okN > 0 && badN > 0 ? "chan" : okN > 0 ? "ok" : badN > 0 ? "site" : "unknown";
 }
@@ -135,7 +139,7 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
     : { rows: [] };
   const rows = (body.rows || []) as Array<{ relay: string; ok: boolean; status?: number; bytes?: number; ms?: number }>;
   if (direct.ok || (direct as { status?: number }).status) rows.unshift({ relay: "direct", ok: !!direct.ok, status: direct.status, bytes: direct.bytes, ms: direct.ms });
-  const okN = rows.filter((x) => x.ok && x.status === 200).length;
+  const okN = rows.filter((x) => x.ok && (x.status || 0) >= 200 && (x.status || 0) < 400).length;
   const badN = rows.filter((x) => (x.status || 0) >= 400).length;
   const verdict = tfClass(rows as Array<{ ok: boolean; status?: number; bytes?: number }>);
   const prevTag = S.tfbV.get(host) || "";
@@ -144,7 +148,9 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
   for (const row of rows) {
     const ip = splitRelay(row.relay, 443)[0];
     if (verdict === "chan" && row.status === 403 && mayBlock) vSetState(host, ip === "direct" ? "d" : "r:" + ip, 2, 1);
-    else if (row.ok && row.status === 200) vSet(host, ip === "direct" ? "d" : "r:" + ip, 200, Number(row.ms || 0), 1);
+    // 正证据同样按 2xx/3xx 记（存真实状态码：判定表的 stateOf 本来就把 2xx/3xx 归成 ok）
+    else if (row.ok && (row.status || 0) >= 200 && (row.status || 0) < 400)
+      vSet(host, ip === "direct" ? "d" : "r:" + ip, Number(row.status || 200), Number(row.ms || 0), 1);
   }
   const escalate = tfEscalate(verdict);
   const tag = verdict + "/" + escalate;

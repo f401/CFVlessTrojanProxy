@@ -6973,5 +6973,48 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   ok("回填分支用 seedOk", srcDbg248.includes("let seedOk = false;") && srcDbg248.includes("return json({ ok: seedOk, doStatus: seedStatus, seeded });"));
   ok("钉节点分支用 fx.ok 判定落盘", srcDbg248.includes('anchor: fx.ok ? "ok" : "fail"'));
 }
+// ---- 第 249 组：站点「应答了」不等于「回了 200」（D203，7.249） ----
+// 探测走 redirect: "manual"（src/core/tf.ts），301/302 是正常形态；只认 200 时
+// 会重定向的站点每一批都判 unknown ⇒ rotate，永久换出口、中继拿不到正证据。
+{
+  const G = "第 249 组";
+  ok(`[${G}] 301 算「站点应答」（不再落 unknown）`, W.tfVerdict([{ ok: true, status: 301, bytes: 0 }]) === "ok");
+  ok(`[${G}] 302 同样`, W.tfVerdict([{ ok: true, status: 302, bytes: 0 }]) === "ok");
+  ok(`[${G}] 204 同样`, W.tfVerdict([{ ok: true, status: 204, bytes: 0 }]) === "ok");
+  ok(`[${G}] 重定向站点不再被判成要一直换出口`, W.tfEscalate(W.tfVerdict([{ ok: true, status: 301 }])) === "none");
+  ok(`[${G}] 301 与 403 并存仍是 chan（不能因为放宽 okN 就吞掉分裂）`, W.tfVerdict([{ ok: true, status: 301 }, { ok: true, status: 403, bytes: 4 }]) === "chan");
+  ok(`[${G}] 全 4xx 仍是 site`, W.tfVerdict([{ ok: false, status: 403 }, { ok: false, status: 403 }]) === "site");
+  ok(`[${G}] 无状态码仍是 unknown`, W.tfVerdict([{ ok: false }, { ok: false }]) === "unknown");
+  eq(`[${G}] tfClass 对 301 给 ok`, W.tfClass([{ ok: true, status: 301 }]), "ok");
+
+  // 行为面：一条 301 的中继必须拿到正证据（改前 vSet 只在 status === 200 时调用）
+  const H249 = "d203.example.com";
+  const ip249 = "203.0.113.9";
+  W.vClear(H249);
+  const before249 = W.vOk(H249, "r:" + ip249);
+  const ctx249 = {
+    env: {
+      METER: {
+        idFromName: () => "tf-probe",
+        get: () => ({
+          fetch: async () =>
+            Response.json({ rows: [{ relay: ip249 + ":443", ok: true, status: 301, ms: 12 }] }),
+        }),
+      },
+    },
+  };
+  await W.runTfb(ctx249, H249, 2, "");
+  const after249 = W.vOk(H249, "r:" + ip249);
+  ok(`[${G}] 301 的中继拿到正证据（vOk 从 false 变成 true）`, before249 === false && after249 === true);
+  eq(`[${G}] 存的不是硬写的 200，而是真实状态码`, W.vState(H249, "r:" + ip249), 1);
+  W.vClear(H249);
+
+  const tfbSrc249 = fs.readFileSync("src/route/tfb.ts", "utf8");
+  ok(`[${G}] tfVerdict 不再只认 status === 200`, !tfbSrc249.includes("x.ok && x.status === 200"));
+  ok(`[${G}] vSet 分支不再只认 status === 200`, !tfbSrc249.includes("row.ok && row.status === 200"));
+  ok(`[${G}] 正证据写真实状态码`, tfbSrc249.includes("Number(row.status || 200)"));
+  ok(`[${G}] 2xx/3xx 判据出现两处（tfVerdict + runTfb 的 okN）`, tfbSrc249.split("(x.status || 0) >= 200 && (x.status || 0) < 400").length - 1 === 2);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
