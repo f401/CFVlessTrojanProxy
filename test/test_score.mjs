@@ -5770,7 +5770,7 @@ const msSrc220 = fs.readFileSync("src/store/metershard.ts", "utf8");
 ok("账本类型里记了代号", msSrc220.includes("fs?: number;"));
 ok("单键路径写 fs: 0", msSrc220.includes("await st.put(\"a\", await seal(env as Env, { ...whole, fs: 0 }));"));
 ok("分片路径用同一个代号", msSrc220.includes("const fs = Date.now();") && msSrc220.includes("await st.put(\"f2\", await seal(env as Env, { fs, ...f2 }));"));
-ok("读分片时比代号", msSrc220.includes("if (Number(o.fs) !== want) continue;"));
+ok("读分片时比代号", msSrc220.includes("if (Number(o.fs) !== want) {") && msSrc220.includes("cnt(\"shardBad\");"));
 ok("代号为 0 就不读分片", msSrc220.includes("if (!want) return out;"));
 ok("save 之后记住本次代号", storeSrc().includes("this.fs = await saveState(this.env, this.st.storage, {"));
 ok("恢复时把 a 里的代号读出来", storeSrc().includes("this.fs = Number((o as unknown as { fs?: number }).fs) || 0;"));
@@ -6100,6 +6100,74 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   ok("正记忆也淘汰最旧", !W.JUDGE.posOn(posPairs[0][0], posPairs[0][1], nowPos + 1000));
   const alivePos = posPairs.filter(([h, ip]) => W.JUDGE.posOn(h, ip, nowPos + 1000)).length;
   ok("正记忆规模不超过上限", alivePos <= W.SC.HOST_MEM_MAX, `alive=${alivePos}`);
+}
+
+
+// ===== 第 229 组：分片恢复失败不能静默（7.228 D185）=====
+{
+  const shardSrc = fs.readFileSync("src/store/metershard.ts", "utf8");
+  const stateSrc = fs.readFileSync("src/core/state.ts", "utf8");
+  ok("三处失败路径都计数", (shardSrc.match(/cnt\("shardBad"\)/g) || []).length === 3);
+  ok("解不开的分片留底", shardSrc.includes("async function backUpShard("));
+  ok("留底只写一次", shardSrc.includes("if (seen) return;"));
+  ok("shardBad 已登记", stateSrc.includes('"shardBad",'));
+
+  const kek229 = "QESq7bKGwx8l5PMcTGhe6Z_j1HUkeBDQ";
+  const mkMem = (store = new Map()) => {
+    let gate = Promise.resolve();
+    const state = {
+      blockConcurrencyWhile: (fn) => {
+        gate = Promise.resolve().then(fn);
+        return gate;
+      },
+      storage: {
+        get: async (k) => store.get(k),
+        put: async (k, v) => store.set(k, v),
+        delete: async (k) => store.delete(k),
+      },
+    };
+    const m = new W.Meter(state, { kek: kek229 });
+    const raw = m.fetch.bind(m);
+    m.fetch = async (req) => {
+      await gate;
+      return raw(req);
+    };
+    return { store, m };
+  };
+  const h229 = (i) => `g229-${i}.example.com`;
+  const ip229 = (i) => `203.40.${(i >> 8) & 255}.${i & 255}`;
+  const fill229 = {
+    up: 1024,
+    down: 2048,
+    conns: 1,
+    vt: Array.from({ length: 220 }, (_, i) => ({ k: `${h229(i)}|r:${ip229(i)}`, s: 2, t: Date.now() + 1800000 })),
+    hl: Array.from({ length: 220 }, (_, i) => ({ i: ip229(i), o: 9, b: 1, d: 0, t: Date.now() - 1000 })),
+    eg: Array.from({ length: 600 }, (_, i) => ({ i: ip229(i), f: 4, at: Date.now() - 1000 })),
+    ps: Array.from({ length: 600 }, (_, i) => ({ k: `${h229(i)}|${ip229(i)}`, q: 200, n: 4, at: Date.now() - 1000, top: 240 })),
+    dead: Array.from({ length: 300 }, (_, i) => ({ i: ip229(i), n: 3, at: Date.now() - 1000 })),
+    blk2: Array.from({ length: 1100 }, (_, i) => ({ k: `${h229(i)}|${ip229(i)}`, n: 3, at: Date.now() - 1000 })),
+    dns: Array.from({ length: 600 }, (_, i) => ({ h: h229(i), v: 1, at: Date.now() - 1000 })),
+  };
+  const st229 = new Map();
+  const first229 = mkMem(st229);
+  await first229.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify(fill229) }));
+  ok("先拆成了三片", ["a", "f1", "f2", "f3"].every((k) => st229.has(k)));
+
+  // 真实世界的两种坏法：写 a 之后被杀（缺片）、换过 kek（解不开）
+  st229.delete("f3");
+  st229.set("f2", "ENC1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBBBBBBBB");
+  const before229 = W.cntView().shardBad || 0;
+  const again229 = mkMem(st229);
+  await again229.m.fetch(new Request("https://m/get"));
+  const after229 = W.cntView().shardBad || 0;
+  ok("缺片与解不开都被计数", after229 - before229 === 2, `计数=${after229 - before229}`);
+  ok("解不开的那片留了底", Boolean(st229.get("s_bak")));
+  ok("好的那片照常恢复", Boolean(st229.get("f1")));
+
+  // 代号不符（删残片失败留下的旧片）也算坏片，但绝不覆盖内存
+  const stale = mkMem(st229);
+  await stale.m.fetch(new Request("https://m/get"));
+  ok("残留片不会被当成事实", (W.cntView().shardBad || 0) >= after229);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

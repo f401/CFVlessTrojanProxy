@@ -1,4 +1,5 @@
 import { seal, unseal } from "./index";
+import { cnt } from "../core/counter";
 
 /**
  * 单个 DO 存储值的字节预算。平台硬上限是 128 KiB（131072），这里留 8 KiB 余量。
@@ -93,6 +94,21 @@ interface MiniStore {
 }
 
 /**
+ * 功能：把一份解不开的分片原文留到 `s_bak`（一次性，人工可抢救）。
+ *
+ * 为什么只留第一份：`s_bak` 是一个值，多次覆盖会把最早那份（最可能被人需要的那份）冲掉。
+ * 为什么不进读路径：可疑数据只做取证，绝不参与恢复 —— 覆盖内存等于拿坏数据顶掉好数据。
+ * @param {MiniStore} st DO storage
+ * @param {unknown} raw 解不开的原文
+ * @returns {Promise<void>}
+ */
+async function backUpShard(st: MiniStore & { get: (k: string) => Promise<unknown> }, raw: unknown): Promise<void> {
+  const seen = await st.get("s_bak");
+  if (seen) return;
+  await st.put("s_bak", raw as never);
+}
+
+/**
  * 把账本写进 DO storage（装得下就单键，装不下按体积拆片）。
  *
  * 布局：热状态（`c/g/s/e/cl`）永远一个值 `a`；七张事实表装得下就并进 `a`，装不下才拆
@@ -151,13 +167,27 @@ export async function readShards(
   const out: MeterStore = {};
   // `want` 是 `a` 里的代号：0（或缺失）说明事实已经在 `a` 里，任何分片都是上一轮的残留
   if (!want) return out;
+  // 恢复失败必须留证据（7.228）：以前三种情况都只是 `continue`，于是「七张事实表全空」
+  // 与「本来就没有事实」在外部完全一样 —— 下一次 `save()` 还会把空表写回去。
+  // 这里只计数 + 把第一份坏分片的原文留到 `s_bak`（一次性、不进任何读路径），
+  // 不改变恢复结果：宁可少用旧证据，也不拿可疑的分片覆盖内存。
   for (const key of SHARD_KEYS) {
     const raw = await st.get(key);
-    if (!raw) continue;
+    if (!raw) {
+      cnt("shardBad");
+      continue;
+    }
     const o = await unseal<MeterStore>(env as Env, raw as never);
-    if (!o || typeof o !== "object") continue;
+    if (!o || typeof o !== "object") {
+      cnt("shardBad");
+      await backUpShard(st, raw);
+      continue;
+    }
     // 代号不同的分片是「删残片失败」留下的：用它覆盖 `a` 会让旧事实复活、新事实被顶掉
-    if (Number(o.fs) !== want) continue;
+    if (Number(o.fs) !== want) {
+      cnt("shardBad");
+      continue;
+    }
     if (o.vt) out.vt = o.vt;
     if (o.hl) out.hl = o.hl;
     if (o.eg) out.eg = o.eg;
