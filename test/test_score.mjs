@@ -2283,7 +2283,7 @@ console.log("\n75) 正记忆优先复用");
   // 两条中继都能通时，选代价更低的那条（健康度都未知 → 由站点 × 中继决定）
   const ctxR = { host: "a.example.com", cfHost: true, clientV6: false, relays: ["203.0.113.9", "203.0.113.7"], legacyWantsRelay: true };
   eq("按站点 × 中继选更快的那条", W.decide(ctxR).chan.ip, "203.0.113.7");
-  eq("调试快照按代价升序", W.relSnap("a.example.com")[0].ip, "203.0.113.7");
+  eq("调试快照按代价升序", W.relSnap("a.example.com")[0].relayIp, "203.0.113.7");
   W.RELPERF.clear();
   eq("清空后代价回到未知", W.relCost("a.example.com", "203.0.113.7"), 1e6);
 }
@@ -3316,7 +3316,7 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   W.relNote(H, A, 100, 0);
   W.relNote(H, A, 100, 0);
   eq("小响应样本不会把吞吐拽下去（100 + 512000/800）", Math.round(W.relCostMode("tput", H, A)), 740);
-  eq("调试快照里的速率也还是 800", Math.round(W.relSnap(H)[0].kbs), 800);
+  eq("调试快照里的速率也还是 800", Math.round(W.relSnap(H)[0].kiloBytesPerSec), 800);
   // 反过来：先只有小响应（没量到吞吐），再来一次大下载
   W.RELPERF.clear();
   const B = "203.0.113.141";
@@ -4388,7 +4388,7 @@ console.log("\n176) 预算账本与续回边界");
   W.RELPERF.note("rel188.example", "203.0.113.21", 300, 900);
   eq("量过的那条被记进站点 × 中继表", W.relSnap("rel188.example").length, 1);
   W.RELPERF.note("rel188.example", "203.0.113.21", 320, 950);
-  eq("样本数照样累加（只增不重置）", W.relSnap("rel188.example")[0].n, 2);
+  eq("样本数照样累加（只增不重置）", W.relSnap("rel188.example")[0].samples, 2);
   W.RELPERF.clear();
 }
 /* ── 179. 吞吐容量表：上限与寿命必须落在插入路径上；残槽 HOOK.psNote 不该存在 ── */
@@ -4918,7 +4918,7 @@ console.log("\n191b) 中继健康表的 merge 口径");
   eq("cron.ts 不再自己 new Map", srcCron201.includes("new Map("), false);
   eq("cron.ts 走 TFB.sweep 清理", srcCron201.includes("TFB.sweep(S.needPx, now)"), true);
   eq("cron.ts 开批前问 due", srcCron201.includes("if (!TFB.due(host, now)) continue;"), true);
-  eq("账本上限与 SC.PX_MAX 同源", srcBook201.includes("while (this.at.size > SC.PX_MAX)"), true);
+  eq("账本容量交给 BoundedMap（与 SC.PX_MAX 同源）", srcBook201.includes("max: SC.PX_MAX") && srcBook201.includes("this.lastBatchAt.prune(now, false)"), true);
   const srcArch201 = fs.readFileSync("tools/check-arch.js", "utf8");
   eq("arch 门禁拦住顶层可变容器", srcArch201.includes("顶层可变容器"), true);
 }
@@ -7030,14 +7030,14 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   const sz250 = t250.size();
   ok("淘汰后不超过上限 512", sz250.rows <= 512, JSON.stringify(sz250));
   ok("淘汰留 1/8 低水位（不是每条样本都排整表）", sz250.rows >= 448, JSON.stringify(sz250));
-  ok("站点无关聚合表也有上限 256", sz250.by <= 256, JSON.stringify(sz250));
-  ok("两条表都真的装进了样本", sz250.rows > 0 && sz250.by > 0, JSON.stringify(sz250));
+  ok("站点无关聚合表也有上限 256", sz250.byRelay <= 256, JSON.stringify(sz250));
+  ok("两条表都真的装进了样本", sz250.rows > 0 && sz250.byRelay > 0, JSON.stringify(sz250));
 
   // D204-2：过期的样本不再参与决策（内存按上限收，过期靠读路径判活）
   const t251 = mkRel250();
   t251.note("old.test", "10.8.0.9", 100, 1024, 1_000);
   ok("未过期的样本仍在", !!t251.get("old.test", "10.8.0.9", 1_500), JSON.stringify(t251.size()));
-  ok("过期的样本不再被选中", t251.get("old.test", "10.8.0.9", 1_000 + W.REL_TTL + 1) === null);
+  ok("过期的样本不再被选中", t251.get("old.test", "10.8.0.9", 1_000 + W.REL_SAMPLE_TTL + 1) === null);
 
   // D204-3：代价函数仍可用（淘汰改动不能把它弄坏）
   const t252 = mkRel250();
@@ -7047,16 +7047,16 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 
   // D205-1：枚举是唯一真源，且能被当作数字/字符串用（既有调用点不变）
   // A/B 时旧包没有这些导出，用「不可能相等」的桩让断言红而不是抛错
-  const ST250 = W.St || { Unknown: -1, Ok: -2, Blocked: -3, Dead: -4 };
+  const ST250 = W.St || { Unknown: -1, Reachable: -2, Blocked: -3, Dead: -4 };
   const MD250 = W.Mode || { Tput: "__none__", Lat: "__none__" };
 
   eq("St.Unknown 是 0", ST250.Unknown, 0);
-  eq("St.Ok 是 1", ST250.Ok, 1);
+  eq("St.Reachable 是 1", ST250.Reachable, 1);
   eq("St.Blocked 是 2", ST250.Blocked, 2);
   eq("St.Dead 是 3", ST250.Dead, 3);
   eq("St 反向映射保留语义名", ST250[3], "Dead");
-  eq("Mode.Tput 是 tput", MD250.Tput, "tput");
-  eq("Mode.Lat 是 lat", MD250.Lat, "lat");
+  eq("Mode.Throughput 是 tput", MD250.Throughput, "tput");
+  eq("Mode.Latency 是 lat", MD250.Latency, "lat");
 
 
   // D205-2：行为面 —— 判定表写入与读取在枚举口径下仍一致
@@ -7065,9 +7065,9 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   eq("状态 3 记成 Dead", W.vState("enum250.test", "d"), ST250.Dead);
   eq("Dead 不是「可用」", W.vOk("enum250.test", "d"), false);
   eq("Dead 算「不可用」", W.vBad("enum250.test", "d"), true);
-  W.vSetState("enum250.test", "d", ST250.Ok, 1);
-  eq("状态 1 记成 Ok", W.vState("enum250.test", "d"), ST250.Ok);
-  eq("Ok 算「可用」", W.vOk("enum250.test", "d"), true);
+  W.vSetState("enum250.test", "d", ST250.Reachable, 1);
+  eq("状态 1 记成 Reachable", W.vState("enum250.test", "d"), ST250.Reachable);
+  eq("Reachable 算「可用」", W.vOk("enum250.test", "d"), true);
   W.vSetState("enum250.test", "d", ST250.Blocked, 1);
   eq("状态 2 记成 Blocked", W.vState("enum250.test", "d"), ST250.Blocked);
   W.vClear();
@@ -7075,7 +7075,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   // D205-3：源码锁 —— 状态字面量不许再散落在判定路径上
   const srcVer250 = fs.readFileSync("src/route/verdict.ts", "utf8");
   ok("verdict.ts 用 St.Dead 而不是裸 3", srcVer250.includes("St.Dead") && !srcVer250.includes("return 3;"));
-  ok("verdict.ts 的 vOk/vBad 走枚举", srcVer250.includes("=== St.Ok") && srcVer250.includes("=== St.Blocked || e.state === St.Dead"));
+  ok("verdict.ts 的 vOk/vBad 走枚举", srcVer250.includes("=== St.Reachable") && srcVer250.includes("=== St.Blocked || e.state === St.Dead"));
   const srcEnums250 = fs.readFileSync("src/core/enums.ts", "utf8");
   ok(
     "枚举文件在且是唯一真源",
@@ -7088,11 +7088,78 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   const srcAdd250 = fs.readFileSync("src/store/meteradd.ts", "utf8");
   ok("meteradd.ts 的老格式按枚举读", srcAdd250.includes("r.s === St.Dead ? St.Dead : St.Blocked"));
   const srcRel250 = fs.readFileSync("src/route/relperf.ts", "utf8");
-  ok("relperf 的淘汰只有一处实现", srcRel250.includes("private evict(") && !srcRel250.includes("this.drop(now)"));
-  ok("relperf 的上限判断在插入之后", srcRel250.includes("if (this.m.size > MAX) this.evict(this.m, MAX, now);"));
-  ok("relperf 用 Mode 枚举判模式", srcRel250.includes("mode === Mode.Lat"));
+  ok("relperf 的淘汰交给 BoundedMap（不再自己写一份）", srcRel250.includes("new BoundedMap<string, RelSample>") && !srcRel250.includes("private evict("));
+  ok("relperf 的上限判断在插入之后", srcRel250.includes("this.rows.prune(now);"));
+  ok("relperf 用 Mode 枚举判模式", srcRel250.includes("modeToken === Mode.Latency"));
 }
 
+
+// ---- 251. 命名规范与结构收口（7.251）：有界表统一实现、语义字段名、枚举成员名
+{
+  const G = 251;
+  const BM = W.BoundedMap;
+  ok(`[${G}] BoundedMap 可构造`, typeof BM === "function");
+
+  // 容量：上限 128，插 300 条边插边清 —— 稳定不超上限，且一次收下 1/8 余量
+  const bm = new BM({ max: 128, timeOf: (stamp) => stamp });
+  for (let i = 0; i < 300; i++) bm.set("k" + i, i);
+  bm.prune(299);
+  eq(`[${G}] 一次清理收到低水位（128 - 16 = 112）`, bm.size, 112);
+  ok(`[${G}] 最新那条仍在表里`, bm.has("k299"));
+  ok(`[${G}] 最旧那条已被淘汰`, !bm.has("k0"));
+
+  // 寿命：过期行先被删，仍超限才按时间收到低水位
+  const exp = new BM({ max: 10, ttlMs: 1000, timeOf: (stamp) => stamp });
+  exp.set("old", 0);
+  exp.set("new", 5000);
+  const droppedExp = exp.prune(6000);
+  eq(`[${G}] prune 返回删掉的条数`, droppedExp, 1);
+  ok(`[${G}] 过期行被删、新鲜行留下`, !exp.has("old") && exp.has("new"));
+  eq(`[${G}] 容量与寿命可读`, [exp.capacity(), exp.lifeMs()], [10, 1000]);
+
+  // 语义字段名：snap() 的行键就是面板/调试端点看到的形状
+  W.RELPERF.clear();
+  W.RELPERF.note("n251.test", "1.2.3.4", 120, 800, 1000);
+  const row251 = (W.RELPERF.snap("n251.test", 1000) || [])[0] || {};
+  eq(`[${G}] 样本行用语义键`, Object.keys(row251).sort(), ["ageMs", "costMs", "firstByteMs", "kiloBytesPerSec", "relayIp", "samples"]);
+  eq(`[${G}] size() 报 rows / byRelay`, Object.keys(W.RELPERF.size()).sort(), ["byRelay", "rows"]);
+  eq(
+    `[${G}] 代价 = 首字节 + 512KB 折算`,
+    Math.round(W.relCostOf({ samples: 1, firstByteMs: 120, kiloBytesPerSec: 800, updatedAt: 0 })),
+    760,
+  );
+
+  // 起搏账本：两栏改名，容量仍与 SC.PX_MAX 同源
+  const book251 = new W.TfbBook();
+  eq(`[${G}] 新账本为空`, book251.size(), 0);
+  W.TFB.forget("t251.test");
+  const now251 = 1_700_000_000_000;
+  ok(`[${G}] 首次可以开批`, W.TFB.due("t251.test", now251));
+  W.TFB.take("t251.test", now251);
+  ok(`[${G}] 10 分钟内不再开批`, W.TFB.due("t251.test", now251 + 60000) === false);
+  W.TFB.forget("t251.test");
+
+  // 枚举成员名：读代码时能看出语义（数字值与线协议都没变）
+  eq(`[${G}] St 四个成员`, [W.St.Unknown, W.St.Reachable, W.St.Blocked, W.St.Dead], [0, 1, 2, 3]);
+  eq(`[${G}] Mode 两个成员`, [W.Mode.Throughput, W.Mode.Latency], ["tput", "lat"]);
+  W.vClear();
+  W.vSetState("e251.test", "d", W.St.Reachable);
+  ok(`[${G}] vOk 认枚举写入的状态`, W.vOk("e251.test", "d") === true);
+
+  // 源码锁
+  const relSrc251 = fs.readFileSync("src/route/relperf.ts", "utf8");
+  ok(`[${G}] relperf 用 BoundedMap 而不是自写淘汰`, relSrc251.includes("new BoundedMap<string, RelSample>") && !relSrc251.includes("private m = new Map"));
+  ok(`[${G}] relperf 字段名带单位`, relSrc251.includes("kiloBytesPerSec: KiloBytesPerSec;") && relSrc251.includes("updatedAt: EpochMs;"));
+  const tfbSrc251 = fs.readFileSync("src/route/tfbbook.ts", "utf8");
+  ok(`[${G}] tfbbook 两栏改名`, tfbSrc251.includes("private lastBatchAt") && tfbSrc251.includes("private batchCount"));
+  const enumSrc251 = fs.readFileSync("src/core/enums.ts", "utf8");
+  ok(`[${G}] 枚举成员名可读`, enumSrc251.includes("Reachable = 1") && enumSrc251.includes('Throughput = "tput"') && enumSrc251.includes('Latency = "lat"'));
+  const pre251 = fs.readFileSync("tools/preflight.mjs", "utf8");
+  ok(`[${G}] 命名门禁接进 preflight`, pre251.includes("tools/check-names.mjs"));
+  const base251 = JSON.parse(fs.readFileSync("tools/naming-baseline.json", "utf8"));
+  ok(`[${G}] 命名基线是个只许下降的数字`, typeof base251.opaque === "number" && base251.opaque <= 100, String(base251.opaque));
+  ok(`[${G}] 短名白名单写在工具里且带理由`, fs.readFileSync("tools/check-names.mjs", "utf8").includes("改名要迁移 DO 存储"));
+}
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

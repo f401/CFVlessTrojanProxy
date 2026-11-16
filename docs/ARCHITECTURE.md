@@ -70,6 +70,7 @@ tools/bundle.js   esbuild → dist/_worker.js（生产）/ dist/_test.js（测�
 tools/check-arch.js 分层 / 循环 / 顶层 let / 体积
 tools/check-dead.mjs 死导出（导出函数/常量必须在全仓有真实引用）
 - tools/check-indent.mjs 缩进（语句不许被顶出所在块；7.237 已补齐 stat.ts 的 305 行与 score.ts 的 176 行，白名单清空、覆盖全仓）
+- tools/check-names.mjs 成员命名（类字段 / 接口成员名 ≤2 字符必须进白名单并写明理由；剩余数量记在 `tools/naming-baseline.json`，只许下降）
 tools/doc-audit.mjs 注释 / 类表 / 活文档引用 / 表格列数与反引号 / 文档挂在 import 上 / H6 编号连续 / 版本口径 / JSDoc 类型与签名一致
   · H6 编号必须从 1 连续到最大值（7.231 的第 188 行、7.233 的第 190 行都是漏写，表格语法合法所以没人报）
   · `AGENTS.md` 头部的仓库版本、缺陷数、「差 N 个版本」三者必须与 `src/core/util.ts` 的 `VERSION`、H6 表最大编号对齐
@@ -220,6 +221,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `RelayHealth`（`HEALTH`） | `src/route/relay-health.ts` | 中继健康表（sent/pending 语义） |
 | `CronLock`（`CRONLOCK`） | `src/core/lock.ts` | cron 闸门：持有时间戳 + `SC.CRON_STALE_MS` 截止；超时接管计 `cronStale`（布尔闩卡死即永久停摆） |
 | `TfbBook`（`TFB`） | `src/route/tfbbook.ts` | 起搏记账（上次开批时间 + 本窗口批数；`sweep` 是唯一清理入口，上限与 `SC.PX_MAX` 同源） |
+| `BoundedMap` | `src/core/table.ts` | 有界「键 → 行」表（容量 + 寿命 + 淘汰顺序）；`RelPerfTable` 与 `TfbBook` 继承的淘汰规则就这一份，7.251 前四处各写一遍，于是出现过「上限判在插入之前」那种偏差 |
 | `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps） |
 | `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |
 | 预算分配（自由函数 `planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核）：判定额度这一项在 7.149 随 `round.ts` 一起删掉，现在只有 `adm` 与 `cap` |

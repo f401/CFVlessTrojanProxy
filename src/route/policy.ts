@@ -271,7 +271,7 @@ export class Policy {
       // 只给「本站点一次都没量过」的中继采样机会，而且必须已经有 1 条样本做锚：
       // 全池轮换会把 0/4、2/4 全 403 的中继塞给用户（实测 tput 2/8），
       // 完全不轮换又永远学不出容量差异（只剩一条中继有样本）。小步、只朝没试过的走。
-      const seen = new Set(relRows.map((r) => r.ip));
+      const seen = new Set(relRows.map((row) => row.relayIp));
       const unmeasured = stick.filter((ip) => !JUDGE.negOn(c.host, ip) && !seen.has(ip));
       if (c.mode !== "lat" && coldSite && fresh >= 1 && unmeasured.length > 0) {
         const ip = unmeasured[this.rot++ % unmeasured.length] as string;

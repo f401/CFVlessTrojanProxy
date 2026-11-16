@@ -15,7 +15,7 @@ import { vtDelta, vtLoad } from "../route/verdictsync";
 import { cntView } from "../core/counter";
 import { planView } from "../route/budget";
 import { prefsJson } from "../route/prefs";
-import { REL_TTL, relSnap } from "../route/relperf";
+import { REL_SAMPLE_TTL, relSnap } from "../route/relperf";
 import { BLK } from "../route/blkfacts";
 import { FACTS } from "../route/factsstore";
 import { EG } from "../route/egfacts";
@@ -60,7 +60,7 @@ export async function debug(c: UserCtx): Promise<Response> {
   // 站点 × 中继的成功率事实（本 isolate）：样本越多越可信，因子越靠近 1
   if (url.searchParams.get("pss")) return json({ host: String(url.searchParams.get("pss")), rows: psSnap(String(url.searchParams.get("pss"))) });
   if (url.searchParams.get("eg")) return json({ rows: EG.snap() });
-  if (url.searchParams.get("rt")) return json({ host: String(url.searchParams.get("rt") || "").slice(0, 80), rows: relSnap(String(url.searchParams.get("rt") || "").slice(0, 80)), alive: S.alive.size, ttl: REL_TTL });
+  if (url.searchParams.get("rt")) return json({ host: String(url.searchParams.get("rt") || "").slice(0, 80), rows: relSnap(String(url.searchParams.get("rt") || "").slice(0, 80)), alive: S.alive.size, ttl: REL_SAMPLE_TTL });
   // 站点 × 中继的封锁行（v7.222）：文档里从 v8 起就写着 `?blk=<host>`，代码里一直没有这个分支。
   // 只读内存表，不打 DO：要看别处 isolate 回传的行得配合 `?do=1` 那条链（那里是 /meter/vt）。
   if (url.searchParams.get("blk")) {

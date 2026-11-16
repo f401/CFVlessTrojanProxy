@@ -16,7 +16,7 @@
 /** 判定状态：0 未知 / 1 可用 / 2 被拦 / 3 连不上 */
 export enum St {
   Unknown = 0,
-  Ok = 1,
+  Reachable = 1,
   Blocked = 2,
   Dead = 3,
 }
@@ -26,8 +26,8 @@ export type StLike = St | 0 | 1 | 2 | 3;
 
 /** 传输模式：吞吐优先 / 延迟优先 */
 export enum Mode {
-  Tput = "tput",
-  Lat = "lat",
+  Throughput = "tput",
+  Latency = "lat",
 }
 
 /** 传输模式的宽松写法（兼容既有按字符串传参的调用点与 `?mode=` 参数） */

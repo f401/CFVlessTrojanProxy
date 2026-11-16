@@ -10,6 +10,7 @@
     "arch": "node tools/check-arch.js",
     "dead": "node tools/check-dead.mjs",
     "indent": "node tools/check-indent.mjs",
+    "names": "node tools/check-names.mjs",
     "format": "prettier --write \"src/**/*.ts\" \"types/*.d.ts\"",
     "obf": "node obf/pre.js && node obf/obf_mid.js",
     "all": "npm run arch && npm run build && npm test && npm run obf",
