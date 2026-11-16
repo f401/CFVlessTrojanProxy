@@ -10,6 +10,10 @@ const minIdx = args.indexOf("--min");
 const MIN = minIdx >= 0 ? Number(args[minIdx + 1]) || 12 : 12;
 const topIdx = args.indexOf("--top");
 const TOP = topIdx >= 0 ? Number(args[topIdx + 1]) || 25 : 25;
+// --max N：允许的「体内零注释」函数个数上限（超过即红）。preflight 里用 --max 0，
+// 意思是这条规则从「体检」升级成硬门禁；不给 --max 时保持原来的纯体检行为。
+const maxIdx = args.indexOf("--max");
+const MAX = maxIdx >= 0 ? Number(args[maxIdx + 1]) || 0 : -1;
 const only = args.find((a, i) => !a.startsWith("--") && !/^\d+$/.test(a) && args[i - 1] !== "--min" && args[i - 1] !== "--top");
 
 /** 递归收集 .ts（跳过 .d.ts 与 vendor） */
@@ -63,4 +67,12 @@ rows.sort((a, b) => b.code - a.code);
 console.log(`体内零注释且代码行 ≥${MIN} 的函数：${rows.length} 个\n`);
 for (const r of rows.slice(0, TOP)) {
   console.log(`${String(r.code).padStart(4)} 行  ${r.file}:${r.line}  ${r.name}`);
+}
+
+
+// 硬门禁档位：超过 --max 就红，并逐条点名（与 check-names / check-insertorder 的棘轮口径一致）
+if (MAX >= 0 && rows.length > MAX) {
+  console.error(`肉体零注释的函数 ${rows.length} 个，上限 ${MAX}：`);
+  for (const r of rows) console.error(`  ${r.file}:${r.line} ${r.name}（${r.code} 行）`);
+  process.exitCode = 1;
 }

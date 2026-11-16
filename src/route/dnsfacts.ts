@@ -132,11 +132,17 @@ export class DnsFacts {
    */
   load(rows: DnsWire[]): number {
     let n = 0;
+    // 三件事任一不成立就整条跳过：地址非空字符串、族标记只能是 0/1、时间戳必须可用。
+
+    // 旧格式或坏行宁可丢，也不能把「这个域的出口族」写成一个瞎猜的值。
+
     for (const r of rows) {
       if (!r || typeof r.h !== "string" || !r.h) continue;
       if (r.v !== 0 && r.v !== 1) continue;
       const at = Number(r.at) || 0;
       if (!at) continue;
+      // 更晚的观测胜出：族结论会变（同一个域在不同机房可能一边 v4 一边 v6），旧行不许覆盖新行。
+
       const cur = this.rows.get(r.h);
       if (cur && cur.at >= at) continue;
       this.rows.set(r.h, { v6: r.v, at });

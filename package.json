@@ -16,7 +16,8 @@
     "all": "npm run arch && npm run build && npm test && npm run obf",
     "sim": "node tools/sim-count.mjs",
     "sim:colo": "node tools/sim-colo.mjs",
-    "insertorder": "node tools/check-insertorder.mjs"
+    "insertorder": "node tools/check-insertorder.mjs",
+    "body": "node tools/body-audit.mjs --max 0"
   },
   "devDependencies": {
     "prettier": "3.9.10",

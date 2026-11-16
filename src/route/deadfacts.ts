@@ -122,16 +122,25 @@ export class DeadFacts {
    */
   load(rows: DeadWire[]): number {
     let n = 0;
+    // 远端行逐条校验：地址必须是字符串、时间与批数必须是有限数 —— 坏行整条跳过，
+
+    // 不能让一个 undefined 的时间戳把「谁已经判死」这件事写坏。
+
     for (const r of rows) {
       if (!r || typeof r.i !== "string") continue;
       const at = Number(r.at);
       const cntN = Number(r.n);
       if (!Number.isFinite(at) || !Number.isFinite(cntN)) continue;
+      // 只认更新的观测：本地已有的行更晚就保留（同一中继的「判死」不该被旧行回滚）。
+
       const cur = this.rows.get(r.i);
       if (cur && cur.at >= at) continue;
+      // 批数夹在 1..9：远端可能给出 0（没意义）或很大的值（面板读起来失真）。
+
       this.rows.set(r.i, { n: Math.max(1, Math.min(9, cntN)), at });
       n += 1;
     }
+    // 合并完再限界：批量灌入时先删一轮比逐条判更快，也避免中间态超上限。
     if (this.rows.size > DEAD_MAX) this.drop(0);
     return n;
   }

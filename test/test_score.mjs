@@ -7631,5 +7631,17 @@ const bad265 = walk265("src")
   .filter((p) => code265(p).includes('lastIndexOf(":")'));
 ok("内联拆地址只剩实现与端口守卫", bad265.length === 0, bad265.join(","));
 
+﻿// 第 266 组：体内注释从「体检」升级成硬门禁（7.266）
+const body266 = fs.readFileSync("tools/body-audit.mjs", "utf8");
+ok("体内注释门禁支持 --max", body266.includes('"--max"') && body266.includes("process.exitCode = 1;"));
+ok("preflight 里接了体内注释门禁", fs.readFileSync("tools/preflight.mjs", "utf8").includes('["体内注释门禁", ["tools/body-audit.mjs", "--max", "0"]]'));
+const pkg266 = JSON.parse(fs.readFileSync("package.json", "utf8"));
+eq("package.json 有 body 别名", pkg266.scripts && pkg266.scripts.body, "node tools/body-audit.mjs --max 0");
+const dead266 = fs.readFileSync("src/route/deadfacts.ts", "utf8");
+const dns266 = fs.readFileSync("src/route/dnsfacts.ts", "utf8");
+ok("死亡事实的 load 写了体内步骤", dead266.includes("坏行整条跳过") && dead266.includes("批数夹在 1..9"));
+ok("出口族事实的 load 写了体内步骤", dns266.includes("三件事任一不成立就整条跳过") && dns266.includes("更晚的观测胜出"));
+ok("自证探针已清理", !fs.existsSync("src/__probe-body.ts"));
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

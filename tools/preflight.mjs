@@ -13,6 +13,7 @@ const steps = [
   ["类型检查", ["tools/tsc.js"]],
   ["架构门禁", ["tools/check-arch.js"]],
   ["注释门禁", ["tools/doc-audit.mjs", "--max", "0", "--top", "5"]],
+  ["体内注释门禁", ["tools/body-audit.mjs", "--max", "0"]],
   ["死导出", ["tools/check-dead.mjs"]],
   ["缩进门禁", ["tools/check-indent.mjs"]],
   ["命名门禁", ["tools/check-names.mjs"]],
