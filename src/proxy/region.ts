@@ -2,7 +2,7 @@ import type { Socket } from "cloudflare:sockets";
 import { connect } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 import { nsFail } from "../nodes/stat";
-import { withTimeout } from "../core/util";
+import { CONNECT_MS, withTimeout } from "../core/util";
 import { SEL } from "../px/selector";
 import { checkTarget } from "./dial";
 
@@ -40,7 +40,7 @@ export class RegionPicker {
     // 与 Dialer.open 同一个口径：connect() 自己没有超时，挂死会让客户端一直干等
     const pk = Promise.resolve(connect({ hostname: p.h, port: p.p }));
     try {
-      const sock = await withTimeout(pk, 2500);
+      const sock = await withTimeout(pk, CONNECT_MS);
       st.via = "node";
       st.retried = true;
       return sock;
@@ -55,7 +55,7 @@ export class RegionPicker {
         st.node = alt.h + ":" + alt.p;
         const pk2 = Promise.resolve(connect({ hostname: alt.h, port: alt.p }));
         try {
-          const sock2 = await withTimeout(pk2, 2500);
+          const sock2 = await withTimeout(pk2, CONNECT_MS);
           st.via = "node";
           st.retried = true;
           return sock2;

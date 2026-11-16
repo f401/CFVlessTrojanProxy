@@ -2,7 +2,7 @@ import type { Socket } from "cloudflare:sockets";
 import { logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { checkTarget } from "../core/net";
-import { dec, enc, timeoutSignal, toHex, withTimeout } from "../core/util";
+import { CONNECT_MS, dec, enc, timeoutSignal, toHex, withTimeout } from "../core/util";
 import { connect } from "cloudflare:sockets";
 
 /* 代理节点：探活与池子抓取 */
@@ -108,7 +108,7 @@ export async function probeProxy(h: string, p: number) {
     const w = sock.writable.getWriter();
     // connect() 是惰性的：真正的 TCP 建连发生在第一次 write。只给 read 包超时不够 ——
     // 黑洞候选会让这里一直挂着，而探活是按 SC.PROBE_CONC 个一批跑的，挂住一个就卡住整轮。
-    await withTimeout(w.write(PROBE_HELLO), 2500, "timeout");
+    await withTimeout(w.write(PROBE_HELLO), CONNECT_MS, "timeout");
     w.releaseLock();
 
     const r = sock.readable.getReader();
@@ -468,7 +468,7 @@ export function tlsHello(sni: string): Uint8Array {
  * @param {number} [ms] 超时毫秒
  * @returns {Promise<{tcp:number, hs?:number, err:string}>} 结果
  */
-export async function probeSni(nodeHost: string, nodePort: number, sni: string, ms = 2500): Promise<SniProbe> {
+export async function probeSni(nodeHost: string, nodePort: number, sni: string, ms = CONNECT_MS): Promise<SniProbe> {
   if (checkTarget(nodeHost, nodePort)) return { err: "denied" };
   const t0 = Date.now();
   let sock: Socket | null = null;

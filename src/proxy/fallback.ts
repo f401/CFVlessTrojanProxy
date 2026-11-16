@@ -1,6 +1,6 @@
 import { connect } from "cloudflare:sockets";
 import { nextNode, nsFail } from "../nodes/score";
-import { withTimeout } from "../core/util";
+import { CONNECT_MS, withTimeout } from "../core/util";
 import { logErr } from "../nodes/metrics";
 import { isCfIp } from "../core/net";
 import { checkTarget } from "./dial";
@@ -48,7 +48,7 @@ export async function dialAnother(
     // 客户端放弃为止。补救链更怕这个——走到这里时客户端已经等了两三秒。
     const pk = Promise.resolve(connect({ hostname: host, port }));
     try {
-      const s = await withTimeout(pk, 2500);
+      const s = await withTimeout(pk, CONNECT_MS);
       st.node = alt;
       st.via = "node";
       st.pxTries = (st.pxTries || 1) + 1;

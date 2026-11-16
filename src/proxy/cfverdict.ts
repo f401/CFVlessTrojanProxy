@@ -32,7 +32,7 @@ export function refreshCfHttp(host: string, ctx: { waitUntil(p: Promise<unknown>
   if (S.cfHttpFlight.size > 200) S.cfHttpFlight.clear();
   S.cfHttpFlight.add(host);
   ctx.waitUntil(
-    httpProbe(host, 2500)
+    httpProbe(host)
       .then((v) => {
         // 先写负缓存再覆盖：拿到状态码时正缓存覆盖它
         S.cfHttp.set(host, { code: v.code, colo: v.colo, t: v.code ? Date.now() : Date.now() - CF_HTTP_TTL + CF_HTTP_NEG });

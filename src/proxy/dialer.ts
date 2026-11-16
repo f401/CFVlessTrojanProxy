@@ -7,7 +7,7 @@ import { isPxHost } from "../core/hosts";
 import { isCfIp } from "../core/net";
 import { S } from "../core/state";
 import { cnt } from "../core/counter";
-import { closeQuietly, withTimeout } from "../core/util";
+import { CONNECT_MS, closeQuietly, withTimeout } from "../core/util";
 import { dropExpired, trimAged } from "../core/hostmem";
 import { logErr } from "../nodes/metrics";
 import { nsFail } from "../nodes/stat";
@@ -112,7 +112,7 @@ export class Dialer {
         const pk = Promise.resolve(connect({ hostname: p.host, port: p.port }));
         try {
           // 拨号必须有上限：connect() 自己没有超时，挂死的中继会把整个请求拖到客户端放弃为止。
-          sock = await withTimeout(pk, 2500);
+          sock = await withTimeout(pk, CONNECT_MS);
           st.node = key;
           st.via = "node";
           st.retried = true;
@@ -160,7 +160,7 @@ export class Dialer {
     // 会白占免费计划 6 个并发 connect 名额（症状是之后所有站点开始零星失败）。
     const pk = Promise.resolve(p);
     try {
-      return await withTimeout(pk, 2500);
+      return await withTimeout(pk, CONNECT_MS);
     } catch (e) {
       void pk.then((x) => closeQuietly(x)).catch(() => {
         /* 本来就没连上 */

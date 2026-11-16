@@ -1,4 +1,4 @@
-import { errMsg } from "../core/util";
+import { CONNECT_MS, errMsg } from "../core/util";
 import type { Socket } from "cloudflare:sockets";
 import { Connection } from "./connection";
 import { wsToStream } from "./ws-in";
@@ -183,7 +183,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
                 // 并发 connect 名额（v7.171 补上这一处，之前只有 fallback/attacher/region 有）。
                 const pk0 = Promise.resolve(connect({ hostname: px0.host, port: px0.port }));
                 try {
-                  sock = await withTimeout(pk0, 2500);
+                  sock = await withTimeout(pk0, CONNECT_MS);
                   st.via = "node";
                 } catch (e3) {
                   void pk0

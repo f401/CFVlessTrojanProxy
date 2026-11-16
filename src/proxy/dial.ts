@@ -1,6 +1,6 @@
 import { S } from "../core/state";
 import { connect } from "cloudflare:sockets";
-import { timeoutSignal, withTimeout } from "../core/util";
+import { CONNECT_MS, timeoutSignal, withTimeout } from "../core/util";
 import { isCfIp, isPrivateHost } from "../core/net";
 export { DENY_PORTS, checkTarget, isPrivateHost } from "../core/net";
 
@@ -217,7 +217,7 @@ export async function dial(host: string, port: number) {
 /** 用一次 HTTP 请求判定「本 isolate 的出口」访问该站点会被怎么对待。
  *  返回 {code, colo}：code 0 表示连 HTTP 都没拿到（当作未知）。
  *  只在 CF 托管目标上用：这些站点会把我们的出口 IP 透传给源站，403 就是被按 IP 拒。 */
-export async function httpProbe(host: string, ms = 2500): Promise<{ code: number; colo: string }> {
+export async function httpProbe(host: string, ms = CONNECT_MS): Promise<{ code: number; colo: string }> {
   try {
     const r = await withTimeout(
       fetch(`https://${host}/`, {

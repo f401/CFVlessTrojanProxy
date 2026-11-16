@@ -1,4 +1,4 @@
-import { errMsg, withTimeout } from "../core/util";
+import { CONNECT_MS, errMsg, withTimeout } from "../core/util";
 import { probeHttp80 } from "../core/http80";
 import { connect } from "cloudflare:sockets";
 import type { Socket } from "cloudflare:sockets";
@@ -509,7 +509,7 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
       try {
         // `connect()` 返回的是 Socket（连接在 `.opened` 上），包成 Promise 才能 race
         pk = Promise.resolve(connect({ hostname: expandV6(out.aaaa), port: 443 }));
-        const s6 = await withTimeout(pk, 2500);
+        const s6 = await withTimeout(pk, CONNECT_MS);
         out.v6Connect = "ok";
         try {
           s6.close();

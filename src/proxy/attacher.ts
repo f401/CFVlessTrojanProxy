@@ -5,7 +5,7 @@ import { S } from "../core/state";
 import { SC } from "../core/const";
 import { trimAged } from "../core/hostmem";
 import { cnt } from "../core/counter";
-import { closeQuietly, releaseAll, withTimeout, WS_OPEN } from "../core/util";
+import { CONNECT_MS, closeQuietly, releaseAll, withTimeout, WS_OPEN } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
 import { nsEmptyClose, nsFail } from "../nodes/stat";
 import { SEL } from "../px/selector";
@@ -107,7 +107,7 @@ export class Attacher {
           const p6 = Promise.resolve(connect({ hostname: expandV6(v6), port }));
           try {
             logErr(`empty close -> retry via IPv6 ${v6}`, host);
-            const s6 = await withTimeout(p6, 2500);
+            const s6 = await withTimeout(p6, CONNECT_MS);
             st.via = "v6";
             await this.run(o, s6);
             return;
@@ -150,7 +150,7 @@ export class Attacher {
       // 与主路径同一个口径：connect() 自己没有超时，挂死会把客户端拖到放弃
       const p3 = Promise.resolve(connect({ hostname: px.host, port: px.port }));
       try {
-        const s3 = await withTimeout(p3, 2500);
+        const s3 = await withTimeout(p3, CONNECT_MS);
         st.node = px.host + ":" + px.port;
         st.via = "node";
         await this.run(o, s3);

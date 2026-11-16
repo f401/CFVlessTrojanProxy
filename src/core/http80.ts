@@ -2,7 +2,7 @@
 // 用途：免费计划跑不动 TLS 客户端（DO 也会 CPU 超限），但 CF 边缘在 :80 同样按 Host 路由，
 // 封锁/放行会体现为不同的状态码，因此这是「真实的 HTTP 证据」而不是流量推断。
 import { connect } from "cloudflare:sockets";
-import { withTimeout } from "./util";
+import { CONNECT_MS, withTimeout } from "./util";
 
 export interface HttpProbeResult {
   ok: boolean;
@@ -83,9 +83,9 @@ export async function probeHttp80(host: string, relay = "", path = "/"): Promise
   try {
     const w = sock.writable.getWriter();
     // connect() 惰性：第一次 write 才真正建连，没有上限就会一直挂在这里。
-    await withTimeout(w.write(new TextEncoder().encode(req)), 2500, "timeout");
+    await withTimeout(w.write(new TextEncoder().encode(req)), CONNECT_MS, "timeout");
     w.releaseLock();
-    await Promise.race([pump, new Promise((r) => setTimeout(r, 2500))]);
+    await Promise.race([pump, new Promise((r) => setTimeout(r, CONNECT_MS))]);
   } catch (e) {
     try { sock.close(); } catch {}
     return { ...EMPTY, err: "io: " + String((e as Error).message).slice(0, 80), ms: Date.now() - t0 };

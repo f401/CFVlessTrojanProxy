@@ -3760,14 +3760,14 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   // 主路径给 connect() 包了 2.5 秒上限，补救链没有：客户端已经等了两三秒，再挂死等于直接放弃。
   const fSrc = fs.readFileSync("src/proxy/fallback.ts", "utf8");
   const aSrc = fs.readFileSync("src/proxy/attacher.ts", "utf8");
-  ok("换节点重试也给 connect() 加了超时", fSrc.includes("withTimeout(pk, 2500)"));
+  ok("换节点重试也给 connect() 加了超时", fSrc.includes("withTimeout(pk, CONNECT_MS)"));
   ok("换节点失败要给这条候选记一笔（否则一直被挑回来）", fSrc.includes("nsFail(alt)"));
   ok("超时迟到成功的 socket 会被关掉（fallback）", fSrc.includes("pk.then((s) =>"));
   const iRel = aSrc.indexOf("releaseAll(st)");
   const iSet = aSrc.indexOf("st.sock = sock;");
   ok("递归重试前先释放上一跳的 socket 与写锁", iRel >= 0 && iSet > iRel);
-  ok("IPv6 兜底也有超时", aSrc.includes("withTimeout(p6, 2500)"));
-  ok("proxyip 兜底也有超时", aSrc.includes("withTimeout(p3, 2500)"));
+  ok("IPv6 兜底也有超时", aSrc.includes("withTimeout(p6, CONNECT_MS)"));
+  ok("proxyip 兜底也有超时", aSrc.includes("withTimeout(p3, CONNECT_MS)"));
   ok("proxyip 连不上要给中继记账", aSrc.includes('nsFail(px.host + ":" + px.port)'));
   ok("死条件 !px || st.retried 已经删掉（只判代码行，注释里可以留历史）", !/if \(!px \|\| st\.retried\)/.test(aSrc));
 }
@@ -3787,7 +3787,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
 // Dialer 抛错后那条「临时取一条中继直连」是最后一跳，漏了超时就会把客户端拖到放弃。
 const ss2 = fs.readFileSync("src/proxy/session.ts", "utf8");
 const at2 = fs.readFileSync("src/proxy/attacher.ts", "utf8");
-ok("会话层补救链的 connect 也加了 2.5 秒上限", /withTimeout\(pk0, 2500\)/.test(ss2));
+ok("会话层补救链的 connect 也加了 2.5 秒上限", /withTimeout\(pk0, CONNECT_MS\)/.test(ss2));
 ok("会话层不再有裸 connect（迟到成功的 socket 必须有人关）", !/await connect\(\{ hostname: px0\.host/.test(ss2));
 ok("超时之后迟到成功的 socket 会被关掉", /void pk0\s*\n\s*\.then\(\(s\) => \{ try \{ s\.close\(\); \}/.test(ss2));
 ok("地区钉住的补救链不再把「没别的候选」记成目标不可达", at2.includes('cnt(region ? "rgFail" : "dead")'));
@@ -4365,7 +4365,7 @@ console.log("\n176) 预算账本与续回边界");
   ok("meter 的 /vt 已委托给 factsOut", meterSrc177.includes("Response.json(factsOut(this))"), "meter.ts");
   ok("meter 里不再自己拼 blk2 的插入序切片", !meterSrc177.includes("Object.entries(this.blk2)"), "meter.ts");
   const dbgSrc177 = fs.readFileSync("src/routes/debug.ts", "utf8");
-  ok("诊断默认分支的建连带超时", dbgSrc177.includes("withTimeout(pk, 2500)"), "debug.ts");
+  ok("诊断默认分支的建连带超时", dbgSrc177.includes("withTimeout(pk, CONNECT_MS)"), "debug.ts");
   ok("诊断默认分支把 connect 包成 Promise", dbgSrc177.includes("Promise.resolve(connect("), "debug.ts");
 }
 
@@ -5320,7 +5320,7 @@ console.log("\n191b) 中继健康表的 merge 口径");
     !dialerSrc.includes("sock = await dial4(host, port);") && !dialerSrc.includes("sock = await dial(host, port);"),
   );
   ok("超时后关掉迟到 socket", dialerSrc.includes("closeQuietly(x)"));
-  ok("guarded 用 2500ms 上限", dialerSrc.includes("return await withTimeout(pk, 2500);"));
+  ok("guarded 用 2500ms 上限", dialerSrc.includes("return await withTimeout(pk, CONNECT_MS);"));
 }
 /* ===== 第 210 组：探活的三处 connect 惰性建连必须有时限（7.209 D165） ===== */
 {
@@ -5358,11 +5358,11 @@ console.log("\n191b) 中继健康表的 merge 口径");
   const httpSrc = fs.readFileSync("src/core/http80.ts", "utf8");
   ok(
     "probeProxy 的 write 有超时",
-    probeSrc.includes('withTimeout(w.write(PROBE_HELLO), 2500, "timeout")'),
+    probeSrc.includes('withTimeout(w.write(PROBE_HELLO), CONNECT_MS, "timeout")'),
   );
   ok("probeSni 的 write 跟随 ms", probeSrc.includes('withTimeout(w.write(tlsHello(sni)), ms, "timeout")'));
-  ok("http80 的 write 有超时", httpSrc.includes('withTimeout(w.write(new TextEncoder().encode(req)), 2500, "timeout")'));
-  ok("http80 引入了 withTimeout", httpSrc.includes('import { withTimeout } from "./util";'));
+  ok("http80 的 write 有超时", httpSrc.includes('withTimeout(w.write(new TextEncoder().encode(req)), CONNECT_MS, "timeout")'));
+  ok("http80 引入了 withTimeout", httpSrc.includes('import { CONNECT_MS, withTimeout } from "./util";'));
   ok(
     "探活路径不再有裸 write",
     !/await w\.write\((?!.*withTimeout)/.test(probeSrc) && !/await w\.write\((?!.*withTimeout)/.test(httpSrc),
@@ -6225,6 +6225,40 @@ ok("索引下限夹到 0（p 很小时不能取负）", pendSrc.includes("Math.m
   ok("trim 削静默表", blkSrc.includes("if (this.mute.size > BLK_MUTE_MAX) {"), "");
   ok("muted 读到过期就删", blkSrc.includes("if (until && until <= now) {"), "");
   W.BLK.clear();
+}
+
+/* ---------- 第 232 组：连接超时只有一个真源（v7.231 D188） ---------- */
+{
+  const walk = (d, a = []) => {
+    for (const f of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = d + "/" + f.name;
+      if (f.isDirectory()) walk(p, a);
+      else if (p.endsWith(".ts")) a.push(p);
+    }
+    return a;
+  };
+  const utilSrc = fs.readFileSync("src/core/util.ts", "utf8");
+  ok("CONNECT_MS 有唯一真源", /export const CONNECT_MS = 2500;/.test(utilSrc), "");
+  ok("注释点明 SC.STALL 不是一回事", utilSrc.includes("SC.STALL = 2500") , "");
+  let stray = 0;
+  let used = 0;
+  const where231 = [];
+  for (const p of walk("src")) {
+    if (p.endsWith("core/const.ts") || p.endsWith("core/util.ts")) continue;
+    const t = fs.readFileSync(p, "utf8");
+    const n2500 = (t.match(/\b2500\b/g) || []).length;
+    stray += n2500;
+    if (n2500) where231.push(p + ":" + n2500);
+    used += (t.match(/CONNECT_MS/g) || []).length;
+  }
+  eq("除了常量定义处没有裸 2500", stray, 0);
+  ok("至少 10 处调用点改成常量", used >= 20, String(used));
+  ok("没有 2500 的文件清单为空", where231.length === 0, where231.join(","));
+  const dialSrc = fs.readFileSync("src/proxy/dial.ts", "utf8");
+  ok("httpProbe 默认参数走常量", dialSrc.includes("ms = CONNECT_MS"), "");
+  const probeSrc = fs.readFileSync("src/px/probe.ts", "utf8");
+  ok("probeSni 默认参数走常量", probeSrc.includes("ms = CONNECT_MS"), "");
+  ok("SC.STALL 仍在（语义是卡顿当量）", W.SC.STALL === 2500, String(W.SC.STALL));
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

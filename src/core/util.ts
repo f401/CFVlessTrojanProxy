@@ -4,6 +4,17 @@ export const WS_BUFFER_LIMIT = 1024 * 1024; // 下行发送缓冲超过 1MB 就�
 export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给它 60 秒
 
 /**
+ * 连接（`connect()`）与单发探活的统一上限，单位毫秒。
+ *
+ * 为什么要有这个常量：`connect()` 自身没有超时（Workers 的 socket 建连会一直挂着），
+ * 而免费计划全局只有 6 个并发 `connect()` 名额 —— 一条挂死的连接会把名额吃到
+ * 客户端放弃为止。7.169–7.171 修「谁漏了超时」时每次都在调用点写一遍 `2500`，
+ * 于是同一个预算散在 10 处：改一处必然漏一处（与 7.154 的 `VT_TTL`、7.226 的
+ * `PX_TTL` 是同一形状）。注意 `SC.STALL = 2500` 只是数字相同，语义是「卡顿当量」，
+ * 不要拿它当建连上限。
+ */
+export const CONNECT_MS = 2500;
+/**
  * 上游写（客户端 → 中继/源站）的单次分片上限。
  *
  * 数据面上唯一没有上限的操作就是它：中继接了 TCP 却从不读走数据时 socket.write() 永不返回，
@@ -14,7 +25,7 @@ export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给它 
  */
 export const UP_STALL_MS = 30000;
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐死
-export const VERSION = "7.230";
+export const VERSION = "7.231";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 
