@@ -4911,5 +4911,57 @@ console.log("\n191b) 中继健康表的 merge 口径");
   eq("arch 门禁拦住顶层可变容器", srcArch201.includes("顶层可变容器"), true);
 }
 
+// 第 202 组：force 落盘必须真的落盘；信誉表类型里不许留没人写也没人读的字段
+{
+  const store = Object.create(null);
+  const puts = [];
+  const envF = {
+    STATS: {
+      get: async (k) => (k in store ? store[k] : null),
+      put: async (k, v) => {
+        store[k] = v;
+        puts.push(k);
+      },
+    },
+  };
+  const snapWrites = () => puts.filter((k) => k === "snap").length;
+  const mark = () => W.S.stats.set("force-u", { up: 3, down: 4, conns: 1, first: 1, last: 1 });
+
+  W.S.snapWritten = 0;
+  W.S.snapChecked = 0;
+  W.S.snapBusy = false;
+  mark();
+  await W.flushSnap(envF, true);
+  eq("第一次强制落盘写了 snap", snapWrites(), 1);
+
+  // 5 分钟检查闸门：旧代码在 force 时也会 return，强制落盘静默变成 no-op
+  mark();
+  await W.flushSnap(envF, true);
+  eq("紧接着再强制一次仍会落盘（不被 5 分钟检查闸门吃掉）", snapWrites(), 2);
+
+  // 45 分钟全局闸门：把检查闸门的手动复位掉，单独验证第二道
+  W.S.snapChecked = 0;
+  mark();
+  await W.flushSnap(envF, true);
+  eq("force 也绕过 45 分钟全局闸门", snapWrites(), 3);
+
+  // 非 force 的路径必须仍然被节流（否则 force 就成了唯一节流）
+  mark();
+  await W.flushSnap(envF);
+  eq("非 force 的路径仍被节流", snapWrites(), 3);
+  W.S.stats.delete("force-u");
+
+  const srcSnap202 = fs.readFileSync("src/store/snapshot.ts", "utf8");
+  eq("检查闸门对 force 放行", srcSnap202.includes("if (!force && now - S.snapChecked < 5 * 60000) return;"), true);
+  eq("全局闸门对 force 放行", srcSnap202.includes("if (!force && now - (prev.ts || 0) < FLUSH_GAP) {"), true);
+  eq("flushSnap 把 force 传下去", srcSnap202.includes("await writeSnap(env, now, !!force);"), true);
+  eq("usageSnapWrite 文档不再承诺「不传就用本地状态」", srcSnap202.includes("不传则用本地状态"), false);
+
+  const srcTypes202 = fs.readFileSync("types/app.d.ts", "utf8");
+  eq("信誉表类型不再留 Seed.lastColo", srcTypes202.includes("lastColo"), false);
+  eq("信誉表类型不再留 SeedHp", srcTypes202.includes("SeedHp"), false);
+  eq("信誉表条目不再声明 v6 统计字段", /interface SeedNode \{[^}]*sb\?:/.test(srcTypes202), false);
+  eq("信誉表条目仍声明名字与地址", /interface SeedNode \{[^}]*k: string;/.test(srcTypes202), true);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

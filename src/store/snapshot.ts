@@ -30,7 +30,8 @@ export async function usageSnapGet(env: Env) {
 /**
  * 功能：写用量快照。读失败时直接跳过——拿空表覆盖会把别的用户的历史用量抹掉。
  * @param env 环境变量
- * @param users 可选的用户表（不传则用本地状态）
+ * @param users 用户表（必须传：本地没有"全部用户"的表，不传等于什么都不写 —— v7.142 删掉
+ *   门面方法就是因为 `usageSnapWrite(env)` 这个形态永远写不出东西，这里如实写清）
  * @returns 无
  */
 export async function usageSnapWrite(env: Env, users?: UserRec[]) {
@@ -164,15 +165,17 @@ export async function flushSnap(env: Env, force?: boolean): Promise<void> {
   // 免费额度（1000/天）打爆。
   const due = !!force || (S.snapBytes >= FLUSH_DIRTY && since >= FLUSH_MIN_MS) || since >= FLUSH_MAX_MS;
   if (!due) return;
-  // 全局闸门失败/跳过时不能每条连接都再去读一次 KV：5 分钟内只检查一次
-  if (now - S.snapChecked < 5 * 60000) return;
+  // 全局闸门失败/跳过时不能每条连接都再去读一次 KV：5 分钟内只检查一次。
+  // force 必须绕过它，否则 force 就是个死开关（v7.201：强制落盘连续调两次，第二次被
+  // 这句静默吃掉，调用方以为已经写进 KV）。
+  if (!force && now - S.snapChecked < 5 * 60000) return;
   S.snapChecked = now;
   // 同一 isolate 只允许一个落盘在飞：连接收尾会并发调 flushSnap，
   // 没有这个闩时 50 条连接同时关闭就可能各写一次 KV（写额度 1000/天）。
   if (S.snapBusy) return;
   S.snapBusy = true;
   try {
-    await writeSnap(env, now);
+    await writeSnap(env, now, !!force);
   } finally {
     S.snapBusy = false;
   }
@@ -182,9 +185,10 @@ export async function flushSnap(env: Env, force?: boolean): Promise<void> {
  * 功能：真正合并并写入快照（把 DO 与本地读数合并后落 KV）。
  * @param env 环境变量
  * @param now 当前时间戳
+ * @param force 跳过 45 分钟全局闸门（强制落盘时用）
  * @returns 无
  */
-async function writeSnap(env: Env, now: number): Promise<void> {
+async function writeSnap(env: Env, now: number, force = false): Promise<void> {
   // 第二个闸门是"全局"的：每个 isolate 各写各的会让写次数随实例数线性增长
   // （实测 8 个 isolate × 24 次/天 = 192 次）。快照本身就是合并写入，
   // 45 分钟内别人写过就跳过，自己的增量留在内存里下一轮合并，一条不丢。
@@ -197,7 +201,8 @@ async function writeSnap(env: Env, now: number): Promise<void> {
   } catch (e) {
     return;
   }
-  if (now - (prev.ts || 0) < FLUSH_GAP) {
+  // force 同样要绕开全局闸门：这是"现在就要写"的意思，被挡掉等于没写（调用方拿不到任何反馈）
+  if (!force && now - (prev.ts || 0) < FLUSH_GAP) {
     // 别人刚写过：把本地基线推进到那一次，并把下一次检查推到闸门结束，
     // 避免下一批连接反复走 getSnap 再跳过。
     S.snapWritten = Math.max(S.snapWritten || 0, prev.ts || 0);

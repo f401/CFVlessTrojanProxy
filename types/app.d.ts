@@ -144,35 +144,17 @@ interface NodeEntry {
   [k: string]: unknown;
 }
 
-/** 信誉表里的一条（落盘用） */
+/**
+ * 信誉表里的一条（落盘用）。
+ * 只有"名字与地址"：这几个字段是事实（这地址在这个机房连得上），跨 isolate 有意义。
+ * ms/tcp/tls/n/f/b/sb/at 是 v6 的跨机房统计，v7 起 `packName` 不再写、也没有任何读端 ——
+ * 类型里留着它们只会骗后来的人（照着类型写代码会读到永远 undefined 的字段）。
+ */
 interface SeedNode {
   k: string;
   h?: string;
   p?: number;
   cc?: string;
-  ms?: number;
-  tcp?: number;
-  tls?: number;
-  n?: number;
-  f?: number;
-  b?: number;
-  /** 先验速率（别的 isolate 测到的 p90） */
-  sb?: number;
-  at?: number;
-}
-
-/** 站点偏好的一条（跨 isolate 共享：延迟 + 站点级吞吐） */
-interface SeedHp {
-  h: string;
-  k: string;
-  ttfb?: number;
-  n?: number;
-  bad?: number;
-  at?: number;
-  /** 站点级吞吐 EWMA（字节/秒）与样本数、采集时刻 */
-  bps?: number;
-  bpsN?: number;
-  bpsAt?: number;
 }
 
 /** 一个机房的桶 */
@@ -180,8 +162,6 @@ interface SeedBucket {
   ts?: number;
   lastSwitch?: number;
   nodes?: SeedNode[];
-  /** 站点偏好：只存样本够的 */
-  hp?: SeedHp[];
 }
 
 /** px:seed 的整体结构 */
@@ -195,7 +175,6 @@ interface Seed {
   builtAt: number;
   byColo: Record<string, SeedBucket>;
   cnt?: CounterDoc | null;
-  lastColo?: string;
 }
 
 /** 本 isolate 的本地计数 */
