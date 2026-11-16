@@ -2,6 +2,7 @@
 // 状态机：0 unknown / 1 ok / 2 blocked / 3 dead。
 // 纪律：弱证据（traffic）不得把强证据（probe/client）的结论冲掉；封锁只能由「行为证据」判定。
 import { cnt } from "../core/counter";
+import { BoundedMap } from "../core/table";
 import type { ChanToken, EpochMs, HostName, SampleCount } from "../core/types";
 import { St } from "../core/enums";
 export type VState = 0 | 1 | 2 | 3;
@@ -41,9 +42,8 @@ export const VT_TTL_MS = 30 * 60_000;
  * - 目标 `*`（通配）一律不落表：写入入口直接拒绝并计数（见 `blockWild`），读取侧也不再有通配回落。
  */
 export class VerdictTable {
-  private byKey = new Map<string, Verdict>();
-  private ttl = VT_TTL_MS;
-  private max = 600;
+  /** 判定行（600 行 / 30 分钟过期；淘汰规则由 `BoundedMap` 统一提供） */
+  private byKey = new BoundedMap<string, Verdict>({ max: 600, ttlMs: VT_TTL_MS, timeOf: (row) => row.updatedAt });
 
   /**
    * 功能：把（目标, 通道）拼成 Map 键。
@@ -73,7 +73,7 @@ export class VerdictTable {
    */
   private fresh(v: Verdict | undefined): Verdict | undefined {
     if (!v) return undefined;
-    return Date.now() - v.updatedAt <= this.ttl ? v : undefined;
+    return Date.now() - v.updatedAt <= this.byKey.lifeMs() ? v : undefined;
   }
 
   /**
@@ -108,7 +108,7 @@ export class VerdictTable {
     // 弱证据不得把强证据的 blocked/dead 冲掉，也不得把 ok 冲成 blocked
     const st = src === 0 && old ? (old.state === St.Reachable ? (code >= 200 ? St.Reachable : old.state) : old.state) : VerdictTable.stateOf(code);
     this.byKey.set(k, { target: t, channel: c, state: st, code, ms: ems, observations: (old?.observations || 0) + 1, updatedAt: Date.now(), src });
-    if (this.byKey.size > this.max) this.trim();
+    if (this.byKey.size > this.byKey.capacity()) this.trim();
   }
 
   /**
@@ -274,29 +274,16 @@ export class VerdictTable {
   }
 
   /**
-   * 功能：把表压到上限以内——先清过期行，仍超限就删最旧的。
-   * 为什么分两步（v7.181）：只清过期行时，「全新鲜」的表一行也删不掉，
-   * 600 行上限名存实亡（实测灌 700 条走 setState 仍是 700、走 import 能到 960）；
-   * 而键里的站点名来自客户端，长命 isolate 会一路涨。trim 在 set/setState/import 三处都调。
+   * 功能：把表压到上限以内（v7.255 起整段委托给 `BoundedMap.prune`）。
+   * 历史：v7.181 之前只清过期行，「全新鲜」的表一行也删不掉，600 行上限名存实亡
+   * （实测灌 700 条走 setState 仍是 700、走 import 能到 960），而键里的站点名来自客户端，
+   * 长命 isolate 会一路涨 —— 所以先清过期、再按写入时间删最旧的两步必须都在。
+   * 现在这两步是 `BoundedMap.prune` 的语义，本方法只负责「超限才动手」。
    * @returns 无
    */
   private trim(): void {
-    if (this.byKey.size <= this.max) return;
-    this.sweep();
-    if (this.byKey.size <= this.max) return;
-    // 仍超限：按写入时间升序删最旧的（at 相同时保持插入顺序，行为稳定可测）
-    const over = this.byKey.size - this.max;
-    const rows = [...this.byKey.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt);
-    for (let i = 0; i < over && i < rows.length; i++) this.byKey.delete(rows[i][0]);
-  }
-
-  /**
-   * 功能：清掉过期行（trim 的第一步）。
-   * @returns 无
-   */
-  private sweep(): void {
-    const now = Date.now();
-    for (const [k, v] of this.byKey) if (now - v.updatedAt > this.ttl) this.byKey.delete(k);
+    if (this.byKey.size <= this.byKey.capacity()) return;
+    this.byKey.prune(Date.now());
   }
 }
 

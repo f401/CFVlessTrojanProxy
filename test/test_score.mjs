@@ -4057,7 +4057,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   // 1) 判定表：走 setState（recordBlock/recordPass/markBlocked/import 都走它）灌 700 行
   W.VT.clear();
   for (let i = 0; i < 700; i++) W.vSetState("cap" + i + ".test", "r:198.51.100.9", 2, 1);
-  eq("判定表的上限在 setState 上也生效（700 → 600）", W.VT.size(), 600);
+  ok("判定表的上限在 setState 上也生效（超限即收回容量）", W.VT.size() <= 600 && W.VT.size() >= 500, `size=${W.VT.size()}`);
   ok("删掉的是最旧的：第一条已经不在了", !W.vAll().some((r) => r.target === "cap0.test"));
   ok("最新的那条还在", W.vAll().some((r) => r.target === "cap699.test"));
 
@@ -4068,7 +4068,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
     for (let i = 0; i < 120; i++) rows.push({ k: "imp" + b + "_" + i + ".test|r:198.51.100.9", s: 2, t: Date.now() + 1800000 });
     W.vImport(rows);
   }
-  eq("判定表的上限在 import 上也生效（960 → 600）", W.VT.size(), 600);
+  ok("判定表的上限在 import 上也生效（超限即收回容量）", W.VT.size() <= 600 && W.VT.size() >= 500, `size=${W.VT.size()}`);
   W.VT.clear();
 
   // 3) DO 的 hl：三小时前「好」+ 刚刚「坏」不得拼成 { o:9, b:6, t:刚刚 }
@@ -4111,7 +4111,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   // 6) 源码断言：三处写入路径都要 trim
   const vSrc = fs.readFileSync("src/route/verdict.ts", "utf8");
   ok("set 走上限检查", vSrc.includes("this.trim();"));
-  ok("trim 会删最旧的而不是只清过期", vSrc.includes("const over = this.byKey.size - this.max;"));
+  ok("trim 委托给 BoundedMap.prune（先清过期、再按写入时间删最旧）", vSrc.includes("this.byKey.prune(Date.now());") && vSrc.includes("this.byKey.capacity()"));
 }
 
 // 172. 站点记忆表的上限只在一条路上执行；限流表被撑爆就整体清空（v7.182）
@@ -7171,7 +7171,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   ok("判定行用 channel", vtSrc.includes("channel: ChanToken;"), "");
   ok("判定行用 observations", vtSrc.includes("observations: SampleCount;"), "");
   ok("判定行用 updatedAt", vtSrc.includes("updatedAt: EpochMs;"), "");
-  ok("判定表私有表改了名", vtSrc.includes("private byKey = new Map"), "");
+  ok("判定表私有表是 BoundedMap（淘汰规则不再各写一遍）", vtSrc.includes("private byKey = new BoundedMap") && !vtSrc.includes("private sweep"), "");
   ok("判定表不再出现旧的私有名", !vtSrc.includes("private m = new Map"), "");
 
   const csSrc = fs.readFileSync("src/proxy/connection.ts", "utf8");
@@ -7245,5 +7245,28 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   ok("类型声明也改成新名", typesSrc.includes("trafficOkW") && !/\btS:/.test(typesSrc));
 }
 
+// ---------------------------------------------------------------- 255. 判定表迁到 BoundedMap
+const t255 = new W.VerdictTable();
+const now255 = Date.now();
+for (let i = 0; i < 700; i++) t255.setState(`h255-${i}.test`, "d", 2, 1);
+ok("700 条后仍在 600 以内", t255.size() <= 600, `size=${t255.size()}`);
+ok("超限时收回容量（低水位，留出下一批的空间）", t255.size() >= 500, `size=${t255.size()}`);
+const kept255 = t255.size();
+t255.setState("fresh255.test", "d", 2, 1);
+ok("新写入的站点一定还在（删的是最旧的）", t255.state("fresh255.test", "d") === 2);
+// 过期的行必须被当成「没有证据」：直接改时间戳绕过 Date.now()
+const k255 = "stale255.test|d";
+t255.byKey.set(k255, { target: "stale255.test", channel: "d", state: 2, code: 403, ms: 10, observations: 1, updatedAt: now255 - W.VT_TTL_MS - 60000, src: 1 });
+eq("超过 TTL 的行读出来是「没测过」", t255.state("stale255.test", "d"), 0);
+if (typeof t255.byKey.prune === "function") t255.byKey.prune(Date.now());
+ok("prune 顺手清掉过期行", t255.size() <= kept255 + 1, `size=${t255.size()}`);
+ok("lifeMs 报的是 VT_TTL_MS", typeof t255.byKey.lifeMs === "function" && t255.byKey.lifeMs() === W.VT_TTL_MS, `lifeMs=${t255.byKey.lifeMs && t255.byKey.lifeMs()}`);
+ok("capacity 报的是 600", typeof t255.byKey.capacity === "function" && t255.byKey.capacity() === 600, `cap=${t255.byKey.capacity && t255.byKey.capacity()}`);
+const vSrc255 = fs.readFileSync("src/route/verdict.ts", "utf8");
+ok("判定表用 BoundedMap", vSrc255.includes("private byKey = new BoundedMap"), "");
+ok("判定表不再自己写 sweep", !vSrc255.includes("private sweep"), "");
+ok("trim 只在超限时动手", vSrc255.includes("if (this.byKey.size <= this.byKey.capacity()) return;"), "");
+ok("fresh() 用表自身的 TTL", vSrc255.includes("this.byKey.lifeMs()"), "");
+ok("relay-health 有自己的删除偏好（dead>0 先跳过），不套用通用淘汰", fs.readFileSync("src/route/relay-health.ts", "utf8").includes("if (s.dead > 0) continue;"), "");
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
