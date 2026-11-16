@@ -97,7 +97,11 @@ export class Dialer {
       const tried = new Set<string>();
       // 钉住的 ?rx= 只试一次：它本来就是「我就要这一条」的诊断语义
       const maxTries = st.rx ? 1 : 2;
-      for (let tries = 0; tries < maxTries && !sock; tries++) {
+      // 名额的语义是「真的拨了几次」。以前用循环下标当名额，于是下面那个
+      // 「跳过 CF 边缘中继」的 continue 也会吃掉一次 —— 候选里排着 CF 边缘时，
+      // 「最多试两条」实际只试了一条，剩下那条能用的中继根本没被拨过。
+      let tries = 0;
+      for (let guard = 0; guard < maxTries + 4 && tries < maxTries && !sock; guard++) {
         const p = parseProxyIp(st.rx || (await SEL.current(env, mode, st, host, cfHost, tried)));
         if (!p || checkTarget(p.host, p.port)) break;
         const key = p.host + ":" + p.port;
@@ -106,9 +110,12 @@ export class Dialer {
         tried.add(key);
         // 池子里的「优选 IP」本身就是 CF 边缘：拿它中转到 CF 托管目标，等于从同一边缘再撞一次。
         if (cfHost && isCfIp(p.host)) {
-          logErr(`skip cf-edge relay ${p.host}`, host);
+          // 只计数：这里每个 CF 托管站点的请求都可能命中一次，
+          // 写进错误环会把真正的故障挤掉（7.84 删「每条成功连接都写 logErr」就是同一个原因）
+          cnt("skipCfRelay");
           continue;
         }
+        tries += 1;
         const pk = Promise.resolve(connect({ hostname: p.host, port: p.port }));
         try {
           // 拨号必须有上限：connect() 自己没有超时，挂死的中继会把整个请求拖到客户端放弃为止。
@@ -116,7 +123,7 @@ export class Dialer {
           st.node = key;
           st.via = "node";
           st.retried = true;
-          st.pxTries = tries + 1;
+          st.pxTries = tries;
           cnt("pxf");
           // 连上了：把这条中继的「连不上」计数清零（复活只可能由真实连接触发）
           HOOK.deadNote?.(p.host, true);

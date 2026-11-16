@@ -6857,5 +6857,63 @@ const wsOf245 = (state = 1) => ({ readyState: state, bufferedAmount: 0, send() {
   ok("第246组·statsSeedFail 已登记 cntKeys", srcState246.includes('"statsSeedFail"'));
 }
 
+
+// ═══ 第 247 组：跳过 CF 边缘候选不等于试过一次（D201）═══
+const H247 = "cfhost247.test";
+W.S.cfHost.set(H247, Date.now() + 1800000);
+W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), fail: 0, ok: 3, ms: 200 });
+{
+  // 选择器只给一条 CF 边缘：中转到 CF 托管目标等于从同一边缘再撞一次，必须跳过
+  const realCur = W.SEL.current;
+  W.SEL.current = async () => "104.16.0.1:443";
+  W.S.errs.length = 0;
+  const before = W.cntView().skipCfRelay || 0;
+  const st247 = {
+    rx: "",
+    node: "",
+    via: "",
+    retried: false,
+    pxTries: 0,
+    hostTrial: false,
+    cf: false,
+    ctx: { waitUntil: () => {}, passThroughOnException: () => {} },
+  };
+  let err247 = "";
+  try {
+    await W.DIALER.open({
+      env: { STATS: { get: async () => null, put: async () => {}, list: async () => ({ keys: [] }) }, proxyip: "auto" },
+      request: new Request("https://" + H247 + "/"),
+      st: st247,
+      mode: "tput",
+      host: H247,
+      port: 443,
+      pxForce: 1,
+    });
+  } catch (err) {
+    err247 = String((err && err.message) || err);
+  }
+  W.SEL.current = realCur;
+  const skipped = (W.cntView().skipCfRelay || 0) - before;
+  eq("跳过 CF 边缘候选记一次 skipCfRelay", skipped, 1);
+  eq(
+    "跳过不写错误环（否则每个 CF 站点请求都会挤掉真错误）",
+    W.S.errs.filter((x) => String(x.m || "").includes("skip cf-edge")).length,
+    0,
+  );
+  ok("跳过不是一次尝试（st.via 仍为空、pxTries 未推进）", st247.via === "" && st247.pxTries === 0, st247.via + "/" + st247.pxTries);
+  ok("跳过之后仍然会去拨直连（Node 里没有 sockets，抛错属预期）", err247.length > 0, err247);
+}
+{
+  const dsrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
+  ok("尝试名额按「真的拨了几次」算，不跟循环下标走",
+    dsrc.includes("for (let guard = 0; guard < maxTries + 4 && tries < maxTries && !sock; guard++) {"), true);
+  ok("计数发生在拨号之前（跳过分支没有 tries += 1）",
+    /tries \+= 1;\s*\r?\n\s*const pk = Promise\.resolve\(connect\(/.test(dsrc), true);
+  ok("跳过分支只计数、不再写 logErr",
+    /cnt\("skipCfRelay"\);\s*\r?\n\s*continue;/.test(dsrc) && !/logErr\(`skip cf-edge relay/.test(dsrc), true);
+  ok("st.pxTries 记的是真实尝试次数（不再用下标 +1）",
+    dsrc.includes("st.pxTries = tries;") && !dsrc.includes("st.pxTries = tries + 1;"), true);
+  ok("skipCfRelay 在 cntKeys 里登记", fs.readFileSync("src/core/state.ts", "utf8").includes('"skipCfRelay",'), true);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
