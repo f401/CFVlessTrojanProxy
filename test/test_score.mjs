@@ -5255,5 +5255,61 @@ console.log("\n191b) 中继健康表的 merge 口径");
   eq("新名优先于旧名", W.secretPwd({ pwd: "  x  ", trojan: "b" }), "x");
   eq("两个都没配时为空串", W.secretPwd({}), "");
 }
+/* ===== 第 209 组：直连拨号也必须有时限（7.208 D164） ===== */
+{
+  const prevSim = globalThis.__simConnect;
+  const envD = { proxyip: "", uuid: "main", proxyipList: "" };
+  const reqD = new Request("https://example.com/probe");
+  const mkSt = () => ({ hostTrial: false, trial: false, pxTries: 0 });
+  const runOne = async () => {
+    const t = Date.now();
+    const r = await Promise.race([
+      W.DIALER.open({ env: envD, request: reqD, st: mkSt(), mode: "tput", host: "example.com", port: 80, pxForce: -1 })
+        .then(() => "ok")
+        .catch((e) => "err:" + String(e && e.message)),
+      new Promise((res) => setTimeout(() => res("hang"), 4500)),
+    ]);
+    return { r, ms: Date.now() - t };
+  };
+  // ① connect() 永远不返回：必须在上限内失败，不能把请求一起挂住
+  globalThis.__simConnect = () => new Promise(() => {});
+  const a = await runOne();
+  ok("直连挂死时 4.5 秒内必须失败", a.r === "err:timeout", JSON.stringify(a));
+  ok("直连挂死的等待上限约 2.5 秒", a.ms < 4000, String(a.ms));
+  // ② 3 秒后才连上：必须已经放弃，并把迟到的 socket 关掉（否则白占 6 个并发名额）
+  let closedD = 0;
+  globalThis.__simConnect = () =>
+    new Promise((res) =>
+      setTimeout(
+        () =>
+          res({
+            close: () => {
+              closedD += 1;
+            },
+            closed: Promise.resolve(),
+            opened: Promise.resolve({}),
+          }),
+        3000,
+      ),
+    );
+  const b = await runOne();
+  await new Promise((r) => setTimeout(r, 1200));
+  ok("迟到的直连也会被放弃", b.r === "err:timeout", JSON.stringify(b));
+  ok("迟到的直连 socket 会被关掉", closedD === 1, String(closedD));
+  globalThis.__simConnect = prevSim;
+  // ③ 源码锁：两个直连分支都必须走 guarded，且 guarded 用 2500ms 上限
+  const dialerSrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
+  ok(
+    "直连两个分支都走 guarded 上限",
+    dialerSrc.includes("await this.guarded(dial4(host, port), host)") &&
+      dialerSrc.includes("await this.guarded(dial(host, port), host)"),
+  );
+  ok(
+    "不再有裸的直连拨号",
+    !dialerSrc.includes("sock = await dial4(host, port);") && !dialerSrc.includes("sock = await dial(host, port);"),
+  );
+  ok("超时后关掉迟到 socket", dialerSrc.includes("closeQuietly(x)"));
+  ok("guarded 用 2500ms 上限", dialerSrc.includes("return await withTimeout(pk, 2500);"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

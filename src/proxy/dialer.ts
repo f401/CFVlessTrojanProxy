@@ -7,7 +7,7 @@ import { isPxHost } from "../core/hosts";
 import { isCfIp } from "../core/net";
 import { S } from "../core/state";
 import { cnt } from "../core/counter";
-import { withTimeout } from "../core/util";
+import { closeQuietly, withTimeout } from "../core/util";
 import { dropExpired, trimAged } from "../core/hostmem";
 import { logErr } from "../nodes/metrics";
 import { nsFail } from "../nodes/stat";
@@ -136,16 +136,38 @@ export class Dialer {
     // 中转不可用或没走中转：CF 托管目标优先按 A 记录拨号（X 会直接拒 IPv6 出口）。
     if (!sock) {
       if (cfHost && !isV6Literal(host)) {
-        sock = await dial4(host, port);
+        sock = await this.guarded(dial4(host, port), host);
         if (sock) {
           cnt("px4");
           logErr(`ipv4 first ${host}`, host);
         }
       }
-      if (!sock) sock = await dial(host, port);
+      if (!sock) sock = await this.guarded(dial(host, port), host);
     }
     if (!sock) throw new Error("dial returned null");
     return sock;
+  }
+
+  /**
+   * 功能：给一条直连拨号加上限，并在超时后把「迟到连上」的 socket 关掉。
+   * @param p 拨号 Promise（`dial` / `dial4` 的返回值，`null` 表示没有可用地址）
+   * @param host 目标域名（只用于错误信息）
+   * @returns 连上的 socket；超时或全部失败时抛错 / 返回 null
+   */
+  private async guarded(p: Promise<Socket | null>, host: string): Promise<Socket | null> {
+    // 与中继分支同一个口径：直连同样是 connect()，同样没有自己的超时。
+    // 挂死的直连会把请求拖到客户端放弃为止，而那条「已经超时、但真的连上了」的连接
+    // 会白占免费计划 6 个并发 connect 名额（症状是之后所有站点开始零星失败）。
+    const pk = Promise.resolve(p);
+    try {
+      return await withTimeout(pk, 2500);
+    } catch (e) {
+      void pk.then((x) => closeQuietly(x)).catch(() => {
+        /* 本来就没连上 */
+      });
+      logErr(`direct dial timeout ${host}`, host);
+      throw e;
+    }
   }
 }
 
