@@ -67,15 +67,20 @@ mergeAt(t.dns, d.dns, 512, FACT_TTL.dns, (r) => {
 for (const r of d.ps as Array<{ k?: unknown; q?: unknown; n?: unknown; at?: unknown; top?: unknown }>) {
         if (!r || typeof r.k !== "string" || !r.k.includes("|")) continue;
         if (typeof r.at !== "number" || typeof r.q !== "number" || typeof r.n !== "number") continue;
-if (r.at <= Date.now() - FACT_TTL.ps) continue;
+        if (r.at <= Date.now() - FACT_TTL.ps) continue;
         const cur = t.ps[r.k];
-        if (cur && cur.at >= r.at) continue;
         // 历史最好只升不降（v7.163）：它不进 `at` 的比较，也不能被新观测的均值覆盖，
         // 否则「曾经行过」的证据每跨一次 isolate 就衰减一次，康复通道永远等不到那条通道。
         const qq = Math.max(0, Math.min(255, Math.round(r.q)));
         const wTop = Number(r.top);
-        const top = Math.max(cur?.top ?? 0, qq, Number.isFinite(wTop) ? Math.max(0, Math.min(255, Math.round(wTop))) : 0);
-        t.ps[r.k] = { q: qq, n: Math.max(0, Math.min(32, r.n)), at: r.at, top };
+        const inTop = Math.max(qq, Number.isFinite(wTop) ? Math.max(0, Math.min(255, Math.round(wTop))) : 0);
+        if (cur && cur.at >= r.at) {
+          // 更旧的观测不覆盖均值与计数，但「历史最好」是单调水位：整行丢掉等于把别处那条成功抹了
+          // （别处 10 分钟前成过一次、本地 1 分钟前只是又失败一次，康复通道要的是前者），所以只提 top。
+          if (inTop > (cur.top ?? 0)) cur.top = inTop;
+          continue;
+        }
+        t.ps[r.k] = { q: qq, n: Math.max(0, Math.min(32, r.n)), at: r.at, top: Math.max(cur?.top ?? 0, inTop) };
       }
       const pk = Object.keys(t.ps);
       if (pk.length > 512) {

@@ -5644,5 +5644,42 @@ try {
   ok("不再按坏证据条数单独排序", !meterSrc.includes("rows.sort((a, b) => b.d + b.b - (a.d + a.b));"));
 }
 
+// 远端 ps 合并：时间与「历史最好」是两件事（v7.217）
+{
+  const now = Date.now();
+  const K = "ps-newer.test|10.7.7.7";
+  const mk = () => ({ eg: {}, ps: { [K]: { q: 40, n: 4, at: now - 60000, top: 40 } }, dead: {}, blk2: {}, dns: {} });
+  // 远端这行更旧（10 分钟前），但那时它拿到过整页（top=220）
+  const a = mk();
+  W.mergeFacts(a, { ps: [{ k: K, q: 40, n: 4, at: now - 600000, top: 220 }] });
+  ok("更旧的远端行也会把历史最好提上来", (a.ps[K].top || 0) >= 220, JSON.stringify(a.ps[K]));
+  eq("均值仍是本地较新的那条", a.ps[K].q, 40);
+  eq("样本数不被旧观测覆盖", a.ps[K].n, 4);
+  eq("观测时间不被旧观测回退", a.ps[K].at, now - 60000);
+  // 本地已经更高：不能被远端更低的 top 拉下来
+  const b = mk();
+  b.ps[K].top = 255;
+  W.mergeFacts(b, { ps: [{ k: K, q: 250, n: 9, at: now - 900000, top: 60 }] });
+  eq("历史最好只升不降", b.ps[K].top, 255);
+  // 过期的行整条丢，top 也不提
+  const c = mk();
+  W.mergeFacts(c, { ps: [{ k: K, q: 250, n: 9, at: now - 46 * 60000, top: 255 }] });
+  eq("过期行连 top 一起丢", c.ps[K].top, 40);
+  // 更新的行照旧整体胜出（top 取两边较高）
+  const d2 = mk();
+  W.mergeFacts(d2, { ps: [{ k: K, q: 200, n: 8, at: now + 5000, top: 0 }] });
+  eq("更新观测的均值胜出", d2.ps[K].q, 200);
+  eq("更新观测的样本数胜出", d2.ps[K].n, 8);
+  eq("top 仍保留两边较高", d2.ps[K].top, 200);
+  // 新键没有任何历史
+  const e2 = mk();
+  W.mergeFacts(e2, { ps: [{ k: "ps-newer.test|10.7.7.8", q: 33, n: 2, at: now - 600000, top: 0 }] });
+  eq("新键按远端行建", e2.ps["ps-newer.test|10.7.7.8"].q, 33);
+  eq("新键的 top 就是它自己的均值", e2.ps["ps-newer.test|10.7.7.8"].top, 33);
+  const fm = fs.readFileSync("src/store/factmerge.ts", "utf8");
+  ok("源码：较早的观测只提 top", fm.includes("if (inTop > (cur.top ?? 0)) cur.top = inTop;"));
+  ok("源码：过期行在提 top 之前就被丢弃", fm.indexOf("if (r.at <= Date.now() - FACT_TTL.ps) continue;") < fm.indexOf("if (inTop > (cur.top ?? 0)) cur.top = inTop;"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
