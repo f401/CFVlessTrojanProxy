@@ -90,6 +90,7 @@ export class AppState {
     "factsJoin",
     "factsDo",
     "factsCacheHit",
+    "vtCacheBad",
     "capSet",
     "capNoise",
     "rehab",

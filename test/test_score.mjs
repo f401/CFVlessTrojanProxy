@@ -2874,7 +2874,7 @@ console.log("\n91) 活跃池目标：只作判据（加码函数已删）");
 console.log("\n92) 远端事实读取：并发只读一次 + colo 缓存命中");
 {
   let hits = 0;
-  const mkEnv = () => ({ uuid: "u-test", METER: { idFromName: () => "id", get: () => ({ fetch: async () => { hits += 1; await new Promise((r) => setTimeout(r, 15)); return { json: async () => ({ eg: [], ps: [], dead: [], blk2: [] }) }; } }) } });
+  const mkEnv = () => ({ uuid: "u-test", METER: { idFromName: () => "id", get: () => ({ fetch: async () => { hits += 1; await new Promise((r) => setTimeout(r, 15)); return { ok: true, json: async () => ({ vt: [], hl: [], eg: [], ps: [], dead: [], blk2: [] }) }; } }) } });
   W.S.vtLoaded = false;
   W.S.vtFlight = null;
   const before = globalThis.caches;
@@ -2886,7 +2886,7 @@ console.log("\n92) 远端事实读取：并发只读一次 + colo 缓存命中")
   // 缓存命中：有 colo 缓存时不应再问 DO
   hits = 0;
   W.S.vtLoaded = false;
-  globalThis.caches = { default: { match: async () => new Response(JSON.stringify({ eg: [], ps: [] })), put: async () => {} } };
+  globalThis.caches = { default: { match: async () => new Response(JSON.stringify({ vt: [], hl: [], eg: [], ps: [] })), put: async () => {} } };
   await W.vtLoad(mkEnv());
   eq("缓存命中不问 DO", hits, 0);
   eq("缓存命中后仍标记已加载", W.S.vtLoaded, true);
@@ -5538,6 +5538,65 @@ try {
   eq("env 缺失也不炸", W.shadowRate(null), 0.05);
   // 闸门在位：check-dead 现在也扫 SC 常量，且已接进 preflight
   ok("闸门扫描 SC 常量", deadSrc.includes("SC 常量扫描"));
+}
+// ===== 第 215 组：远端事实读取失败不能被当成「没有事实」（D171） =====
+{
+  const mkEnv = (mk) => ({ uuid: "u215", METER: { idFromName: (n) => "id-" + n, get: () => ({ fetch: async () => mk() }) } });
+  const reset = () => {
+    W.S.vtLoaded = false;
+    W.S.vtCool = 0;
+    W.S.vtFlight = null;
+  };
+  const errBody = () => new Response(JSON.stringify({ error: "boom" }), { status: 500 });
+  const shapeBad = () => new Response(JSON.stringify({ foo: 1 }), { status: 200 });
+  const good = () => new Response(JSON.stringify({ vt: [], hl: [] }), { status: 200 });
+
+  // ① DO 5xx：不能置 vtLoaded，要记冷却，且不回写缓存
+  reset();
+  let writes = 0;
+  let doHits = 0;
+  globalThis.caches = { default: { match: async () => undefined, put: async () => { writes += 1; } } };
+  await W.vtLoad(mkEnv(() => { doHits += 1; return errBody(); }));
+  ok("DO 5xx 不当成事实（不置 vtLoaded）", W.S.vtLoaded === false, String(W.S.vtLoaded));
+  ok("DO 5xx 记冷却，允许 60 秒后重试", W.S.vtCool > Date.now(), String(W.S.vtCool - Date.now()));
+  eq("DO 5xx 不回写缓存", writes, 0);
+
+  // ② DO 200 但形状不对：同样算失败
+  reset();
+  writes = 0;
+  await W.vtLoad(mkEnv(shapeBad));
+  ok("形状不对也不当成事实", W.S.vtLoaded === false, String(W.S.vtLoaded));
+  eq("形状不对不回写缓存", writes, 0);
+
+  // ③ 缓存里是坏体：当未命中，重新问 DO，且计数
+  reset();
+  writes = 0;
+  const beforeBad = Number(W.S.cnt.vtCacheBad || 0);
+  globalThis.caches = { default: { match: async () => new Response(JSON.stringify({ error: "stale" }), { status: 200 }), put: async () => { writes += 1; } } };
+  await W.vtLoad(mkEnv(good));
+  eq("坏缓存被当成未命中并计数", Number(W.S.cnt.vtCacheBad || 0), beforeBad + 1);
+  ok("坏缓存之后照样拿到事实", W.S.vtLoaded === true, String(W.S.vtLoaded));
+  eq("校验通过的快照才回写缓存", writes, 1);
+
+  // ④ 缓存里是好体：命中即用，不再问 DO
+  reset();
+  writes = 0;
+  doHits = 0;
+  const beforeHit = Number(W.S.cnt.factsCacheHit || 0);
+  globalThis.caches = { default: { match: async () => new Response(JSON.stringify({ vt: [], hl: [] }), { status: 200 }), put: async () => { writes += 1; } } };
+  await W.vtLoad(mkEnv(() => { doHits += 1; return good(); }));
+  eq("好缓存直接命中", Number(W.S.cnt.factsCacheHit || 0), beforeHit + 1);
+  eq("命中缓存不再问 DO", doHits, 0);
+  eq("命中缓存不回写", writes, 0);
+
+  // ⑤ 源码锁：判据不能被绕过
+  const vsrc = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+  ok("DO 读取检查了状态码", vsrc.includes("if (!rr.ok) throw new Error(\"do \" + rr.status);"), vsrc.includes("!rr.ok"));
+  ok("DO 读取检查了形状", vsrc.includes("if (!vtShape(bo)) throw new Error(\"do shape\");"));
+  ok("vtShape 是类型守卫", vsrc.includes("function vtShape(b: unknown): b is WireBody"));
+  ok("坏缓存计数已接线", vsrc.includes("cnt(\"vtCacheBad\")"));
+  ok("只有校验通过才回写缓存", vsrc.indexOf("cnt(\"factsDo\")") < vsrc.indexOf("cache.put("));
+  delete globalThis.caches;
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

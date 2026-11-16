@@ -98,6 +98,21 @@ type WireBody = FactsBody & {
 };
 
 /**
+ * 功能：判断响应体是不是「真的七张表」。
+ * 为什么需要它：`/meter/vt` 正常时恒返回 `{ vt: [...], hl: [...], eg/ps/dead/blk2/dns: [...] }`，
+ * 而 DO 报错时给的是 5xx 加 `{"error":…}` 之类的对象 —— 两者都是合法 JSON，
+ * 只看 `Array.isArray(jj.vt)` 会把错误体当成「事实为空」，然后让本 isolate 整个生命周期不再重读。
+ * @param b 解析后的任意 JSON
+ * @returns {boolean} 形状合格（vt 与 hl 都是数组）为 true
+ */
+function vtShape(b: unknown): b is WireBody {
+  if (!b || typeof b !== "object") return false;
+  const o = b as WireBody;
+  // vt 是判定表、hl 是中继健康度：正常快照里这两张一定在（空的时候也是空数组）
+  return Array.isArray(o.vt) && Array.isArray(o.hl);
+}
+
+/**
  * 功能：真正的一次读取（single-flight 的内核）—— 先看 colo 缓存，未命中再问 DO，并顺手回写缓存。
  * @param env 环境绑定
  * @returns {Promise<void>} 无返回值
@@ -114,14 +129,25 @@ async function vtFetch(env: Env): Promise<void> {
     if (cache) {
       const hit = await cache.match(ckey);
       if (hit) {
-        jj = (await hit.json()) as WireBody;
-        cnt("factsCacheHit");
+        const bo = await hit.json();
+        // 坏缓存（修复前写进去的错误体）当未命中：否则同一 POP 的 isolate 会跟着错 90 秒
+        if (vtShape(bo)) {
+          jj = bo;
+          cnt("factsCacheHit");
+        } else {
+          cnt("vtCacheBad");
+        }
       }
     }
     if (!jj) {
       const raw = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
       const rr = await env.METER.get(env.METER.idFromName(raw)).fetch("https://meter/vt");
-      jj = (await rr.json()) as WireBody;
+      // 不检查状态码是旧实现的根部问题：5xx 的错误体也是合法 JSON，会被当成「事实为空」
+      if (!rr.ok) throw new Error("do " + rr.status);
+      const bo = await rr.json();
+      // 形状再筛一道：DO 有可能 200 返回一个不含事实的对象（比如被中间件改写）
+      if (!vtShape(bo)) throw new Error("do shape");
+      jj = bo;
       cnt("factsDo");
       // 回写缓存不阻塞连接：写失败（无 Cache API / 配额）也不影响本次结果
       if (cache) void cache.put(ckey, new Response(JSON.stringify(jj), { headers: { "cache-control": "max-age=90" } })).catch(() => {});
