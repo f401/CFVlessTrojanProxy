@@ -1746,7 +1746,10 @@ W.vClear();
   const yt = W.renderClash(envR, new URL("https://example.com/x"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
   eq("冷 isolate：中继条目来自事实层的 v4 出口", yt.includes("r-192.0.2.44-") && yt.includes("rx=192.0.2.44"), true);
   S.eg4Top = keepTop;
-  eq("?e=0 时不发中继条目", (y0r.match(/name: "r-/g) || []).length, 0);
+  // ?e=0 只是「不发入口 IP 条目」（那是列表里最占地方的一块），中继条目仍要发：
+  // 它们承载 ?tu= 通道实测，一并删掉等于把「客户端自己挑中继」这条路关死。
+  eq("?e=0 只关入口条目、中继条目仍在", y0r.includes('name: "r-203.0.113.7-'), true);
+  eq("?e=0 时入口条目消失", (y0r.match(/name: "e-/g) || []).length, 0);
   S.alive = keep;
 }
 
@@ -4696,6 +4699,67 @@ console.log("\n191b) 中继健康表的 merge 口径");
   ok("注释门禁会查文档挂在 import 上", srcAudit.includes("function docOnImport(lines)"), "docOnImport 不见了");
   ok("门禁把首个注释块当文件头放过", srcAudit.includes("blockOf[k] === 1"), "文件头判据不见了");
   ok("门禁真的调用了这条检查", srcAudit.includes("const onImp = docOnImport(lines);"), "没调用 docOnImport");
+}
+// 第 197 组：订阅开关各管各的块（?e=0 不该把中继块一起删掉）；地区条目端口有兜底
+{
+  const subEnv = { uuid: "4241b903-8d39-4a17-8f4c-bb33b1630c33", pwd: "", nodes: "" };
+  const subHost = "sim.example.com";
+  const aliveBefore = W.S.alive;
+  const egBefore = W.S.eg4Top;
+  W.S.alive = new Map();
+  W.S.eg4Top = [];
+  W.S.alive.set("45.136.117.194:443", { host: "45.136.117.194", port: 443, tls: true, cc: "" });
+  const render = (q) => W.renderClash(subEnv, new URL("https://" + subHost + "/sub" + q), subEnv.uuid, subHost, {}, ["HK"], undefined);
+  // 取某个条目的 server 行（clash 的 name 带引号，按含引号的整行找）
+  const serverOf = (txt, name) => {
+    const ls = txt.split(/\r?\n/);
+    const i = ls.findIndex((l) => l.trim() === "- name: \"" + name + "\"");
+    if (i < 0) return null;
+    const s = ls.slice(i, i + 6).find((l) => l.trim().startsWith("server:"));
+    return s ? s.trim().slice(7).trim() : null;
+  };
+
+  // ① ?e=0 只去掉入口 IP 条目：中继条目与它的 url-test 组都还在，server 回落到域名
+  const noEdgeTxt = render("?e=0");
+  ok("?e=0 时中继条目仍在", noEdgeTxt.includes("- name: \"r-45.136.117.194-VLT\""), "中继条目被 ?e=0 一起删掉了");
+  ok("?e=0 时中继优选组仍在", noEdgeTxt.includes("\"🔁 中继优选\""), "中继优选组被 ?e=0 一起删掉了");
+  ok("?e=0 时入口条目确实没了", noEdgeTxt.includes("- name: \"e-") === false, "入口条目没被去掉");
+  eq("?e=0 时中继条目用域名入口", serverOf(noEdgeTxt, "r-45.136.117.194-VLT"), subHost);
+
+  // ② ?r=0 才是中继开关：中继条目与组都没了，入口条目照旧
+  const noRelayTxt = render("?r=0");
+  ok("?r=0 时中继条目消失", noRelayTxt.includes("- name: \"r-45.136.117.194-VLT\"") === false, "中继条目还在");
+  ok("?r=0 时中继优选组消失", noRelayTxt.includes("\"🔁 中继优选\"") === false, "中继优选组还在");
+  ok("?r=0 时入口条目仍在", noRelayTxt.includes("- name: \"e-"), "入口条目被连带删掉了");
+
+  // ③ 默认（两个开关都不给）：入口 IP 还在时，中继条目必须钉在入口 IP 上，不能退化成域名
+  const defTxt = render("");
+  ok("默认时中继条目钉入口 IP", /^\d+\.\d+\.\d+\.\d+$/.test(String(serverOf(defTxt, "r-45.136.117.194-VLT"))), "中继条目的 server 不是 IP 字面量");
+
+  // ④ RegionEntry 的端口兜底：url 省略时不能是 undefined（`NaN || undefined` 还是 undefined）
+  const regs = W.regionEntries(["HK"], subHost, "", ["vless"], undefined);
+  eq("省略 url 时地区条目端口是 443", regs.length && regs[0].port, 443);
+  const regHttp = W.regionEntries(["HK"], subHost, "", ["vless"], new URL("http://" + subHost + "/sub"));
+  eq("http 订阅的地区条目端口是 80", regHttp.length && regHttp[0].port, 80);
+  const regPort = W.regionEntries(["HK"], subHost, "", ["vless"], new URL("https://" + subHost + ":8443/sub"));
+  eq("显式端口的订阅按 URL 端口走", regPort.length && regPort[0].port, 8443);
+
+  W.S.alive = aliveBefore;
+  W.S.eg4Top = egBefore;
+
+  // ⑤ 源码锁：两个开关必须是两个独立条件；兜底写法必须在位
+  const srcSub = fs.readFileSync("src/views/sub.ts", "utf8");
+  ok("中继块只判 noRelay", srcSub.includes("if (!noRelay) {"), "条件里还带着 noEdge");
+  eq("中继块不再要求入口 IP 存在", srcSub.includes("if (!noEdge && !noRelay) {"), false);
+  const srcCommon = fs.readFileSync("src/views/sub-common.ts", "utf8");
+  ok("地区条目端口有显式兜底", srcCommon.includes(': 443;'), "端口兜底不见了");
+  // 注释里可以引用旧写法（说明为什么改），但可执行的那一行必须是新的三目
+  const commonCode = srcCommon.split(/\r?\n/).filter((l) => !l.trim().startsWith("//")).join("\n");
+  eq("端口表达式不再依赖 url 守卫", commonCode.includes("Number(url && url.port)"), false);
+  ok("端口表达式显式区分有无 url", commonCode.includes("const listen = url ? Number(url.port)"), "端口表达式没改");
+  // ⑥ sing-box 的两处 domain_strategy 被脚本打散过缩进（块内 10 空格）
+  const sbLines = fs.readFileSync("src/views/sub-singbox.ts", "utf8").split(/\r?\n/);
+  eq("sing-box 没有 4 空格缩进的 domain_strategy", sbLines.filter((l) => /^ {4}domain_strategy:/.test(l)).length, 0);
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

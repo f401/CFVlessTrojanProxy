@@ -20,6 +20,7 @@ export {
   trojanPasswordOf,
   edgeCount,
 } from "./views/sub";
+export { regionEntries } from "./views/sub-common";
 export { SUBVIEW, SubscriptionView } from "./views/subview";
 export { ROUTES, RouteTable } from "./routes/table";
 export { PAGES, PageView } from "./views/pageview";

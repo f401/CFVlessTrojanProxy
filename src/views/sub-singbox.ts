@@ -39,7 +39,7 @@ export function renderSingbox(
           tag,
           server: n.host,
           server_port: n.port,
-    domain_strategy: "ipv4_only",
+          domain_strategy: "ipv4_only",
           tls: n.tls ? { enabled: true, server_name: host } : { enabled: false },
           transport: { type: "ws", path: `${nodePath(n)}&mode=${mode}`, headers: { Host: host } },
         };
@@ -58,7 +58,7 @@ export function renderSingbox(
       tag: e.name,
       server: e.server,
       server_port: e.port,
-    domain_strategy: "ipv4_only",
+          domain_strategy: "ipv4_only",
       tls: { enabled: true, server_name: host },
       transport: { type: "ws", path: e.path, headers: { Host: host } },
     };

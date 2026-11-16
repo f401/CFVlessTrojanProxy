@@ -123,7 +123,10 @@ export function renderClash(
   // 只有客户端自己逐条试才稳；路径里的 px=1&rx=<ip> 由服务端钉住该中继。
   const relayNames: string[] = [];
   const relayIps: string[] = [];
-  if (!noEdge && !noRelay) {
+  // 中继块只由 ?r=0 控制。之前写的是 `!noEdge && !noRelay`，于是 `?e=0`（只想减少入口条目，
+  // 那是最占地方的一块）会连带把中继条目一起删掉 —— 而下面 `srv` 里的 `: host` 回退正是为
+  // 「没有入口 IP 可用」这一种情况写的，条件一收紧它就永远执行不到（写着的兜底从没生效）。
+  if (!noRelay) {
     // 用本 isolate 已判活的中继（S.alive 里是 ip:port），不走 KV —— 订阅渲染是同步的
     // 先用**事实层已知的 v4 出口**（跨 isolate 共享过，钉住它们实测 9/9 能过），
     // 再用本 isolate 已判活的中继补齐 —— 只发 S.alive 会在冷 isolate 里发出空组。

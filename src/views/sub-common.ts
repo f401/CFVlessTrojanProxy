@@ -255,7 +255,10 @@ export function nodePath(n: RankedNode) {
 export function regionEntries(regions: string[], host: string, pass: string, protos: string[], url?: URL): RegionEntry[] {
   const out: RegionEntry[] = [];
   // 监听端口按订阅自身的 URL 推断（https=443 / http=80，显式端口优先）：客户端连的就是这个入口
-  const listen = Number(url && url.port) || (url && url.protocol === "http:" ? 80 : 443);
+  // url 是可选参数。旧写法 `Number(url && url.port) || (url && url.protocol === "http:" ? 80 : 443)`
+  // 在 url 省略时靠三元里的 `url &&` 守卫得到 443 —— 结果是对的，但正确性藏在一个守卫的副作用里，
+  // 读起来像是会算出 `NaN || undefined`。这里把「没 URL 就是 443」写在最外层，读代码不用再推一遍。
+  const listen = url ? Number(url.port) || (url.protocol === "http:" ? 80 : 443) : 443;
   for (const cc of regions) {
     for (const proto of protos) {
       // Trojan 必须有密码，没配就跳过这条协议，别发一条注定连不上的条目

@@ -2,7 +2,7 @@
 
 给在这个仓库里干活的 AI/人类协作者的交接说明。目标：**任何一次改动都能被门禁证明、能被回滚、不会把线上搞挂**。
 
-项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.196**（自举审计七十六批、共 146 个缺陷，均未部署））。
+项目：`cf-proxyx`（`package.json` 名，版本号 1.0.0；实际对外版本是 `src/core/util.ts` 的 `VERSION`，线上 **7.123**、仓库 **7.197**（自举审计七十七批、共 148 个缺陷，均未部署））。
 形态：Cloudflare Workers 上的 VLESS/Trojan over WebSocket，带 proxyip 候选池、节点评分与轮换、用量计量、封锁判定与调度预算。
 
 ---
