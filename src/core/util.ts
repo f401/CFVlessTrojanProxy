@@ -14,7 +14,7 @@ export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给它 
  */
 export const UP_STALL_MS = 30000;
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐死
-export const VERSION = "7.212";
+export const VERSION = "7.213";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 
@@ -32,7 +32,11 @@ export const secretPwd = (env: Env) => {
   return String((env && (env.pwd || legacy)) || "").trim();
 };
 
-/** 影子流量默认比例：只在「当前节点样本不足」时才提升，上限 SC.EXPLORE_MAX */
+/**
+ * 影子流量默认比例（`env.pxShadow` 没配时用它）。
+ * 这里**不**做「样本不足就抬比例」：探索由单层抽样自己负责（样本少 ⇒ 乐观面大 ⇒ 天然被抽），
+ * 比例只决定「给站点画像补样本」的那点点流量。
+ */
 export const SHADOW_DEFAULT = 0.05;
 
 /**

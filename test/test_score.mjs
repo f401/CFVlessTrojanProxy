@@ -5515,5 +5515,29 @@ try {
   eq("中转空关闭会加一", W.S.nstat.get(k213).eCloseP, 1);
   W.S.nstat.delete(k213);
 }
+
+/* ===== 第 214 组：SC 里的僵尸常量（有人声明、注释描述了一个不存在的机制、没人读） ===== */
+{
+  const constSrc = fs.readFileSync("src/core/const.ts", "utf8");
+  const utilSrc = fs.readFileSync("src/core/util.ts", "utf8");
+  const pxSrc = fs.readFileSync("src/px/const.ts", "utf8");
+  const deadSrc = fs.readFileSync("tools/check-dead.mjs", "utf8");
+  // 源码锁：两个常量本身不存在了（否则注释会继续描述「seed 先验保质期」「探索上限」）
+  ok("SC 不再有 SEED_TTL", !/SEED_TTL:/.test(constSrc) && !/SC\.SEED_TTL/.test(constSrc));
+  ok("SC 不再有 EXPLORE_MAX", !/EXPLORE_MAX:/.test(constSrc) && !/SC\.EXPLORE_MAX/.test(constSrc));
+  // 文档锁：不许再拿被删的常量当承诺
+  ok("shadowRate 文档不再承诺 EXPLORE_MAX", !/SC\.EXPLORE_MAX/.test(utilSrc));
+  ok("shadowRate 文档写清探索归抽样负责", utilSrc.includes("探索由单层抽样"));
+  ok("px/const 不再引用已删的 SC.SEED_TTL", !/SC\.SEED_TTL/.test(pxSrc));
+  // 行为面：pxShadow 的解析口径（默认 0.05、夹到 1、非法回落默认）
+  eq("没配 pxShadow 用默认比例", W.shadowRate({}), 0.05);
+  eq("配了就用配的值", W.shadowRate({ pxShadow: "0.3" }), 0.3);
+  eq("超过 1 夹到 1", W.shadowRate({ pxShadow: "5" }), 1);
+  eq("非法值回落默认", W.shadowRate({ pxShadow: "abc" }), 0.05);
+  eq("负数回落默认", W.shadowRate({ pxShadow: "-1" }), 0.05);
+  eq("env 缺失也不炸", W.shadowRate(null), 0.05);
+  // 闸门在位：check-dead 现在也扫 SC 常量，且已接进 preflight
+  ok("闸门扫描 SC 常量", deadSrc.includes("SC 常量扫描"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

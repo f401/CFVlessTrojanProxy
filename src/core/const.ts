@@ -68,8 +68,7 @@ export const SC = {
   RECENT_MIN: 3 * 1048576, // 近期有效字节门槛
   SAMPLE_TTL: 24 * 3600e3, // 吞吐样本保质期
   CONN_W_CAP: 4, // 单条连接对直方图的累计权重上限
-  SEED_TTL: 24 * 3600e3, // seed 先验保质期
-  EXPLORE_MAX: 0.1, // 样本不足时的探索上限（样本够了回落到 pxShadow）
+
   WIN_HL: 3 * 60000, // 快速失败窗口半衰期：3 分钟（指数窗口，不按 10 分钟一刀切）
 };
 export const HIST_BASE = 16 * 1024; // 直方图起点 16 KB/s
