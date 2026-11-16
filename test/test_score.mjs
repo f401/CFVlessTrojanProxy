@@ -5835,5 +5835,37 @@ ok("构造函数里有 else 分支", meterSrc221.includes("cnt(\"doBad\");"));
 ok("留底带着原值", meterSrc221.includes("this.bakRaw = all;"));
 ok("落盘前备份 a_bak", meterSrc221.includes("await this.st.storage.put(\"a_bak\", this.bakRaw);"));
 
+// ---- 第 222 组：站点级自愈（sweep → mute）不能被别处回传的封锁事实撤销（v7.221）----
+const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
+{
+  const H = "mute222.example.com";
+  const A = "10.222.0.1";
+  const B = "10.222.0.2";
+  const t0 = Date.now();
+  // ① 两行封锁事实 + 一次站点级自愈：判「站点在拒绝所有人」，清表并静音 30 分钟
+  W.BLK.clear();
+  eq("建行两条", W.BLK.load([{ k: H + "|" + A, n: 3, at: t0 - 60000 }, { k: H + "|" + B, n: 3, at: t0 - 60000 }]), 2);
+  eq("封锁使出口涨价", W.blkPen(H, A, t0), W.BLK_PEN);
+  eq("站点级自愈触发", W.BLK.sweep(H, [A, B], t0), true);
+  eq("自愈后静音中", W.BLK.muted(H, t0 + 1000), true);
+  eq("自愈清掉了封锁行", W.blkPen(H, A, t0), 1);
+  // ② 静音期内，别处 isolate 回传同一个站点的封锁事实：必须被拒绝（否则自愈等于白做）
+  eq("静音期内别处的封锁事实被拒绝", W.BLK.load([{ k: H + "|" + A, n: 3, at: t0 + 2000 }]), 0);
+  eq("静音期内封锁没有复活", W.blkPen(H, A, t0 + 3000), 1);
+  // ③ 别的站点不受影响
+  eq("没被静音的站点照常收", W.BLK.load([{ k: "other222.example.com|" + A, n: 3, at: t0 + 2000 }]), 1);
+  // ④ 静音过期之后，同一行要能重新被接受（不是永久拒收）
+  W.BLK.clear();
+  W.BLK.load([{ k: H + "|" + A, n: 3, at: t0 - 7200000 }, { k: H + "|" + B, n: 3, at: t0 - 7200000 }]);
+  eq("过期站点再自愈", W.BLK.sweep(H, [A, B], t0 - 31 * 60000), true);
+  eq("静音已经过期", W.BLK.muted(H, t0), false);
+  eq("静音过期后照常收", W.BLK.load([{ k: H + "|" + A, n: 3, at: t0 }]), 1);
+  W.BLK.clear();
+  // ⑤ 源码锁：静音判断在 load 里、丢弃要计数、计数要在 cntKeys 登记
+  eq("load 里按最后一个竖线切站点", blkSrc().includes("const cut = r.k.lastIndexOf(\"|\");"), true);
+  eq("load 用 muted 挡远端事实", blkSrc().includes("if (this.muted(r.k.slice(0, cut), now)) {"), true);
+  eq("静音丢弃有计数", blkSrc().includes("cnt(\"blkMutedSkip\")"), true);
+  eq("blkMutedSkip 已登记", fs.readFileSync("src/core/state.ts", "utf8").includes("\"blkMutedSkip\","), true);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

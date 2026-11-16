@@ -87,6 +87,7 @@ export class AppState {
     "blkDO",
     "bizSweeps",
     "blkContra",
+    "blkMutedSkip",
     "factsJoin",
     "factsDo",
     "factsCacheHit",

@@ -37,3 +37,8 @@ __pycache__/
 # 构建依赖（由 scripts/fetch-deps.sh 下载）
 obf/obfuscator-browser.js
 _bundle.mjs
+
+out*.txt
+err*.txt
+pre.txt
+

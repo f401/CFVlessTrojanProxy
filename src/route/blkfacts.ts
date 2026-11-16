@@ -245,10 +245,20 @@ export class BlkFacts {
    */
   load(rows: BlkWire[]): number {
     let n = 0;
+    // 静音期内的站点不再收事实（v7.221）：`sweep` 刚判定「这个站点在拒绝所有人」，于是清表并
+    // 静音 30 分钟。别处 isolate 的 blk2 里还躺着同一批「这个出口被封锁」的行，收下来等于把
+    // 自愈的结论当场撤销（penOf 又乘 6 倍）—— 而「静音期内不再收新证据」正是 mute 的定义。
+    const now = Date.now();
     for (const r of rows) {
       if (!r || typeof r.k !== "string") continue;
       const at = Number(r.at);
       if (!Number.isFinite(at)) continue;
+      const cut = r.k.lastIndexOf("|");
+      if (cut <= 0) continue;
+      if (this.muted(r.k.slice(0, cut), now)) {
+        cnt("blkMutedSkip");
+        continue;
+      }
       const cur = this.rows.get(r.k);
       if (cur && cur.at >= at) continue;
       this.rows.set(r.k, { n: BLK_BATCH, at });
