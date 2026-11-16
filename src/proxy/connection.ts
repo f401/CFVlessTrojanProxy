@@ -126,10 +126,9 @@ export class Connection {
       if (this.sampleAt && dt >= 800 && now - this.lastEmit >= 5000) {
         const bytes = this.down - this.sampleDown;
         if (this.node && bytes >= 65536) {
-          let w = this.takeWeight(bytes, dt);
           // 窗口里一半以上时间在背压 = 瓶颈在客户端，这个样本不代表节点能力
           const stallWin = this.stallMs - this.stallMark;
-          if (stallWin > dt * 0.5) w *= 0.3;
+          const w = this.takeWeight(bytes, dt, stallWin > dt * 0.5 ? 0.3 : 1);
           if (w > 0) {
             this.lastEmit = now;
             nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
@@ -270,11 +269,14 @@ export class Connection {
    * 本次窗口应贡献多少直方图权重。
    * 512KB / 1s 是"一个标准样本"；短窗口或小样本按比例降权，单连接累计封顶。
    */
-  takeWeight(bytes: number, dt: number): number {
+  takeWeight(bytes: number, dt: number, factor = 1): number {
     const room = SC.CONN_W_CAP - this.sampleW;
     if (room <= 0) return 0;
     const w = Math.min(1, bytes / (512 * 1024)) * Math.min(1, dt / 1000);
-    const use = Math.min(room, w);
+    // 折扣因子（背压窗口 ×0.3）必须在封顶之前生效：
+    // 否则一条「客户端是瓶颈」的连接会按满权重吃掉 CONN_W_CAP，
+    // 报出去的却只有 0.3 倍 —— 它一共只贡献了 cap 的 30%，随后再也报不出样本。
+    const use = Math.min(room, w * Math.max(0, Math.min(1, factor)));
     this.sampleW += use;
     return use;
   }
@@ -302,9 +304,8 @@ export class Connection {
         bytes >= 32768 &&
         now - this.lastEmit >= 5000
       ) {
-        let w = this.takeWeight(bytes, dt);
         const stallWin = this.stallMs - this.stallMark;
-        if (stallWin > dt * 0.5) w *= 0.3;
+        const w = this.takeWeight(bytes, dt, stallWin > dt * 0.5 ? 0.3 : 1);
         if (w > 0) {
           nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
           cnt("tput");

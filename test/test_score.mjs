@@ -7268,5 +7268,32 @@ ok("判定表不再自己写 sweep", !vSrc255.includes("private sweep"), "");
 ok("trim 只在超限时动手", vSrc255.includes("if (this.byKey.size <= this.byKey.capacity()) return;"), "");
 ok("fresh() 用表自身的 TTL", vSrc255.includes("this.byKey.lifeMs()"), "");
 ok("relay-health 有自己的删除偏好（dead>0 先跳过），不套用通用淘汰", fs.readFileSync("src/route/relay-health.ts", "utf8").includes("if (s.dead > 0) continue;"), "");
+// ---------------------------------------------------------------- 256. 背压折扣先于单连接权重上限
+const env256 = { STATS: { get: async () => null, put: async () => {}, list: async () => ({ keys: [] }) } };
+const st256 = new W.Connection(env256, { waitUntil() {}, passThroughOnException() {} }, W.Mode.Throughput, "1.1.1.1");
+ok("takeWeight 收折扣因子", st256.takeWeight.length >= 2 && String(st256.takeWeight).includes("factor"), "");
+const w256a = st256.takeWeight(512 * 1024, 1000, 0.3);
+ok("折扣直接作用在报出的权重上（1.0 × 0.3 = 0.3）", Math.abs(w256a - 0.3) < 1e-6, `got=${w256a}`);
+const st256b = new W.Connection(env256, { waitUntil() {}, passThroughOnException() {} }, W.Mode.Throughput, "1.1.1.1");
+let total256 = 0;
+let windows256 = 0;
+for (let i = 0; i < 40; i++) {
+  const w = st256b.takeWeight(512 * 1024, 1000, 0.3);
+  if (w <= 0) break;
+  total256 += w;
+  windows256++;
+}
+ok("一直背压的连接也能用满自己的权重额度", total256 >= W.SC.CONN_W_CAP - 0.01, `total=${total256}`);
+ok("用满额度需要更多窗口（折扣真的生效了）", windows256 > W.SC.CONN_W_CAP, `windows=${windows256}`);
+const st256c = new W.Connection(env256, { waitUntil() {}, passThroughOnException() {} }, W.Mode.Throughput, "1.1.1.1");
+let total256c = 0;
+for (let i = 0; i < 10; i++) total256c += st256c.takeWeight(512 * 1024, 1000);
+ok("不打折时额度用完就不再给样本", Math.abs(total256c - W.SC.CONN_W_CAP) < 1e-6, `total=${total256c}`);
+const st256d = new W.Connection(env256, { waitUntil() {}, passThroughOnException() {} }, W.Mode.Throughput, "1.1.1.1");
+eq("负折扣不会让权重变成负数", st256d.takeWeight(512 * 1024, 1000, -5), 0);
+const csrc256 = fs.readFileSync("src/proxy/connection.ts", "utf8");
+eq("两处调用都把折扣一起传进去", csrc256.split("stallWin > dt * 0.5 ? 0.3 : 1)").length - 1, 2);
+ok("调用点不再自己乘 0.3", !csrc256.includes("w *= 0.3"), "");
+ok("封顶按报出的量计", csrc256.includes("Math.min(room, w * Math.max(0, Math.min(1, factor)))"), "");
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
