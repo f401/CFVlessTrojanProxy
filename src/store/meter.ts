@@ -206,6 +206,14 @@ export class Meter {
       }
       // 连接观测按节点合并（不同 isolate 各报一段）：计数相加，分位数取最新一段
       if (Array.isArray(d.cl) && d.cl.length) {
+        // 时间戳必须严格大于表里已有的任何一条（v7.215）：同一毫秒里连着来两批时，
+        // 时间戳相同会让排序退回插入序，「插得最早」的那条又被当成最旧的删掉 ——
+        // 而它恰恰可能是样本最多的节点。取 max(now, 表内最大 + 1) 就永不并列。
+        let clNow = Date.now();
+        for (const r of this.cl) {
+          const t0 = Number(r.t) || 0;
+          if (t0 >= clNow) clNow = t0 + 1;
+        }
         for (const x of d.cl) {
           if (!x || typeof x.n !== "number" || typeof x.k !== "string") continue;
           const old = this.cl.find((r) => r.k === x.k);
@@ -215,9 +223,18 @@ export class Meter {
             old.dn += x.dn;
             old.p50 = x.p50;
             old.p95 = x.p95;
-          } else this.cl.push({ k: x.k, n: x.n, ok: x.ok, p50: x.p50, p95: x.p95, dn: x.dn });
+            // 刷新时间戳（v7.215）：淘汰按它排序，活跃节点不能因为「插得早」先被删
+            old.t = clNow;
+          } else this.cl.push({ k: x.k, n: x.n, ok: x.ok, p50: x.p50, p95: x.p95, dn: x.dn, t: clNow });
         }
-        if (this.cl.length > 60) this.cl = this.cl.slice(-60);
+        if (this.cl.length > 60) {
+          // 按最近更新时间淘汰（v7.215）：以前按插入序 slice(-60)，而合并是就地累加、不移动位置，
+          // 于是「最先进来的、样本最多的那个节点」永远排在最前，表一满就先被删，
+          // 一次性的新节点反而都留着。没有 t 的老行按 0 处理，最先淘汰（它们本来就是最旧的）。
+          // 无 t 的老行全是 0，先按样本数少的淘汰（它们是升级前留下的、也确实更旧）
+          this.cl.sort((a, b) => (Number(a.t) || 0) - (Number(b.t) || 0) || (a.n || 0) - (b.n || 0));
+          this.cl = this.cl.slice(-60);
+        }
       }
       // 中继 403 判定搭便车上来：只保留未过期的，最多 200 条。
       // 下面四段（vt / 事实 / hl / blk）以前被整块嵌在上面那个 d.cl 判断里：

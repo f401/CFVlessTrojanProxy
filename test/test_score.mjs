@@ -5598,5 +5598,32 @@ try {
   ok("只有校验通过才回写缓存", vsrc.indexOf("cnt(\"factsDo\")") < vsrc.indexOf("cache.put("));
   delete globalThis.caches;
 }
+// 连接观测表的淘汰按「最近更新时间」而不是插入序（v7.215）
+{
+  const d = mkDO();
+  const addCl = async (rows) => {
+    await d.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 0, down: 0, conns: 0, cl: rows }) }));
+  };
+  const ring = async () => ((await (await d.m.fetch(new Request("https://m/cl"))).json()).cl || []);
+  await addCl([{ k: "hot", n: 5, ok: 5, p50: 100, p95: 120, dn: 1000 }]);
+  await addCl(Array.from({ length: 30 }, (_, i) => ({ k: "n" + i, n: 1, ok: 1, p50: 400, p95: 900, dn: 10 })));
+  await addCl([{ k: "hot", n: 1, ok: 1, p50: 105, p95: 130, dn: 200 }]);
+  await addCl(Array.from({ length: 30 }, (_, i) => ({ k: "m" + i, n: 1, ok: 1, p50: 400, p95: 900, dn: 10 })));
+  const ring1 = await ring();
+  eq("连接观测表最多 60 条", ring1.length, 60);
+  const hot1 = ring1.find((x) => x.k === "hot");
+  ok("一直在用的节点不会因为插得早先被淘汰", Boolean(hot1), JSON.stringify(hot1 || null));
+  eq("hot 的累计样本没丢", hot1 ? hot1.n : -1, 6);
+  ok("连接观测行都带更新时间", ring1.every((x) => typeof x.t === "number" && x.t > 0));
+  ok("不同批次的时间戳互不相同（同一批共享一个）", new Set(ring1.map((x) => x.t)).size >= 3, String(new Set(ring1.map((x) => x.t)).size));
+  const meterSrc = fs.readFileSync("src/store/meter.ts", "utf8");
+  ok("淘汰前按更新时间排序", meterSrc.includes("(Number(a.t) || 0) - (Number(b.t) || 0) || (a.n || 0) - (b.n || 0)"));
+  ok("排序在截断之前", meterSrc.indexOf("Number(a.t) || 0) - (Number(b.t) || 0)") < meterSrc.indexOf("this.cl = this.cl.slice(-60)"));
+  ok("时间戳取 max(now, 表内最大 + 1)", meterSrc.includes("if (t0 >= clNow) clNow = t0 + 1;"));
+  ok("已知行更新时刷新时间戳", meterSrc.includes("old.t = clNow;"));
+  const appTypes = fs.readFileSync("types/app.d.ts", "utf8");
+  ok("ClRec 声明了更新时间", appTypes.includes("t?: number; // 最近一次更新的时间"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
