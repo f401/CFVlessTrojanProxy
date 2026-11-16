@@ -5042,5 +5042,53 @@ console.log("\n191b) 中继健康表的 merge 口径");
   ok("不再有「本地优先」的锚点写法", !sd.includes("poolGen: S.poolGen || S.seed.poolGen"));
   ok("落后时的分支原样沿用锚点", sd.includes("return { gen: gSeed, n: nSeed, builtAt: atSeed };"));
 }
+// 第 205 组：按站点内存表的淘汰序（7.204）
+
+// 旧口径：`Map.set` 对已存在的键不移动位置，所以 trim 删的是「最早插进来的」——
+// 而最早插进来的往往正是最热的站点（每个请求都会 set 一次），于是它第一个被删、
+// 康复计数器反复归零，真正陈旧的站点反而留着。修法是写入端先 delete 再 set。
+{
+  const HOST_MAX = 512;
+  const RELAY = "45.136.117.194";
+  const ctx = (host) => ({
+    host,
+    cfHost: false,
+    clientV6: false,
+    relays: [RELAY],
+    legacyWantsRelay: false,
+  });
+  const p = new W.Policy();
+  // h0 是「最热的站点」：每插一个别的站点之前都访问它一次
+  for (let i = 0; i < HOST_MAX + 88; i++) {
+    p.decide(ctx("h0"));
+    p.decide(ctx("h" + (i + 1)));
+  }
+  eq("序号表压回上限内", p.seq.size <= HOST_MAX, true);
+  eq("最热的站点没被淘汰（真 LRU）", p.seq.has("h0"), true);
+  eq("最热站点的序号没有被归零", (p.seq.get("h0") || 0) > HOST_MAX, true);
+  eq("最早插入的普通站点确实被淘汰", p.seq.has("h1"), false);
+
+  // 钉住表同一个口径：刚钉过的站点不能被 trim 先删
+  const p2 = new W.Policy();
+  p2.pinFor("hot", ["1.1.1.1"]);
+  for (let i = 0; i < HOST_MAX + 40; i++) {
+    p2.pinFor("hot", ["1.1.1.1"]);
+    p2.pinFor("n" + i, ["3.3.3.3"]);
+  }
+  eq("钉住表压回上限内", p2.pin.size <= HOST_MAX, true);
+  eq("刚钉过的站点没被淘汰", p2.pin.has("hot"), true);
+  eq("钉住仍是第一次选中的那条", p2.pin.get("hot").ip, "1.1.1.1");
+
+  // 源码锁：两个写入端都必须先 delete 再 set，注释里必须写明 Map 的语义
+  const srcPolicy = fs.readFileSync("src/route/policy.ts", "utf8");
+  ok("decide 里先删后插", srcPolicy.includes("this.seq.delete(c.host);"), "");
+  ok("pinFor 里先删后插", srcPolicy.includes("this.pin.delete(host);"), "");
+  ok("注释写明 Map.set 不移动位置", srcPolicy.includes("**不移动插入位置**"), "");
+  // 零调用的 Judge.okAge 已删（文档说返回「距上次 ok 的时间」，实现返回 1/0）
+  const srcJudge = fs.readFileSync("src/route/judge.ts", "utf8");
+  ok("Judge.okAge 已删", srcJudge.includes("okAge") === false, "");
+  ok("测试窗口里也没有它", typeof W.JUDGE.okAge, "undefined");
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

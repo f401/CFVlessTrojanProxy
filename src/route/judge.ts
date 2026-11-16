@@ -8,7 +8,7 @@ import { SC } from "../core/const";
 import { trimAged } from "../core/hostmem";
 import { TrafficEvt } from "../core/hook";
 import { Chan, DIRECT, chanKey } from "./channel";
-import { vBad, vOk } from "./verdict";
+import { vBad } from "./verdict";
 import { recordBlock, recordPass, recordTraffic } from "./observe";
 import { cfHttpCode } from "../proxy/cfverdict";
 import { cnt } from "../core/counter";
@@ -225,11 +225,6 @@ export class Judge {
       return;
     }
     this.markBlocked(e, chan, ck, now);
-  }
-
-  /** 距该通道上次被判 ok 的时间（0 = 没有记录） */
-  okAge(host: string, ip: string): number {
-    return vOk(host, "r:" + ip) ? 1 : 0;
   }
 
   /** 选路用：该通道是否被判死 */

@@ -71,7 +71,11 @@ export class Policy {
    * 为什么要有（v7.140）：两者都在每次决策里 `set` 一次，条目只增不减 —— 长跑 isolate 里
    * 见过的每个站点都会留一行，而站点名来自客户端请求的 ClientHello，不是有限集合。
    * 裁剪规则：先清过期的 `pin`（`until <= now`），再把两张表压回 `HOST_MEM_MAX` 行；
-   * 压回时删 Map 里最前面的键 —— `set` 每次都会把键移到末尾，所以顺序 ≈ 最近使用顺序。
+   * 压回时删 Map 里最前面的键，所以**顺序必须是最近使用序**。
+   * 注意：JavaScript 的 `Map.set` 对已存在的键只更新值、**不移动插入位置**，
+   * 所以「最近使用」不能在注释里假设，只能靠写入端先 `delete` 再 `set` 显式维持
+   * （见 `decide` 与 `pinFor`）。7.204 之前这里按首次插入序淘汰：最早见过的站点
+   * 往往正是最热的站点，于是它第一个被删、康复计数器反复归零，而真正陈旧的站点留着。
    * @param now 当前时间
    * @returns {void}
    */
@@ -110,8 +114,13 @@ export class Policy {
     const cur = this.pin.get(host);
     if (cur && cur.until > now && list.includes(cur.ip)) return cur.ip;
     const pick = list[0] || "";
-    if (pick) this.pin.set(host, { ip: pick, until: now + 60_000 });
-    else this.pin.delete(host);
+    if (pick) {
+      // 同 `seq`：不先删就 set，`trim` 会按首次插入序淘汰，把刚钉过的站点先删掉
+      this.pin.delete(host);
+      this.pin.set(host, { ip: pick, until: now + 60_000 });
+      // 写入端自己封顶：trim 原先只在 decide 里被调，单走 pinFor 的路径上这张表会无限长
+      if (this.pin.size > HOST_MEM_MAX) this.trim();
+    } else this.pin.delete(host);
     return pick;
   }
 
@@ -210,6 +219,8 @@ export class Policy {
     // 不这么做就存在死锁：被降权的通道再也拿不到样本 → 成功率永远停在先验 → 永远回不来。
     // 用序号而不是随机数，是为了让「第 20 条会康复」这件事可复现、可断言。
     const nth = (this.seq.get(c.host) || 0) + 1;
+    // 先 delete 再 set：Map 对已存在的键不移动位置，不这么做 `trim` 就是在按首次插入序淘汰
+    this.seq.delete(c.host);
     this.seq.set(c.host, nth);
     // 站点名不是有限集合：超过上限就压回（见 trim 的注释）
     if (this.seq.size > HOST_MEM_MAX || this.pin.size > HOST_MEM_MAX) this.trim();
