@@ -148,7 +148,11 @@ export class Policy {
     // 一次机房级风控不该让整池永久出局（复检 5% 太慢，这里直接放开多数）。
     const blockedRatio = c.relays.length ? (c.relays.length - usable.length) / c.relays.length : 0;
     if (blockedRatio > 0.75 && usable.length < 2) {
-      const sorted = c.relays.slice().sort((a, b) => vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a));
+      // 只对「被判死的」动手：7.268 之前这里对整个 c.relays 排序，把唯一能打通那条的正证据
+      // 也一起重置成 unknown（它的证据比最近四条判死更旧 ⇒ 排在后面 ⇒ 被 slice(2) 扫到），
+      // 结果 okOnes 变空、`vAt` 又被刷成「刚刚」⇒ 冷启动判据以为量过、好中继优先也失效。
+      const dead = c.relays.filter((ip) => vBad(c.host, "r:" + ip));
+      const sorted = dead.slice().sort((a, b) => vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a));
       for (const ip of sorted.slice(2)) vSetState(c.host, "r:" + ip, 0, 1);
       usable = c.relays.filter((ip) => this.chanOk(ip, c.host));
     }

@@ -7676,5 +7676,26 @@ const gate267 = fs.readFileSync("tools/check-names.mjs", "utf8");
 ok("命名门禁里有判定状态裸数字判据", gate267.includes("rawStateLiterals") && gate267.includes("判定状态用裸数字"), "");
 ok("判据排除枚举文件自身", gate267.includes("src/core/enums.ts"), "");
 ok("文档写明判定状态只用枚举", fs.readFileSync("docs/命名约定.md", "utf8").includes("判定状态"), "");
+// 第 268 组：比例兜底「释放被判死的中继」时不能顺手抹掉正证据（D213）
+{
+  const H268 = "rel268.group.test";
+  W.vClear();
+  const rels = ["10.8.0.1", "10.8.0.2", "10.8.0.3", "10.8.0.4", "10.8.0.5"];
+  // 唯一能打通的那条先写（证据时间最早），四条判死的写在后面（时间更新）
+  W.vSet(H268, "r:" + rels[4], 200, 120, 1);
+  for (let i = 0; i < 4; i++) {
+    W.vSet(H268, "r:" + rels[i], 403, 100, 1);
+    W.vSetState(H268, "r:" + rels[i], 2, 1);
+  }
+  const ctx268 = { host: H268, relays: rels.slice(), cfHost: true, clientV6: false, httpCode: 0, directOk: false, mode: "tput" };
+  W.POLICY.decide(ctx268);
+  eq("比例兜底后仍记得能打通的那条", W.vState(H268, "r:" + rels[4]), 1);
+  ok("释放确实放开了被判死的中继", rels.slice(0, 4).some((ip) => W.vState(H268, "r:" + ip) === 0));
+  ok("最近判死的两条仍然保留结论", rels.slice(0, 2).every((ip) => W.vState(H268, "r:" + ip) === 2));
+  const pol268 = fs.readFileSync("src/route/policy.ts", "utf8");
+  ok("释放只在被判死的集合上做", pol268.includes("const dead = c.relays.filter((ip) => vBad(c.host, \"r:\" + ip));"));
+  ok("排序也只在被判死的集合上做", pol268.includes("const sorted = dead.slice()"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
