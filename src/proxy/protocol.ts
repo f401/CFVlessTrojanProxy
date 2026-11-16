@@ -179,7 +179,8 @@ export function detectProtocol(u8: Uint8Array) {
  * 把两种协议里含义不同的地址类型字节归一化成 VLESS 语义。
  * @param {'vless'|'trojan'} proto 协议名
  * @param {number} atyp 原始地址类型字节
- * @returns {number} 归一化后的 atyp（1=IPv4 3=域名 4=IPv6）
+ * @returns {string|null} v4 / dom / v6 三个标签之一；识别不了回 null
+ * （返回的不是数字 atyp：数字是线协议里的字节，标签是给人读的）
  */
 export function normAtyp(proto: string, atyp: number): string | null {
   if (proto === "vless") {
@@ -192,8 +193,9 @@ export function normAtyp(proto: string, atyp: number): string | null {
  * 从首包中解析目标地址（IPv4 / 域名 / IPv6）。
  * @param {Uint8Array} u8 首包
  * @param {number} off 地址字段起始偏移
- * @param {number} kind 归一化后的 atyp
- * @returns {{host: string, port: number, next: number}|null} 目标地址、端口与下一字段偏移
+ * @param {string} kind normAtyp 归一化后的标签（v4 / dom / v6）
+ * @returns {{host: string, next: number}|{err: string}} 成功给地址与下一字段偏移，失败给错误文案
+ * （端口不在这里读：VLESS 的端口在地址之前、Trojan 的在之后，各自解析器按自己的顺序取）
  */
 export function readAddr(u8: Uint8Array, off: number, kind: string): AddrOk | AddrErr {
   // 三种 atyp：v4 定长 4 字节、域名 1 字节长度 + n 字节、v6 定长 16 字节；

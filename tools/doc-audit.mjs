@@ -408,4 +408,64 @@ if (headSync.length) {
   process.exitCode = 1;
 }
 
+// JSDoc 里的类型必须与 TS 签名一致（7.235）：文档写 {number}、代码是 string 这类漂移
+// 单看注释门禁查不出来，只有「把文档里的类型和签名里的类型对一遍」才能发现。
+// 保守口径：参数含泛型 / 解构 / 剩余参数 / 换行的函数一律跳过（正则拆不干净，宁可漏报）。
+const docType = (() => {
+  const PRIM = new Set(["number", "string", "boolean", "void", "null", "undefined", "object"]);
+  const out = [];
+  for (const f of walk(root)) {
+    const lines = fs.readFileSync(f, "utf8").split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/);
+      if (!m) continue;
+      // 文档块必须紧贴签名（中间只允许空行）
+      let k = i - 1;
+      while (k >= 0 && lines[k].trim() === "") k--;
+      if (k < 0 || lines[k].trim() !== "*/") continue;
+      let d0 = k;
+      while (d0 >= 0 && lines[d0].trim() !== "/**") d0--;
+      const doc = lines.slice(d0, k + 1).join("\n");
+      // 签名最多拼 10 行，遇到 `) :` 就停
+      let sig = "";
+      for (let q = i; q < Math.min(lines.length, i + 10); q++) {
+        sig += lines[q] + "\n";
+        if (/\)\s*:/.test(sig)) break;
+      }
+      const pm = sig.match(/\(([\s\S]*?)\)\s*:/);
+      if (!pm) continue;
+      const raw = pm[1];
+      if (/[<>{}\[\]]|\.\.\./.test(raw)) continue;
+      const params = [];
+      let simple = true;
+      for (const part of raw.split(",")) {
+        const t = part.trim();
+        if (!t) continue;
+        const mm = t.match(/^([A-Za-z_$][\w$]*)\??\s*:\s*([A-Za-z_$][\w$]*)$/);
+        if (!mm) { simple = false; break; }
+        params.push({ name: mm[1], type: mm[2] });
+      }
+      if (!simple || !params.length) continue;
+      // 返回类型：`X` 或 `X | null` 都按 X 比（文档省掉 | null 是常见简写，不算漂移）
+      const retM = sig.match(/\)\s*:\s*([A-Za-z_$][\w$]*)\s*(?:\|\s*[A-Za-z_$][\w$.\[\]]*\s*)*\{/);
+      const retDoc = doc.match(/@returns \{([A-Za-z_$][\w$]*)\}/);
+      if (retM && retDoc && PRIM.has(retDoc[1]) && PRIM.has(retM[1]) && retDoc[1] !== retM[1]) {
+        out.push(`${f}:${i + 1} ${m[1]}() 文档 @returns {${retDoc[1]}}，签名是 ${retM[1]}`);
+      }
+      for (const dm of doc.matchAll(/@param \{([A-Za-z_$][\w$]*)\} ([A-Za-z_$][\w$]*)/g)) {
+        const c = params.find((x) => x.name === dm[2]);
+        if (!c) continue;
+        if (PRIM.has(dm[1]) && PRIM.has(c.type) && dm[1] !== c.type) {
+          out.push(`${f}:${i + 1} ${m[1]}() 文档 @param ${dm[2]} {${dm[1]}}，签名是 ${c.type}`);
+        }
+      }
+    }
+  }
+  return out;
+})();
+if (docType.length) {
+  console.log("\nJSDoc 类型与签名不一致（文档里的类型必须是签名里的类型）：");
+  for (const x of docType) console.log(`  ${x}`);
+  process.exitCode = 1;
+}
 process.exitCode = process.exitCode || 0;

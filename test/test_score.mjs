@@ -6349,5 +6349,32 @@ const hm235 = agentsMd.match(/仓库 \*\*([0-9.]+)\*\*（[^）]*?共 (\d+) 个�
 ok("AGENTS 头部能解析出版本与缺陷数", Boolean(hm235), "头部格式变了");
 eq("AGENTS 头部版本等于 VERSION", hm235 ? hm235[1] : "", vm235 ? vm235[1] : "");
 eq("AGENTS 头部缺陷数等于 H6 最大编号", Number(hm235 ? hm235[2] : -1), h6Max);
+/* ---- 第 236 组：JSDoc 里的类型必须与签名一致（7.235） ---- */
+{
+  const protoSrc = fs.readFileSync("src/proxy/protocol.ts", "utf8");
+  // 文档说返回 number，实际给的是 v4/dom/v6 标签：这行锁住「别再写成 number」
+  ok("normAtyp 的返回注解是 string|null", protoSrc.includes("@returns {string|null} v4 / dom / v6"));
+  ok("normAtyp 不再声称返回数字 atyp", !protoSrc.includes("@returns {number} 归一化后的 atyp"));
+  ok("readAddr 的 kind 注解是 string", protoSrc.includes("@param {string} kind normAtyp 归一化后的标签"));
+  ok("readAddr 不再声称 kind 是 number", !protoSrc.includes("@param {number} kind"));
+  // 旧文档说返回里有 port，实际没有：这句话必须留在文档里当解释，且 return 里不许出现 port
+  ok("readAddr 文档不再声称返回 port 字段", !protoSrc.includes("{host: string, port: number, next: number}"));
+  ok("readAddr 文档写明了端口不在这里读", protoSrc.includes("端口不在这里读"));
+  const auditSrc = fs.readFileSync("tools/doc-audit.mjs", "utf8");
+  ok("doc-audit 有 JSDoc 类型判据", auditSrc.includes("JSDoc 类型与签名不一致"));
+  ok("判据跳过泛型/解构签名（保守口径）", auditSrc.includes("[<>{}\\[\\]]|\\.\\.\\."));
+  // 行为面：三个标签确实是字符串，且识别不了的类型回 null
+  eq("normAtyp 认得 IPv4", W.normAtyp("vless", 1), "v4");
+  eq("normAtyp 认得域名", W.normAtyp("vless", 2), "dom");
+  eq("normAtyp 认得 IPv6", W.normAtyp("vless", 3), "v6");
+  eq("normAtyp 对未知类型回 null", W.normAtyp("vless", 9), null);
+  eq("trojan 的 v6 是 4 不是 3", W.normAtyp("trojan", 4), "v6");
+  // readAddr 的返回里确实没有 port，只有 host/next（成功）或 err（失败）
+  const a236 = W.readAddr(new Uint8Array([10, 0, 0, 1]), 0, "v4");
+  eq("readAddr 成功给 host", a236.host, "10.0.0.1");
+  eq("readAddr 成功给 next", a236.next, 4);
+  ok("readAddr 成功时不带 port 字段", !("port" in a236));
+  ok("readAddr 越界回错误对象", typeof W.readAddr(new Uint8Array([10, 0]), 0, "v4").err === "string");
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
