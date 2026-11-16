@@ -82,6 +82,22 @@ for (const f of prod) {
     }
   });
 }
+// 反方向：登记了却从来没有写入点的键。这类键在 /health 与面板上恒为 0，读代码的人会以为
+// 「这个功能从没触发过」，实际是「这个计数没人写」——`szBig` 就是这样挂着的一格（文档还写着
+// 尺寸分桶是 `sz1..sz4/szBig`，而 `szBig` 连触发条件都不可达：桶只在 `e.down < SMALL_MAX` 里累加）。
+// 三元表达式里的动态键（`cnt(this.node ? "node" : "direct")`）扫不到字面量，用显式白名单兜住。
+const DYN_CNT = new Set(["node", "direct", "smN", "smD", "rgFail", "dead"]);
+const literals = new Set();
+for (const f of prod) {
+  for (const m of fs.readFileSync(f, "utf8").matchAll(/\bcnt\("([A-Za-z0-9_]+)"/g)) literals.add(m[1]);
+}
+let deadCnt = 0;
+for (const k of known) {
+  if (literals.has(k) || DYN_CNT.has(k)) continue;
+  deadCnt += 1;
+  console.log(`FAIL 计数 ${k} 登记了但没有任何 cnt("${k}") 写入点（面板上恒为 0）`);
+}
+fail += deadCnt;
 fail += cntFail;
 // DO 端点的调用方与实现方必须成对：7.69 删掉 subtls 时移除了 `/meter/{probe,raw,dbt}`，
 // 但调试端点仍在 POST 它们 —— `Meter.fetch` 的兜底分支是 `return this.json()`（200 + 整份计量表），

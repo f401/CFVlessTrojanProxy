@@ -67,7 +67,7 @@ export { DIALER, Dialer } from "./proxy/dialer";
 export { ATTACHER, Attacher } from "./proxy/attacher";
 export { REGION, RegionPicker } from "./proxy/region";
 export { spdSnapshot } from "./core/node-snapshot";
-export { cntDelta, cntUnsend, cntView } from "./core/counter";
+export { cnt, cntDelta, cntUnsend, cntView } from "./core/counter";
 export {
   logErr,
   errDup,

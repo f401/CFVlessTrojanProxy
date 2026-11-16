@@ -4963,5 +4963,27 @@ console.log("\n191b) 中继健康表的 merge 口径");
   eq("信誉表条目不再声明 v6 统计字段", /interface SeedNode \{[^}]*sb\?:/.test(srcTypes202), false);
   eq("信誉表条目仍声明名字与地址", /interface SeedNode \{[^}]*k: string;/.test(srcTypes202), true);
 }
+// —— 第 203 组：计数器账本（登记了就必须有人写）——
+{
+  const st = fs.readFileSync("src/core/state.ts", "utf8");
+  const cw = fs.readFileSync("tools/check-wire.mjs", "utf8");
+  const cn = fs.readFileSync("src/proxy/connection.ts", "utf8");
+  ok("szBig 已从登记表删除（触发条件不可达）", !/^\s*"szBig",/m.test(st));
+  ok("psSent 已从登记表删除", !/^\s*"psSent",/m.test(st));
+  ok("egProbe 已从登记表删除", !/^\s*"egProbe",/m.test(st));
+  ok("e4retry 已从登记表删除", !/^\s*"e4retry",/m.test(st));
+  ok("vtSeen 已从登记表删除", !/^\s*"vtSeen",/m.test(st));
+  ok("vtPend 计数键已删除（S.vtPend 是另一张表）", !/^\s*"vtPend",/m.test(st));
+  eq("connection.ts 的 tput 都走 cnt()", (cn.match(/cnt\("tput"\)/g) || []).length, 2);
+  ok("connection.ts 不再直接改 S.cnt.tput", !cn.includes("S.cnt.tput"));
+  ok("check-wire 有动态键白名单", cw.includes("DYN_CNT"));
+  ok("check-wire 会对死登记键报红", cw.includes("没有任何 cnt("));
+  W.S.cntDay = "1970-01-01";
+  W.S.cnt.tput = 5;
+  W.cnt("tput");
+  eq("cnt() 跨天后从 1 开始", W.S.cnt.tput, 1);
+  W.cnt("szBig");
+  ok("未登记的键不会凭空出现", !("szBig" in W.S.cnt));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

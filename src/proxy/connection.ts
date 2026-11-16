@@ -132,7 +132,7 @@ export class Connection {
           if (w > 0) {
             this.lastEmit = now;
             nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
-            S.cnt.tput = (S.cnt.tput || 0) + 1;
+            cnt("tput");
           }
         }
         this.sampleAt = now;
@@ -269,7 +269,7 @@ export class Connection {
         if (stallWin > dt * 0.5) w *= 0.3;
         if (w > 0) {
           nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
-          S.cnt.tput = (S.cnt.tput || 0) + 1;
+          cnt("tput");
         }
       }
       // 分母必须是"所有连接的总时长"：pStall = (stallMs + 50) / (runMs + 1000)。
