@@ -1,4 +1,15 @@
 import fs from "node:fs";
+/**
+ * 存储层三层源码拼在一起：`meter.ts`（DO 外壳）/ `meteradd.ts`（`/add` 合并）/ `metershard.ts`（分片落盘）。
+ * v7.218 把后两块从 `meter.ts` 拆出去（单文件 ≤560 行的硬上限），源码锁断言跟着改成「在存储层存在」，
+ * 避免以后每次挪文件都要改一批断言。
+ * @returns {string} 三段源码
+ */
+const storeSrc = () =>
+  ["src/store/meter.ts", "src/store/meteradd.ts", "src/store/metershard.ts"]
+    .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
+    .join("\n");
+
 import * as W from "./_bundle.mjs";
 import { webcrypto } from "node:crypto";
 
@@ -3645,7 +3656,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   d4.m.vt[K4] = now + 600000;
   const r4 = (await VT()).find((x) => x.k === K4) || {};
   eq("老格式（裸到期时间）读成 blocked", Number(r4.s), 2);
-  ok("DO 侧存状态（源码）", fs.readFileSync("src/store/meter.ts", "utf8").includes("r.s === 3 ? 3 : 2"));
+  ok("DO 侧存状态（源码）", storeSrc().includes("r.s === 3 ? 3 : 2"));
 }
 // ── 第 155 组：空关闭的门槛只该在「跨过那一条」上生效 ──
 {
@@ -3784,7 +3795,7 @@ eq("attacher 里只剩一处 dead（真正的目标不可达）", (at2.match(/cn
 
 // 第 162 组：DO 端点的反方向（有实现、零调用方）（v7.172）
 // 前几轮只查过「调用方有、实现方没有」；这一批查反方向：能力被写下、却没有任何入口。
-const mSrc = fs.readFileSync("src/store/meter.ts", "utf8");
+const mSrc = storeSrc();
 const wSrc = fs.readFileSync("tools/check-wire.mjs", "utf8");
 ok("两个零调用点的 DO 端点已删除（/http80 与 /reset）", !/endsWith\("\/(http80|reset)"\)/.test(mSrc));
 ok("meter.ts 不再 import 探活用的 probeHttp80", !mSrc.includes("probeHttp80"));
@@ -3881,7 +3892,7 @@ const dset = (m, body) => m.fetch(new Request("https://meter/set", { method: "PO
   eq("首次使用时间取更早的那个", b.m.c.first, 1000);
   eq("字节按快照恢复（快照更大才覆盖）", b.m.c.up + b.m.c.down, 350);
 }
-const mSrc166 = fs.readFileSync("src/store/meter.ts", "utf8");
+const mSrc166 = storeSrc();
 ok("恢复门槛含连接数（与 /seed 口径一致）", mSrc166.includes("wantN > curN"));
 ok("conns 用 max 合并，快照落后也不回退", mSrc166.includes("Math.max(wantN, curN)"));
 // 第 167 组：挂在主批次上的增量只能由那一批确认（第 99 条）
@@ -4350,7 +4361,7 @@ console.log("\n176) 预算账本与续回边界");
   eq("成功率行的历史最好原样透传", out177.ps[0].top, 250);
   eq("freshTop 直接按时间戳降序取", W.freshTop([{ t: 1 }, { t: 3 }, { t: 2 }], (r) => r.t, 2).map((r) => r.t).join(","), "3,2");
   eq("freshTop 不超上限时原样返回", W.freshTop([{ t: 1 }, { t: 3 }], (r) => r.t, 5).length, 2);
-  const meterSrc177 = fs.readFileSync("src/store/meter.ts", "utf8");
+  const meterSrc177 = storeSrc();
   ok("meter 的 /vt 已委托给 factsOut", meterSrc177.includes("Response.json(factsOut(this))"), "meter.ts");
   ok("meter 里不再自己拼 blk2 的插入序切片", !meterSrc177.includes("Object.entries(this.blk2)"), "meter.ts");
   const dbgSrc177 = fs.readFileSync("src/routes/debug.ts", "utf8");
@@ -4361,7 +4372,7 @@ console.log("\n176) 预算账本与续回边界");
 
 /** 第 178 组（v7.188）：没有生产者的旧封锁表删净、热路径一张表只扫一遍 */
 {
-  const mS = fs.readFileSync("src/store/meter.ts", "utf8");
+  const mS = storeSrc();
   ok("计量表里不再有旧封锁表字段", !/this\.blk\b/.test(mS), "meter.ts");
   ok("计量表不再提供 /blk 端点", mS.indexOf('endsWith("/blk")') < 0, "meter.ts");
   ok("七张事实表的出站仍走 factsOut", mS.indexOf("Response.json(factsOut(this))") >= 0, "meter.ts");
@@ -5616,9 +5627,9 @@ try {
   eq("hot 的累计样本没丢", hot1 ? hot1.n : -1, 6);
   ok("连接观测行都带更新时间", ring1.every((x) => typeof x.t === "number" && x.t > 0));
   ok("不同批次的时间戳互不相同（同一批共享一个）", new Set(ring1.map((x) => x.t)).size >= 3, String(new Set(ring1.map((x) => x.t)).size));
-  const meterSrc = fs.readFileSync("src/store/meter.ts", "utf8");
+  const meterSrc = storeSrc();
   ok("淘汰前按更新时间排序", meterSrc.includes("(Number(a.t) || 0) - (Number(b.t) || 0) || (a.n || 0) - (b.n || 0)"));
-  ok("排序在截断之前", meterSrc.indexOf("Number(a.t) || 0) - (Number(b.t) || 0)") < meterSrc.indexOf("this.cl = this.cl.slice(-60)"));
+  ok("排序在截断之前", meterSrc.indexOf("Number(a.t) || 0) - (Number(b.t) || 0)") >= 0 && meterSrc.indexOf("Number(a.t) || 0) - (Number(b.t) || 0)") < meterSrc.indexOf("m.cl = m.cl.slice(-60)"));
   ok("时间戳取 max(now, 表内最大 + 1)", meterSrc.includes("if (t0 >= clNow) clNow = t0 + 1;"));
   ok("已知行更新时刷新时间戳", meterSrc.includes("old.t = clNow;"));
   const appTypes = fs.readFileSync("types/app.d.ts", "utf8");
@@ -5639,7 +5650,7 @@ try {
   ok("第一条是最近被记过的证据", (hl[0].t || 0) >= now - 60000, JSON.stringify(hl[0]));
   ok("不带 t 的老行由 DO 按收到时间补", hl.some((r) => r.i.startsWith("10.3.3.") && (r.t || 0) >= now - 60000), String(hl.filter((r) => r.i.startsWith("10.3.3.")).length));
   ok("按证据时间降序", hl.every((r, k) => k === 0 || (hl[k - 1].t || 0) >= (r.t || 0)));
-  const meterSrc = fs.readFileSync("src/store/meter.ts", "utf8");
+  const meterSrc = storeSrc();
   ok("出站排序按 t 降序", meterSrc.includes("rows.sort((a, b) => b.t - a.t || b.d + b.b - (a.d + a.b));"));
   ok("不再按坏证据条数单独排序", !meterSrc.includes("rows.sort((a, b) => b.d + b.b - (a.d + a.b));"));
 }
@@ -5681,5 +5692,54 @@ try {
   ok("源码：过期行在提 top 之前就被丢弃", fm.indexOf("if (r.at <= Date.now() - FACT_TTL.ps) continue;") < fm.indexOf("if (inTop > (cur.top ?? 0)) cur.top = inTop;"));
 }
 
+/* ---------- 219) DO 单值上限：按体积自适应分片 ---------- */
+const doFill = (n) => {
+  const host = (i) => `s-${i}.example.com`;
+  const ip = (i) => `198.51.${(i >> 8) & 255}.${i & 255}`;
+  return {
+    up: 1, down: 1, conns: 1,
+    vt: Array.from({ length: n + 20 }, (_, i) => ({ k: `${host(i)}|r:${ip(i)}`, s: 2, t: Date.now() + 1800000 })),
+    hl: Array.from({ length: n + 20 }, (_, i) => ({ i: ip(i), o: 9, b: 1, d: 0, t: Date.now() - 1000 })),
+    eg: Array.from({ length: 600 }, (_, i) => ({ i: ip(i), f: 4, at: Date.now() - 1000 })),
+    ps: Array.from({ length: 600 }, (_, i) => ({ k: `${host(i)}|${ip(i)}`, q: 200, n: 4, at: Date.now() - 1000, top: 240 })),
+    dead: Array.from({ length: 300 }, (_, i) => ({ i: ip(i), n: 3, at: Date.now() - 1000 })),
+    blk2: Array.from({ length: 1100 }, (_, i) => ({ k: `${host(i)}|${ip(i)}`, n: 3, at: Date.now() - 1000 })),
+    dns: Array.from({ length: 600 }, (_, i) => ({ h: host(i), v: 1, at: Date.now() - 1000 })),
+    cl: Array.from({ length: 60 }, (_, i) => ({ k: ip(i), n: 40, ok: 39, p50: 320, p95: 900, dn: 20480 })),
+  };
+};
+const bigDo = mkDO();
+await bigDo.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify(doFill(200)) }));
+await bigDo.m.save();
+const shardKeys = [...bigDo.store.keys()].sort();
+const shardSize = (k) => String(bigDo.store.get(k)).length;
+eq("表填满后按体积拆片", shardKeys.join(","), "a,f1,f2,f3");
+ok("每片都在 DO 单值上限内（131072）", shardKeys.every((k) => shardSize(k) <= 131072), shardKeys.map((k) => `${k}=${shardSize(k)}`).join(" "));
+const cnt7 = (m) => ["vt", "hl", "eg", "ps", "dead", "blk2", "dns"].map((t) => Object.keys(m[t] || {}).length).join(",");
+const beforeCnt = cnt7(bigDo.m);
+// 同一个 storage 再建一个 Meter = isolate 重启：分片里的七张表必须读回来
+const bigDo2 = mkDO([...bigDo.store.entries()]);
+await bigDo2.m.fetch(new Request("https://m/get"));
+eq("重启后七张事实表都读回来", cnt7(bigDo2.m), beforeCnt);
+ok("七张表都不是空的", beforeCnt.split(",").every((x) => Number(x) > 0), beforeCnt);
+const smallDo = mkDO();
+await smallDo.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
+await smallDo.m.save();
+eq("小账本仍旧只写一个值", [...smallDo.store.keys()].join(","), "a");
+await smallDo.store.set("f1", "stale");
+await smallDo.m.save();
+eq("退回单键时删掉残片", smallDo.store.has("f1"), false);
+// 主机名最长的那些（253 字节级）：只按条数设上限挡不住字节，fit 必须按时间丢最旧
+const longDo = mkDO();
+const longName = (i) => "a".repeat(150) + "-" + i + "." + "b".repeat(60) + ".example.com";
+await longDo.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 1, down: 1, conns: 1, dns: Array.from({ length: 600 }, (_, i) => ({ h: longName(i), v: 1, at: Date.now() - 1000 })) }) }));
+await longDo.m.save();
+const longSizes = [...longDo.store.keys()].map((k) => [k, String(longDo.store.get(k)).length]);
+ok("长主机名也压进单值上限", longSizes.every(([, n]) => n <= 131072), longSizes.map(([k, n]) => `${k}=${n}`).join(" "));
+const meterSrc = storeSrc();
+ok("单值预算常量在位", meterSrc.includes("const VALUE_MAX = 120000;"), true);
+ok("分片键是三片", meterSrc.includes('const SHARD_KEYS = ["f1", "f2", "f3"] as const;'), true);
+ok("装得下就单键、装不下才拆", meterSrc.includes("if (estSize(env, whole) <= VALUE_MAX) {"), true);
+ok("两条恢复路径都读分片", (meterSrc.match(/await this\.loadShards\(\);/g) || []).length === 2, (meterSrc.match(/await this\.loadShards\(\);/g) || []).length);
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

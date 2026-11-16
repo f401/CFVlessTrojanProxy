@@ -1,7 +1,8 @@
-import { mergeFacts } from "./factmerge";
 import { factsOut } from "./factout";
-import { seal, unseal } from "./index";
+import { unseal } from "./index";
+import { applyAdd } from "./meteradd";
 import { probeTf } from "../core/tf";
+import { readShards, saveState } from "./metershard";
 
 /**
  * 用量账本（Durable Object，全局唯一）：一个用户一个实例，只有它能回答「已用多少字节」。
@@ -81,6 +82,8 @@ export class Meter {
         if (o.dns && typeof o.dns === "object") this.dns = o.dns as unknown as Record<string, { v: number; at: number }>;
         if (o.blk2 && typeof o.blk2 === "object") this.blk2 = o.blk2 as unknown as Record<string, { n: number; at: number }>;
         }
+        // 分片要在 `a` 之后再读：装不下时事实表搬去了 f1/f2/f3，只读 `a` 会看到空表
+        await this.loadShards();
         return;
       }
       // 老结构（c/e/s/g 四个键）：读出来顺手迁到新键，再删掉旧的
@@ -122,20 +125,33 @@ export class Meter {
           await this.save();
           for (const k of ["c", "e", "s", "g"]) await this.st.storage.delete(k);
         } catch (e) {}
+      // 老布局的分片同样要读：从 7.218 起事实表可能只存在于 f1/f2/f3 里
+      await this.loadShards();
       }
     });
   }
 
   /**
-   * 把当前计数加密后写进 DO storage（存储里看不到任何明文）。
+   * 把分片里的七张事实表读回内存（只在 `saveState()` 曾因体积拆过片时存在）。
+   * 为什么单独一个方法：恢复有两条路径（新布局 `a`、老布局 `c/e/s/g`），分片对两条都适用，
+   * 塞在任一条里都会让另一条漏读 —— 表现为「重启后事实全空」。
+   * @returns {Promise<void>}
+   */
+  private async loadShards(): Promise<void> {
+    Object.assign(this, await readShards(this.env, this.st.storage));
+  }
+
+  /**
+   * 把当前账本加密后写进 DO storage（装得下就单键 `a`，装不下按体积拆 `f1`/`f2`/`f3`）。
+   * 体积预算与分片布局都在 `src/store/metershard.ts` 的 `saveState()` 里。
    * @returns {Promise<void>}
    */
   async save() {
-    // 一次 put = 一行。四个字段塞进一个对象，行写入直接 ÷4。
-    await this.st.storage.put(
-      "a",
-      await seal(this.env, { c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl, vt: this.vt, hl: this.hl, eg: this.eg, ps: this.ps, dead: this.dead, blk2: this.blk2, dns: this.dns }),
-    );
+    await saveState(this.env, this.st.storage, {
+      c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl,
+      vt: this.vt, hl: this.hl, eg: this.eg, ps: this.ps,
+      dead: this.dead, blk2: this.blk2, dns: this.dns,
+    });
   }
 
   /**
@@ -171,166 +187,22 @@ export class Meter {
         const j = await req.json();
         if (j && typeof j === "object" && !Array.isArray(j)) d = j as MeterBody;
       } catch (e) {}
-      const c = this.c;
-      const oldC = { ...this.c },
-        oldG = { ...this.g },
-        oldS = Object.assign(Object.create(null), this.s),
-        oldE = this.e.slice(),
-        // 连接观测是**加法**合并（同一个键的 n/ok/dn 直接相加），不像事实表那样按 `at` 幂等：
-        // 落盘失败后 pendFlush 会原样重发这一批（`S.cagg` 只在成功后清），只回滚用量的话
-        // `cl` 的计数会被加两遍。这一份因此必须深拷（行对象就地累加），其余结构要么整体替换、要么按时间戳幂等。
-        oldCl = this.cl.map((r) => ({ ...r }));
-      // 计数搭便车：同一次 /add 请求把 isolate 的日计数也带上来，0 额外请求
-      if (d.c && typeof d.c === "object" && !Array.isArray(d.c)) {
-        const d0 = String(d.c.d || new Date().toISOString().slice(0, 10));
-        // 只接受"今天"或更新的一天：旧的 isolate 可能带着昨天的计数晚到，
-        // 不能让它把全局日计数回滚到昨天，更不能把旧数加进今天。
-        if (!this.g || !this.g.d || d0 > this.g.d) this.g = { d: d0 };
-        if (this.g.d === d0) {
-          for (const [k, v] of Object.entries(d.c)) {
-            if (k === "d" || k === "__proto__" || k === "constructor" || k === "prototype") continue;
-            if (!(Number(v) > 0)) continue;
-            this.g[k] = (Number(this.g[k]) || 0) + Number(v);
-          }
-        }
-      }
-      if (Array.isArray(d.e) && d.e.length) {
-        const seen = new Set(this.e.map((x) => x && x.t));
-        for (const x of d.e) {
-          if (!x || !x.t || seen.has(x.t)) continue;
-          this.e.push(x);
-          seen.add(x.t);
-        }
-        this.e.sort((a, b) => a.t - b.t);
-        if (this.e.length > 50) this.e = this.e.slice(-50);
-      }
-      // 连接观测按节点合并（不同 isolate 各报一段）：计数相加，分位数取最新一段
-      if (Array.isArray(d.cl) && d.cl.length) {
-        // 时间戳必须严格大于表里已有的任何一条（v7.215）：同一毫秒里连着来两批时，
-        // 时间戳相同会让排序退回插入序，「插得最早」的那条又被当成最旧的删掉 ——
-        // 而它恰恰可能是样本最多的节点。取 max(now, 表内最大 + 1) 就永不并列。
-        let clNow = Date.now();
-        for (const r of this.cl) {
-          const t0 = Number(r.t) || 0;
-          if (t0 >= clNow) clNow = t0 + 1;
-        }
-        for (const x of d.cl) {
-          if (!x || typeof x.n !== "number" || typeof x.k !== "string") continue;
-          const old = this.cl.find((r) => r.k === x.k);
-          if (old) {
-            old.n += x.n;
-            old.ok += x.ok;
-            old.dn += x.dn;
-            old.p50 = x.p50;
-            old.p95 = x.p95;
-            // 刷新时间戳（v7.215）：淘汰按它排序，活跃节点不能因为「插得早」先被删
-            old.t = clNow;
-          } else this.cl.push({ k: x.k, n: x.n, ok: x.ok, p50: x.p50, p95: x.p95, dn: x.dn, t: clNow });
-        }
-        if (this.cl.length > 60) {
-          // 按最近更新时间淘汰（v7.215）：以前按插入序 slice(-60)，而合并是就地累加、不移动位置，
-          // 于是「最先进来的、样本最多的那个节点」永远排在最前，表一满就先被删，
-          // 一次性的新节点反而都留着。没有 t 的老行按 0 处理，最先淘汰（它们本来就是最旧的）。
-          // 无 t 的老行全是 0，先按样本数少的淘汰（它们是升级前留下的、也确实更旧）
-          this.cl.sort((a, b) => (Number(a.t) || 0) - (Number(b.t) || 0) || (a.n || 0) - (b.n || 0));
-          this.cl = this.cl.slice(-60);
-        }
-      }
-      // 中继 403 判定搭便车上来：只保留未过期的，最多 200 条。
-      // 下面四段（vt / 事实 / hl / blk）以前被整块嵌在上面那个 d.cl 判断里：
-      // 同一批没有连接观测时，DO 会静默丢掉它们，而发送侧照样 syncAck —— 增量就此蒸发。
-      if (Array.isArray(d.vt) && d.vt.length) {
-        for (const r of d.vt) {
-          if (!r || typeof r.k !== "string" || typeof r.t !== "number") continue;
-          if (r.t <= Date.now()) continue;
-          // 状态必须一起存（v7.164）：只存到期时间的话，`dead` 读回来一律变 `blocked`，
-          // `policy` 里的硬排除退化成 ×6 降权，一条连不上的中继会继续占 `connect()` 名额。
-          // 合并口径：更晚到期的那条胜；同一时刻取更严格的状态（3 > 2）。
-          const s = r.s === 3 ? 3 : 2;
-          const old = this.vt[r.k];
-          const oldT = typeof old === "number" ? old : old ? old.t : 0;
-          const oldS = typeof old === "number" ? 2 : old ? old.s : 0;
-          const t = Math.max(oldT, r.t);
-          this.vt[r.k] = { s: t > oldT ? s : Math.max(oldS, s), t };
-        }
-        const ks = Object.keys(this.vt);
-        if (ks.length > 200) {
-          const expOf = (k: string): number => {
-            const v = this.vt[k];
-            return typeof v === "number" ? v : v.t;
-          };
-          ks.sort((a, b) => expOf(b) - expOf(a));
-          for (const k of ks.slice(200)) delete this.vt[k];
-        }
-      }
-      mergeFacts(this, d);
-      // 中继存活度搭便车：加性合并（只增不减，避免别的 isolate 的旧数据把本地结论冲掉）
-      if (Array.isArray(d.hl) && d.hl.length) {
-        const nowHl = Date.now();
-        for (const r of d.hl) {
-          if (!r || typeof r.i !== "string") continue;
-          const o0 = Number(r.o) || 0;
-          const b0 = Number(r.b) || 0;
-          const d0 = Number(r.d) || 0;
-          const t0 = Math.min(Number(r.t) || nowHl, nowHl);
-          const cur0 = this.hl[r.i];
-          // 一条证据整体胜出（v7.181）：以前逐字段取 max，会把「三小时前 9 次成功」与
-          // 「刚刚 6 次失败」拼成 { o:9, b:6, t:刚刚 } —— 一条从未发生过的证据，
-          // 而客户端的 30 分钟半衰期正是按 t 算的，最容易过期的那批数据反而永远新鲜
-          // （7.161 在客户端 merge 里修过同一形状，DO 这层漏了）。
-          const inN = o0 + b0 + d0;
-          const curN = cur0 ? cur0.o + cur0.b + cur0.d : -1;
-          if (!cur0 || inN > curN || (inN === curN && t0 > (Number(cur0.t) || 0))) {
-            this.hl[r.i] = { o: o0, b: b0, d: d0, t: t0 };
-          }
-        }
-        const hk = Object.keys(this.hl);
-        if (hk.length > 200) {
-          // 留最新的 200 条（v7.181）：按插入顺序切会删掉刚写进来的那条，
-          // 新中继的健康证据永远进不了表（同 7.177 的 pend 星形饥饿）。
-          hk.sort((x, y) => (Number(this.hl[y].t) || 0) - (Number(this.hl[x].t) || 0));
-          for (const k of hk.slice(200)) delete this.hl[k];
-        }
-      }
-      if (d.spd && typeof d.spd === "object") {
-        for (const [k, v] of Object.entries(d.spd)) {
-          if (!v || typeof v !== "object") continue;
-          if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
-          const old = this.s[k];
-          if (!old || (v.at || 0) >= (old.at || 0)) this.s[k] = v; // 新的覆盖旧的
-        }
-        // 池子每天换代，旧节点快照会无限累积；只留最近活跃的 64 个
-        const sk = Object.keys(this.s);
-        if (sk.length > 64) {
-          sk.sort((a, b) => (this.s[a].at || 0) - (this.s[b].at || 0));
-          for (let i = 0; i < sk.length - 64; i++) delete this.s[sk[i]];
-        }
-      }
-      c.up += Number(d.up) || 0;
-      c.down += Number(d.down) || 0;
-      c.conns += Number(d.conns) || 0;
-      // 当日字节：跨天自动清零。累计值 up/down 是订阅头用的（协议惯例），
-      // 面板上的"今日"用这一份 —— 否则用户永远只看到历史总量。
-      const today0 = new Date().toISOString().slice(0, 10);
-      if (c.d !== today0) {
-        c.d = today0;
-        c.dU = 0;
-        c.dD = 0;
-      }
-      c.dU = (c.dU || 0) + (Number(d.up) || 0);
-      c.dD = (c.dD || 0) + (Number(d.down) || 0);
-      c.ts = Date.now();
-      if (!c.first) c.first = c.ts;
-      // 每次都落盘：DO 随时可能被驱逐，靠内存攒着会在驱逐时全丢。
+      // 快照只覆盖「就地累加」的字段：事实表按时间戳幂等、用量/日计数/节点快照整体替换，
+      // 连接观测是加法合并（行在表里就地累加）—— 所以 `cl` 必须深拷，否则回滚回不去。
+      const snap = {
+        c: { ...this.c },
+        g: { ...this.g },
+        s: Object.assign(Object.create(null), this.s),
+        e: this.e.slice(),
+        cl: this.cl.map((r) => ({ ...r })),
+      };
+      applyAdd(this, d);
+      // 每次都落盘：DO 随时可能被驱逐，靠内存攒着会在驱逐时全丢；
       // 落盘失败必须回滚内存，否则 pendFlush 重发同一批会把用量算两遍。
       try {
         await this.save();
       } catch (e) {
-        this.c = oldC;
-        this.g = oldG;
-        this.s = oldS;
-        this.e = oldE;
-        this.cl = oldCl;
+        Object.assign(this, snap);
         throw e;
       }
       return this.json();
