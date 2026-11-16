@@ -70,6 +70,7 @@ tools/bundle.js   esbuild → dist/_worker.js（生产）/ dist/_test.js（测�
 tools/check-arch.js 分层 / 循环 / 顶层 let / 体积
 tools/check-dead.mjs 死导出（导出函数/常量必须在全仓有真实引用）
 - tools/check-indent.mjs 缩进（语句不许被顶出所在块；7.237 已补齐 stat.ts 的 305 行与 score.ts 的 176 行，白名单清空、覆盖全仓）
+- tools/check-insertorder.mjs 「按插入序」判据（`Object.keys/values/entries(...).slice` 与 `Map.keys().next()` 必须显式按时间排序，或写端先 delete 再 set；允许清单 `tools/insertorder-baseline.json` 逐条写理由，7.177/7.181/7.187/7.215/7.224 五条缺陷都是这个形状）
 - tools/check-names.mjs 成员命名（类字段 / 接口成员名 ≤2 字符必须进白名单并写明理由；剩余数量记在 `tools/naming-baseline.json`，只许下降）
 tools/doc-audit.mjs 注释 / 类表 / 活文档引用 / 表格列数与反引号 / 文档挂在 import 上 / H6 编号连续 / 版本口径 / JSDoc 类型与签名一致
   · H6 编号必须从 1 连续到最大值（7.231 的第 188 行、7.233 的第 190 行都是漏写，表格语法合法所以没人报）

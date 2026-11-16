@@ -1,0 +1,17 @@
+[
+  {
+    "file": "src/route/policy.ts",
+    "snippet": "const first = this.pin.keys().next().value as string | undefined;",
+    "why": "写入端 pinFor (policy.ts:119-120) 先 delete 再 set，插入序就是最近使用序；trim() 从头删 = 删最久没用的站点（7.204 修的就是这里按「首次插入」淘汰）"
+  },
+  {
+    "file": "src/route/policy.ts",
+    "snippet": "const first = this.seq.keys().next().value as string | undefined;",
+    "why": "同上：decide() 在 policy.ts:223-224 先 delete 再 set，seq 的插入序也是最近使用序"
+  },
+  {
+    "file": "src/route/tfb.ts",
+    "snippet": "const first = S.tfbV.keys().next();",
+    "why": "tfRemember() 刻意先 delete 再 set（7.224），所以从头删 = 删最久没再被探过的站点，两批共识才不会对最该封锁的站点失效"
+  }
+]

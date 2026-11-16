@@ -15,7 +15,8 @@
     "obf": "node obf/pre.js && node obf/obf_mid.js",
     "all": "npm run arch && npm run build && npm test && npm run obf",
     "sim": "node tools/sim-count.mjs",
-    "sim:colo": "node tools/sim-colo.mjs"
+    "sim:colo": "node tools/sim-colo.mjs",
+    "insertorder": "node tools/check-insertorder.mjs"
   },
   "devDependencies": {
     "prettier": "3.9.10",

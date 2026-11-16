@@ -12,6 +12,7 @@ const storeSrc = () =>
 
 import * as W from "./_bundle.mjs";
 import { webcrypto } from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 // Node 18 没有全局 crypto（Workers 有），补一个给 tlsHello() 用
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
@@ -7295,5 +7296,33 @@ const csrc256 = fs.readFileSync("src/proxy/connection.ts", "utf8");
 eq("两处调用都把折扣一起传进去", csrc256.split("stallWin > dt * 0.5 ? 0.3 : 1)").length - 1, 2);
 ok("调用点不再自己乘 0.3", !csrc256.includes("w *= 0.3"), "");
 ok("封顶按报出的量计", csrc256.includes("Math.min(room, w * Math.max(0, Math.min(1, factor)))"), "");
+// ── 第 257 组：「按插入序」判据做成门禁（棘轮）────────────────────────────
+// 这条判据背后是 7.177 / 7.181 / 7.187 / 7.215 / 7.224 五条缺陷：插入序切片切到最旧的那批，
+// 或 Map.set 不移动位置导致「淘汰 = 删最热的键」。现在三处允许点都写了理由，新增一处就红。
+const gate257 = "tools/check-insertorder.mjs";
+const base257 = "tools/insertorder-baseline.json";
+ok("插入序门禁存在", fs.existsSync(gate257));
+ok("插入序基线存在", fs.existsSync(base257));
+const allow257 = JSON.parse(fs.readFileSync(base257, "utf8"));
+eq("基线里三处允许点", allow257.length, 3);
+ok("每条允许点都写了理由", allow257.every((x) => typeof x.why === "string" && x.why.length >= 20));
+ok("允许点都在 src 里", allow257.every((x) => x.file.startsWith("src/")));
+const pre257 = fs.readFileSync("tools/preflight.mjs", "utf8");
+ok("preflight 里接了插入序门禁", pre257.includes("tools/check-insertorder.mjs"));
+const pkg257 = JSON.parse(fs.readFileSync("package.json", "utf8"));
+eq("package.json 有 insertorder 别名", (pkg257.scripts || {}).insertorder, "node tools/check-insertorder.mjs");
+// 行为面：干净时退出 0；塞一条违规代码就点名
+let clean257 = 0;
+try { execFileSync("node", [gate257], { encoding: "utf8" }); } catch (e) { clean257 = 1; }
+eq("干净时门禁通过", clean257, 0);
+const probe257 = "src/__probe257.ts";
+fs.writeFileSync(probe257, "export const bad = Object.values({}).slice(0, 1);" + "\n");
+let bad257 = 0;
+let badOut257 = "";
+try { badOut257 = execFileSync("node", [gate257], { encoding: "utf8" }); } catch (e) { bad257 = 1; badOut257 = String(e.stdout || "") + String(e.stderr || ""); }
+if (fs.existsSync(probe257)) fs.unlinkSync(probe257);
+eq("插入违规代码就红", bad257, 1);
+ok("报错点名了违规文件", badOut257.includes("__probe257"));
+ok("违规探针已清理", !fs.existsSync(probe257));
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
