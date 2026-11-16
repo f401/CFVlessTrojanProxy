@@ -5357,5 +5357,81 @@ console.log("\n191b) 中继健康表的 merge 口径");
     !/await w\.write\((?!.*withTimeout)/.test(probeSrc) && !/await w\.write\((?!.*withTimeout)/.test(httpSrc),
   );
 }
+// ---- 211: 数据面上游写必须有上限（黑洞中继接了连接却不读，write 永不返回） ----
+console.log("");
+const srcUtil211 = fs.readFileSync("src/core/util.ts", "utf8");
+const srcState211 = fs.readFileSync("src/core/state.ts", "utf8");
+const srcConn211 = fs.readFileSync("src/proxy/connection.ts", "utf8");
+const srcSess211 = fs.readFileSync("src/proxy/session.ts", "utf8");
+const srcAtt211 = fs.readFileSync("src/proxy/attacher.ts", "utf8");
+ok("上游写上限常量是 30 秒", srcUtil211.includes("export const UP_STALL_MS = 30000;"));
+ok("ustall 已登记（否则计数会被静默丢掉）", srcState211.includes('"ustall",'));
+ok("泵里改调 upWrite", srcSess211.includes("return st.upWrite(chunk);"));
+ok("泵里不再直接写 writer", srcSess211.includes("w.write(chunk)") === false);
+ok("首包写也走 upWrite", srcAtt211.includes("await st.upWrite(payload);"));
+ok("blackhole 的超时消息可辨认", srcConn211.includes("withTimeout(p, ms, \"up stall\")"));
+try {
+  const mkSock211 = () => { const o = { closed: 0, close() { o.closed += 1; } }; return o; };
+  const mkConn211 = (node, via) => {
+    const env = { STATS: { get: async () => null, put: async () => {} } };
+    const c = new W.Connection(env, { waitUntil() {}, passThroughOnException() {} }, "tput", "");
+    c.node = node;
+    c.host = "example.com";
+    if (via) c.via = via;
+    return c;
+  };
+  // 黑洞出口：write 永不 resolve
+  {
+    const c = mkConn211("203.0.113.211:443", "node");
+    const sock = mkSock211();
+    c.sock = sock;
+    c.writer = { write: () => new Promise(() => {}) };
+    const before = Number(W.S.cnt.ustall || 0);
+    const t0 = Date.now();
+    await c.upWrite(new Uint8Array(16), 40);
+    const ms = Date.now() - t0;
+    ok("黑洞出口不会永远挂着", ms < 400, String(ms));
+    eq("超时记 ustall", Number(W.S.cnt.ustall || 0) - before, 1);
+    eq("超时关掉 socket", sock.closed, 1);
+    ok("超时后不再往死连接写", c.dead === true);
+    ok("超时归因到中继节点", Number(W.nsGet("203.0.113.211:443").failW || 0) > 0);
+  }
+  // 直连黑洞：没有节点可罚，计数与断开照做
+  {
+    const c = mkConn211("203.0.113.212:443", "direct");
+    const sock = mkSock211();
+    c.sock = sock;
+    c.writer = { write: () => new Promise(() => {}) };
+    const fw = Number(W.nsGet("203.0.113.212:443").failW || 0);
+    await c.upWrite(new Uint8Array(16), 40);
+    eq("直连黑洞也关 socket", sock.closed, 1);
+    eq("直连黑洞不罚池子里的节点", Number(W.nsGet("203.0.113.212:443").failW || 0), fw);
+  }
+  // 正常写：不计 ustall、不关 socket
+  {
+    const c = mkConn211("203.0.113.213:443", "node");
+    const sock = mkSock211();
+    c.sock = sock;
+    c.writer = { write: async () => {} };
+    const before = Number(W.S.cnt.ustall || 0);
+    await c.upWrite(new Uint8Array(16), 40);
+    eq("正常写不记 ustall", Number(W.S.cnt.ustall || 0), before);
+    eq("正常写不关 socket", sock.closed, 0);
+  }
+  // 普通写失败：只关 socket（与改造前一致），不算黑洞
+  {
+    const c = mkConn211("203.0.113.214:443", "node");
+    const sock = mkSock211();
+    c.sock = sock;
+    c.writer = { write: async () => { throw new Error("broken pipe"); } };
+    const before = Number(W.S.cnt.ustall || 0);
+    await c.upWrite(new Uint8Array(16), 40);
+    eq("写失败不记 ustall", Number(W.S.cnt.ustall || 0), before);
+    eq("写失败关 socket", sock.closed, 1);
+  }
+} catch (e) {
+  ok("上游写上限的行为段可执行（旧代码没有 upWrite）", false, String((e && e.message) || e));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

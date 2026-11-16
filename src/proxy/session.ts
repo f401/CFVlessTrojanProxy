@@ -82,8 +82,9 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
           }
 
           if (st.sock) {
-            const w = st.writer!;
-            return w.write(chunk).catch(() => closeQuietly(st.sock));
+// 上游写是数据面上唯一没有上限的操作：黑洞中继接了连接却不读时 write() 永不返回，
+            // 这条连接会一直挂着（客户端还在推、socket 也不关）。上限与归因都收在 upWrite 里。
+            return st.upWrite(chunk);
           }
 
           const u8 = toU8(chunk);

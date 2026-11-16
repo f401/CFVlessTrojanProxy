@@ -2,8 +2,19 @@
 export const WS_OPEN = 1;
 export const WS_BUFFER_LIMIT = 1024 * 1024; // 下行发送缓冲超过 1MB 就开始背压
 export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给它 60 秒
+
+/**
+ * 上游写（客户端 → 中继/源站）的单次分片上限。
+ *
+ * 数据面上唯一没有上限的操作就是它：中继接了 TCP 却从不读走数据时 socket.write() 永不返回，
+ * 而客户端在上行一直在推、WS 缓冲一直涨 —— 这条连接会既不发数据也不结束，
+ * 直到客户端自己放弃（服务端这边 socket、writer、inflight 计数全都留着）。
+ * 30 秒足够覆盖正常慢上传的单个分片（分片上限 16MB 但要写进内核缓冲，不会卡这么久），
+ * 超出就按黑洞出口处理。
+ */
+export const UP_STALL_MS = 30000;
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐死
-export const VERSION = "7.209";
+export const VERSION = "7.210";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 

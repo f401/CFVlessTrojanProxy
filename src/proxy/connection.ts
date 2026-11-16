@@ -6,11 +6,11 @@ import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { FO } from "../core/firstobs";
 import { LAT } from "../core/latobs";
-import { nsLatency, nsOk, nsSpeed, nsStall } from "../nodes/score";
+import { nsFail, nsLatency, nsOk, nsSpeed, nsStall } from "../nodes/score";
 import { markSeedDirty } from "../px/seed";
 import { S } from "../core/state";
 import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";
-import { WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS, closeQuietly, releaseAll } from "../core/util";
+import { UP_STALL_MS, WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS, closeQuietly, releaseAll, withTimeout } from "../core/util";
 
 
 /** 每收到多少字节触发一次 tick */
@@ -201,6 +201,43 @@ export class Connection {
     }
     this.stallMs += Date.now() - t0;
     return true;
+  }
+
+  /**
+   * 功能：把客户端分片写给上游（中继或源站），并给这一次写加时间上限。
+   * @param {Uint8Array} chunk 客户端上行的分片
+   * @param {number} ms 本次写的上限毫秒（默认 `UP_STALL_MS`，单测用小值）
+   * @returns {Promise<void>} 写完（或写失败被吞掉）后 resolve；永不 reject
+   */
+  async upWrite(chunk: Uint8Array, ms = UP_STALL_MS): Promise<void> {
+    const w = this.writer;
+    if (!w) return;
+    // 先把迟到的那一半接住：超时判完之后它可能才失败，未捕获的 rejection 会打到 1101
+    const p = w.write(chunk);
+    void p.catch(() => {
+      /* 已经按写失败处理过了 */
+    });
+    try {
+      await withTimeout(p, ms, "up stall");
+    } catch (e) {
+      if (errMsg(e) === "up stall") this.onUpStall();
+      else closeQuietly(this.sock); // 普通写失败：与改造前一致，只关 socket
+    }
+  }
+
+  /**
+   * 功能：判定上游是黑洞出口（接了连接却从不读）时的收尾：计数、归因到节点、断开连接。
+   * @returns {无}
+   */
+  private onUpStall(): void {
+    // 这是节点问题不是站点问题：只有「走中继」时才有节点可罚，直连目标黑洞不该记到池子头上
+    cnt("ustall");
+    if (this.via === "node" && this.node) {
+      nsFail(this.node);
+      logErr("up stall " + this.node, this.node);
+    } else logErr("up stall direct", this.host || "");
+    this.dead = true; // 后续分片不再往这条死连接上写
+    closeQuietly(this.sock);
   }
 
   /** 把"在途连接数"对齐到当前节点（切换节点时会迁移） */

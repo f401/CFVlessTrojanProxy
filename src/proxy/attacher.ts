@@ -46,7 +46,8 @@ export class Attacher {
     st.headerSent = false;
     st.tAttach = Date.now(); // 首字节耗时从这里起算
     st.ttfb = 0;
-    if (payload.length) await st.writer!.write(payload).catch(() => {});
+// 首包写也要有上限：黑洞中继接了连接却不读，write 永不返回，而客户端已经等在首字节上
+    if (payload.length) await st.upWrite(payload);
 
     pipeBack(sock, ws, st, async (gotData) => {
       // 客户端已经走了（取消下载 / 切网 / 切节点）：别再替它开新中转
