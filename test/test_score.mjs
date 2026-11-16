@@ -4535,5 +4535,38 @@ console.log("\n191b) 中继健康表的 merge 口径");
   ok("条数相同且时间相同则保持本地", !!r3 && r3.ok === 2 && r3.dead === 0, JSON.stringify(r3));
 }
 
+// 第 192 组：缩水守卫要比「最大已知规模」；读失败必须留证据（7.192）
+{
+  const mem = new Map();
+  const envP = { uuid: "00000000-0000-0000-0000-000000000000", STATS: {
+    get: async (k) => (mem.has(k) ? mem.get(k) : null),
+    put: async (k, v) => { mem.set(k, v); },
+  } };
+  const mk = (n, tag) => Array.from({ length: n }, (_x, i) => ({ h: tag + i, p: 443, cc: "" }));
+  const putSeed = (gen, n) => mem.set("px:seed", JSON.stringify({ v: 7, ts: 0, poolGen: gen, poolN: n, builtAt: 0, byColo: {} }));
+  // 别的 isolate 已经提交过 200 条的池子；本 isolate 内存还停在上一代的小池子（10 条）
+  W.S.pool = mk(10, "stale"); W.S.poolGen = 4; W.S.seed.poolGen = 4; W.S.seed.poolN = 10;
+  W.S.seedAt = Date.now(); W.S.seedReadFail = false; W.S.colo = "TST";
+  putSeed(5, 200);
+  const c1 = await W.POOL.commitPool(envP, mk(80, "shrink"), false);
+  eq("本地是小池子时仍按 KV 的真实规模判缩水", c1.ok, false);
+  ok("拒绝理由写明是缩水", String(c1.reason || "").includes("rejected"), String(c1.reason));
+  const c2 = await W.POOL.commitPool(envP, mk(80, "shrink"), true);
+  eq("手动 refill 仍然可以缩水", c2.ok, true);
+  // 读失败：普通 kvGet 会把 get 抛错吞成 null，那条 logErr 永远写不出来
+  // 错误环上限 50 条、满了 shift：只能按时间戳认「这条是刚写进去的」，不能按下标切
+  const errAt = Date.now();
+  W.S.pool = []; W.S.poolGen = 0; W.S.seed.poolGen = 6; W.S.seedAt = 0; W.S.seedReadFail = false;
+  const downEnv = { uuid: "00000000-0000-0000-0000-000000000000", STATS: {
+    get: async () => { throw new Error("kv down"); },
+    put: async () => { throw new Error("kv down"); },
+  } };
+  const got = await W.POOL.ensurePool(downEnv);
+  eq("读失败按空池返回，不炸调用方", got.length, 0);
+  const logged = W.S.errs.some((x) => x && x.t >= errAt && String(x.m || "").includes("pool gen 6"));
+  ok("读失败写进了错误环", logged, JSON.stringify(W.S.errs.filter((x) => x && x.t >= errAt)));
+  W.S.pool = []; W.S.poolGen = 0; W.S.seed.poolGen = 0; W.S.seed.poolN = 0; W.S.colo = ""; W.S.seedAt = 0;
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

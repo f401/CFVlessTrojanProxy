@@ -3,7 +3,7 @@ import { errMsg } from "../core/util";
 import { S } from "../core/state";
 import { logErr } from "../nodes/metrics";
 import { invalidateRank } from "../nodes/score";
-import { kvGet, kvGetStrict, kvSet } from "../store/index";
+import { kvGetStrict, kvSet } from "../store/index";
 import { PX_TTL, SEED_KEY } from "./const";
 import { POOL_MAX } from "./probe";
 import { SEEDS } from "./seed";
@@ -24,7 +24,7 @@ export async function ensurePool(env: Env) {
   // 没有代际号说明从没成功提交过池子：返回空，交给 cronScan 去拉源重建
   if (!gen) return [];
   try {
-    const v = await kvGet<PoolEntry[]>(env, "px:pool:" + gen);
+    const v = await kvGetStrict<PoolEntry[]>(env, "px:pool:" + gen);
     if (Array.isArray(v) && v.length) {
       // 截断到当前上限：KV 里的池子可能比配置的 POOL_MAX 大（上限被调小过）
       S.pool = v.slice(0, POOL_MAX);
@@ -33,7 +33,9 @@ export async function ensurePool(env: Env) {
     }
   } catch (e) {
     // 读失败与「还没有池子」在调用方看来都是空池，但前者要留证据：
-    // 静默吞掉会让 KV 故障表现为「一直在重建池子」，排查时看不到任何线索
+    // 静默吞掉会让 KV 故障表现为「一直在重建池子」，排查时看不到任何线索。
+    // 必须用严格读：普通 kvGet 把 get 抛错吞成 null，那样 try/catch 永远不会进 catch，
+    // 这条 logErr 就是一句写在注释里的承诺（v7.192）。
     logErr("pool gen " + gen + " " + String(errMsg(e)).slice(0, 60), "kv");
   }
   return S.pool;
@@ -67,9 +69,10 @@ export async function commitPool(env: Env, fresh: PoolEntry[], allowShrink = fal
     logErr("pool anchor read " + String(errMsg(e)).slice(0, 60), "kv");
     return { ok: false, reason: "anchor read" };
   }
-  // 池子「缩水 60%」的判断必须拿真实大小比：本地 S.pool 可能是上一代的小池子，
-  // 会让一次正常的重建被误拒（反之也会放过真正的缩水）
-  const oldN = S.pool.length || anchorN || Number(S.seed.poolN) || 0;
+  // 池子「缩水 60%」要比所有已知规模里最大的那个：本地 S.pool 可能停在好几代以前的
+  // 小池子上（内存优先命中时不会跟随代际更新），只比它就会把 300 → 80 这种真缩水当成
+  // 正常重建放过去，把别的 isolate 刚提交的大池子覆盖掉。锚点是跨 isolate 的真相。
+  const oldN = Math.max(S.pool.length, anchorN, Number(S.seed.poolN) || 0);
   if (!allowShrink && oldN && newN < oldN * 0.6) {
     return { ok: false, reason: `rejected ${newN} < 60% of ${oldN}` };
   }
