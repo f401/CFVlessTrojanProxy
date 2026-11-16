@@ -91,6 +91,9 @@ export class AppState {
     "factsDo",
     "factsCacheHit",
     "vtCacheBad",
+    // 账本解不开（换过 kek / 值被写坏）：次数不为 0 就说明有实例在从零记账，
+    // 原文会被 save() 备份到 `a_bak`，人工可抢救（v7.220）
+    "doBad",
     "capSet",
     "capNoise",
     "rehab",

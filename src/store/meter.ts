@@ -2,6 +2,7 @@ import { factsOut } from "./factout";
 import { unseal } from "./index";
 import { applyAdd } from "./meteradd";
 import { probeTf } from "../core/tf";
+import { cnt } from "../core/counter";
 import { readShards, saveState } from "./metershard";
 
 /**
@@ -40,6 +41,8 @@ export class Meter {
   blk2: Record<string, { n: number; at: number }>;
   /** 事实表代号：`a` 里记的号与分片里的号不同就说明分片是上一轮的残留（v7.219） */
   fs: number;
+  /** 读不出来的 `a` 原文（换过 kek 或值被写坏）：第一次落盘前先备份到 `a_bak` */
+  private bakRaw: unknown = null;
   /** 请求串行队列：/add 与 /set 交错会让内存和 storage 的顺序不一致 */
   q: Promise<unknown> = Promise.resolve();
   /**
@@ -86,6 +89,12 @@ export class Meter {
         if (o.blk2 && typeof o.blk2 === "object") this.blk2 = o.blk2 as unknown as Record<string, { n: number; at: number }>;
         // 代号决定「要不要读分片」：0 表示事实就在这个值里，磁盘上的分片必是上一轮的残留
         this.fs = Number((o as unknown as { fs?: number }).fs) || 0;
+        } else {
+          // 换过 kek、或值被写坏：这份账本解不开。**不能当成「没有账本」静默从零开始** ——
+          // 下一次 /add 就会把零值覆盖回去，历史用量与配额永久消失。这里只留底与计数，
+          // 真正的写入让 save() 先把原文备份到 `a_bak`（人工可抢救）。
+          cnt("doBad");
+          this.bakRaw = all;
         }
         // 分片要在 `a` 之后再读：装不下时事实表搬去了 f1/f2/f3，只读 `a` 会看到空表
         await this.loadShards();
@@ -152,6 +161,11 @@ export class Meter {
    * @returns {Promise<void>}
    */
   async save() {
+    // 解不开的旧值只备份一次：`a_bak` 只给人工抢救用，不进任何读路径
+    if (this.bakRaw !== null) {
+      await this.st.storage.put("a_bak", this.bakRaw);
+      this.bakRaw = null;
+    }
     this.fs = await saveState(this.env, this.st.storage, {
       c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl,
       vt: this.vt, hl: this.hl, eg: this.eg, ps: this.ps,

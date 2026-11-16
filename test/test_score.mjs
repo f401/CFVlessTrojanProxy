@@ -5775,5 +5775,65 @@ ok("代号为 0 就不读分片", msSrc220.includes("if (!want) return out;"));
 ok("save 之后记住本次代号", storeSrc().includes("this.fs = await saveState(this.env, this.st.storage, {"));
 ok("恢复时把 a 里的代号读出来", storeSrc().includes("this.fs = Number((o as unknown as { fs?: number }).fs) || 0;"));
 ok("loadShards 把代号传下去", storeSrc().includes("readShards(this.env, this.st.storage, this.fs)"));
+// ── 第 221 组：账本解不开时不能静默从零开始（换 kek / 值损坏）
+const mkMeter = (store, kek) => {
+  let gate = Promise.resolve();
+  const state = {
+    blockConcurrencyWhile: (fn) => {
+      gate = Promise.resolve().then(fn);
+      return gate;
+    },
+    storage: {
+      get: async (k) => store.get(k),
+      put: async (k, v) => {
+        store.set(k, v);
+      },
+      delete: async (k) => {
+        store.delete(k);
+      },
+    },
+  };
+  const m = new W.Meter(state, { kek });
+  const raw = m.fetch.bind(m);
+  m.fetch = async (req) => {
+    await gate;
+    return raw(req);
+  };
+  return m;
+};
+const addBody = {
+  method: "POST",
+  body: JSON.stringify({ up: 1000, down: 2000, conns: 1 }),
+  headers: { "content-type": "application/json" },
+};
+const KEK221 = "QESq7bKGwx8l5PMcTGhe6Z_j1HUkeBDQ";
+const GARBAGE = "ENC1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+// 解不开的旧值：构造时记一次计数，落盘前把原文备份走
+const badStore = new Map();
+badStore.set("a", GARBAGE);
+const before221 = W.S.cnt.doBad || 0;
+const badM = mkMeter(badStore, KEK221);
+await badM.fetch(new Request("https://m/get"));
+eq("解不开的账本会计数 doBad", (W.S.cnt.doBad || 0) - before221, 1);
+const badAdd = await badM.fetch(new Request("https://m/add", addBody));
+eq("解不开也要能继续记账（不 5xx）", badAdd.status, 200);
+eq("覆盖前把原文备份到 a_bak", badStore.get("a_bak"), GARBAGE);
+ok("新值已写回 a", typeof badStore.get("a") === "string" && badStore.get("a") !== GARBAGE);
+// 能解开的旧值：不计数、不留底（防误伤）
+const goodStore = new Map();
+const g1 = mkMeter(goodStore, KEK221);
+await g1.fetch(new Request("https://m/add", addBody));
+const before222 = W.S.cnt.doBad || 0;
+const g2 = mkMeter(goodStore, KEK221);
+await g2.fetch(new Request("https://m/get"));
+eq("能解开就不计 doBad", (W.S.cnt.doBad || 0) - before222, 0);
+ok("能解开就不留底", goodStore.get("a_bak") === undefined);
+// 源码锁：这条链的三个关键点都得在
+const meterSrc221 = storeSrc();
+ok("配置里登记了 doBad", fs.readFileSync("src/core/state.ts", "utf8").includes("\"doBad\","));
+ok("构造函数里有 else 分支", meterSrc221.includes("cnt(\"doBad\");"));
+ok("留底带着原值", meterSrc221.includes("this.bakRaw = all;"));
+ok("落盘前备份 a_bak", meterSrc221.includes("await this.st.storage.put(\"a_bak\", this.bakRaw);"));
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
