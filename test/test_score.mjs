@@ -4568,5 +4568,50 @@ console.log("\n191b) 中继健康表的 merge 口径");
   W.S.pool = []; W.S.poolGen = 0; W.S.seed.poolGen = 0; W.S.seed.poolN = 0; W.S.colo = ""; W.S.seedAt = 0;
 }
 
+// 第 193 组：判定层与 pxDecision 闸门的口径（7.193）
+// 缺陷：pxDecision 对「CF 托管目标」无条件 return true，把判定层的 direct-ok 一起盖掉。
+{
+  const reqP = new Request("https://gw.example/", { headers: { "cf-connecting-ip": "203.0.113.9" } });
+  const poolBak = S.pool;
+  const aliveBak = new Map(S.alive);
+  // pxDecision 内部用的是 POLICY.relays()：先让池子里有两条非 CF 中继，闸门才有「中继」可选
+  S.pool = [{ h: "45.136.117.194", p: 443, cc: "" }, { h: "193.181.211.185", p: 443, cc: "" }];
+  S.alive.clear();
+
+  // ① 新鲜直连整页证据：判定层选直连，闸门必须放行（旧代码在这里返回 true）
+  W.vClear();
+  W.vSet("x.com", "d", 200, 40, 1);
+  const d1 = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["45.136.117.194"], legacyWantsRelay: true, mode: "tput" });
+  eq("新鲜直连证据下判定层选直连", d1.chan.kind, "d");
+  eq("新鲜直连证据下闸门不再硬绕中继", W.pxDecision(reqP, "x.com", true, true, 2), false);
+  eq("非 CF 站点的直连证据同样放行", W.pxDecision(reqP, "x.com", false, true, 2), false);
+
+  // ② 没有直连证据：判定层选一条中继，闸门走中继（这是 7.187 要保住的那一半）
+  const d2 = W.decide({ host: "y.org", cfHost: true, clientV6: false, relays: ["45.136.117.194"], legacyWantsRelay: true, mode: "tput" });
+  ok("没有直连证据时判定层选一条中继", d2.chan.kind === "r", d2.why);
+  eq("没有直连证据时闸门走中继", W.pxDecision(reqP, "y.org", true, false, 2), true);
+
+  // ③ 直连被差分判死：闸门必须改走中继（不依赖 wantPx）
+  W.vSetState("z.net", "d", 2, 1);
+  const d3 = W.decide({ host: "z.net", cfHost: true, clientV6: false, relays: ["45.136.117.194"], legacyWantsRelay: false, mode: "tput" });
+  ok("直连被判死时判定层改走中继", d3.chan.kind === "r", d3.why);
+  eq("直连被判死时闸门走中继", W.pxDecision(reqP, "z.net", true, false, 2), true);
+
+  // ④ 分级语义：2 才改行为，1 只改硬规则，0 全是影子
+  W.vClear();
+  W.vSet("k.io", "d", 200, 40, 1);
+  eq("level 1 不改行为（wantPx=false 就直连）", W.pxDecision(reqP, "k.io", true, false, 1), false);
+  eq("level 0 不改行为（wantPx=true 就绕中继）", W.pxDecision(reqP, "k.io", true, true, 0), true);
+
+  // ⑤ 源码锁：闸门的硬规则必须挂在「判定层选了中继」这个条件上
+  const srcPx = fs.readFileSync("src/proxy/pxhook.ts", "utf8");
+  ok("闸门按判定结果而非无条件放行", srcPx.includes('if (cfHost && level >= 1 && out.via === "r")'), "pxhook 的 cfHost 分支形状变了");
+  ok("闸门里没有无条件的 cfHost return true", !/if \(cfHost && level >= 1\) \{\s*return true;/.test(srcPx), "仍是无条件硬绕");
+
+  W.vClear();
+  S.pool = poolBak;
+  S.alive.clear();
+  for (const [k, v] of aliveBak) S.alive.set(k, v);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

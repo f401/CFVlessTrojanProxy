@@ -17,9 +17,13 @@ export function pxDecision(request: Request, host: string, cfHost: boolean, want
     out.why === "http200" ||
     out.why === "dir-blocked" || out.why === "explore";
   // CF 托管目标（x.com 这类）：直连与 CF 中继都是 CF→CF，客户端出口原样透传，
-  // 只有非 CF 主机能改判。这一条不需要任何学习/池子信息，先让它硬生效，
-  // 中继选不出来时 session 会自己回落直连（不会把请求卡死）。
-  if (cfHost && level >= 1) {
+  // 只有非 CF 主机能改判。**只在判定层自己选了中继时**才把它硬生效：
+  // 无条件的 `return true` 会把判定层的 `direct-ok` 一起盖掉 —— 那条分支要的证据是
+  // 「隧道直连 5 分钟内真出过整页」（`vOk(host,"d")` + `vAt`），比任何静态规则都硬，
+  // 而本地配对实测中继比直连差 4 个百分点（直连 30/30 vs 中继 26/30）。
+  // 同一条件也放过 `http200` 与 `v6-cf-none`（没有中继候选可挑时直连是唯一的出口），
+  // 但它们本来就不在 `hard` 里，所以只在 level === 2 时生效（level 1 只改硬规则）。
+  if (cfHost && level >= 1 && out.via === "r") {
     return true;
   }
   const on = level >= 2 || (level >= 1 && hard);
