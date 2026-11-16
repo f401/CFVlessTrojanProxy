@@ -8,8 +8,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
-/** 已知「整块少一级缩进」的文件：留待单独一轮整体重排，重排完必须从这张表里删掉 */
-const BLOCK_SHIFTED = ["src/nodes/stat.ts", "src/nodes/score.ts"];
+/**
+ * 已知「整块少一级缩进」的文件：留待单独一轮整体重排，重排完必须从这张表里删掉。
+ * 7.237 已把 `src/nodes/stat.ts`（130 行）与 `src/nodes/score.ts`（87 行）补齐 ⇒ 现在这张表是空的，
+ * 门禁覆盖全仓；以后若再出现整块偏移，先登记、再排一轮补，补完删掉。
+ */
+const BLOCK_SHIFTED = [];
 
 /** 上一行以这些字符结尾时，本行属于续行（多行表达式/参数表），不做缩进判断 */
 const CONT_TAIL = /(?:[,=([]|[.?:+\-*/%<>&|^!~]|&&|\|\|)$/;
@@ -75,5 +79,7 @@ if (bad) {
   console.log(`\n缩进门禁：${bad} 行被顶出所在块（脚本按行替换时丢了缩进）`);
   process.exitCode = 1;
 } else {
-  console.log(`缩进门禁通过：${files.length} 个文件（跳过整块偏移 ${BLOCK_SHIFTED.join(" / ")}）`);
+  // 白名单为空时不要打印「跳过 …」，否则看起来像还有文件没归位
+  const skip = BLOCK_SHIFTED.length ? `（跳过整块偏移 ${BLOCK_SHIFTED.join(" / ")}）` : "";
+  console.log(`缩进门禁通过：${files.length} 个文件${skip}`);
 }

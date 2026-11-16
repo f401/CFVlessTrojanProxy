@@ -6388,7 +6388,7 @@ eq("AGENTS 头部缺陷数等于 H6 最大编号", Number(hm235 ? hm235[2] : -1)
     return acc;
   };
   const indentHits = (() => {
-    const skip = ["src/nodes/stat.ts", "src/nodes/score.ts"];
+    const skip = [];
     const out = [];
     for (const f of walkTs("src")) {
       if (skip.includes(f)) continue;
@@ -6419,7 +6419,9 @@ eq("AGENTS 头部缺陷数等于 H6 最大编号", Number(hm235 ? hm235[2] : -1)
   ok("没有语句被顶出所在块（缩进门禁的判据）", indentHits.length === 0, indentHits.slice(0, 5).join(" "));
   const gateSrc = fs.existsSync("tools/check-indent.mjs") ? fs.readFileSync("tools/check-indent.mjs", "utf8") : "";
   ok("缩进门禁脚本在位", gateSrc.length > 0);
-  ok("门禁登记了两份整块偏移的文件", gateSrc.includes('"src/nodes/stat.ts"') && gateSrc.includes('"src/nodes/score.ts"'));
+  ok("整块偏移的白名单已清空（stat.ts / score.ts 已补齐）", /const BLOCK_SHIFTED = \[\];/.test(gateSrc));
+  ok("白名单为空时不再打印「跳过」", gateSrc.includes('const skip = BLOCK_SHIFTED.length') && gateSrc.includes("const skip = BLOCK_SHIFTED.length ? "));
+  ok("白名单为空 ⇒ stat.ts / score.ts 也在扫描范围内", indentHits.every((h) => !/nodes\/(stat|score)\.ts/.test(h)));
   ok("preflight 串上了缩进门禁", fs.readFileSync("tools/preflight.mjs", "utf8").includes("缩进门禁"));
   ok("package.json 有 indent 脚本", fs.readFileSync("package.json", "utf8").includes('"indent": "node tools/check-indent.mjs"'));
   const idxSrc = fs.readFileSync("src/index.ts", "utf8");
