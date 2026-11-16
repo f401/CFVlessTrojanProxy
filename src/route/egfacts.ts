@@ -32,7 +32,7 @@ const EG_MAX = 512;
  */
 export class EgFacts {
   /** 已知事实：IP → { f, at } */
-  private m = new Map<string, { f: number; at: number }>();
+  private bySite = new Map<string, { f: number; at: number }>();
   /** 尚未确认送达的增量：IP → { f, at } */
   private pend = new Map<string, { f: number; at: number }>();
   // 这一批真正发出去的行（键 → 发出时的 at）：ack 只清它们，见 ack() 的注释
@@ -47,10 +47,10 @@ export class EgFacts {
    */
   note(ip: string, fam: number, at = Date.now()): void {
     if (!ip || (fam !== 4 && fam !== 6)) return;
-    const cur = this.m.get(ip);
+    const cur = this.bySite.get(ip);
     // 同族且不比已知的新：什么都不用做（避免每次请求都刷新 at，把过期时间无限推后）
     if (cur && cur.f === fam && cur.at >= at) return;
-    this.m.set(ip, { f: fam, at });
+    this.bySite.set(ip, { f: fam, at });
     this.pend.set(ip, { f: fam, at });
     this.trim(at);
   }
@@ -62,10 +62,10 @@ export class EgFacts {
    * @returns {number} 4 / 6 / 0（0 表示未知或已过期）
    */
   famOf(ip: string, now = Date.now()): number {
-    const e = this.m.get(ip);
+    const e = this.bySite.get(ip);
     if (!e) return 0;
     if (now - e.at > EG_TTL) {
-      this.m.delete(ip);
+      this.bySite.delete(ip);
       return 0;
     }
     return e.f;
@@ -135,9 +135,9 @@ export class EgFacts {
     let n = 0;
     for (const r of rows) {
       if (!r || typeof r.i !== "string" || (r.f !== 4 && r.f !== 6) || typeof r.at !== "number") continue;
-      const cur = this.m.get(r.i);
+      const cur = this.bySite.get(r.i);
       if (cur && cur.at >= r.at) continue;
-      this.m.set(r.i, { f: r.f, at: r.at });
+      this.bySite.set(r.i, { f: r.f, at: r.at });
       n += 1;
     }
     this.trim(0);
@@ -154,7 +154,7 @@ export class EgFacts {
   v4List(now = Date.now()): string[] {
     this.trim(now);
     const out: Array<{ i: string; at: number }> = [];
-    for (const [i, r] of this.m) if (r.f === 4) out.push({ i, at: r.at });
+    for (const [i, r] of this.bySite) if (r.f === 4) out.push({ i, at: r.at });
     out.sort((a2, b2) => b2.at - a2.at);
     return out.map((x) => x.i);
   }
@@ -166,14 +166,14 @@ export class EgFacts {
   snap(): EgRow[] {
     const now = Date.now();
     const out: EgRow[] = [];
-    for (const [i, e] of this.m) if (now - e.at <= EG_TTL) out.push({ i, f: e.f, at: e.at });
+    for (const [i, e] of this.bySite) if (now - e.at <= EG_TTL) out.push({ i, f: e.f, at: e.at });
     out.sort((a, b) => b.at - a.at);
     return out.slice(0, 64);
   }
 
   /** 功能：清零（单测用）。@returns {void} */
   clear(): void {
-    this.m.clear();
+    this.bySite.clear();
     this.pend.clear();
     this.sent.clear();
   }
@@ -184,14 +184,14 @@ export class EgFacts {
    * @returns {void}
    */
   private trim(now: number): void {
-    if (this.m.size <= EG_MAX) {
-      if (now > 0) for (const [ip, e] of this.m) if (now - e.at > EG_TTL) this.m.delete(ip);
+    if (this.bySite.size <= EG_MAX) {
+      if (now > 0) for (const [ip, e] of this.bySite) if (now - e.at > EG_TTL) this.bySite.delete(ip);
       return;
     }
-    if (now > 0) for (const [ip, e] of this.m) if (now - e.at > EG_TTL) this.m.delete(ip);
-    if (this.m.size <= EG_MAX) return;
-    const rows = [...this.m.entries()].sort((a, b) => a[1].at - b[1].at);
-    for (let i = 0; i < rows.length - EG_MAX; i++) this.m.delete(rows[i][0]);
+    if (now > 0) for (const [ip, e] of this.bySite) if (now - e.at > EG_TTL) this.bySite.delete(ip);
+    if (this.bySite.size <= EG_MAX) return;
+    const rows = [...this.bySite.entries()].sort((a, b) => a[1].at - b[1].at);
+    for (let i = 0; i < rows.length - EG_MAX; i++) this.bySite.delete(rows[i][0]);
   }
 }
 

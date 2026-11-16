@@ -2,19 +2,20 @@
 // 状态机：0 unknown / 1 ok / 2 blocked / 3 dead。
 // 纪律：弱证据（traffic）不得把强证据（probe/client）的结论冲掉；封锁只能由「行为证据」判定。
 import { cnt } from "../core/counter";
+import type { ChanToken, EpochMs, HostName, SampleCount } from "../core/types";
 import { St } from "../core/enums";
 export type VState = 0 | 1 | 2 | 3;
 export type VSrc = 0 | 1 | 2; // 0 traffic 弱证据 / 1 probe 强证据 / 2 client 端到端
 
 /** 一行判定：某个目标站经某条通道的结论 */
 export interface Verdict {
-  t: string; // 目标站（主机名或 IP 字面量）
-  c: string; // 通道键：d=直连 / r:<ip>=中继
+  target: HostName; // 目标站（主机名或 IP 字面量）
+  channel: ChanToken; // 通道键：d=直连 / r:<ip>=中继
   state: VState; // 0 未知 / 1 可用 / 2 被拦 / 3 连不上
   code: number; // 最近一次观察到的 HTTP 状态码（0 = 没拿到状态码）
   ms: number; // 首字节延迟（毫秒，EWMA）
-  n: number; // 观察次数
-  at: number; // 最近一次更新时间（毫秒时间戳）
+  observations: SampleCount; // 观察次数
+  updatedAt: EpochMs; // 最近一次更新时间（毫秒时间戳）
   src: VSrc; // 这条结论的证据来源
 }
 
@@ -40,7 +41,7 @@ export const VT_TTL_MS = 30 * 60_000;
  * - 目标 `*`（通配）一律不落表：写入入口直接拒绝并计数（见 `blockWild`），读取侧也不再有通配回落。
  */
 export class VerdictTable {
-  private m = new Map<string, Verdict>();
+  private byKey = new Map<string, Verdict>();
   private ttl = VT_TTL_MS;
   private max = 600;
 
@@ -72,7 +73,7 @@ export class VerdictTable {
    */
   private fresh(v: Verdict | undefined): Verdict | undefined {
     if (!v) return undefined;
-    return Date.now() - v.at <= this.ttl ? v : undefined;
+    return Date.now() - v.updatedAt <= this.ttl ? v : undefined;
   }
 
   /**
@@ -102,12 +103,12 @@ export class VerdictTable {
   set(t: string, c: string, code: number, ms: number, src: VSrc = 1): void {
     if (VerdictTable.blockWild(t)) return;
     const k = VerdictTable.key(t, c);
-    const old = this.m.get(k);
+    const old = this.byKey.get(k);
     const ems = old ? Math.round(old.ms * 0.6 + ms * 0.4) : Math.round(ms);
     // 弱证据不得把强证据的 blocked/dead 冲掉，也不得把 ok 冲成 blocked
     const st = src === 0 && old ? (old.state === St.Reachable ? (code >= 200 ? St.Reachable : old.state) : old.state) : VerdictTable.stateOf(code);
-    this.m.set(k, { t, c, state: st, code, ms: ems, n: (old?.n || 0) + 1, at: Date.now(), src });
-    if (this.m.size > this.max) this.trim();
+    this.byKey.set(k, { target: t, channel: c, state: st, code, ms: ems, observations: (old?.observations || 0) + 1, updatedAt: Date.now(), src });
+    if (this.byKey.size > this.max) this.trim();
   }
 
   /**
@@ -122,9 +123,9 @@ export class VerdictTable {
   setState(t: string, c: string, state: VState, src: VSrc): void {
     if (VerdictTable.blockWild(t)) return;
     const k = VerdictTable.key(t, c);
-    const old = this.m.get(k);
+    const old = this.byKey.get(k);
     if (old && old.src > src) return;
-    this.m.set(k, { t, c, state, code: old?.code || 0, ms: old?.ms || 0, n: (old?.n || 0) + 1, at: Date.now(), src });
+    this.byKey.set(k, { target: t, channel: c, state, code: old?.code || 0, ms: old?.ms || 0, observations: (old?.observations || 0) + 1, updatedAt: Date.now(), src });
     this.trim();
   }
 
@@ -135,7 +136,7 @@ export class VerdictTable {
    * @returns 0 流量弱证据 / 1 探测 / 2 客户端端到端；无记录时返回 0
    */
   srcOf(t: string, c: string): VSrc {
-    return this.fresh(this.m.get(VerdictTable.key(t, c)))?.src ?? 0;
+    return this.fresh(this.byKey.get(VerdictTable.key(t, c)))?.src ?? 0;
   }
 
   /**
@@ -145,7 +146,7 @@ export class VerdictTable {
    * @returns HTTP 状态码；无记录或已过期时返回 0
    */
   get(t: string, c: string): number {
-    return this.fresh(this.m.get(VerdictTable.key(t, c)))?.code || 0;
+    return this.fresh(this.byKey.get(VerdictTable.key(t, c)))?.code || 0;
   }
 
   /**
@@ -155,7 +156,7 @@ export class VerdictTable {
    * @returns 0 未知 / 1 可用 / 2 被拦 / 3 连不上；无记录时为 0
    */
   state(t: string, c: string): VState {
-    return this.fresh(this.m.get(VerdictTable.key(t, c)))?.state ?? 0;
+    return this.fresh(this.byKey.get(VerdictTable.key(t, c)))?.state ?? 0;
   }
 
   /**
@@ -165,7 +166,7 @@ export class VerdictTable {
    * @returns 毫秒时间戳；无记录时为 0
    */
   at(t: string, c: string): number {
-    return this.fresh(this.m.get(VerdictTable.key(t, c)))?.at || 0;
+    return this.fresh(this.byKey.get(VerdictTable.key(t, c)))?.updatedAt || 0;
   }
 
   /**
@@ -177,7 +178,7 @@ export class VerdictTable {
    * @returns 可用返回 true
    */
   ok(t: string, c: string): boolean {
-    return this.fresh(this.m.get(VerdictTable.key(t, c)))?.state === St.Reachable;
+    return this.fresh(this.byKey.get(VerdictTable.key(t, c)))?.state === St.Reachable;
   }
 
   /**
@@ -187,7 +188,7 @@ export class VerdictTable {
    * @returns 状态为 2 或 3 返回 true
    */
   bad(t: string, c: string): boolean {
-    const e = this.fresh(this.m.get(VerdictTable.key(t, c)));
+    const e = this.fresh(this.byKey.get(VerdictTable.key(t, c)));
     return !!e && (e.state === St.Blocked || e.state === St.Dead);
   }
 
@@ -198,8 +199,8 @@ export class VerdictTable {
    */
   dead(t: string): boolean {
     let seen = 0;
-    for (const v of this.m.values()) {
-      if (v.t !== t) continue;
+    for (const v of this.byKey.values()) {
+      if (v.target !== t) continue;
       if (!this.fresh(v)) continue;
       if (v.state === St.Reachable) return false;
       seen++;
@@ -214,12 +215,12 @@ export class VerdictTable {
    */
   all(t = ""): Verdict[] {
     const out: Verdict[] = [];
-    for (const v of this.m.values()) {
+    for (const v of this.byKey.values()) {
       if (!this.fresh(v)) continue;
-      if (t && v.t !== t) continue;
+      if (t && v.target !== t) continue;
       out.push(v);
     }
-    return out.sort((a, b) => (a.t === b.t ? a.ms - b.ms : a.t < b.t ? -1 : 1));
+    return out.sort((a, b) => (a.target === b.target ? a.ms - b.ms : a.target < b.target ? -1 : 1));
   }
 
   /**
@@ -230,7 +231,7 @@ export class VerdictTable {
    * @returns 无
    */
   clearHost(t: string): void {
-    for (const [k, v] of this.m) if (v.t === t) this.m.delete(k);
+    for (const [k, v] of this.byKey) if (v.target === t) this.byKey.delete(k);
   }
 
   /**
@@ -261,7 +262,7 @@ export class VerdictTable {
    * @returns 无
    */
   clear(): void {
-    this.m.clear();
+    this.byKey.clear();
   }
 
   /**
@@ -269,7 +270,7 @@ export class VerdictTable {
    * @returns 行数
    */
   size(): number {
-    return this.m.size;
+    return this.byKey.size;
   }
 
   /**
@@ -280,13 +281,13 @@ export class VerdictTable {
    * @returns 无
    */
   private trim(): void {
-    if (this.m.size <= this.max) return;
+    if (this.byKey.size <= this.max) return;
     this.sweep();
-    if (this.m.size <= this.max) return;
+    if (this.byKey.size <= this.max) return;
     // 仍超限：按写入时间升序删最旧的（at 相同时保持插入顺序，行为稳定可测）
-    const over = this.m.size - this.max;
-    const rows = [...this.m.entries()].sort((a, b) => a[1].at - b[1].at);
-    for (let i = 0; i < over && i < rows.length; i++) this.m.delete(rows[i][0]);
+    const over = this.byKey.size - this.max;
+    const rows = [...this.byKey.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt);
+    for (let i = 0; i < over && i < rows.length; i++) this.byKey.delete(rows[i][0]);
   }
 
   /**
@@ -295,7 +296,7 @@ export class VerdictTable {
    */
   private sweep(): void {
     const now = Date.now();
-    for (const [k, v] of this.m) if (now - v.at > this.ttl) this.m.delete(k);
+    for (const [k, v] of this.byKey) if (now - v.updatedAt > this.ttl) this.byKey.delete(k);
   }
 }
 

@@ -31,9 +31,9 @@ export class Prefs {
   of(host = "", limit = 40): { ok: PrefRow[]; bad: PrefRow[] } {
     const pick = new Map<string, PrefRow>();
     for (const r of vAll()) {
-      if (host && r.t !== host) continue;
-      const prev = pick.get(r.c);
-      if (!prev || r.at > prev.at) pick.set(r.c, { c: r.c, s: r.state, at: r.at });
+      if (host && r.target !== host) continue;
+      const prev = pick.get(r.channel);
+      if (!prev || r.updatedAt > prev.at) pick.set(r.channel, { c: r.channel, s: r.state, at: r.updatedAt });
     }
     const all = [...pick.values()].sort((a, b) => b.at - a.at);
     return { ok: all.filter((x) => x.s === 1).slice(0, limit), bad: all.filter((x) => x.s >= 2).slice(0, limit) };

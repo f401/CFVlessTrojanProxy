@@ -1621,7 +1621,7 @@ eq("弱证据不能冲掉强证据的 blocked", W.vState(tg, "r:185.253.117.147"
 W.vSet(tg, "r:45.136.117.194", 0, 800, 1);
 eq("probe 连不上记为 dead", W.vState(tg, "r:45.136.117.194"), 3);
   W.vSet("*", "r:185.253.117.147", 200, 60, 1);
-  ok("通配目标不落表", W.vAll().every((r) => r.t !== "*") && !W.vOk(tg, "r:185.253.117.147"));
+  ok("通配目标不落表", W.vAll().every((r) => r.target !== "*") && !W.vOk(tg, "r:185.253.117.147"));
   const cw = W.cntView();
   ok("通配写入被计数（vwild）", (cw.vwild || 0) >= 1, String(cw.vwild));
   W.vSet("*", "r:45.136.117.194", 200, 55, 1);
@@ -2450,7 +2450,7 @@ console.log("\n78) 写入决策器的影子统计");
   eq("直连腿的 tiny → 永不写封锁", W.FACT.observe(ev({ via: "direct", node: "", down: 737 }), t0 + 242000), "R_DIRECT_NEVER");
   eq("零字节 → 弃权", W.FACT.observe(ev({ down: 0, ok: false }), t0 + 363000), "R_NO_BYTES");
   const sn = W.FACT.snap();
-  eq("影子统计了 4 条", sn.n, 4);
+  eq("影子统计了 4 条", sn.samples, 4);
   eq("本会写 ps 的只有 1 条", sn.would.ps, 1);
   eq("本会写封锁的是 0 条", sn.would.blk || 0, 0);
   eq("理由码也被统计", sn.why.R_NO_BYTES, 1);
@@ -2461,7 +2461,7 @@ console.log("\n78) 写入决策器的影子统计");
   eq("20 秒后同一个键 → 节流", W.FACT.observe(ev({ down: 45290, ok: true }), t1 + 20000), "R_THROTTLED");
   eq("61 秒后再来 → 又能写", W.FACT.observe(ev({ down: 45290, ok: true }), t1 + 61000), "ok");
   W.FACT.clear();
-  eq("清零后快照为空", W.FACT.snap().n, 0);
+  eq("清零后快照为空", W.FACT.snap().samples, 0);
 }
 
 
@@ -2599,7 +2599,7 @@ console.log("\n82) 冷启动口径：firstTry / firstPage / 灰带");
   W.FO.clear();
   const s0 = W.FO.snap();
   eq("没有样本时比率是 0", s0.firstTry, 0);
-  eq("没有样本时 n 是 0", s0.n, 0);
+  eq("没有样本时 n 是 0", s0.samples, 0);
   W.FO.note(0);
   eq("零字节不算连上", W.FO.snap().firstTry, 0);
   W.FO.note(737);
@@ -2607,7 +2607,7 @@ console.log("\n82) 冷启动口径：firstTry / firstPage / 灰带");
   eq("737B 不在整页里", W.FO.snap().page, 0);
   W.FO.note(4096);
   eq("4096 刚好算整页", W.FO.snap().page, 1);
-  eq("三条到上限", W.FO.snap().n, 3);
+  eq("三条到上限", W.FO.snap().samples, 3);
   eq("firstTry = 2/3", W.FO.snap().firstTry, 0.667);
   eq("firstPage = 1/3", W.FO.snap().firstPage, 0.333);
   W.FO.note(3000);
@@ -3555,7 +3555,7 @@ console.log("\n-- 中继健康表的合并口径与死出口（v7.161）");
   const rh = fs.readFileSync("src/route/relay-health.ts", "utf8");
   ok("合并按条数、平局按较新的观测决定谁胜出", rh.includes("inN > curN || (inN === curN && at > cur.at)"));
   ok("淘汰一条中继时连 pending 一起清掉", (rh.match(/this\.pending\.delete\(k\)/g) || []).length === 2);
-  ok("表外的键不会被登记进已上报快照", rh.includes("if (this.m.has(r.i)) this.sent.set(r.i"));
+  ok("表外的键不会被登记进已上报快照", rh.includes("if (this.byRelay.has(r.i)) this.sent.set(r.i"));
   ok("中继健康表的 loaded 状态已删除（冷启动由 vtLoad 的 single-flight 负责）", W.HEALTH.loaded === undefined);
   ok("needLoad 已经不存在", typeof W.HEALTH.needLoad === "undefined");
   ok("markLoaded 已经不存在", typeof W.HEALTH.markLoaded === "undefined");
@@ -3715,7 +3715,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
 {
   const dsrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
   ok("拨号器把已试过的键传给选择器", dsrc.includes("SEL.current(env, mode, st, host, cfHost, tried)"));
-  ok("钉住的 ?rx= 只试一次（诊断语义：我就要这一条）", dsrc.includes("const maxTries = st.rx ? 1 : 2;"));
+  ok("钉住的 ?rx= 只试一次（诊断语义：我就要这一条）", dsrc.includes("const maxTries = st.forceRelayIp ? 1 : 2;"));
   ok("同一条不会试第二次", dsrc.includes("if (tried.has(key)) break;"));
 }
 
@@ -4058,8 +4058,8 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   W.VT.clear();
   for (let i = 0; i < 700; i++) W.vSetState("cap" + i + ".test", "r:198.51.100.9", 2, 1);
   eq("判定表的上限在 setState 上也生效（700 → 600）", W.VT.size(), 600);
-  ok("删掉的是最旧的：第一条已经不在了", !W.vAll().some((r) => r.t === "cap0.test"));
-  ok("最新的那条还在", W.vAll().some((r) => r.t === "cap699.test"));
+  ok("删掉的是最旧的：第一条已经不在了", !W.vAll().some((r) => r.target === "cap0.test"));
+  ok("最新的那条还在", W.vAll().some((r) => r.target === "cap699.test"));
 
   // 2) 判定表：走 import（远端同步，单批 120 行）灌 960 行
   W.VT.clear();
@@ -4111,7 +4111,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   // 6) 源码断言：三处写入路径都要 trim
   const vSrc = fs.readFileSync("src/route/verdict.ts", "utf8");
   ok("set 走上限检查", vSrc.includes("this.trim();"));
-  ok("trim 会删最旧的而不是只清过期", vSrc.includes("const over = this.m.size - this.max;"));
+  ok("trim 会删最旧的而不是只清过期", vSrc.includes("const over = this.byKey.size - this.max;"));
 }
 
 // 172. 站点记忆表的上限只在一条路上执行；限流表被撑爆就整体清空（v7.182）
@@ -4540,7 +4540,8 @@ console.log("\n191b) 中继健康表的 merge 口径");
   f.merge([{ i: "10.4.4.4", o: 1, b: 0, d: 0, t: Date.now() - 1000 }]);
   const before = f.score("10.4.4.4");
   f.merge([{ i: "10.4.4.4", o: 0, b: 0, d: 1, t: Date.now() - 3600 * 1000 }]);
-  eq("较旧的观测不覆盖本地结论", f.score("10.4.4.4"), before);
+  // 健康度带半衰期、每次读都会重新算，直接比浮点数会随两行之间的毫秒抖动 —— 用容差
+ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before) < 1e-6, f.score("10.4.4.4") + " vs " + before);
   // 条数更多的那条照样整条胜出
   f.merge([{ i: "10.4.4.4", o: 5, b: 0, d: 0, t: Date.now() }]);
   const r2 = f.json(5).find((r) => r.ip === "10.4.4.4");
@@ -7159,6 +7160,40 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   const base251 = JSON.parse(fs.readFileSync("tools/naming-baseline.json", "utf8"));
   ok(`[${G}] 命名基线是个只许下降的数字`, typeof base251.opaque === "number" && base251.opaque <= 100, String(base251.opaque));
   ok(`[${G}] 短名白名单写在工具里且带理由`, fs.readFileSync("tools/check-names.mjs", "utf8").includes("改名要迁移 DO 存储"));
+}
+
+// ── 252) 命名批次二：内存字段改成语义名（v7.252） ──
+// 判据：结构体的成员名必须能读出含义（AGENTS.md §6）。这里锁的是本轮改过的形状，
+// 防止后续又出现 `n` / `at` / `m` 这类要靠读实现才懂的字段。
+{
+  const vtSrc = fs.readFileSync("src/route/verdict.ts", "utf8");
+  ok("判定行用 target", vtSrc.includes("target: HostName;"), "");
+  ok("判定行用 channel", vtSrc.includes("channel: ChanToken;"), "");
+  ok("判定行用 observations", vtSrc.includes("observations: SampleCount;"), "");
+  ok("判定行用 updatedAt", vtSrc.includes("updatedAt: EpochMs;"), "");
+  ok("判定表私有表改了名", vtSrc.includes("private byKey = new Map"), "");
+  ok("判定表不再出现旧的私有名", !vtSrc.includes("private m = new Map"), "");
+
+  const csSrc = fs.readFileSync("src/proxy/connection.ts", "utf8");
+  ok("连接用 targetBytes", csSrc.includes("targetBytes = 0;"), "");
+  ok("连接用 forceRelayIp", csSrc.includes("forceRelayIp = \"\";"), "");
+  ok("连接用 startedAt", csSrc.includes("startedAt = Date.now();"), "");
+
+  const foSrc = fs.readFileSync("src/core/firstobs.ts", "utf8");
+  ok("首次观测计数叫 samples", foSrc.includes("private samples = 0;"), "");
+  const fsSrc = fs.readFileSync("src/route/factshadow.ts", "utf8");
+  ok("影子的计数也叫 samples", fsSrc.includes("private samples = 0;"), "");
+
+  // 行为面：快照与记录都改用新字段
+  W.FO.clear();
+  const snap252 = W.FO.snap();
+  eq("快照用 samples 字段", typeof snap252.samples, "number");
+  eq("旧字段 n 已经不在了", snap252.n, undefined);
+
+  // 棘轮基线：本轮从 100 降到 86，门禁必须与之一致
+  const base252 = JSON.parse(fs.readFileSync("tools/naming-baseline.json", "utf8"));
+  eq("命名基线降到 86", base252.opaque, 86);
+  ok("命名门禁已接进 preflight", fs.readFileSync("tools/preflight.mjs", "utf8").includes("check-names.mjs"), "");
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

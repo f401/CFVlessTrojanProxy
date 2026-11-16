@@ -34,10 +34,10 @@ export function vtDelta(): VtRow[] {
     if (v.state < 2) continue;
     // 表里不可能再有通配行：写入入口（`VerdictTable.blockWild`）直接拒绝 `*`。
     // 站点级证据（`站点|通道`）照旧同步 —— 那才是「这个站点这条通道被封」的可信事实。
-    const k = v.t + "|" + v.c;
+    const k = v.target + "|" + v.channel;
     // 有效期跟判定表共用同一个常量：以前这里自己抄了一个 1800000，
     // 7.154 把 `SC.VT_TTL` 删掉之后这种副本就会静默漂移
-    const exp = v.at + VT_TTL_MS;
+    const exp = v.updatedAt + VT_TTL_MS;
     if (exp <= now) continue;
     if ((S.vtSent.get(k) || 0) >= exp) continue;
     if ((S.vtPend.get(k)?.t || 0) >= exp) continue;

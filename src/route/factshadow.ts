@@ -15,11 +15,12 @@ import { cnt } from "../core/counter";
 import { S } from "../core/state";
 import type { TrafficEvt } from "../core/hook";
 import { BIG_WIN, commitFact, factKey, type FactCtx, type FactObs, type FactOut } from "./commitfact";
+import type { SampleCount } from "../core/types";
 
 /** 影子统计的一次快照 */
 export interface FactShadowSnap {
   /** 观测总数 */
-  n: number;
+  samples: SampleCount;
   /** 「本会写」的分布：eg / dead / blk / ps / none */
   would: Record<string, number>;
   /** 拒绝理由码分布（`ok` 表示会写） */
@@ -124,7 +125,7 @@ export function shadowCtx(o: FactObs, now: number, lastWriteAt = 0): FactCtx {
  * 「v8 的写入规则在真实流量下的形状」，而不是精确账目。
  */
 export class FactShadow {
-  private n = 0;
+  private samples = 0;
   private would = new Map<string, number>();
   private why = new Map<string, number>();
   /**
@@ -154,7 +155,7 @@ export class FactShadow {
     const o = shadowObs(e, now);
     const r = commitFact(o, shadowCtx(o, now, this.wrote.get(factKey(o)) || 0));
     // 统计（「如果切到 v8 会写出什么」的分布，`/health` 上的 `would`/`why` 就是它）
-    this.n += 1;
+    this.samples += 1;
     const kind = r.write ? r.write.kind : "none";
     this.would.set(kind, (this.would.get(kind) || 0) + 1);
     this.why.set(r.reason, (this.why.get(r.reason) || 0) + 1);
@@ -184,12 +185,12 @@ export class FactShadow {
    * @returns {FactShadowSnap} 观测数 + 两类分布
    */
   snap(): FactShadowSnap {
-    return { n: this.n, would: mapToObj(this.would), why: mapToObj(this.why) };
+    return { samples: this.samples, would: mapToObj(this.would), why: mapToObj(this.why) };
   }
 
   /** 功能：清零（单测用）。@returns {void} */
   clear(): void {
-    this.n = 0;
+    this.samples = 0;
     this.would.clear();
     this.why.clear();
     this.wrote.clear();

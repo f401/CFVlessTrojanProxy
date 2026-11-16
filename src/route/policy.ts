@@ -339,9 +339,9 @@ export class Policy {
     let d = false;
     let r = false;
     for (const v of vAll()) {
-      if (v.t !== host || v.state !== 1) continue;
-      if (v.c === "d") d = true;
-      else if (v.c.startsWith("r:")) {
+      if (v.target !== host || v.state !== 1) continue;
+      if (v.channel === "d") d = true;
+      else if (v.channel.startsWith("r:")) {
         r = true;
         break;
       }

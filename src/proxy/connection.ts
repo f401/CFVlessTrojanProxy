@@ -85,15 +85,15 @@ export class Connection {
   // —— 观测 ——
   tAttach = 0; // 连上上游的时刻
   ttfb = 0; // 首字节耗时（ms），按站点的画像就靠它
-  sz = 0;
+  targetBytes = 0; // 目标流量（字节，0 = 按模式默认）：决定「传完一个请求」要算多少流量
   /** 目标站点是否托管在 CF 上（决定中继只能用非 CF 出口） */
-  cf = false; // 目标流量（字节，0 = 按模式默认）：决定"传完一个请求"要算多少流量
+  cf = false; // 目标站点是否托管在 CF 上（决定中继只能用非 CF 出口）
   /** 调试用：`?rx=<ip>` 强制这一条连接走指定中继（只给诊断脚本用，正常流量留空） */
-  rx = "";
+  forceRelayIp = "";
   directFail = false; // 直连阶段 0 字节关闭过（用于"直连对照"）
 
   // —— 身份与上下文 ——
-  t0 = Date.now();
+  startedAt = Date.now();
   id: string | null = null;
   env: Env;
   ctx: ExecutionContext;
@@ -315,7 +315,7 @@ export class Connection {
       // 一条 5 秒连接卡 2 秒 → pStall 0.34（真实占比 0.001），单次卡顿白送 800+ ms 分，
       // 还会踩中 pStall>0.25 的 +400 重罚档，节点一晚上翻不了身。
       if (this.node) {
-        nsStall(this.node, this.stallMs, Math.max(1000, now - this.t0));
+        nsStall(this.node, this.stallMs, Math.max(1000, now - this.startedAt));
       }
       // 连接观测按节点聚合（n/ok/p50/p95）：40 条原始记录只能盖住 40 个节点，
       // 聚合后同样载重能覆盖全池（2000 个节点也就 400 条聚合记录）。
@@ -347,7 +347,7 @@ export class Connection {
         // 前 3 条用户连接的质量：低流量客户端几乎每条请求都落冷 isolate，这是唯一能看到的「第一眼」
         FO.note(this.down);
         // 延迟观测：成功口径是「拿到内容」，不是 2xx（业务 4xx 也是内容）
-        LAT.note(this.down > 64, Date.now() - this.t0);
+        LAT.note(this.down > 64, Date.now() - this.startedAt);
         // 真实流量的"成功"样本：可用性(pFail/availOf)、面板成功率全靠它。
         // 早先只有失败才记账（nsFail），成功只走 SEL.resetFail()，而那里
         // 第一行就是 `if (!S.pxFailSeen) return` —— 健康节点永远 n=0，
@@ -366,14 +366,14 @@ export class Connection {
           const kbs = this.down >= 1048576 ? (this.down / 1024) * 1000 / xfer : 0;
           HOOK.relPerf?.(this.host, ip, t0, kbs);
           // 只有真正拉到 ≥40KB 才算一次可用的吞吐样本：4 字节 403 页算出的"速度"是假的（文档 D5）
-          if (this.down >= 40960) HOOK.capNote?.(ip, Math.round((this.down / 1024) * 1000 / Math.max(1, Date.now() - this.t0)));
+          if (this.down >= 40960) HOOK.capNote?.(ip, Math.round((this.down / 1024) * 1000 / Math.max(1, Date.now() - this.startedAt)));
           // 「站点 × 中继」成功率（v8 §5 的 ps）不在这里写：判定层要的是「同一窗口里有 2xx 对照」，
           // 只有 src/route/judge.ts 的判定出口知道这件事，它自己调 PS.note。
           // 这里只交出三样原料：首字节（relPerf）、容量（capNote）、完整响应字节数（traffic）。
         }
         // 通道证据：交给决策层（弱证据只可能把 unknown 提成 ok；判死只有 probe 能下）
         if (this.host && HOOK.traffic) {
-          HOOK.traffic({ cf: this.cf, host: this.host, via: this.via as "node" | "direct" | "v6", node: this.node || "", down: this.down, ok: !this.failed && this.down > 0, life: Date.now() - this.t0, up: this.up, at: Date.now() });
+          HOOK.traffic({ cf: this.cf, host: this.host, via: this.via as "node" | "direct" | "v6", node: this.node || "", down: this.down, ok: !this.failed && this.down > 0, life: Date.now() - this.startedAt, up: this.up, at: Date.now() });
         }
         // 真实首字节回流：探活只能证明连得上，转发快不快只有这条路径知道
         if (this.node && this.ttfb > 0) nsLatency(this.node, this.ttfb);

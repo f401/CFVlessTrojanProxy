@@ -107,7 +107,7 @@ W.FO.note(737);
 W.FO.note(45000);
 W.FO.note(0);
 const fo = W.FO.snap();
-ok("first：三条到上限", fo.n === 3, fo);
+ok("first：三条到上限", fo.samples === 3, fo);
 ok("first：737B 与 45KB 都算连通，只有 45KB 算整页", fo.first === 2 && fo.page === 1, fo);
 
 // ── 7) /health：五个新字段都在 ───────────────────────────────────────────────

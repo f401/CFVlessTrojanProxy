@@ -67,8 +67,8 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
   const stream = wsToStream(serverWS, early);
 
   const st = new Connection(env, ctx, mode, ipTag || "");
-  st.sz = szBytes;
-  st.rx = rxPin;
+  st.targetBytes = szBytes;
+  st.forceRelayIp = rxPin;
   cnt("conn");
 
   stream

@@ -96,13 +96,13 @@ export class Dialer {
       // 两次调用返回的是同一条，而 nsFail 的惩罚不足以让它掉出第一 —— 所以把试过的键传下去。
       const tried = new Set<string>();
       // 钉住的 ?rx= 只试一次：它本来就是「我就要这一条」的诊断语义
-      const maxTries = st.rx ? 1 : 2;
+      const maxTries = st.forceRelayIp ? 1 : 2;
       // 名额的语义是「真的拨了几次」。以前用循环下标当名额，于是下面那个
       // 「跳过 CF 边缘中继」的 continue 也会吃掉一次 —— 候选里排着 CF 边缘时，
       // 「最多试两条」实际只试了一条，剩下那条能用的中继根本没被拨过。
       let tries = 0;
       for (let guard = 0; guard < maxTries + 4 && tries < maxTries && !sock; guard++) {
-        const p = parseProxyIp(st.rx || (await SEL.current(env, mode, st, host, cfHost, tried)));
+        const p = parseProxyIp(st.forceRelayIp || (await SEL.current(env, mode, st, host, cfHost, tried)));
         if (!p || checkTarget(p.host, p.port)) break;
         const key = p.host + ":" + p.port;
         // 没有别的候选了（选择器回空或回同一条）：不要再花 2.5 秒试同一条

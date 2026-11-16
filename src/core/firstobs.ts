@@ -9,6 +9,7 @@
 // - `gray`：2048–4096 之间的灰带（真实的小页面与「稍大一点的拒绝页」在这里重叠）。
 // 只用 firstTry 会以为「95% 都通」，只用 firstPage 会把 `example.com`（932B）判成失败。
 import { cnt } from "./counter";
+import type { SampleCount } from "../core/types";
 
 /** 每个 isolate 只统计前几条用户连接 */
 export const FO_LIMIT = 3;
@@ -20,7 +21,7 @@ export const FO_GRAY = 2048;
 /** 快照结构 */
 export interface FirstSnap {
   /** 统计到的连接数（最多 `FO_LIMIT`） */
-  n: number;
+  samples: SampleCount;
   /** `down > 0` 的条数 */
   first: number;
   /** `down >= FO_PAGE` 的条数 */
@@ -39,7 +40,7 @@ export interface FirstSnap {
  * 功能：每个 isolate 的前 N 条用户连接质量统计（只累计，不清零）。
  */
 export class FirstObs {
-  private n = 0;
+  private samples = 0;
   private first = 0;
   private page = 0;
   private gray = 0;
@@ -53,12 +54,12 @@ export class FirstObs {
   note(down: number): void {
     const d = Number.isFinite(down) ? Math.max(0, Math.round(down)) : 0;
     // 上限之后只计数不取样：否则「isolate 跑了 200 条」和「3 条」的快照会长得一样
-    if (this.n >= FO_LIMIT) {
+    if (this.samples >= FO_LIMIT) {
       this.skip += 1;
       if (this.skip === 1) cnt("ftSkip");
       return;
     }
-    this.n += 1;
+    this.samples += 1;
     if (d > 0) this.first += 1;
     if (d >= FO_PAGE) this.page += 1;
     else if (d >= FO_GRAY) this.gray += 1;
@@ -69,21 +70,21 @@ export class FirstObs {
    * @returns {FirstSnap} 计数与两个比率
    */
   snap(): FirstSnap {
-    const n = this.n;
+    const samples = this.samples;
     return {
-      n,
+      samples,
       first: this.first,
       page: this.page,
       gray: this.gray,
       skip: this.skip,
-      firstTry: n ? Math.round((this.first / n) * 1000) / 1000 : 0,
-      firstPage: n ? Math.round((this.page / n) * 1000) / 1000 : 0,
+      firstTry: samples ? Math.round((this.first / samples) * 1000) / 1000 : 0,
+      firstPage: samples ? Math.round((this.page / samples) * 1000) / 1000 : 0,
     };
   }
 
   /** 功能：清空（单测用）。@returns {void} */
   clear(): void {
-    this.n = 0;
+    this.samples = 0;
     this.first = 0;
     this.page = 0;
     this.gray = 0;
