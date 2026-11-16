@@ -106,7 +106,9 @@ export async function probeProxy(h: string, p: number) {
     }
     const tcp = Date.now() - t0; // ① 建连：纯网络 S.rtt
     const w = sock.writable.getWriter();
-    await w.write(PROBE_HELLO);
+    // connect() 是惰性的：真正的 TCP 建连发生在第一次 write。只给 read 包超时不够 ——
+    // 黑洞候选会让这里一直挂着，而探活是按 SC.PROBE_CONC 个一批跑的，挂住一个就卡住整轮。
+    await withTimeout(w.write(PROBE_HELLO), 2500, "timeout");
     w.releaseLock();
 
     const r = sock.readable.getReader();
@@ -475,7 +477,8 @@ export async function probeSni(nodeHost: string, nodePort: number, sni: string, 
     // 注意：Workers 的 connect() 是惰性的，真正的 TCP 建连发生在第一次 write/read，
     // 所以这里不单独报 tcp，只报"从发起到收到 ServerHello"的总耗时。
     const w = sock.writable.getWriter();
-    await w.write(tlsHello(sni));
+    // 同上：惰性 connect 的第一次 write 才是真正建连，必须有时限。
+    await withTimeout(w.write(tlsHello(sni)), ms, "timeout");
     w.releaseLock();
 
     const r = sock.readable.getReader();

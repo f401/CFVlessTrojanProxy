@@ -83,7 +83,7 @@ export {
   errHist,
 } from "./nodes/metrics";
 export { ERRS } from "./nodes/errlog";
-export { tlsHello, refillPool, chunks, srcNote, srcRank, srcHealth, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES } from "./px/probe";
+export { tlsHello, probeProxy, probeSni, refillPool, chunks, srcNote, srcRank, srcHealth, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES } from "./px/probe";
 export { regionListAsync } from "./px/regions";
 export { PEND, clSnapshot, nodeSnapGet, primaryId, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
 export { runCron } from "./routes/cron";

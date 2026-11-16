@@ -5311,5 +5311,51 @@ console.log("\n191b) 中继健康表的 merge 口径");
   ok("超时后关掉迟到 socket", dialerSrc.includes("closeQuietly(x)"));
   ok("guarded 用 2500ms 上限", dialerSrc.includes("return await withTimeout(pk, 2500);"));
 }
+/* ===== 第 210 组：探活的三处 connect 惰性建连必须有时限（7.209 D165） ===== */
+{
+  // connect() 是惰性的：真正的 TCP 建连发生在第一次 write。挂死时三个探测函数都必须自己返回，
+  // 不能让 chunks(batch, PROBE_CONC) 的整轮探活跟着一起挂住。
+  const prevSimWr = globalThis.__simConnect;
+  let closedWr = 0;
+  globalThis.__simConnect = () => ({
+    writable: { getWriter: () => ({ write: () => new Promise(() => {}), releaseLock: () => {} }) },
+    readable: { getReader: () => ({ read: () => new Promise(() => {}) }) },
+    close: () => {
+      closedWr += 1;
+    },
+  });
+  const bounded = async (fn) => {
+    const t = Date.now();
+    const r = await Promise.race([
+      fn().then((x) => ({ x })).catch((e) => ({ e })),
+      new Promise((res) => setTimeout(() => res("hang"), 4500)),
+    ]);
+    return { r, ms: Date.now() - t };
+  };
+  const pw = await bounded(() => W.probeProxy("1.2.3.4", 443));
+  ok("probeProxy 挂死时 4.5 秒内自己返回", Boolean(pw.r && pw.r.x === null), JSON.stringify(pw.r));
+  ok("probeProxy 的等待上限约 2.5 秒", pw.ms < 4000, String(pw.ms));
+  const ps = await bounded(() => W.probeSni("1.2.3.4", 443, "example.com", 1200));
+  ok("probeSni 挂死时按自己的 ms 返回", Boolean(ps.r && ps.r.x && ps.r.x.err === "tcp"), JSON.stringify(ps.r));
+  ok("probeSni 的等待上限跟随 ms 参数", ps.ms < 3000, String(ps.ms));
+  const ph = await bounded(() => W.probeHttp80("example.com", "1.2.3.4:80"));
+  ok("probeHttp80 挂死时返回 io: timeout", Boolean(ph.r && ph.r.x && ph.r.x.ok === false && ph.r.x.err === "io: timeout"), JSON.stringify(ph.r));
+  ok("三次探测都把挂死的 socket 关掉", closedWr >= 3, String(closedWr));
+  globalThis.__simConnect = prevSimWr;
+  // 源码锁：三处 write 都必须带 withTimeout，且不许再出现裸的 await w.write(
+  const probeSrc = fs.readFileSync("src/px/probe.ts", "utf8");
+  const httpSrc = fs.readFileSync("src/core/http80.ts", "utf8");
+  ok(
+    "probeProxy 的 write 有超时",
+    probeSrc.includes('withTimeout(w.write(PROBE_HELLO), 2500, "timeout")'),
+  );
+  ok("probeSni 的 write 跟随 ms", probeSrc.includes('withTimeout(w.write(tlsHello(sni)), ms, "timeout")'));
+  ok("http80 的 write 有超时", httpSrc.includes('withTimeout(w.write(new TextEncoder().encode(req)), 2500, "timeout")'));
+  ok("http80 引入了 withTimeout", httpSrc.includes('import { withTimeout } from "./util";'));
+  ok(
+    "探活路径不再有裸 write",
+    !/await w\.write\((?!.*withTimeout)/.test(probeSrc) && !/await w\.write\((?!.*withTimeout)/.test(httpSrc),
+  );
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
