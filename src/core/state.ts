@@ -104,6 +104,7 @@ export class AppState {
     // 原文会被 save() 备份到 `a_bak`，人工可抢救（v7.220）
     "doBad",
     "logsDoFail",
+  "dayDoFail",
   "shardBad",
     "capSet",
     "capNoise",

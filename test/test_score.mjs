@@ -6639,5 +6639,55 @@ ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 D
   ok("cron 检查 flushPx 返回值", srcCron243.includes("const fx = await flushPx(env);") && srcCron243.includes("if (!fx.ok)"));
   ok("cron 记录用户表读失败", srcCron243.includes('cnt("snapUsersFail")'));
 }
+/* ---------- 244. /proxyip?day=1 的读失败不能伪装成「今天零用量」 ---------- */
+{
+  const mk = (meter) => ({
+    env: { METER: meter, NODE_ENV: "test" },
+    url: new URL("https://sim.example.com/u/proxyip?day=1"),
+    host: "sim.example.com",
+    id: "u244b",
+  });
+  const bad = {
+    idFromName: () => "id",
+    get: () => ({ fetch: async () => { throw new Error("kv down"); } }),
+  };
+  const r1 = await (await W.proxyip(mk(bad))).json();
+  eq("读失败时 doSrc 是 fail", r1.doSrc, "fail");
+  eq("读失败时计数仍是空表", JSON.stringify(r1.cnt), "{}");
+  const n1 = W.cntView().dayDoFail || 0;
+  ok("读失败记了 dayDoFail", n1 >= 1, String(n1));
+
+  const r500 = await (
+    await W.proxyip(
+      mk({ idFromName: () => "id", get: () => ({ fetch: async () => new Response(JSON.stringify({ g: {} }), { status: 500 }) }) })
+    )
+  ).json();
+  eq("DO 回 5xx 也算读失败", r500.doSrc, "fail");
+
+  const r3 = await (await W.proxyip(mk(undefined))).json();
+  eq("没有 METER 绑定时报 none", r3.doSrc, "none");
+
+  const r4 = await (
+    await W.proxyip(
+      mk({
+        idFromName: () => "id",
+        get: () => ({ fetch: async () => new Response(JSON.stringify({ g: { d: "2026-11-16", n: 3 }, s: {} }), { status: 200 }) }),
+      })
+    )
+  ).json();
+  eq("读通了报 ok", r4.doSrc, "ok");
+  eq("读通了拿到真实计数", r4.cnt.n, 3);
+
+  // 源码锁：三条留痕都必须真的在，且响应体带出来源标记
+  const px244 = fs.readFileSync("src/routes/proxyip.ts", "utf8");
+  ok("doSrc 有三态声明", px244.includes('let doSrc: "ok" | "fail" | "none"'));
+  ok("先判 r.ok 再解析", px244.includes('if (!r.ok) throw new Error("meter cnt " + r.status);'));
+  ok("失败记 dayDoFail", px244.includes('cnt("dayDoFail")'));
+  ok("失败写错误环", px244.includes('logErr("day count read failed", "kv")'));
+  ok("响应体带 doSrc", /\n\s+doSrc,/.test(px244));
+  const st244 = fs.readFileSync("src/core/state.ts", "utf8");
+  ok("cntKeys 登记了 dayDoFail", st244.includes('"dayDoFail"'));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

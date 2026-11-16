@@ -89,6 +89,7 @@ export { regionListAsync } from "./px/regions";
 export { PEND, RESTORE_MAX, clSnapshot, nodeSnapGet, pendFlush, primaryId, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
 export { doFetch, meterGet } from "./store/meter-client";
 export { runCron } from "./routes/cron";
+export { proxyip } from "./routes/proxyip";
 export { renderStatsHtml } from "./views/panel";
 export { statsNodeRows } from "./nodes/stats-rows";
 export { randomPwd } from "./edge/auth";

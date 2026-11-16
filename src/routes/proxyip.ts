@@ -9,7 +9,7 @@ import { nodeSnapGet } from "../store/index";
 import { cronScan, nsOf, pxGet } from "../px/pool";
 import { POOL_SOURCES, srcHealth, srcRank } from "../px/probe";
 import { SEL } from "../px/selector";
-import { cntView } from "../core/counter";
+import { cnt, cntView } from "../core/counter";
 import { CRONLOCK } from "../core/lock";
 import { spdSnapshot } from "../core/node-snapshot";
 import { regionListAsync } from "../px/regions";
@@ -28,19 +28,30 @@ export async function proxyip(c: UserCtx): Promise<Response> {
   if (url.searchParams.get("day") === "1") {
     let g = null;
     let nodesSnap = {};
+    // 读不到与「今天还没用量」在面板上是同一个样子（7.233 的 /logs 修过同一形状），
+    // 所以这里必须带一个显式的来源标记：none = 没绑定、ok = 读通了、fail = 读失败。
+    let doSrc: "ok" | "fail" | "none" = env.METER ? "ok" : "none";
     if (env.METER) {
       try {
         const stub = env.METER.get(env.METER.idFromName(primaryId(env) || id));
         const r = await stub.fetch("https://meter/cnt");
+        // 非 2xx 时 json() 可能照样解析出一份错误体（7.214 的 vtFetch 就是这么把 5xx 当成空表的），
+        // 所以先按状态码判失败，别让「DO 报错」伪装成「今天零用量」。
+        if (!r.ok) throw new Error("meter cnt " + r.status);
         const j = await r.json();
         g = j && j.g;
         nodesSnap = (j && j.s) || {};
-      } catch (e) {}
+      } catch (e) {
+        doSrc = "fail";
+        cnt("dayDoFail");
+        logErr("day count read failed", "kv");
+      }
     }
     return json({
       date: (g && g.d) || "",
       cnt: g || {},
       nodes: nodesSnap,
+      doSrc,
       local: cntView(),
       localSpd: spdSnapshot(),
       now: Date.now(),
