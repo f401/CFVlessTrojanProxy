@@ -109,11 +109,20 @@ export function renderSingbox(
           { tag: "dns_local", address: "223.5.5.5" },
           { tag: "dns_remote", address: "https://1.1.1.1/dns-query", detour: G_MAN },
         ],
+        // 局域网名字用本地解析器：路由器 / NAS / .local 这些名字在公网 DNS 上不存在，
+        // 走 dns_remote（detour G_MAN）不但查不到，还会把内网主机名送到代理出口去
+        rules: [{ domain_suffix: [".lan", ".local", ".home.arpa"], server: "dns_local" }],
         final: "dns_remote",
       },
       inbounds: [{ type: "tun", tag: "tun-in", address: ["172.19.0.1/30"], auto_route: true, strict_route: true }],
       outbounds: [...groups, ...outs, { type: "direct", tag: "direct" }],
-      route: { final: G_MAN, auto_detect_interface: true },
+      // tun + auto_route 会把整机流量接管，private 网段必须显式放直连，否则局域网
+      // （路由管理页、NAS、局域网打印机）都会被送进隧道，再由 CF 出口去连 192.168.x —— 必然失败
+      route: {
+        rules: [{ ip_is_private: true, outbound: "direct" }],
+        final: G_MAN,
+        auto_detect_interface: true,
+      },
     },
     null,
     2,

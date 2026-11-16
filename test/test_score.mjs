@@ -4815,5 +4815,50 @@ console.log("\n191b) 中继健康表的 merge 口径");
   eq("文档写明 ?p 默认 both", v8199.includes("默认 `both`"), true);
 }
 
+// 第 200 组：sing-box 的本地直连口径（tun + auto_route 接管整机流量，private 网段与局域网 DNS 必须放直连）
+{
+  const envS200 = { uuid: "u200", nodes: "", proxyip: "auto" };
+  const idS200 = "4241b903-8d39-4a17-8f4c-bb33b1630c33";
+  const alive200 = W.S.alive;
+  const now200 = Date.now();
+  W.S.alive = new Map([
+    ["45.136.117.194", { at: now200, ms: 120 }],
+    ["193.181.211.185", { at: now200, ms: 150 }],
+  ]);
+  const sb200 = JSON.parse(W.renderSingbox(envS200, new URL("https://example.com/sub"), idS200, "example.com", {}, ["HK"]));
+  W.S.alive = alive200;
+
+  const dns200 = sb200.dns || {};
+  const route200 = sb200.route || {};
+  const dnsTags200 = (dns200.servers || []).map((s2) => s2.tag);
+  const dnsRules200 = Array.isArray(dns200.rules) ? dns200.rules : [];
+  const localRule200 = dnsRules200.find((r) => r.server === "dns_local");
+  // dns_local 只声明不选 = 内网主机名照样送到公网 DNS（还经代理），等于没配
+  eq("sing-box 有 dns 规则把局域网后缀交给 dns_local", Boolean(localRule200), true);
+  eq("局域网后缀覆盖 .lan", String(localRule200 && localRule200.domain_suffix).includes(".lan"), true);
+  eq("局域网后缀覆盖 .local", String(localRule200 && localRule200.domain_suffix).includes(".local"), true);
+  eq("dns 规则引用的 server 都在 dns.servers 里", dnsRules200.every((r) => dnsTags200.includes(r.server)), true);
+  eq("默认 DNS 仍是走代理的 dns_remote", dns200.final, "dns_remote");
+  const remote200 = (dns200.servers || []).find((s2) => s2.tag === "dns_remote");
+  eq("dns_remote 依旧经手动组出去", Boolean(remote200 && remote200.detour), true);
+
+  const routeRules200 = Array.isArray(route200.rules) ? route200.rules : [];
+  const priv200 = routeRules200.find((r) => r.ip_is_private === true);
+  eq("route 有 private 网段规则", Boolean(priv200), true);
+  eq("private 网段放直连", priv200 && priv200.outbound, "direct");
+  const sbTags200 = (sb200.outbounds || []).map((o) => o.tag);
+  eq("private 规则指向的 direct 出站真实存在", sbTags200.includes("direct"), true);
+  eq("未命中仍落到手动组", Boolean(route200.final) && sbTags200.includes(route200.final), true);
+  const tun200 = (sb200.inbounds || []).find((i) => i.type === "tun");
+  eq("tun 仍开着 auto_route（所以 private 直连必须显式写）", Boolean(tun200 && tun200.auto_route), true);
+  const src200 = fs.readFileSync("src/views/sub-singbox.ts", "utf8");
+  eq("源码里写了 ip_is_private 直连", src200.includes("ip_is_private: true"), true);
+  eq("源码里局域网后缀与 dns_local 配对", src200.includes('server: "dns_local"'), true);
+  // 对照：Clash 侧本来就有本地解析与 CN 直连，改 sing-box 时别把两边口径搞反
+  const cl200 = W.renderClash(envS200, new URL("https://example.com/sub"), idS200, "example.com");
+  eq("Clash 侧仍是本地 nameserver", cl200.includes("nameserver: [223.5.5.5"), true);
+  eq("Clash 侧仍有 GEOIP,CN 直连", cl200.includes("- GEOIP,CN,DIRECT"), true);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
