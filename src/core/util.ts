@@ -3,7 +3,7 @@ export const WS_OPEN = 1;
 export const WS_BUFFER_LIMIT = 1024 * 1024; // 下行发送缓冲超过 1MB 就开始背压
 export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给它 60 秒
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐死
-export const VERSION = "7.206";
+export const VERSION = "7.207";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 
@@ -13,8 +13,13 @@ export const dec = new TextDecoder();
 
 export const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"));
 
-// 密码绑定的读取：优先 env.pwd（中性名），兼容老的 env[P_T]
-export const secretPwd = (env: Env) => String((env && (env.pwd || env[P_T])) || "").trim();
+// 密码绑定的读取：优先 env.pwd（中性名），兼容老的 env[P_T]（历史绑定名见 P_T 的构造）。
+// `Env` 故意没有索引签名（见 types/env.d.ts 末尾说明），所以这条历史别名必须显式转型取，
+// 而不是靠 `env[P_T]` 从索引签名里混过去 —— 那个签名会让所有拼错的绑定名一起编译通过。
+export const secretPwd = (env: Env) => {
+  const legacy = (env as unknown as Record<string, unknown>)[P_T];
+  return String((env && (env.pwd || legacy)) || "").trim();
+};
 
 /** 影子流量默认比例：只在「当前节点样本不足」时才提升，上限 SC.EXPLORE_MAX */
 export const SHADOW_DEFAULT = 0.05;

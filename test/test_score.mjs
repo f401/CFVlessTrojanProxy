@@ -5221,5 +5221,39 @@ console.log("\n191b) 中继健康表的 merge 口径");
   ok("日志路径的快照读失败会留痕", srcLogs.includes('logErr("logs snap read failed", "kv")'), "");
 }
 
+// ── 208. 绑定名必须在类型里声明（v7.207：Env 的索引签名让拼错也能编译通过）──
+{
+  const envDts = fs.readFileSync("types/env.d.ts", "utf8");
+  const envBody = envDts.slice(envDts.indexOf("interface Env {"), envDts.indexOf("/** request.cf"));
+  // 只看代码行：注释里提到索引签名这个形状时不能自伤（v7.207 踩过一次）
+  const envCode = envBody
+    .split(/\r?\n/)
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join("\n");
+  ok("Env 没有索引签名（否则拼错的绑定也能编译）", !/\[\s*k\s*:\s*string\s*\]/.test(envCode));
+  ok("scanSub 已在 Env 里声明", /scanSub\?: string;/.test(envBody));
+  ok("poolSrc 已在 Env 里声明", /poolSrc\?: string;/.test(envBody));
+  // 声明与读取必须一一对上：src 读到的每个 env.X 都得在 Env 里（本条锁住「新增绑定忘记声明」）
+  const declaredFields = new Set([...envBody.matchAll(/^\s{2}([A-Za-z_$][\w$]*)\??:/gm)].map((m) => m[1]));
+  const readFields = new Map();
+  const walkSrc = (d) =>
+    fs
+      .readdirSync(d, { withFileTypes: true })
+      .flatMap((e) => (e.isDirectory() ? walkSrc(d + "/" + e.name) : e.name.endsWith(".ts") ? [d + "/" + e.name] : []));
+  for (const sf of walkSrc("src")) {
+    for (const line of fs.readFileSync(sf, "utf8").split(/\r?\n/)) {
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue;
+      for (const m of line.matchAll(/\benv\.([A-Za-z_$][\w$]*)/g)) if (!readFields.has(m[1])) readFields.set(m[1], sf);
+    }
+  }
+  const missing = [...readFields.keys()].filter((n) => !declaredFields.has(n));
+  eq("src 里读到的 env 字段都在 Env 里声明", missing.join(","), "");
+  // 旧绑定名兼容（trojan）必须仍然生效：靠显式转型，而不是把索引签名加回来
+  const utilSrc = fs.readFileSync("src/core/util.ts", "utf8");
+  ok("旧绑定名走显式转型而不是索引签名", utilSrc.includes("(env as unknown as Record<string, unknown>)[P_T]"));
+  eq("旧名仍能读到密码", W.secretPwd({ trojan: "legacy-pw" }), "legacy-pw");
+  eq("新名优先于旧名", W.secretPwd({ pwd: "  x  ", trojan: "b" }), "x");
+  eq("两个都没配时为空串", W.secretPwd({}), "");
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
