@@ -79,16 +79,16 @@ export class Meter {
           if (o.s && typeof o.s === "object") this.s = Object.assign(Object.create(null), o.s);
           if (Array.isArray(o.e)) this.e = o.e;
           if (Array.isArray(o.cl)) this.cl = o.cl as ClRec[];
-        if (o.vt && typeof o.vt === "object")
+          if (o.vt && typeof o.vt === "object")
           this.vt = o.vt as unknown as Record<string, number | { s: number; t: number }>;
-        if (o.hl && typeof o.hl === "object") this.hl = o.hl as unknown as Record<string, { o: number; b: number; d: number; t?: number }>;
-        if (o.eg && typeof o.eg === "object") this.eg = o.eg as unknown as Record<string, { f: number; at: number }>;
-        if (o.ps && typeof o.ps === "object") this.ps = o.ps as unknown as Record<string, { q: number; n: number; at: number; top?: number }>;
-        if (o.dead && typeof o.dead === "object") this.dead = o.dead as unknown as Record<string, { n: number; at: number }>;
-        if (o.dns && typeof o.dns === "object") this.dns = o.dns as unknown as Record<string, { v: number; at: number }>;
-        if (o.blk2 && typeof o.blk2 === "object") this.blk2 = o.blk2 as unknown as Record<string, { n: number; at: number }>;
+          if (o.hl && typeof o.hl === "object") this.hl = o.hl as unknown as Record<string, { o: number; b: number; d: number; t?: number }>;
+          if (o.eg && typeof o.eg === "object") this.eg = o.eg as unknown as Record<string, { f: number; at: number }>;
+          if (o.ps && typeof o.ps === "object") this.ps = o.ps as unknown as Record<string, { q: number; n: number; at: number; top?: number }>;
+          if (o.dead && typeof o.dead === "object") this.dead = o.dead as unknown as Record<string, { n: number; at: number }>;
+          if (o.dns && typeof o.dns === "object") this.dns = o.dns as unknown as Record<string, { v: number; at: number }>;
+          if (o.blk2 && typeof o.blk2 === "object") this.blk2 = o.blk2 as unknown as Record<string, { n: number; at: number }>;
         // 代号决定「要不要读分片」：0 表示事实就在这个值里，磁盘上的分片必是上一轮的残留
-        this.fs = Number((o as unknown as { fs?: number }).fs) || 0;
+          this.fs = Number((o as unknown as { fs?: number }).fs) || 0;
         } else {
           // 换过 kek、或值被写坏：这份账本解不开。**不能当成「没有账本」静默从零开始** ——
           // 下一次 /add 就会把零值覆盖回去，历史用量与配额永久消失。这里只留底与计数，
@@ -140,7 +140,7 @@ export class Meter {
           for (const k of ["c", "e", "s", "g"]) await this.st.storage.delete(k);
         } catch (e) {}
       // 老布局的分片同样要读：从 7.218 起事实表可能只存在于 f1/f2/f3 里
-      await this.loadShards();
+        await this.loadShards();
       }
     });
   }

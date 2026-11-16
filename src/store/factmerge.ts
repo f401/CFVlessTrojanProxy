@@ -41,7 +41,7 @@ export function mergeFacts(t: FactTables, d: FactDeltaIn): void {
       for (const r of d.eg as Array<{ i?: unknown; f?: unknown; at?: unknown }>) {
         if (!r || typeof r.i !== "string" || typeof r.at !== "number") continue;
         if (r.f !== 4 && r.f !== 6) continue;
-if (r.at <= Date.now() - FACT_TTL.eg) continue;
+        if (r.at <= Date.now() - FACT_TTL.eg) continue;
         const cur = t.eg[r.i];
         if (cur && cur.at >= r.at) continue;
         t.eg[r.i] = { f: r.f, at: r.at };
@@ -54,7 +54,7 @@ if (r.at <= Date.now() - FACT_TTL.eg) continue;
     }
     // DNS 事实：24 小时寿命（DoH 全失败时调用方根本不写，所以不必区分「没有」与「不知道」）
     if (Array.isArray(d.dns) && d.dns.length) {
-mergeAt(t.dns, d.dns, 512, FACT_TTL.dns, (r) => {
+      mergeAt(t.dns, d.dns, 512, FACT_TTL.dns, (r) => {
         const x = r as { v?: unknown; at?: unknown };
         if (x.v !== 0 && x.v !== 1) return null;
         const at = Number(x.at) || 0;
@@ -64,7 +64,7 @@ mergeAt(t.dns, d.dns, 512, FACT_TTL.dns, (r) => {
     // 成功率事实（v8 §5 的 ps）：新观测覆盖旧观测；45 分钟没更新的行直接丢，表上限 512 条。
     // 不做「按样本数投票」之类合并：各 isolate 的样本不可比（每条 isolate 看到的路径不同）。
     if (Array.isArray(d.ps) && d.ps.length) {
-for (const r of d.ps as Array<{ k?: unknown; q?: unknown; n?: unknown; at?: unknown; top?: unknown }>) {
+      for (const r of d.ps as Array<{ k?: unknown; q?: unknown; n?: unknown; at?: unknown; top?: unknown }>) {
         if (!r || typeof r.k !== "string" || !r.k.includes("|")) continue;
         if (typeof r.at !== "number" || typeof r.q !== "number" || typeof r.n !== "number") continue;
         if (r.at <= Date.now() - FACT_TTL.ps) continue;
@@ -90,7 +90,7 @@ for (const r of d.ps as Array<{ k?: unknown; q?: unknown; n?: unknown; at?: unkn
     }
     // 「连不上」事实（形状 { i, n, at }）：更新的胜、30 分钟过期、上限 256；只收判死（n>=2）的行
     if (Array.isArray(d.dead) && d.dead.length) {
-mergeAt(t.dead, d.dead, 256, FACT_TTL.dead, (r) => {
+      mergeAt(t.dead, d.dead, 256, FACT_TTL.dead, (r) => {
         const x = r as { n?: unknown; at?: unknown };
         if (typeof x.at !== "number" || typeof x.n !== "number" || x.n < 2) return null;
         return { n: Math.max(2, Math.min(9, Math.round(x.n))), at: x.at };

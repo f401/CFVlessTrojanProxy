@@ -362,15 +362,15 @@ export class Policy {
     HOOK.healthDelta = (): Array<{ i: string; o: number; b: number; d: number; t?: number }> => HEALTH.delta();
 
 // 上报成功才让增量生效；失败则退回，下一轮重新发（否则一次 1102 就永久少一段证据）
-HOOK.syncAck = (): void => {
-  HEALTH.ack();
-  vtAck();
-  FACTS.ack();
+    HOOK.syncAck = (): void => {
+      HEALTH.ack();
+      vtAck();
+      FACTS.ack();
 };
-HOOK.syncNack = (): void => {
-  HEALTH.nack();
-  vtNack();
-  FACTS.nack();
+    HOOK.syncNack = (): void => {
+      HEALTH.nack();
+      vtNack();
+      FACTS.nack();
 };
     HOOK.veto = (host: string, ip: string): boolean => {
       if (!ip) return false;
@@ -384,9 +384,9 @@ HOOK.syncNack = (): void => {
     HOOK.prefer = (host: string, ip: string): boolean => this.prefer(host, ip);
     HOOK.chanPref = (ip: string, host = ""): number => chanPref(ip, host);
     HOOK.win = (host: string): { d: boolean; r: boolean } => this.win(host);
-HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => relNote(host, ip, ttfb, kbs);
-HOOK.capNote = (ip: string, kbs: number): void => { capNote(ip, kbs); };
-HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
+    HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => relNote(host, ip, ttfb, kbs);
+    HOOK.capNote = (ip: string, kbs: number): void => { capNote(ip, kbs); };
+    HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
     HOOK.deadNote = (ip: string, ok: boolean): void => deadNote(ip, ok);
     HOOK.factsDelta = (): FactsDelta => FACTS.delta();
     // 之前没注册这个槽位 -> DecisionIn.facts 恒 undefined -> scoreOf 走 FULL_ON，

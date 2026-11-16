@@ -35,7 +35,7 @@ export default {
       const host = url.hostname || request.headers.get("Host") || "";
       const cf = request.cf || {};
       S.colo = (cf && cf.colo) || S.colo || "??"; // 本 isolate 的机房：所有统计按它分桶
-    S.site = host;
+      S.site = host;
 
       if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
         return await handleUpgrade(request, env, ctx);

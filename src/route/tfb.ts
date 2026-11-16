@@ -142,7 +142,7 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
   // 两批共识：单批 `chan` 只当「怀疑」，不写判定表（写进去等于让这条中继 30 分钟不可用）
   const mayBlock = tfBlockOk(prevTag, verdict);
   for (const row of rows) {
-const ip = splitRelay(row.relay, 443)[0];
+    const ip = splitRelay(row.relay, 443)[0];
     if (verdict === "chan" && row.status === 403 && mayBlock) vSetState(host, ip === "direct" ? "d" : "r:" + ip, 2, 1);
     else if (row.ok && row.status === 200) vSet(host, ip === "direct" ? "d" : "r:" + ip, 200, Number(row.ms || 0), 1);
   }

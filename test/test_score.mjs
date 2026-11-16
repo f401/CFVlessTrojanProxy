@@ -6376,5 +6376,62 @@ eq("AGENTS 头部缺陷数等于 H6 最大编号", Number(hm235 ? hm235[2] : -1)
   ok("readAddr 成功时不带 port 字段", !("port" in a236));
   ok("readAddr 越界回错误对象", typeof W.readAddr(new Uint8Array([10, 0]), 0, "v4").err === "string");
 }
+  /* ---------- 第 237 组：缩进门禁（7.236） ---------- */
+  // 判据：语句的缩进 < 所在块左花括号缩进 + 2 ⇒ 被脚本顶出了块。
+  // 这类改动 tsc / 单测 / 其余门禁全绿，只有人读代码才发现，所以单独立一条。
+  const walkTs = (dir, acc = []) => {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = dir + "/" + ent.name;
+      if (ent.isDirectory()) walkTs(p, acc);
+      else if (p.endsWith(".ts")) acc.push(p);
+    }
+    return acc;
+  };
+  const indentHits = (() => {
+    const skip = ["src/nodes/stat.ts", "src/nodes/score.ts"];
+    const out = [];
+    for (const f of walkTs("src")) {
+      if (skip.includes(f)) continue;
+      const txt = fs.readFileSync(f, "utf8");
+      const lines = txt.split(/\r?\n/);
+      const open = [];
+      let inTpl = false;
+      let prev = "";
+      for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i];
+        const line = raw.trim();
+        if ((raw.match(/`/g) || []).length % 2 === 1) inTpl = !inTpl;
+        if (inTpl || !line) continue;
+        const ind = raw.length - raw.trimStart().length;
+        const cont = /(?:[,=([]|[.?:+\-*/%<>&|^!~]|&&|\|\|)$/.test(prev);
+        const skipHead = /^\s*(?:[.)\]}?:+*/%|&<>=,!]|\?\.)/.test(line);
+        const isStmt = !skipHead && !/^\/[/*]/.test(line) && !cont && !/^[}\]);]/.test(line);
+        if (isStmt && open.length >= 2 && ind < open[open.length - 1] + 2) out.push(f + ":" + (i + 1));
+        for (const ch of raw) {
+          if (ch === "{") open.push(ind);
+          else if (ch === "}") open.pop();
+        }
+        prev = line;
+      }
+    }
+    return out;
+  })();
+  ok("没有语句被顶出所在块（缩进门禁的判据）", indentHits.length === 0, indentHits.slice(0, 5).join(" "));
+  const gateSrc = fs.existsSync("tools/check-indent.mjs") ? fs.readFileSync("tools/check-indent.mjs", "utf8") : "";
+  ok("缩进门禁脚本在位", gateSrc.length > 0);
+  ok("门禁登记了两份整块偏移的文件", gateSrc.includes('"src/nodes/stat.ts"') && gateSrc.includes('"src/nodes/score.ts"'));
+  ok("preflight 串上了缩进门禁", fs.readFileSync("tools/preflight.mjs", "utf8").includes("缩进门禁"));
+  ok("package.json 有 indent 脚本", fs.readFileSync("package.json", "utf8").includes('"indent": "node tools/check-indent.mjs"'));
+  const idxSrc = fs.readFileSync("src/index.ts", "utf8");
+  ok("index.ts 的 S.site 回到六个空格", idxSrc.includes("\n      S.site = host;"));
+  const polSrc = fs.readFileSync("src/route/policy.ts", "utf8");
+  ok("policy.ts 的 HOOK 注册回到四个空格", polSrc.includes("\n    HOOK.syncAck = "));
+  const tfbSrc = fs.readFileSync("src/route/tfb.ts", "utf8");
+  ok("tfb.ts 的 splitRelay 行回到四个空格", tfbSrc.includes("\n    const ip = splitRelay(row.relay, 443)[0];"));
+  const fmSrc = fs.readFileSync("src/store/factmerge.ts", "utf8");
+  ok("factmerge 的 eg 过期判断回到四个空格", fmSrc.includes("\n        if (r.at <= Date.now() - FACT_TTL.eg) continue;"));
+  const msSrc = fs.readFileSync("src/store/meter.ts", "utf8");
+  ok("meter.ts 的代号行回到十个空格", msSrc.includes("\n          this.fs = Number((o as unknown as { fs?: number }).fs) || 0;"));
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
