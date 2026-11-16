@@ -4,6 +4,7 @@ import { SC } from "../core/const";
 import { cnt, cntDelta, cntUnsend } from "../core/counter";
 import { eachLimit } from "../core/util";
 import { spdSnapshot } from "../core/node-snapshot";
+import { doFetch } from "./meter-client";
 
 /* PEND 缓冲：连接侧只记增量，30 秒一批推给 Meter DO */
 
@@ -122,7 +123,6 @@ export class PendingLedger {
     await eachLimit(batch, 8, async ([id, d]) => {
       const mine = !primary || String(id).toLowerCase() === primary;
       try {
-        const stub = env.METER.get(env.METER.idFromName(id));
         const body: Record<string, unknown> = { ...d };
         if (!attached && mine) {
           attached = true;
@@ -153,7 +153,7 @@ export class PendingLedger {
           carriedCl = cl.length > 0;
           sentCl = cl;
         }
-        const r = await stub.fetch("https://meter/add", {
+        const r = await doFetch(env, id, "https://meter/add", {
           method: "POST",
           body: JSON.stringify(body),
         });
@@ -165,7 +165,6 @@ export class PendingLedger {
           if (carried && HOOK.syncAck) HOOK.syncAck();
           if (carriedCl) this.clAck(sentCl);
         }
-        S.doCalls += 1;
         S.meterCache.delete(id); // 刚推过增量，缓存立即失效，避免读数倒退
       } catch (e) {
         bad += 1;

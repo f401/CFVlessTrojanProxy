@@ -3,7 +3,7 @@ import { RTT_MAX, SC } from "../core/const";
 import { eachLimit } from "../core/util";
 import { cnt } from "../core/counter";
 import { kvGet, kvGetStrict, kvSet } from "./kv";
-import { meterGet } from "./meter-client";
+import { doFetch, meterGet } from "./meter-client";
 
 /* 快照：用量灾备（KV）+ 合成快照 */
 
@@ -135,8 +135,7 @@ export async function restoreUsage(env: Env, id: string, snap?: UsageSnap) {
   try {
     // 把历史用量推回 DO：DO 可能被回收过，内存计数已经丢了；
     // 推失败就返回 null（调用方按「无记录」处理），绝不能编造用量
-    const stub = env.METER.get(env.METER.idFromName(id));
-    const r = await stub.fetch("https://meter/set", { method: "POST", body: JSON.stringify(u) });
+    const r = await doFetch(env, id, "https://meter/set", { method: "POST", body: JSON.stringify(u) });
     if (!r.ok) return null;
     const v = await r.json();
     S.meterCache.set(id, { v, t: Date.now() });

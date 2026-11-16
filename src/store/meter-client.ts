@@ -5,6 +5,28 @@ import { S } from "../core/state";
 export const METER_TTL = 15000;
 
 /**
+ * 功能：发一次计量 DO 的请求，并把它记进 `S.doCalls`。
+ *
+ * 为什么要有这个唯一入口：`/health` 的 `doCalls` 以前只在「用量批次推成功」那一处自增
+ * （`src/store/pend.ts` 的 flush），而读用量、回填快照、读事实表这些同样是 DO 子请求 ——
+ * 少数的六类路径一个都没计入，于是这个数字被当成「本 isolate 发过几次 DO 请求」来读时
+ * 会小一个数量级，排障时会误判「没在打 DO」。计数点放在这里，生产路径就只有这一个。
+ *
+ * 计的是「发出次数」而不是「成功次数」：免费计划的子请求额度按发出算，失败也占额度。
+ * 漏进来的 `try/catch`（例如 `src/store/snapshot.ts` 的 restore）里抛出也会先计入。
+ * @param env 环境变量
+ * @param id 用户 id（DO 名字）
+ * @param url 完整端点地址（`https://meter/...`）：`tools/check-wire.mjs` 靠这个字面量判断「端点有没有调用方」
+ * @param init 可选的请求参数
+ * @returns DO 的响应
+ */
+export async function doFetch(env: Env, id: string, url: string, init?: RequestInit): Promise<Response> {
+  S.doCalls += 1;
+  const stub = env.METER.get(env.METER.idFromName(id));
+  return stub.fetch(url, init);
+}
+
+/**
  * 功能：从 DO 读某用户的累计用量。
  * @param env 环境变量
  * @param id 用户 id
@@ -20,8 +42,7 @@ export async function meterGet(env: Env, id: string) {
 
   for (let i = 0; i < 2; i++) {
     try {
-      const stub = env.METER.get(env.METER.idFromName(id));
-      const r = await stub.fetch("https://meter/get");
+      const r = await doFetch(env, id, "https://meter/get");
       if (!r.ok) throw new Error("do " + r.status);
       const v = await r.json();
       if (S.meterCache.size > 500) S.meterCache.clear();

@@ -6260,5 +6260,37 @@ ok("索引下限夹到 0（p 很小时不能取负）", pendSrc.includes("Math.m
   ok("probeSni 默认参数走常量", probeSrc.includes("ms = CONNECT_MS"), "");
   ok("SC.STALL 仍在（语义是卡顿当量）", W.SC.STALL === 2500, String(W.SC.STALL));
 }
+
+// ── 第 233 组：计量 DO 请求的计数收成一个入口（D189） ──
+console.log("\n[233] 计量 DO 请求的计数入口");
+const rd233 = (p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "");
+const code233 = (t) => t.split(/\r?\n/).filter((l) => { const x = l.trim(); return x && !x.startsWith("//") && !x.startsWith("*") && !x.startsWith("/*"); }).join("\n");
+const mc233 = code233(rd233("src/store/meter-client.ts"));
+const pd233 = code233(rd233("src/store/pend.ts"));
+const st233 = code233(rd233("src/store/stats.ts"));
+const sn233 = code233(rd233("src/store/snapshot.ts"));
+const vs233 = code233(rd233("src/route/verdictsync.ts"));
+const mkEnv233 = () => ({ METER: { idFromName: (x) => x, get: () => ({ fetch: async () => new Response(JSON.stringify({ up: 0, down: 0, conns: 0 }), { status: 200 }) }) }, uuid: "u233" });
+const c233 = W.S.doCalls | 0;
+if (typeof W.doFetch === "function") {
+  await W.doFetch(mkEnv233(), "u233", "x");
+  eq("一次 doFetch 记一次", (W.S.doCalls | 0) - c233, 1);
+  const bad233 = { METER: { idFromName: (x) => x, get: () => ({ fetch: async () => { throw new Error("boom"); } }) } };
+  let threw233 = false;
+  try { await W.doFetch(bad233, "u233", "x"); } catch { threw233 = true; }
+  ok("失败的 DO 请求也记（额度按发出算）", threw233 && (W.S.doCalls | 0) - c233 === 2);
+  W.S.meterCache.clear();
+  await W.meterGet(mkEnv233(), "u233");
+  eq("meterGet 也走同一个入口", (W.S.doCalls | 0) - c233, 3);
+} else {
+  ok("一次 doFetch 记一次", false, "doFetch 不存在");
+  ok("失败的 DO 请求也记（额度按发出算）", false, "doFetch 不存在");
+  ok("meterGet 也走同一个入口", false, "doFetch 不存在");
+}
+ok("计数点只有一处（meter-client 的 doFetch）", (mc233.split("S.doCalls += 1;").length - 1) === 1 && (pd233.split("S.doCalls += 1;").length - 1) === 0);
+ok("pend 的用量批次改走 doFetch", pd233.includes("doFetch(env, id, \"https://meter/add\"") && !pd233.includes("idFromName(id)).fetch"));
+ok("stats 的读用量与回填都走 doFetch", st233.includes("doFetch(env, primaryId(env) || id, \"https://meter/cnt\")") && st233.includes("doFetch(env, id, \"https://meter/seed\""));
+ok("snapshot 的回填走 doFetch", sn233.includes("doFetch(env, id, \"https://meter/set\""));
+ok("verdictsync 的读事实走 doFetch", vs233.includes("doFetch(env, raw, \"https://meter/vt\")"));
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

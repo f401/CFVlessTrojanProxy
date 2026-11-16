@@ -1,7 +1,7 @@
 import { S } from "../core/state";
 import { primaryId, pendAdd } from "./pend";
 import { getSnap, usageSnapGet } from "./snapshot";
-import { meterGet } from "./meter-client";
+import { doFetch, meterGet } from "./meter-client";
 
 /* 用量视图：Meter DO 读取 / 本地缓存 / 面板口径 */
 
@@ -15,8 +15,7 @@ export async function nodeSnapGet(env: Env, id: string): Promise<Record<string, 
   if (hit.t && Date.now() - hit.t < 60000) return hit.v;
   try {
     // 快照只写在主 uuid 的 DO 上：用别人的 id 去读永远是空的
-    const stub = env.METER.get(env.METER.idFromName(primaryId(env) || id));
-    const r = await stub.fetch("https://meter/cnt");
+    const r = await doFetch(env, primaryId(env) || id, "https://meter/cnt");
     if (!r.ok) throw new Error("do " + r.status);
     const j = await r.json();
     const v = (j && j.s && typeof j.s === "object" ? j.s : {}) as Record<string, NodeSnap>;
@@ -74,8 +73,7 @@ export async function readStats(env: Env, id: string) {
     const s = snap && snap.users && snap.users[id];
     if (s) {
       try {
-        const stub = env.METER.get(env.METER.idFromName(id));
-        const r = await stub.fetch("https://meter/seed", { method: "POST", body: JSON.stringify(s) });
+        const r = await doFetch(env, id, "https://meter/seed", { method: "POST", body: JSON.stringify(s) });
         if (r.ok) {
           doTotal = await r.json();
           S.meterCache.set(id, { v: doTotal, t: Date.now() });

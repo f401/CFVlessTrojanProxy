@@ -7,6 +7,7 @@ import { FACTS, type FactsBody } from "./factsstore";
 import { EG } from "./egfacts";
 import { cnt } from "../core/counter";
 import { dropExpired, trimAged } from "../core/hostmem";
+import { doFetch } from "../store/meter-client";
 
 export interface VtRow {
   k: string; // `target|chan`
@@ -141,7 +142,7 @@ async function vtFetch(env: Env): Promise<void> {
     }
     if (!jj) {
       const raw = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
-      const rr = await env.METER.get(env.METER.idFromName(raw)).fetch("https://meter/vt");
+      const rr = await doFetch(env, raw, "https://meter/vt");
       // 不检查状态码是旧实现的根部问题：5xx 的错误体也是合法 JSON，会被当成「事实为空」
       if (!rr.ok) throw new Error("do " + rr.status);
       const bo = await rr.json();
