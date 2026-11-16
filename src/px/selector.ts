@@ -3,7 +3,7 @@ interface PickState {
   node?: string;
   hostTrial?: boolean;
   retried?: boolean;
-  sz?: number;
+  targetBytes?: number;
 }
 
 import { SC } from "../core/const";
@@ -159,7 +159,7 @@ export class Selector {
     }
 
     // ③ 选路：单层抽样器（完整分数 ± 不确定性，两种模式共用同一套）
-    const pick = pickThom(m, (st && st.sz) || 0);
+    const pick = pickThom(m, (st && st.targetBytes) || 0);
     if (pick) {
       let chosen = pick;
       // 负载感知：抽中的节点在途多时，换到分数接近、在途更少的候选

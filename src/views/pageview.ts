@@ -5,7 +5,7 @@ import { renderStatsHtml } from "./panel-stats";
 export interface StatsIn {
   env: Env;
   id: string;
-  s: StatsView;
+  stats: StatsView;
   learned: Record<string, RttEntry>;
   nodeRows: StatsNodeRow[];
   errs: ErrItem[];
@@ -30,7 +30,7 @@ export class PageView {
 
   /** 用量统计页（/<uuid>/stats?format=html） */
   stats(o: StatsIn): string {
-    return renderStatsHtml(o.env, o.id, o.s, o.learned, o.nodeRows, o.errs);
+    return renderStatsHtml(o.env, o.id, o.stats, o.learned, o.nodeRows, o.errs);
   }
 
   /** 登录页 */

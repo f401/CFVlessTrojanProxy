@@ -1534,10 +1534,10 @@ ok("S=16MB 时选大带宽节点", szB("zb:443") < szB("za:443"), `${szB("za:443
 const rndSZ = Math.random;
 Math.random = () => 0.5;
 const envS = { pxShadow: 0 };
-const pickI = W.SEL.pick(envS, "lat", { host: "", sz: W.SC.SZ_I });
-const pickB = W.SEL.pick(envS, "lat", { host: "", sz: W.SC.SZ_B });
+const pickI = W.SEL.pick(envS, "lat", { host: "", targetBytes: W.SC.SZ_I });
+const pickB = W.SEL.pick(envS, "lat", { host: "", targetBytes: W.SC.SZ_B });
 Math.random = rndSZ;
-ok("pick 会把 sz 传进打分", pickI === "za:443" && pickB === "zb:443", `${pickI} / ${pickB}`);
+ok("pick 会把目标流量传进打分", pickI === "za:443" && pickB === "zb:443", `${pickI} / ${pickB}`);
 
 // —— 兜底：全池都在冷却时也必须给出节点 ——
 // 返回空串会让 session 直接 cnt("dead")，哪怕池子里还有节点只是暂时被罚
@@ -7192,9 +7192,18 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 
   // 棘轮基线：本轮从 100 降到 86，门禁必须与之一致
   const base252 = JSON.parse(fs.readFileSync("tools/naming-baseline.json", "utf8"));
-  eq("命名基线降到 86", base252.opaque, 86);
+  eq("命名基线降到 83", base252.opaque, 83);
   ok("命名门禁已接进 preflight", fs.readFileSync("tools/preflight.mjs", "utf8").includes("check-names.mjs"), "");
 }
 
+// ── 253) 改名必须两端同名（本轮自伤一次，锁住它） ──
+{
+  const sel253 = fs.readFileSync("src/px/selector.ts", "utf8");
+  const con253 = fs.readFileSync("src/proxy/connection.ts", "utf8");
+  ok("选路读的是 targetBytes", sel253.includes("(st && st.targetBytes) || 0"), "");
+  ok("连接上确实有 targetBytes", con253.includes("targetBytes = 0;"), "");
+  ok("选路不再读旧的 bytes 字段", !sel253.includes("st.bytes"), "");
+  ok("PickState 与 Connection 同名", sel253.includes("targetBytes?: number;"), "");
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -95,7 +95,7 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
         }
         const nodeRows = statsNodeRows(alive, nsMap);
         const errs = S.errs.slice(-20).reverse();
-        return html(PAGES.stats({ env, id, s, learned, nodeRows, errs }));
+        return html(PAGES.stats({ env, id, stats: s, learned, nodeRows, errs }));
       }
       return json(s);
     }

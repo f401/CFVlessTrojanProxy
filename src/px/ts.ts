@@ -61,7 +61,7 @@ export function pickThom(mode: Mode, bytes = 0): string {
     // 带宽项按模式取尺度：延迟模式只关心典型请求的传输时间（e10 是 10MB 的量，放进来会淹没一切）。
     const sdL = p.latencyMs / Math.sqrt(Math.max(1, p.latN));
     const sdB = (1 - p.confB) * 0.6 * (mode === "tput" ? p.e10Ms : p.xferMs);
-    const sdF = p.failMs * Math.sqrt(Math.max(0.02, p.pFailRisk * (1 - p.pFailRisk)) / (p.n + 3));
+    const sdF = p.failMs * Math.sqrt(Math.max(0.02, p.pFailRisk * (1 - p.pFailRisk)) / (p.samples + 3));
     const sd = Math.sqrt(sdL * sdL + sdB * sdB + sdF * sdF);
     // 排队：单节点带宽是硬上限，在途 q 条时新连接要等 q 个服务时间。
     // 原来的"在途≥2 才换手"是二值策略，等于不知道 1 与 5 的区别；这里把等待显式计价，
@@ -86,7 +86,7 @@ export function pickThom(mode: Mode, bytes = 0): string {
     // 而按 σ 抽样能让每个未测臂都有机会（跨模式 16MB 场景里 D 曾被 A/B/C 永久压住）。
     const noise = SC.TS_PURE ? Math.max(SC.TS_SD_MIN, sd) : SC.TS_SD_MIN;
     // 没有任何流量样本、探活又已经慢到追不上 → 只保留"实在没人"时兜底，不再参与竞争。
-    const deadEnd = mode === "lat" && p.n < 1 && p.latencyMs > latCut ? 1e7 : 0;
+    const deadEnd = mode === "lat" && p.samples < 1 && p.latencyMs > latCut ? 1e7 : 0;
     vs.push(mean + qMs + gauss() * noise - (SC.TS_PURE ? 0 : opt * sd) + deadEnd);
     // 样本不足的臂必须豁免剪枝：否则"没测过 → 先验很慢 → 被剪掉 → 永远没测过"锁死
     // （16MB 批量场景里 40MB/s 的节点因为先验只算 2MB/s，实测 10.8MB/s 的节点一直赢，

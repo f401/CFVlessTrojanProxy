@@ -10,7 +10,7 @@ export interface ScoreParts {
   mode: Mode; score: number; latencyMs: number; e10Ms: number;
   pFailRisk: number; pStall: number; capBps: number; confB: number;
   nEff: number; latN: number; sampleAgeMs: number; xferMs: number;
-  n: number; jitMs: number; failMs: number; gate: string;
+  samples: number; jitMs: number; failMs: number; gate: string;
 }
 
 /** 候选列表（已过滤黑名单/冻结，按代价升序） */
@@ -150,7 +150,7 @@ export class Scorer {
     return {
       mode: m, score, latencyMs, e10Ms, pFailRisk, pStall, capBps, confB,
       nEff, latN: e.latN, sampleAgeMs: Number.isFinite(sampleAge) ? sampleAge : -1, xferMs,
-      n: N, jitMs, failMs, gate,
+      samples: N, jitMs, failMs, gate,
     };
   }
   /** 节点代价（毫秒当量，越小越好） */
