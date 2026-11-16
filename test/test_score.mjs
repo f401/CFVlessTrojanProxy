@@ -4859,6 +4859,57 @@ console.log("\n191b) 中继健康表的 merge 口径");
   eq("Clash 侧仍是本地 nameserver", cl200.includes("nameserver: [223.5.5.5"), true);
   eq("Clash 侧仍有 GEOIP,CN 直连", cl200.includes("- GEOIP,CN,DIRECT"), true);
 }
+// 第 201 组：tfb 起搏记账收类（原先是 cron.ts 顶层两张 Map，只被一条移除路径清）
+{
+  const TB = W.TfbBook;
+  ok("tfb 起搏记账已收类", !!W.TFB && typeof W.TFB.sweep === "function");
+  ok("TfbBook 可从测试窗口构造", typeof TB === "function");
+  if (typeof TB === "function") {
+    const now = 1800000000000;
+    const b = new TB();
+    eq("新账本为空", b.size(), 0);
+    eq("新站点可以开批", b.due("a.test", now), true);
+    b.take("a.test", now);
+    eq("10 分钟内不再开批", b.due("a.test", now + 599999), false);
+    eq("过了 10 分钟可以再开", b.due("a.test", now + 600000), true);
+    b.take("a.test", now + 600000);
+    b.take("a.test", now + 1200000);
+    eq("同一窗口满 3 批后不再开", b.due("a.test", now + 1799999), false);
+    eq("恰好 30 分钟仍算同一窗口（边界不归零）", b.due("a.test", now + 2999999), false);
+    eq("满 30 分钟后批数归零", b.due("a.test", now + 3000000), true);
+
+    // sweep 是唯一清理入口：keep 里没有的、以及自己过期的，都要被忘掉
+    const b2 = new TB();
+    b2.take("keep.test", now);
+    b2.take("gone.test", now);
+    b2.take("expired.test", now);
+    const keep = new Map([["keep.test", now + 1000], ["expired.test", now - 1]]);
+    eq("sweep 清掉「被挤出 needPx」与「自己过期」的两类", b2.sweep(keep, now), 2);
+    eq("sweep 之后只剩还活着的那个站点", b2.size(), 1);
+    eq("被清掉的站点重回可开批状态", b2.due("gone.test", now + 100), true);
+
+    // 上限兜底：keep 自己涨过头（attacher 那条写入路径不裁剪）时，按最久没探过淘汰
+    const b3 = new TB();
+    for (let i = 0; i < 400; i++) b3.take(`h${i}.test`, now + i);
+    const all = new Map();
+    for (let i = 0; i < 400; i++) all.set(`h${i}.test`, now + 1e9);
+    b3.sweep(all, now);
+    eq("记账表被压回 SC.PX_MAX", b3.size(), W.SC.PX_MAX);
+    eq("最旧的被淘汰（记账里已没有它）", b3.due("h0.test", now + 100), true);
+    eq("最近的仍在记账里（间隔内不再开）", b3.due("h399.test", now + 499), false);
+  }
+
+  // 源码锁：顶层两张 Map 必须消失、清理只走 sweep、上限与 needPx 同源
+  const srcCron201 = fs.readFileSync("src/routes/cron.ts", "utf8");
+  const srcBook201 = fs.readFileSync("src/route/tfbbook.ts", "utf8");
+  eq("cron.ts 不再有顶层 TFB_AT/TFB_N", /TFB_AT|TFB_N/.test(srcCron201), false);
+  eq("cron.ts 不再自己 new Map", srcCron201.includes("new Map("), false);
+  eq("cron.ts 走 TFB.sweep 清理", srcCron201.includes("TFB.sweep(S.needPx, now)"), true);
+  eq("cron.ts 开批前问 due", srcCron201.includes("if (!TFB.due(host, now)) continue;"), true);
+  eq("账本上限与 SC.PX_MAX 同源", srcBook201.includes("while (this.at.size > SC.PX_MAX)"), true);
+  const srcArch201 = fs.readFileSync("tools/check-arch.js", "utf8");
+  eq("arch 门禁拦住顶层可变容器", srcArch201.includes("顶层可变容器"), true);
+}
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -214,6 +214,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Judge`（`JUDGE`） | `src/route/judge.ts` | 流量侧弱证据的累加与落判定 |
 | `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级 |
 | `RelayHealth`（`HEALTH`） | `src/route/relay-health.ts` | 中继健康表（sent/pending 语义） |
+| `TfbBook`（`TFB`） | `src/route/tfbbook.ts` | 起搏记账（上次开批时间 + 本窗口批数；`sweep` 是唯一清理入口，上限与 `SC.PX_MAX` 同源） |
 | `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps） |
 | `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |
 | 预算分配（自由函数 `planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核）：判定额度这一项在 7.149 随 `round.ts` 一起删掉，现在只有 `adm` 与 `cap` |

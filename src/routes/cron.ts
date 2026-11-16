@@ -6,6 +6,7 @@ import { cnt } from "../core/counter";
 import { cronScan, flushPx } from "../px/pool";
 import { planRound } from "../route/budget";
 import { runTfb } from "../route/tfb";
+import { TFB } from "../route/tfbbook";
 import { DNS } from "../route/dnsfacts";
 import { probeFam } from "../proxy/dial";
 import { SEL } from "../px/selector";
@@ -34,29 +35,22 @@ export async function runCron(env: Env, ctx: ExecutionContext): Promise<void> {
   );
 }
 
-/** 站点 → 上次 IP 级探测时间（每站点 10 分钟最多一次）。 */
-const TFB_AT: Map<string, number> = new Map();
-
-/** 站点 → 已轮换批次；30 分钟后重置，最多 3 批（≈6 条通道）。 */
-const TFB_N: Map<string, number> = new Map();
-
 /**
  * 功能：每轮挑一个待验站点跑一批 tfb（每站点 30 分钟最多 3 批，不写 KV）。
  * @param env 环境变量
  * @returns 无
  */
 async function tfbRound(env: Env): Promise<void> {
-  const now0 = Date.now();
-  // 站点过期就把进度表与「上一批判定」一起清，避免 TFB_AT/TFB_N 只增不减
-  for (const [h, t] of S.needPx) if (t <= now0) { S.needPx.delete(h); TFB_AT.delete(h); TFB_N.delete(h); S.tfbV.delete(h); }
   const now = Date.now();
+  // 站点过期就把「上一批判定」一起清；起搏记账由 TFB.sweep 按 keep 清理 ——
+  // 它同时覆盖「被 trimAged 从 needPx 挤掉」的站点，旧版只清过期那一类，剩下的是永久留行
+  for (const [h, t] of S.needPx) if (t <= now) { S.needPx.delete(h); S.tfbV.delete(h); }
+  TFB.sweep(S.needPx, now);
   for (const [host, until] of S.needPx) {
     if (until <= now) continue;
-    if (now - (TFB_AT.get(host) || 0) < 600000) continue;
-    if (now - (TFB_AT.get(host) || 0) > 1800000) TFB_N.set(host, 0);
-    if ((TFB_N.get(host) || 0) >= 3) continue;
-    TFB_N.set(host, (TFB_N.get(host) || 0) + 1);
-    TFB_AT.set(host, now);
+    // due() 里含三道坎：10 分钟间隔、30 分钟窗口归零、每窗口最多 3 批
+    if (!TFB.due(host, now)) continue;
+    TFB.take(host, now);
     cnt("tfb");
     await runTfb({ env } as unknown as Parameters<typeof runTfb>[0], host, 2);
     return;

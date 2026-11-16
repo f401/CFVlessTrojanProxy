@@ -111,6 +111,7 @@ export { JUDGE, Judge } from "./route/judge";
 export { POLICY, Policy } from "./route/policy";
 export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, tfBlockOk, tfRemember, pickFresh } from "./route/tfb";
+export { TFB, TfbBook } from "./route/tfbbook";
 export { RELPERF, REL_TTL, relCost, relCostFor, relCostMode, relNote, relSnap } from "./route/relperf";
 export { EG, EG_BIG, EG_TINY, EG_TTL, EgFacts, egCounts, egDerive } from "./route/egfacts";
 export { CAP, CAP_MAX, CAP_TTL, CapFacts, capFactor } from "./route/capfacts";

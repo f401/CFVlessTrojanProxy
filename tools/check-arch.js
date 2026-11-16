@@ -44,6 +44,12 @@ for (const f of files) {
   const topLet = src.match(/^(?:export\s+)?(?:let|var)\s+[A-Za-z_$]/m);
   if (topLet) problems.push(`${rel}: 顶层可变绑定 ${topLet[0].trim()}`);
 
+  // 顶层 const 容器同样是跨请求可变状态：只允许 src/core/state.ts 持有（S 之外的记账表一律收类）
+  const topMut = src.match(/^const\s+[A-Za-z_$][\w$]*\s*(?::[^=\n]+)?=\s*new\s+(?:Map|Set|WeakMap|WeakSet)\s*\(/m);
+  if (topMut && rel !== path.join("src", "core", "state.ts")) {
+    problems.push(`${rel}: 顶层可变容器 ${topMut[0].trim()}（状态请放进 S 或收类）`);
+  }
+
   const from = layerOf(f);
   const deps = new Set();
   for (const m of src.matchAll(/from\s+"(\.[^"]+)"/g)) {
