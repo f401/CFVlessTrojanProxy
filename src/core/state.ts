@@ -121,7 +121,7 @@ export class AppState {
     "eCloseP",
     "px4",
     "tfb",
-    "skipCfRelay",
+    "skipCfRelay", "badRelay",
   "pxf",
     "sw",
     "noCand",

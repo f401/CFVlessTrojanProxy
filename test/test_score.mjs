@@ -7697,5 +7697,37 @@ ok("文档写明判定状态只用枚举", fs.readFileSync("docs/命名约定.md
   ok("排序也只在被判死的集合上做", pol268.includes("const sorted = dead.slice()"));
 }
 
+const dialerSrc269 = fs.readFileSync("src/proxy/dialer.ts", "utf8");
+// ═══ 第 269 组：非法候选不该结束整条重拨链（7.269 / D214）═══
+{
+  const host269 = "dialer269.test";
+  // 走到重拨循环需要三个前置条件：池子有条目（relays() 冷启动回退名单）、
+  // 直连被判死（否则判定层直接返回 direct、整段跳过）、以及能记录调用次数的 SEL.current。
+  W.S.pool = [{ k: "a", h: "1.1.1.1", p: 443 }, { k: "b", h: "1.1.1.1", p: 8443 }];
+  W.vSetState(host269, "d", 2, 1);
+  const before269 = W.cntView ? W.cntView() : {};
+  let calls269 = 0;
+  const seen269 = [];
+  const realCurrent269 = W.SEL.current;
+  W.SEL.current = async () => {
+    calls269 += 1;
+    const v = calls269 === 1 ? "10.0.0.1:443" : "1.1.1.1:443";
+    seen269.push(v);
+    return v;
+  };
+  const conn269 = new W.Connection({}, { waitUntil: () => {}, passThroughOnException: () => {} });
+  try {
+    await W.DIALER.open({ env: {}, request: new Request("https://" + host269 + "/"), conn: conn269, mode: "tput", host: host269, port: 443, pxForce: 1 });
+  } catch (err269) {
+    // 测试环境没有 connect()：抛错是预期路径，循环本身要继续往下问
+  }
+  W.SEL.current = realCurrent269;
+  const after269 = W.cntView ? W.cntView() : {};
+  ok("非法候选之后继续问下一条中继", calls269 >= 2, "calls=" + calls269 + " seen=" + seen269.join(","));
+  eq("第一条非法候选被记进 badRelay", (after269.badRelay || 0) - (before269.badRelay || 0) >= 1, true);
+  ok("cntKeys 登记了 badRelay", W.S.cntKeys.includes("badRelay"), "badRelay");
+  ok("dialer 对非法候选是 continue 而不是 break", dialerSrc269.includes("cnt(\"badRelay\");") && dialerSrc269.includes("continue;"), "continue");
+  ok("dialer 不再把 checkTarget 和解析失败并成一次 break", !dialerSrc269.includes("checkTarget(p.host, p.port)) break;"), "无合并 break");
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

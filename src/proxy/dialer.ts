@@ -103,7 +103,15 @@ export class Dialer {
       let tries = 0;
       for (let guard = 0; guard < maxTries + 4 && tries < maxTries && !sock; guard++) {
         const p = parseProxyIp(conn.forceRelayIp || (await SEL.current(env, mode, conn, host, cfHost, tried)));
-        if (!p || checkTarget(p.host, p.port)) break;
+        if (!p) break;
+        // 非法候选（内网地址 / 策略禁止的端口）只是**这一条**不能用：跳过它继续找下一条。
+        // 以前这里是一个 break —— 池子里混进一条 10.x 的 proxyip（公开源里很常见，
+        // takePoolLine 只校验八位组范围、不排除保留地址）就让整条重试链提前结束，
+        // 请求退回直连；对 CF 托管目标那就是一次 4 字节 403。
+        if (checkTarget(p.host, p.port)) {
+          cnt("badRelay");
+          continue;
+        }
         const key = p.host + ":" + p.port;
         // 没有别的候选了（选择器回空或回同一条）：不要再花 2.5 秒试同一条
         if (tried.has(key)) break;
