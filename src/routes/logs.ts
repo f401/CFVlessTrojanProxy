@@ -2,6 +2,7 @@ import { S } from "../core/state";
 import { getSnap, primaryId } from "../store/index";
 import { json } from "../edge/respond";
 import { logErr } from "../nodes/errlog";
+import { cnt } from "../core/counter";
 import type { RouteCtx } from "../edge/types";
 
 type UserCtx = RouteCtx & { id: string };
@@ -20,6 +21,10 @@ export async function logs(c: UserCtx): Promise<Response> {
   }
   // 再并上 DO 里那份（跨 isolate），否则永远只能看到"当前这个实例"的 50 条
   let fromDo: ErrItem[] = [];
+  // 跨 isolate 那份到底读没读到，必须让外部看得出：`fromDo: 0` 同时能是
+  // 「DO 里没有错误」和「这次压根没读到」，两者对排障的含义完全相反
+  // （7.188 的 `ringBlk` 就是这么把「空表」当成了「没被封锁」）。
+  let doSrc: "ok" | "fail" | "none" = env.METER ? "ok" : "none";
   if (env.METER) {
     try {
       // 错误环形只挂在主 uuid 的 DO 上：用别人的 id 读永远为空
@@ -27,7 +32,13 @@ export async function logs(c: UserCtx): Promise<Response> {
       const r = await stub.fetch("https://meter/cnt");
       const j = await r.json();
       fromDo = (j && j.e) || [];
-    } catch (e) {}
+    } catch (e) {
+      // 与上面那条快照失败同一个口径：少一份来源必须留痕，否则错误列表
+      // 突然变短时查不出原因（ErrRing 自己 5 秒去重，不会刷屏）。
+      doSrc = "fail";
+      cnt("logsDoFail");
+      logErr("logs do read failed", "kv");
+    }
   }
   // 去重按「时间 + 内容 + 标签」：只按时间去重会把 DO/KV/本地三份里的同一条保留成三条；
   // 超过 48 小时的残留（旧版本留下的噪声）不再回放。
@@ -59,6 +70,6 @@ export async function logs(c: UserCtx): Promise<Response> {
   }
   kept.reverse();
   const out = kept.slice(-50);
-  return json({ count: out.length, persisted: stored.length, fromDo: fromDo.length, items: out });
+  return json({ count: out.length, persisted: stored.length, fromDo: fromDo.length, doSrc, items: out });
 }
 

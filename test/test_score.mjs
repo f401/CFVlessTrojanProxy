@@ -6292,5 +6292,42 @@ ok("pend 的用量批次改走 doFetch", pd233.includes("doFetch(env, id, \"http
 ok("stats 的读用量与回填都走 doFetch", st233.includes("doFetch(env, primaryId(env) || id, \"https://meter/cnt\")") && st233.includes("doFetch(env, id, \"https://meter/seed\""));
 ok("snapshot 的回填走 doFetch", sn233.includes("doFetch(env, id, \"https://meter/set\""));
 ok("verdictsync 的读事实走 doFetch", vs233.includes("doFetch(env, raw, \"https://meter/vt\")"));
+
+// ── 234. /logs 读不到跨 isolate 那份时必须留痕（v7.233：fromDo:0 既可能是「没有错误」也可能是「没读到」）──
+{
+  const UUID234 = "7c53c12a-88b1-4fda-b6e7-4da62e47a4e1";
+  const HOST234 = "sim.example.com";
+  const mkKv234 = () => {
+    const m = new Map();
+    return {
+      async get(k) { return m.has(k) ? m.get(k) : null; },
+      async put(k, v) { m.set(k, v); },
+      async delete(k) { m.delete(k); },
+      async list() { return { keys: [], list_complete: true }; },
+    };
+  };
+  const baseEnv234 = { uuids: UUID234, trojan: UUID234 + ":test123", nodes: "", adminKey: "", STATS: mkKv234(), defaultMode: "lat", regions: "", proxyip: "auto" };
+  const mkReq234 = (p) => ({ url: "https://" + HOST234 + p, headers: { get: () => null }, cf: { asn: 4134, city: "Guangzhou", colo: "HKG", clientTcpRtt: 42 } });
+  const ctx234 = { waitUntil: () => {} };
+  const run234 = async (env) => (await W.default.fetch(mkReq234("/" + UUID234 + "/logs"), env, ctx234)).json();
+  const badEnv = { ...baseEnv234, METER: { idFromName: (n) => n, get: () => ({ async fetch() { throw new Error("do boom"); } }) } };
+  const cntBefore234 = Number(W.cntView().logsDoFail) || 0;
+  const bad1 = await run234(badEnv);
+  eq("DO 读失败时 doSrc 标成 fail", bad1.doSrc, "fail");
+  eq("DO 读失败时 fromDo 仍是 0、但列表里有留痕", String(bad1.fromDo) + "/" + String(bad1.count > 0), "0/true");
+  eq("DO 读失败计 logsDoFail", (Number(W.cntView().logsDoFail) || 0) - cntBefore234, 1);
+  const jnone = await run234({ ...baseEnv234, METER: undefined });
+  eq("没有 METER 绑定时 doSrc 标成 none", jnone.doSrc, "none");
+  const goodEnv = { ...baseEnv234, METER: { idFromName: (n) => n, get: () => ({ async fetch() { return new Response(JSON.stringify({ e: [{ t: Date.now(), m: "probe do line", tag: "x" }] })); } }) } };
+  const jgood = await run234(goodEnv);
+  eq("DO 正常时 doSrc 标成 ok", jgood.doSrc, "ok");
+  eq("DO 正常时 fromDo 带回一条", jgood.fromDo, 1);
+  const srcLogs234 = fs.readFileSync("src/routes/logs.ts", "utf8");
+  ok("DO 读失败要计数", srcLogs234.includes("cnt(\"logsDoFail\");"), "");
+  ok("DO 读失败要留痕（与快照失败同一口径）", srcLogs234.includes("logErr(\"logs do read failed\", \"kv\");"), "");
+  ok("响应里带上 doSrc", srcLogs234.includes("doSrc, items: out }"), "");
+  const st234 = fs.readFileSync("src/core/state.ts", "utf8");
+  ok("logsDoFail 已登记进 cntKeys", st234.includes("\"logsDoFail\","), "");
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
