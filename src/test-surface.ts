@@ -110,6 +110,7 @@ export { HOOK } from "./core/hook";
 export { DNS_BATCH, SHARE_PEND, SHARE_SNAP, TFB_CALLS, SUB_FIXED, SUB_FIXED_N, planRound, planView } from "./route/budget";
 export { chanPref, prefsOf, prefsJson, PREFS } from "./route/prefs";
 export { HEALTH, RelayHealth, ipOf } from "./route/relay-health";
+export { RelayLedger } from "./route/relay-ledger";
 export { STORE, Store } from "./store/store";
 export { VT, VerdictTable } from "./route/verdict";
 export { JUDGE, Judge } from "./route/judge";

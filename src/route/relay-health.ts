@@ -3,6 +3,7 @@
 // 跨 isolate：计数走 /add 搭车上 DO，冷启动从 /hl 拉一次（与判定表的 vt 同一套路）。
 
 import { relayIpOf } from "../core/http80";
+import { RelayLedger } from "./relay-ledger";
 import { PAGE_ABS } from "../core/facts";
 
 /** 中继健康记录 */
@@ -42,10 +43,14 @@ const HL_MS = 30 * 60_000; // 存活证据的半衰期：30 分钟不动就回�
  */
 export class RelayHealth {
   private byRelay = new Map<string, RelayStat>();
-  /** 上次上报时的计数快照（决定 delta 里带哪些行） */
-  private sent = new Map<string, { o: number; b: number; d: number }>();
-  /** 已交给调用方、还没确认送达的行 */
-  private pending = new Map<string, HlRow>();
+  /**
+   * 两张账本（已同步快照 + 待确认行）。
+   *
+   * 为什么单独成类：它们**必须与主表同生同灭** —— 7.161（第 68 条）与 7.215 那批缺陷都是
+   * 「主表删了、账本没删」，键在账本里永久驻留而 `size()` 只看主表 ⇒ 泄漏完全不可见。
+   * 现在删除只有 `RelayLedger.forget()` 一个入口。
+   */
+  private ledger = new RelayLedger();
 
   /** 记一次收尾结果；node 是 host:port，直连时为空 */
   note(node: string, down: number, ok: boolean): void {
@@ -94,35 +99,30 @@ export class RelayHealth {
    */
   delta(): HlRow[] {
     // 上次已经交出去、还没 ack 的行，原样再给一次（调用方重试时能带上）
-    const out: HlRow[] = [...this.pending.values()];
+    const out: HlRow[] = this.ledger.waiting();
     for (const [i, s] of this.byRelay) {
       // 上限判断放在压入之前：以前写在压入之后，`pending` 里已经有 40 行时会返回 41 行，
       // 多出来那一行既没有契约也没有预算（车身每多一行就多几字节，且突破「每批 ≤40 行」）
       if (out.length >= 40) break;
-      const p = this.sent.get(i);
-      if (p && p.o === s.ok && p.b === s.bad && p.d === s.dead) continue;
-      if (this.pending.has(i)) continue;
+      if (!this.ledger.changed(i, { o: s.ok, b: s.bad, d: s.dead })) continue;
+      if (this.ledger.queued(i)) continue;
       // 带上最后观测时间：接收端要靠它判断「这份证据有多旧」，否则只能当刚发生
       const row: HlRow = { i, o: s.ok, b: s.bad, d: s.dead, t: s.at };
       out.push(row);
-      this.pending.set(i, row);
+      this.ledger.queue(row);
     }
     return out;
   }
 
   /** 上报成功：把 pending 里的快照正式提交为 sent */
   ack(): void {
-    for (const r of this.pending.values()) {
-      // 只登记还活着的行：`drop()` 可能已经把这条删了，往 `sent` 里塞一个表外键
-      // 会让它永远留着（`drop()` 只清表内的键），而 `size()` 又只看 `m`，泄漏完全不可见。
-      if (this.byRelay.has(r.i)) this.sent.set(r.i, { o: r.o, b: r.b, d: r.d });
-    }
-    this.pending.clear();
+    // 只登记还活着的行：`drop()` 可能已经把这条删了，往账本里塞一个表外键就是 7.161 那个泄漏。
+    this.ledger.ack((ip) => this.byRelay.has(ip));
   }
 
   /** 上报失败：丢掉 pending，下次 delta 会从当前状态重新算一遍 */
   nack(): void {
-    this.pending.clear();
+    this.ledger.nack();
   }
 
   /**
@@ -158,7 +158,7 @@ export class RelayHealth {
       // 胜出之后还要把「已同步到 DO 的计数」对齐到表里的当前值，
       // 否则下一轮 delta 会把这条已经确认过的证据再发一次。
       const s2 = this.byRelay.get(r.i) as RelayStat;
-      this.sent.set(r.i, { o: s2.ok, b: s2.bad, d: s2.dead });
+      this.ledger.sync(r.i, { o: s2.ok, b: s2.bad, d: s2.dead });
     }
     if (this.byRelay.size > MAX_IP) this.drop();
   }
@@ -176,16 +176,28 @@ export class RelayHealth {
    */
   clear(): void {
     this.byRelay.clear();
-    this.sent.clear();
-    this.pending.clear();
+    this.ledger.clear();
   }
 
   /**
-   * 功能：当前表内中继条数（含未过期的 sent/pending）。
-   * @returns 行数
+   * 功能：主表里的中继条数。
+   *
+   * **只数主表**：7.161 之后账本（`sent`/`pending`）理论上不会多出行，但「不会」需要有地方可看，
+   * 所以账本的规模单独暴露在 `counts()` 里 —— 7.261 之前这个方法声称连两张账本一起数，
+   * 实际只回主表行数（文档与行为长期不一致）。
+   * @returns 主表行数
    */
   size(): number {
     return this.byRelay.size;
+  }
+
+  /**
+   * 功能：三张表的规模（主表 + 两张账本），用来观察账本有没有泄漏。
+   * @returns `{ rows, sent, pending }`
+   */
+  counts(): { rows: number; sent: number; pending: number } {
+    const led = this.ledger.counts();
+    return { rows: this.byRelay.size, sent: led.sent, pending: led.pending };
   }
 
   /**
@@ -200,15 +212,13 @@ export class RelayHealth {
     for (const [k, s] of rows) {
       if (s.dead > 0) continue;
       this.byRelay.delete(k);
-      this.sent.delete(k);
-      this.pending.delete(k);
+      this.ledger.forget(k);
       if (this.byRelay.size <= MAX_IP) return;
     }
     // 第二遍硬兜底：不跳过 dead，从最老开始删到容量以内
     for (const [k] of rows) {
       this.byRelay.delete(k);
-      this.sent.delete(k);
-      this.pending.delete(k);
+      this.ledger.forget(k);
       if (this.byRelay.size <= MAX_IP) return;
     }
   }

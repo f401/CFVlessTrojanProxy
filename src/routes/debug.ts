@@ -92,7 +92,7 @@ export async function debug(c: UserCtx): Promise<Response> {
         ring = [];
       }
     }
-    return json({ local: HEALTH.json(20), ring });
+    return json({ local: HEALTH.json(20), sizes: HEALTH.counts(), ring });
   }
   if (url.searchParams.get("prefs") === "1") {
     return json({ prefs: prefsJson(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });

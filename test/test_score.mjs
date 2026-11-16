@@ -3555,8 +3555,8 @@ console.log("\n-- 中继健康表的合并口径与死出口（v7.161）");
 {
   const rh = fs.readFileSync("src/route/relay-health.ts", "utf8");
   ok("合并按条数、平局按较新的观测决定谁胜出", rh.includes("inN > curN || (inN === curN && at > cur.at)"));
-  ok("淘汰一条中继时连 pending 一起清掉", (rh.match(/this\.pending\.delete\(k\)/g) || []).length === 2);
-  ok("表外的键不会被登记进已上报快照", rh.includes("if (this.byRelay.has(r.i)) this.sent.set(r.i"));
+  ok("淘汰一条中继时连账本一起清掉", (rh.match(/this\.ledger\.forget\(k\)/g) || []).length === 2);
+  ok("表外的键不会被登记进已上报快照", rh.includes("this.ledger.ack((ip) => this.byRelay.has(ip));"));
   ok("中继健康表的 loaded 状态已删除（冷启动由 vtLoad 的 single-flight 负责）", W.HEALTH.loaded === undefined);
   ok("needLoad 已经不存在", typeof W.HEALTH.needLoad === "undefined");
   ok("markLoaded 已经不存在", typeof W.HEALTH.markLoaded === "undefined");
@@ -7409,5 +7409,62 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   eq("方括号键查到与裸 IP 相同的态", W.vState("ip6.test", "r:" + relayIpOf("[2a06:98c0::103]:443")), 1);
   W.vClear();
 }
+// 第 261 组：中继健康表的两张账本收进 RelayLedger（行为 + 泄漏 + 源码锁）
+{
+  const HL_LED = W.HEALTH;
+  HL_LED.clear();
+  const c0 = HL_LED.counts();
+  eq("账本清空后三张表都是 0", `${c0.rows}/${c0.sent}/${c0.pending}`, "0/0/0");
+
+  HL_LED.note("10.61.0.1:443", 40000, true);
+  HL_LED.note("10.61.0.2:443", 40000, true);
+  HL_LED.note("10.61.0.3:443", 40000, true);
+  eq("记三条中继后主表 3 行", HL_LED.counts().rows, 3);
+
+  const d1 = HL_LED.delta();
+  eq("首次 delta 把三行都排队", `${d1.length}/${HL_LED.counts().pending}`, "3/3");
+  HL_LED.ack();
+  eq("ack 之后待确认清零、快照 3 行", `${HL_LED.counts().pending}/${HL_LED.counts().sent}`, "0/3");
+  eq("计数没变时 delta 不再重发", HL_LED.delta().length, 0);
+
+  HL_LED.note("10.61.0.2:443", 40000, true);
+  const d2 = HL_LED.delta();
+  eq("某条计数变了一次只发它那一行", `${d2.length}/${d2[0] && d2[0].i}`, "1/10.61.0.2");
+  HL_LED.nack();
+  eq("nack 之后待确认清零", HL_LED.counts().pending, 0);
+  eq("nack 之后下一轮仍会重发那一条（快照没被推进）", HL_LED.delta().length, 1);
+  HL_LED.ack();
+
+  // 账本必须与主表同生同灭：灌满越过 MAX_IP 后，sent 不能比主表还大（7.161 的泄漏形状）
+  HL_LED.clear();
+  for (let i = 0; i < 260; i++) HL_LED.note("10.61.9." + i + ":443", 40000, true);
+  HL_LED.delta();
+  HL_LED.ack();
+  const leak = HL_LED.counts();
+  ok("主表被裁到上限以内", leak.rows <= 200, `rows=${leak.rows}`);
+  ok("已同步快照不会超过主表（没有表外键）", leak.sent <= leak.rows, `sent=${leak.sent} rows=${leak.rows}`);
+  HL_LED.clear();
+
+  // 类本身：forget 是唯一删除入口
+  const led261 = new W.RelayLedger();
+  led261.queue({ i: "10.61.7.7", o: 1, b: 0, d: 0, t: 1 });
+  led261.ack(() => true);
+  eq("RelayLedger 排队后 ack 得到一条快照", led261.counts().sent, 1);
+  led261.forget("10.61.7.7");
+  eq("RelayLedger.forget 同时清掉快照与待确认", `${led261.counts().sent}/${led261.counts().pending}`, "0/0");
+
+  const rhSrc = fs.readFileSync("src/route/relay-health.ts", "utf8");
+  const ledSrc = fs.readFileSync("src/route/relay-ledger.ts", "utf8");
+  const dbgSrc = fs.readFileSync("src/routes/debug.ts", "utf8");
+  ok("健康表把两张账本换成了一个类", rhSrc.includes("private ledger = new RelayLedger();"), "缺 ledger 字段");
+  ok("健康表自己不再持有 sent 表", !rhSrc.includes("private sent ="), "还有 private sent");
+  ok("健康表自己不再持有 pending 表", !rhSrc.includes("private pending ="), "还有 private pending");
+  ok("删除只经过 forget()", rhSrc.includes("this.ledger.forget(k);"), "drop 没走 forget");
+  ok("size() 的文档不再声称含 sent/pending", !rhSrc.includes("含未过期的 sent/pending"), "文档仍是假话");
+  ok("新增 counts() 暴露三张表的规模", rhSrc.includes("counts(): { rows: number; sent: number; pending: number }"), "缺 counts");
+  ok("账本类自己提供 forget 与 counts", ledSrc.includes("forget(ip: string): void") && ledSrc.includes("counts(): { sent: number; pending: number }"), "账本接口不对");
+  ok("诊断端点把三张表的规模一起报出来", dbgSrc.includes("sizes: HEALTH.counts()"), "debug 没带 sizes");
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
