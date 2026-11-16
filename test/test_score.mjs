@@ -7379,5 +7379,35 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   ok("文档写明新增短名两处都要登记", docSrc.includes("`tools/check-names.mjs`") && docSrc.includes("`ALLOW`"), "doc2");
   eq("命名基线归零（剩余过短成员只剩登记过的线协议键）", baseSrc.opaque, 0);
 }
+
+
+// ── 260. 中继键的 IP 解析只准有一份（7.260）─────────────────────────────
+{
+  const { ipOf } = W;
+  // 旧包没有这个导出时用桩兜底：让断言正常报红，而不是整组 TypeError 崩掉；
+  const relayIpOf = typeof W.relayIpOf === "function" ? W.relayIpOf : () => "<missing>";
+  eq("relayIpOf 存在", typeof W.relayIpOf, "function");
+  // 四种写法都要给出同一个 IP
+  eq("IPv4 带端口", relayIpOf("1.2.3.4:443"), "1.2.3.4");
+  eq("IPv4 裸地址", relayIpOf("1.2.3.4"), "1.2.3.4");
+  eq("方括号 IPv6 去掉方括号", relayIpOf("[2a06:98c0::103]:443"), "2a06:98c0::103");
+  eq("裸 IPv6 原样", relayIpOf("2a06:98c0::103"), "2a06:98c0::103");
+  eq("空串", relayIpOf(""), "");
+  // relay-health 的 ipOf 必须是同一个实现的结果（不是第二份解析）
+  eq("ipOf 与 relayIpOf 同源（方括号）", ipOf("[2a06:98c0::103]:443"), relayIpOf("[2a06:98c0::103]:443"));
+  eq("ipOf 无冒号不吃字符", ipOf("1.2.3.4"), "1.2.3.4");
+  // 源码锁：选路里不能再有本地那份 slice(0, lastIndexOf(":")) 解析
+  const selSrc = fs.readFileSync("src/px/selector.ts", "utf8");
+  ok("selector 不再自写 IP 解析", !selSrc.includes('k.slice(0, k.lastIndexOf(":"))'));
+  ok("selector 用 relayIpOf", selSrc.includes("cp(relayIpOf(first), host)") && selSrc.includes("cp(relayIpOf(x.k), host)"));
+  const rhSrc = fs.readFileSync("src/route/relay-health.ts", "utf8");
+  ok("relay-health 的 ipOf 委托 relayIpOf", rhSrc.includes("return relayIpOf(node);"));
+  ok("relay-health 不再自己拆冒号", !rhSrc.includes('node.lastIndexOf(":")'));
+  // 行为面：方括号写法与裸写法查到同一条判定（同一张表、同一个键）
+  W.vClear();
+  W.vSet("ip6.test", "r:2a06:98c0::103", 200, 120, 1);
+  eq("方括号键查到与裸 IP 相同的态", W.vState("ip6.test", "r:" + relayIpOf("[2a06:98c0::103]:443")), 1);
+  W.vClear();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

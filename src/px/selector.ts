@@ -6,6 +6,7 @@ interface PickState {
   targetBytes?: number;
 }
 
+import { relayIpOf } from "../core/http80";
 import { SC } from "../core/const";
 import { HOOK } from "../core/hook";
 import { isCfIp } from "../core/net";
@@ -405,7 +406,7 @@ export class Selector {
     if (!S.alive.size) void seedAlive(env).catch(() => {});
     await pxGet(env);
     const vet = HOOK.veto;
-    const bad = (k: string): boolean => (vet && host ? vet(host, k.slice(0, k.lastIndexOf(":"))) : false);
+    const bad = (k: string): boolean => (vet && host ? vet(host, relayIpOf(k)) : false);
     if (host && HOOK.prefer) {
       const now = Date.now();
       let best = "";
@@ -414,7 +415,7 @@ export class Selector {
         // 已试过的那条要跳过：pFail 惩罚不足以让它在同一秒内掉出第一
         if (exclude && exclude.has(k)) continue;
         if (isBlack(k) || isFrozen(k) || bad(k)) continue;
-        const ip = k.slice(0, k.lastIndexOf(":"));
+        const ip = relayIpOf(k);
         if (cfOnly && isCfIp((S.alive.get(k) || { h: "" } as { h?: string }).h || "")) continue;
         if (!HOOK.prefer(host, ip)) continue;
         const v = costOf(k, m, now);
@@ -460,14 +461,13 @@ export class Selector {
     // 打得通（0）与没测过（1）都不降权 —— 未知不等于坏，否则新中继永远上不了场。
     const cp = HOOK.chanPref;
     if (!first || !cp || !host) return first || "";
-    const ipOf = (k: string): string => k.slice(0, k.lastIndexOf(":"));
-    if (cp(ipOf(first), host) < 2) return first;
+    if (cp(relayIpOf(first), host) < 2) return first;
     let best = "";
     let bv = Infinity;
     for (const x of candsFor(m)) {
       if (exclude && exclude.has(x.k)) continue;
       if (isBlack(x.k) || isFrozen(x.k)) continue;
-      if (cp(ipOf(x.k), host) >= 2) continue;
+      if (cp(relayIpOf(x.k), host) >= 2) continue;
       if (x.v < bv) { bv = x.v; best = x.k; }
     }
     if (best) { if (st) st.node = best; return best; }

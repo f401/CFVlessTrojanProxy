@@ -48,6 +48,18 @@ export function splitRelay(raw: string, defPort: number): [string, number] {
 }
 
 /**
+ * 功能：从 `host:port` / `[v6]:port` / 裸 host 里取出 IP 部分（中继表的键）。
+ *
+ * 为什么要有它：`ipOf` 这类解析在中继健康表与选路里各写过一份，一份带 `i > 0` 守卫、
+ * 一份写成 `slice(0, lastIndexOf(":"))`（键没有冒号时会吃掉最后一个字符），
+ * 于是同一张判定表的键在两处对不上；方括号 IPv6 也只有这里统一去掉方括号。
+ * @param node 节点或中继地址
+ * @returns {string} 不含方括号与端口的 IP；空串原样返回
+ */
+export function relayIpOf(node: string): string {
+  return splitRelay(node, 443)[0];
+}
+/**
  * 功能：明文 HTTP/80 探目标是否可达（比 TLS 探测便宜，用于判断「IP 层通不通」）。
  * @param host 目标主机名
  * @param relay 中继 host:port，空串表示直连

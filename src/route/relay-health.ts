@@ -2,6 +2,7 @@
 // 与判定表的区别：判定表回答「这条中继对这个站点行不行」，这里回答「这条中继本身还活着吗」。
 // 跨 isolate：计数走 /add 搭车上 DO，冷启动从 /hl 拉一次（与判定表的 vt 同一套路）。
 
+import { relayIpOf } from "../core/http80";
 import { PAGE_ABS } from "../core/facts";
 
 /** 中继健康记录 */
@@ -215,10 +216,9 @@ export class RelayHealth {
 
 export const HEALTH = new RelayHealth();
 
-/** 中继键 → IP（`host:port` 或裸 IP） */
+/** 中继键 → IP（委托 `relayIpOf`：解析只准有一份） */
 export function ipOf(node: string): string {
   if (!node) return "";
-  const i = node.lastIndexOf(":");
-  return i > 0 ? node.slice(0, i) : node;
+  return relayIpOf(node);
 }
 
