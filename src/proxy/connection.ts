@@ -36,7 +36,6 @@ export class Connection {
   node = "";
   host = ""; // 目标域名（按站点的节点画像用）
   mode: Mode;
-  trial = false;
   via = "direct";
   udp = false; // 首包已判定为 UDP/53：后续帧直接当 DNS 报文
   udpTrojan = false; // Trojan UDP 的后续帧带 [ATYP][ADDR][PORT] 前缀
@@ -330,9 +329,9 @@ export class Connection {
           HOOK.relPerf?.(this.host, ip, t0, kbs);
           // 只有真正拉到 ≥40KB 才算一次可用的吞吐样本：4 字节 403 页算出的"速度"是假的（文档 D5）
           if (this.down >= 40960) HOOK.capNote?.(ip, Math.round((this.down / 1024) * 1000 / Math.max(1, Date.now() - this.t0)));
-          // 「站点 × 中继」成功率（v8 §5 的 ps）：拿到完整响应（>64B）才算过。
-          // 64B 这条线来自实测：旧的「4 字节 IPv6 拒绝页」已变成 737B HTML（§19.2），
-          // 所以不能只排除 4 字节；而正常页面哪怕再小也有几百字节（example.com 932B）。
+          // 「站点 × 中继」成功率（v8 §5 的 ps）不在这里写：判定层要的是「同一窗口里有 2xx 对照」，
+          // 只有 src/route/judge.ts 的判定出口知道这件事，它自己调 PS.note。
+          // 这里只交出三样原料：首字节（relPerf）、容量（capNote）、完整响应字节数（traffic）。
         }
         // 通道证据：交给决策层（弱证据只可能把 unknown 提成 ok；判死只有 probe 能下）
         if (this.host && HOOK.traffic) {

@@ -84,8 +84,9 @@ export class Attacher {
         kickFlush(env, st.id); // 换节点也不通 → 这个目标走不了中转
         st.failed = true;
         st.siteFail = true;
-        if (st.hostTrial) await SEL.softFail(st.node);
-        else await SEL.bumpFail(env, o.mode, st.node, st.trial, "site");
+        // 站点级试探与普通站点失败在这里是同一件事：只轻记节点（nsSiteFail），
+        // 不动全局失败记忆、也不冻结。原来那个 if/else 的两条分支调的其实是同一个函数。
+        await SEL.softFail(st.node);
         try {
           ws.close(1000, "done");
         } catch (e) {}

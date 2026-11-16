@@ -120,8 +120,10 @@ export class RelayHealth {
    * 于是两边的观测会被拼成一条从未存在过的证据 —— 本地 3 小时前攒下的 8 次成功，
    * 会顶着「刚刚」的时间戳去算分（`score()` 的半衰期按 `at` 衰减，等于让旧证据永不过期）；
    * 反过来，别处更强的计数可能配着本地更旧的时间，被无谓地衰减掉。
-   * 现在的规则：证据条数（o+b+d）多的那条整体胜出；相等时用较新的时间 ——
+   * 现在的规则：证据条数（o+b+d）多的那条整体胜出；条数相等时较新的观测整体胜出 ——
    * 计数与时间永远来自同一次观测，`不覆盖本地更强的结论` 也仍然成立。
+   * （v7.191 补：条数相等而构成不同时，原先只把时间戳搬过来、计数留本地，
+   * 于是本地「3 次整页」会顶着别处「3 次零字节」的时间戳算半衰期 —— 同一个错的另一半。）
    * @param rows 别处报来的行（`t` 缺省 = 老 DO 行，按「刚刚」算）
    * @returns 无
    */
@@ -136,12 +138,12 @@ export class RelayHealth {
       const d = Math.max(0, Number(r.d) || 0);
       const inN = o + b + d;
       const cur = this.m.get(r.i);
-      if (!cur || inN > cur.ok + cur.bad + cur.dead) {
-        this.m.set(r.i, { ok: o, bad: b, dead: d, at: cur ? Math.max(cur.at, at) : at });
-      } else if (inN === cur.ok + cur.bad + cur.dead) {
-        cur.at = Math.max(cur.at, at);
-      }
-      // 无论哪条胜出，都要把「已同步到 DO 的计数」对齐到表里的当前值，
+      const curN = cur ? cur.ok + cur.bad + cur.dead : 0;
+      // 条数更多的那条胜出；条数一样多时，较新的观测胜出（构成可能不同：本地 3 次整页
+      // vs 别处 3 次零字节，只搬时间戳会把两份观测拼成一条从未存在过的证据）。
+      // 计数与时间必须来自同一次观测，绝不做 Math.max 拼接。
+      if (!cur || inN > curN || (inN === curN && at > cur.at)) this.m.set(r.i, { ok: o, bad: b, dead: d, at });
+      // 胜出之后还要把「已同步到 DO 的计数」对齐到表里的当前值，
       // 否则下一轮 delta 会把这条已经确认过的证据再发一次。
       const s2 = this.m.get(r.i) as RelayStat;
       this.sent.set(r.i, { o: s2.ok, b: s2.bad, d: s2.dead });

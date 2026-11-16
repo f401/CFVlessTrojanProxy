@@ -3538,7 +3538,7 @@ console.log("\n-- 中继健康表的合并口径与死出口（v7.161）");
 }
 {
   const rh = fs.readFileSync("src/route/relay-health.ts", "utf8");
-  ok("合并时按证据条数决定谁胜出", rh.includes("inN > cur.ok + cur.bad + cur.dead"));
+  ok("合并按条数、平局按较新的观测决定谁胜出", rh.includes("inN > curN || (inN === curN && at > cur.at)"));
   ok("淘汰一条中继时连 pending 一起清掉", (rh.match(/this\.pending\.delete\(k\)/g) || []).length === 2);
   ok("表外的键不会被登记进已上报快照", rh.includes("if (this.m.has(r.i)) this.sent.set(r.i"));
   ok("中继健康表的 loaded 状态已删除（冷启动由 vtLoad 的 single-flight 负责）", W.HEALTH.loaded === undefined);
@@ -4466,6 +4466,73 @@ console.log("\n176) 预算账本与续回边界");
 
   S.alive = keepAlive;
   S.eg4Top = keepTop;
+}
+
+
+// 191a) 站点失败只有一条记账路径（attacher 的 if/else 两条分支曾分别调 softFail 与 bumpFail(…, "site")）
+console.log("\n191a) 站点失败的记账路径");
+{
+  reset();
+  node("sfa:443", { tcp: 40 });
+  node("sfb:443", { tcp: 40 });
+  S.pxFailMem = 0;
+  S.pxFailSeen = 0;
+  await W.SEL.softFail("sfa:443");
+  await W.SEL.bumpFail({}, "tput", "sfb:443", false, "site");
+  const fa = W.nsGet("sfa:443");
+  const fb = W.nsGet("sfb:443");
+  eq("softFail 与 kind=site 的权重一致", Math.round(fb.failW * 10), Math.round(fa.failW * 10));
+  ok("站点失败只记 0.2 的站责", fa.failW > 0.1 && fa.failW < 0.3, String(fa.failW));
+  eq("站点失败不进全局失败记忆", S.pxFailMem, 0);
+  eq("站点失败不置失败标志", S.pxFailSeen, 0);
+  eq("站点失败不冻结节点", W.isFrozen("sfa:443") || W.isFrozen("sfb:443"), false);
+  // 节点侧失败（kind=node）必须真的推进全局记忆，否则「连续失败就换节点」永不触发
+  S.pxFailMem = 0;
+  await W.SEL.bumpFail({}, "tput", "sfb:443", false);
+  eq("节点侧失败推进全局记忆", S.pxFailMem >= 1, true);
+  // 站点级试探（hostTrial）的失败只冻结它自己，也不动全局记忆
+  reset();
+  node("sfd:443", { tcp: 40 });
+  S.pxFailMem = 0;
+  await W.SEL.bumpFail({}, "tput", "sfd:443", true);
+  eq("试探失败不进全局记忆", S.pxFailMem, 0);
+  eq("试探失败冻结该节点", W.isFrozen("sfd:443"), true);
+  // 源码锁：影子字段与「第二条等价的记账路径」都别再回来
+  const conSrc = fs.readFileSync("src/proxy/connection.ts", "utf8");
+  const atSrc = fs.readFileSync("src/proxy/attacher.ts", "utf8");
+  ok("Connection 不再有影子连接的 trial 字段", !conSrc.includes("  trial = false;") && !conSrc.includes("this.trial"), "");
+  ok("站点失败的记账只剩 softFail 一条路", !atSrc.includes('"site"'), "");
+}
+
+// 191b) 中继健康表 merge：条数相等时较新的观测整体胜出，不把两份观测拼成一条
+console.log("\n191b) 中继健康表的 merge 口径");
+{
+  // 用 merge 造本地旧证据：一次整页、1 分钟前（note 用的是「现在」，没法造出旧时间戳）
+  const e = new W.RelayHealth();
+  e.merge([{ i: "10.3.3.3", o: 1, b: 0, d: 0, t: Date.now() - 60000 }]);
+  ok("本地整页证据让健康度高于中性", e.score("10.3.3.3") > 0.5, String(e.score("10.3.3.3")));
+  // 别处：同样 1 条，但是零字节，且更新 —— 整条按较新的观测替换
+  e.merge([{ i: "10.3.3.3", o: 0, b: 0, d: 1, t: Date.now() }]);
+  const row = e.json(5).find((r) => r.ip === "10.3.3.3");
+  ok("条数相等时按较新的观测整条替换（ok 归零）", !!row && row.ok === 0 && row.dead === 1, JSON.stringify(row));
+  ok("替换后健康度落到中性以下", e.score("10.3.3.3") < 0.5, String(e.score("10.3.3.3")));
+  // 别处更旧就不该动本地结论，时间戳也不能被搬过来
+  const f = new W.RelayHealth();
+  f.merge([{ i: "10.4.4.4", o: 1, b: 0, d: 0, t: Date.now() - 1000 }]);
+  const before = f.score("10.4.4.4");
+  f.merge([{ i: "10.4.4.4", o: 0, b: 0, d: 1, t: Date.now() - 3600 * 1000 }]);
+  eq("较旧的观测不覆盖本地结论", f.score("10.4.4.4"), before);
+  // 条数更多的那条照样整条胜出
+  f.merge([{ i: "10.4.4.4", o: 5, b: 0, d: 0, t: Date.now() }]);
+  const r2 = f.json(5).find((r) => r.ip === "10.4.4.4");
+  ok("条数更多时整条替换", !!r2 && r2.ok === 5 && r2.dead === 0, JSON.stringify(r2));
+  // 相等条数 + 相等时间戳：保持本地（不写入）也不能拼
+  const g = new W.RelayHealth();
+  const t0 = Date.now() - 60000;
+  g.merge([{ i: "10.5.5.5", o: 2, b: 0, d: 0, t: t0 }]);
+  g.merge([{ i: "10.5.5.5", o: 0, b: 0, d: 2, t: t0 }]);
+  const r3 = g.json(5).find((r) => r.ip === "10.5.5.5");
+  ok("条数相同且时间相同则保持本地", !!r3 && r3.ok === 2 && r3.dead === 0, JSON.stringify(r3));
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

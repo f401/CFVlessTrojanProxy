@@ -264,11 +264,11 @@ export class Selector {
 
   /**
    * 失败处理：记账 → 必要时回滚/换节点。
-   * 影子连接的失败只记在该节点头上，不动主游标。
+   * 站点级试探（Connection.hostTrial）的失败只冻结它自己，不动主游标，也不进全局失败记忆。
    * @param {object} env Worker 环境
    * @param {string} mode 模式
    * @param {string} k 节点
-   * @param {boolean} trial 是否为影子连接
+   * @param {boolean} trial 是不是站点级试探（只有 hostTrial 会置位）
    * @returns {void}
    */
   onFail(_env: Env, mode: Mode, k: string, trial: boolean) {
