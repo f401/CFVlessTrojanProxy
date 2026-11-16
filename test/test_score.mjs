@@ -4761,5 +4761,59 @@ console.log("\n191b) 中继健康表的 merge 口径");
   const sbLines = fs.readFileSync("src/views/sub-singbox.ts", "utf8").split(/\r?\n/);
   eq("sing-box 没有 4 空格缩进的 domain_strategy", sbLines.filter((l) => /^ {4}domain_strategy:/.test(l)).length, 0);
 }
+// 第 198 组：?p= 协议开关（v8 §7 里写的是 ?p=vless|tj|both，而代码原先只读 ?proto=，且不认 tj / both）
+{
+  const id198 = "4241b903-8d39-4a17-8f4c-bb33b1630c33";
+  const envP = { uuid: "u", nodes: "", proxyip: "auto", pwd: "tj-pass-198" };
+  const R = (q) => W.renderClash(envP, new URL("https://example.com/x" + q), id198, "example.com");
+  // 每个 proxy 块都有一行 `    type: <proto>`，按它数协议条目最稳（名字里既可能是 vless- 也可能是 -VL）
+  const tj = (y) => (y.match(/^    type: trojan$/gm) || []).length;
+  const vl = (y) => (y.match(/^    type: vless$/gm) || []).length;
+  const d = R("");
+  ok("有 trojan 密码时默认两协议都在", tj(d) > 0 && vl(d) > 0, "tj=" + tj(d) + " vl=" + vl(d));
+  eq("?p=vless 去掉全部 trojan 条目", tj(R("?p=vless")), 0);
+  ok("?p=vless 仍保留 vless 条目", vl(R("?p=vless")) > 0);
+  eq("?p=tj 去掉全部 vless 条目", vl(R("?p=tj")), 0);
+  ok("?p=tj 仍保留 trojan 条目", tj(R("?p=tj")) > 0);
+  eq("?p=trojan 等同 ?p=tj", tj(R("?p=trojan")), tj(R("?p=tj")));
+  eq("?p=both 回到默认", tj(R("?p=both")), tj(d));
+  eq("?proto=vless 历史别名仍生效", tj(R("?proto=vless")), 0);
+  eq("?p= 优先于 ?proto=", tj(R("?p=vless&proto=trojan")), 0);
+  eq("?p=VL 大小写不敏感", tj(R("?p=VL")), 0);
+  const envNoPwd = { uuid: "u", nodes: "", proxyip: "auto" };
+  const nb = W.renderClash(envNoPwd, new URL("https://example.com/x?p=tj"), id198, "example.com");
+  ok("没有 trojan 密码时 ?p=tj 回落到 vless（不能给出空订阅）", vl(nb) > 0 && tj(nb) === 0, "vl=" + vl(nb) + " tj=" + tj(nb));
+  const sc198 = fs.readFileSync("src/views/sub-common.ts", "utf8");
+  eq("pickProtos 读规范名 ?p=", sc198.includes('url.searchParams.get("p")'), true);
+  eq("pickProtos 仍认 ?proto= 别名", sc198.includes('url.searchParams.get("proto")'), true);
+  eq("pickProtos 认文档里的 tj 取值", sc198.includes('q === "tj"'), true);
+}
+
+// 第 199 组：env.adminHash 是只进签名的影子字段（配了也永远进不去，已删除）
+{
+  const K199 = "#probe-admin-key-199";
+  const DIG199 = await W.sha256Hex(K199);
+  const U199 = new URL("https://example.com/admin");
+  const req199 = (h) => new Request("https://example.com/admin", { headers: h });
+  const envK = { adminKey: K199 };
+  eq("明文 key（X-Admin-Key）可认证", await W.adminAuthed(req199({ "X-Admin-Key": K199 }), U199, envK), true);
+  eq("明文 key（Bearer）可认证", await W.adminAuthed(req199({ Authorization: "Bearer " + K199 }), U199, envK), true);
+  eq("sha256 摘要可当等价凭证", await W.adminAuthed(req199({ Authorization: "Bearer " + DIG199 }), U199, envK), true);
+  eq("错误 key 被拒", await W.adminAuthed(req199({ "X-Admin-Key": "#wrong" }), U199, envK), false);
+  eq("只配 adminHash 的部署进不去（字段已删，等价未配置）", await W.adminAuthed(req199({ "X-Admin-Key": K199 }), U199, { adminKey: "", adminHash: DIG199 }), false);
+  const exp199 = 1800000000000;
+  eq("会话签名不受 adminHash 影响", await W.sessionToken({ adminKey: K199 }, exp199), await W.sessionToken({ adminKey: K199, adminHash: "zzz" }, exp199));
+  const authSrc199 = fs.readFileSync("src/edge/auth.ts", "utf8");
+  eq("签名材料里没有 adminHash", authSrc199.includes("env.adminHash"), false);
+  const envTypes199 = fs.readFileSync("types/env.d.ts", "utf8");
+  eq("类型里没有 adminHash", envTypes199.includes("adminHash"), false);
+  // 文档：开关清单必须与代码口径一致（?ei 上限是 8、?p 默认 both、?full 未实现）
+  const v8199 = fs.readFileSync("docs/v8.md", "utf8");
+  eq("文档写了 ?ei=4..8", v8199.includes("?ei=4..8"), true);
+  eq("文档不再声称 ?full=1 生效", /`\?full=1`\s*≤60/.test(v8199), false);
+  eq("文档写明 ?full 未实现", v8199.includes("?full=` 至今零读取"), true);
+  eq("文档写明 ?p 默认 both", v8199.includes("默认 `both`"), true);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

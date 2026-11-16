@@ -37,7 +37,9 @@ export async function sha256Hex(str: string) {
 /** 会话令牌：exp 参与签名，过期即失效（以前是永久不变的静态值）。 */
 export async function sessionToken(env: Env, exp?: number) {
   const e = Math.floor(exp || Date.now() + 12 * 3600e3);
-  const sig = await sha256Hex(`adm|${e}|${env.adminKey || ""}|${env.adminHash || ""}`);
+  // 只用 adminKey：adminHash 从来没参与过认证（见 types/env.d.ts 的说明），留在签名里只会让
+  // 「配了 adminHash 但没配 adminKey」的部署得到一个签名不同、却谁也进不去的会话。
+  const sig = await sha256Hex(`adm|${e}|${env.adminKey || ""}`);
   return `${e.toString(36)}.${sig.slice(0, 40)}`;
 }
 

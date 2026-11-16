@@ -154,9 +154,10 @@ export function loadNodes(env: Env, host: string): SubNode[] {
  */
 export function pickProtos(env: Env, url: URL, hasTrojanOverride?: boolean): string[] {
   const hasTrojan = hasTrojanOverride === undefined ? Boolean(secretPwd(env)) : !!hasTrojanOverride;
-  const q = url.searchParams.get("proto");
-  if (q === "vless") return ["vless"];
-  if (q === "trojan") return hasTrojan ? ["trojan"] : ["vless"];
+  // 规范名是 ?p=，?proto= 是历史别名（两个都认，p 优先）；取值兼容文档写法 tj / both
+  const q = (url.searchParams.get("p") || url.searchParams.get("proto") || "").trim().toLowerCase();
+  if (q === "vless" || q === "vl") return ["vless"];
+  if (q === "tj" || q === "trojan") return hasTrojan ? ["trojan"] : ["vless"];
   return hasTrojan ? ["vless", "trojan"] : ["vless"];
 }
 
