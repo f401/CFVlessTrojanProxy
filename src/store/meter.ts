@@ -38,6 +38,8 @@ export class Meter {
   dns: Record<string, { v: number; at: number }>;
   /** 单 IP 封锁事实：`host|relay` → { n 批数, at }。只影响代价（×6），从不剔候选 */
   blk2: Record<string, { n: number; at: number }>;
+  /** 事实表代号：`a` 里记的号与分片里的号不同就说明分片是上一轮的残留（v7.219） */
+  fs: number;
   /** 请求串行队列：/add 与 /set 交错会让内存和 storage 的顺序不一致 */
   q: Promise<unknown> = Promise.resolve();
   /**
@@ -53,6 +55,7 @@ export class Meter {
     this.s = Object.create(null) as Record<string, NodeSnap>;
     this.e = []; // 跨 isolate 的错误环形（最多 50 条）
     this.cl = []; // 连接记录环形（最多 60 条）：离线标定 ttfb/抖动用
+    this.fs = 0; // 事实表代号（与分片同号才认；0 = 事实就在 `a` 里）
     this.vt = {};
     this.hl = {};
     this.eg = {};
@@ -81,6 +84,8 @@ export class Meter {
         if (o.dead && typeof o.dead === "object") this.dead = o.dead as unknown as Record<string, { n: number; at: number }>;
         if (o.dns && typeof o.dns === "object") this.dns = o.dns as unknown as Record<string, { v: number; at: number }>;
         if (o.blk2 && typeof o.blk2 === "object") this.blk2 = o.blk2 as unknown as Record<string, { n: number; at: number }>;
+        // 代号决定「要不要读分片」：0 表示事实就在这个值里，磁盘上的分片必是上一轮的残留
+        this.fs = Number((o as unknown as { fs?: number }).fs) || 0;
         }
         // 分片要在 `a` 之后再读：装不下时事实表搬去了 f1/f2/f3，只读 `a` 会看到空表
         await this.loadShards();
@@ -138,7 +143,7 @@ export class Meter {
    * @returns {Promise<void>}
    */
   private async loadShards(): Promise<void> {
-    Object.assign(this, await readShards(this.env, this.st.storage));
+    Object.assign(this, await readShards(this.env, this.st.storage, this.fs));
   }
 
   /**
@@ -147,7 +152,7 @@ export class Meter {
    * @returns {Promise<void>}
    */
   async save() {
-    await saveState(this.env, this.st.storage, {
+    this.fs = await saveState(this.env, this.st.storage, {
       c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl,
       vt: this.vt, hl: this.hl, eg: this.eg, ps: this.ps,
       dead: this.dead, blk2: this.blk2, dns: this.dns,

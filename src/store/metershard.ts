@@ -18,6 +18,8 @@ export const SHARD_KEYS = ["f1", "f2", "f3"] as const;
 
 /** 从 storage 解出来的账本形状（老布局把全部字段塞在 `a` 里，新布局按体积拆片） */
 export interface MeterStore {
+  /** 事实表代号：分片与 `a` 必须同号才认（见 saveState() 的注释） */
+  fs?: number;
   c?: UsageMeter;
   g?: CounterDoc;
   s?: Record<string, NodeSnap>;
@@ -101,13 +103,14 @@ interface MiniStore {
  * @param {MeterStore} parts 当前全部账本字段
  * @returns {Promise<void>}
  */
-export async function saveState(env: Env | null, st: MiniStore, parts: MeterStore): Promise<void> {
+export async function saveState(env: Env | null, st: MiniStore, parts: MeterStore): Promise<number> {
   const hot = { c: parts.c, g: parts.g, s: parts.s, e: parts.e, cl: parts.cl };
   const whole = { ...hot, vt: parts.vt, hl: parts.hl, eg: parts.eg, ps: parts.ps, dead: parts.dead, blk2: parts.blk2, dns: parts.dns };
   if (estSize(env, whole) <= VALUE_MAX) {
-    await st.put("a", await seal(env as Env, whole));
+    // `fs: 0` = 事实就在这个值里（没有分片）。删残片失败时靠这个 0 把残留分片判成过期的
+    await st.put("a", await seal(env as Env, { ...whole, fs: 0 }));
     for (const k of SHARD_KEYS) await st.delete(k);
-    return;
+    return 0;
   }
   const f1: Record<string, Record<string, unknown>> = { vt: parts.vt as unknown as Record<string, unknown>, hl: parts.hl as unknown as Record<string, unknown> };
   const f2: Record<string, Record<string, unknown>> = {
@@ -122,10 +125,13 @@ export async function saveState(env: Env | null, st: MiniStore, parts: MeterStor
   fitBag(env, f1);
   fitBag(env, f2);
   fitBag(env, f3);
-  await st.put("a", await seal(env as Env, hot));
-  await st.put("f1", await seal(env as Env, f1));
-  await st.put("f2", await seal(env as Env, f2));
-  await st.put("f3", await seal(env as Env, f3));
+  // 每片与 `a` 必须同号：删残片失败、或写完 `a` 就被杀，靠代号把上一轮的分片判成过期
+  const fs = Date.now();
+  await st.put("a", await seal(env as Env, { ...hot, fs }));
+  await st.put("f1", await seal(env as Env, { fs, ...f1 }));
+  await st.put("f2", await seal(env as Env, { fs, ...f2 }));
+  await st.put("f3", await seal(env as Env, { fs, ...f3 }));
+  return fs;
 }
 
 /**
@@ -140,13 +146,18 @@ export async function saveState(env: Env | null, st: MiniStore, parts: MeterStor
 export async function readShards(
   env: Env | null,
   st: MiniStore & { get: (k: string) => Promise<unknown> },
+  want: number,
 ): Promise<MeterStore> {
   const out: MeterStore = {};
+  // `want` 是 `a` 里的代号：0（或缺失）说明事实已经在 `a` 里，任何分片都是上一轮的残留
+  if (!want) return out;
   for (const key of SHARD_KEYS) {
     const raw = await st.get(key);
     if (!raw) continue;
     const o = await unseal<MeterStore>(env as Env, raw as never);
     if (!o || typeof o !== "object") continue;
+    // 代号不同的分片是「删残片失败」留下的：用它覆盖 `a` 会让旧事实复活、新事实被顶掉
+    if (Number(o.fs) !== want) continue;
     if (o.vt) out.vt = o.vt;
     if (o.hl) out.hl = o.hl;
     if (o.eg) out.eg = o.eg;
@@ -156,4 +167,5 @@ export async function readShards(
     if (o.dns) out.dns = o.dns;
   }
   return out;
+
 }

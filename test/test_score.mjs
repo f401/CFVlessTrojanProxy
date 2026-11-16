@@ -5741,5 +5741,39 @@ ok("单值预算常量在位", meterSrc.includes("const VALUE_MAX = 120000;"), t
 ok("分片键是三片", meterSrc.includes('const SHARD_KEYS = ["f1", "f2", "f3"] as const;'), true);
 ok("装得下就单键、装不下才拆", meterSrc.includes("if (estSize(env, whole) <= VALUE_MAX) {"), true);
 ok("两条恢复路径都读分片", (meterSrc.match(/await this\.loadShards\(\);/g) || []).length === 2, (meterSrc.match(/await this\.loadShards\(\);/g) || []).length);
+
+/* ---------- 220) 分片带代号：残留分片不能盖掉新写的单键值 ---------- */
+const stampDo = mkDO();
+await stampDo.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify(doFill(200)) }));
+await stampDo.m.save();
+ok("拆片后代号大于 0", Number(stampDo.m.fs) > 0, String(stampDo.m.fs));
+// 留一份上一轮的分片，然后模拟「表缩小了、退回单键，但删残片失败」
+const staleF2 = stampDo.store.get("f2");
+for (const t of ["vt", "hl", "eg", "ps", "dead", "blk2", "dns"]) stampDo.m[t] = {};
+stampDo.m.eg["1.2.3.4"] = { f: 4, at: Date.now() };
+await stampDo.m.save();
+eq("退回单键后代号回到 0", stampDo.m.fs, 0);
+stampDo.store.set("f2", staleF2);
+const stampDo2 = mkDO([...stampDo.store.entries()]);
+await stampDo2.m.fetch(new Request("https://m/get"));
+eq("残留分片不会盖掉新写的单键值", Object.keys(stampDo2.m.eg).join(","), "1.2.3.4");
+// 同号分片必须照读（正常的分片恢复不能被代号挡住）
+const stampDo3 = mkDO();
+await stampDo3.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify(doFill(200)) }));
+await stampDo3.m.save();
+const stamped = stampDo3.store.get("f2");
+const stampDo4 = mkDO([...stampDo3.store.entries()]);
+await stampDo4.m.fetch(new Request("https://m/get"));
+ok("同号分片照读", Object.keys(stampDo4.m.ps || {}).length > 0 && Object.keys(stampDo4.m.eg || {}).length > 0, JSON.stringify({ ps: Object.keys(stampDo4.m.ps || {}).length, eg: Object.keys(stampDo4.m.eg || {}).length }));
+void stamped;
+const msSrc220 = fs.readFileSync("src/store/metershard.ts", "utf8");
+ok("账本类型里记了代号", msSrc220.includes("fs?: number;"));
+ok("单键路径写 fs: 0", msSrc220.includes("await st.put(\"a\", await seal(env as Env, { ...whole, fs: 0 }));"));
+ok("分片路径用同一个代号", msSrc220.includes("const fs = Date.now();") && msSrc220.includes("await st.put(\"f2\", await seal(env as Env, { fs, ...f2 }));"));
+ok("读分片时比代号", msSrc220.includes("if (Number(o.fs) !== want) continue;"));
+ok("代号为 0 就不读分片", msSrc220.includes("if (!want) return out;"));
+ok("save 之后记住本次代号", storeSrc().includes("this.fs = await saveState(this.env, this.st.storage, {"));
+ok("恢复时把 a 里的代号读出来", storeSrc().includes("this.fs = Number((o as unknown as { fs?: number }).fs) || 0;"));
+ok("loadShards 把代号传下去", storeSrc().includes("readShards(this.env, this.st.storage, this.fs)"));
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
