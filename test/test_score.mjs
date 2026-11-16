@@ -5977,5 +5977,48 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   ok("tfRemember 里 delete 在 set 之前", delAt > 0 && setAt > delAt);
   ok("注释写明 Map.set 不移动位置", tfSrc.includes("不移动插入位置"));
 }
+/* ---------- 第 226 组：探活「暂时跳过」表 ---------- */
+{
+  const PB = W.S.probeBad;
+  const key226 = (i) => `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}:443`;
+  const t0 = Date.now();
+  const sw = W.sweepProbeBad;
+  eq("上限常量在位", W.SC.PROBE_BAD_MAX, 2048);
+  // 过期记录：对 probeBadSkip 已经无意义，必须清掉
+  PB.clear();
+  for (let i = 0; i < 500; i++) W.bumpProbeBad(key226(i), false, t0 - 24 * 3600e3);
+  eq("过期记录先攒满 500 行", PB.size, 500);
+  if (sw) sw(t0);
+  eq("过期记录被清空", PB.size, 0);
+  // 未过期记录一条都不许误删
+  PB.clear();
+  for (let i = 0; i < 500; i++) W.bumpProbeBad(key226(i), false, t0);
+  if (sw) sw(t0);
+  eq("未过期记录一条不删", PB.size, 500);
+  // 超上限按「最久没更新」淘汰
+  PB.clear();
+  for (let i = 0; i < 3000; i++) W.bumpProbeBad(key226(i), false, t0 + i);
+  if (sw) sw(t0 + 3000);
+  ok("压到上限以内", PB.size <= W.SC.PROBE_BAD_MAX);
+  ok("最新那条还在", PB.has(key226(2999)));
+  ok("最旧那条被淘汰", !PB.has(key226(0)));
+  // 成功探活仍然删自己那一条
+  PB.clear();
+  W.bumpProbeBad(key226(7), false, t0);
+  eq("失败先记一行", PB.size, 1);
+  W.bumpProbeBad(key226(7), true, t0);
+  eq("成功后自己那行被删", PB.size, 0);
+  // 判据与 TTL 同源：过 TTL 后不再判「跳过」
+  PB.clear();
+  for (let i = 0; i < 3; i++) W.bumpProbeBad(key226(9), false, t0);
+  ok("连续 3 次失败后判跳过", W.probeBadSkip(key226(9), t0));
+  ok("过了 TTL 不再判跳过", W.probeBadSkip(key226(9), t0 + W.SC.PROBE_BAD_TTL + 1) === false);
+  PB.clear();
+  // 源码锁：清理函数存在、且 cronScan 每轮都调它
+  const poolSrc226 = fs.readFileSync("src/px/pool.ts", "utf8");
+  ok("cronScan 每轮都扫这张表", poolSrc226.includes("sweepProbeBad();"));
+  ok("扫的时候先看 TTL", poolSrc226.includes("if (now - v.at > SC.PROBE_BAD_TTL) {"));
+  ok("超上限按 at 升序淘汰", poolSrc226.includes("sort((a, b) => a[1].at - b[1].at)"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

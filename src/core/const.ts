@@ -53,6 +53,7 @@ export const SC = {
   SM_CNT_MAX: 512, // 「站点|通道」→ 小响应次数（nginx 默认页判死要看它）最多留多少行：键是站点×中继，两个维度都会涨
   SCAN_BAD_MAX: 3, // 连续失败几次暂时跳过
   PROBE_BAD_TTL: 1800000, // 「跳过」只保留 30 分钟：临时抖动不该让节点永远排不上（只在本 isolate 记忆，不写 KV）
+  PROBE_BAD_MAX: 2048, // 「跳过」表的上限：键是候选地址，公开池每天都在换，长命 isolate 里只增不减
   // 免费计划每次调用最多 6 个同时打开的 connect()，第 7 个起直接报 too many connections；
   // 探活分段必须按它切，否则被拒的那几个会被当成「节点坏了」写进 probeBad。
   PROBE_CONC: 6,

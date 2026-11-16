@@ -14,7 +14,7 @@ export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给它 
  */
 export const UP_STALL_MS = 30000;
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐死
-export const VERSION = "7.224";
+export const VERSION = "7.225";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 

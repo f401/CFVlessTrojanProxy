@@ -200,6 +200,39 @@ export function bumpProbeBad(k: string, ok: boolean, now = Date.now()): void {
   const n = cur && now - cur.at <= SC.PROBE_BAD_TTL ? cur.n + 1 : 1;
   S.probeBad.set(k, { n: Math.min(9, n), at: now });
 }
+
+/**
+ * 功能：清理「暂时跳过」表 —— 先删过了 TTL 的记录（它们对 `probeBadSkip` 已经没有意义），
+ * 再按上限淘汰最久没更新的那些。
+ *
+ * 为什么要主动扫：这张表的键是候选地址（`host:port`），公开池每天换一批，
+ * 而写入路径只有「失败时新增」与「成功时删自己那一条」——一个长命 isolate 见过几万个失败候选后
+ * 表就一直涨，且没有任何读路径会因此报错（`probeBadSkip` 只是每行比较一次）。
+ * @param {number} now 当前时间（毫秒时间戳，默认取 `Date.now()`）
+ * @returns {number} 这一次删掉的行数
+ */
+export function sweepProbeBad(now = Date.now()): number {
+  let gone = 0;
+  // ① 过期即无用：判据与 probeBadSkip 用的是同一个 TTL，避免两处口径漂移
+  for (const [k, v] of S.probeBad) {
+    if (now - v.at > SC.PROBE_BAD_TTL) {
+      S.probeBad.delete(k);
+      gone += 1;
+    }
+  }
+  // ② 还在 TTL 内但表已经太大：按最久没更新淘汰（值就是时间戳，不必额外维护淘汰序）
+  if (S.probeBad.size > SC.PROBE_BAD_MAX) {
+    const rows = [...S.probeBad.entries()].sort((a, b) => a[1].at - b[1].at);
+    let over = S.probeBad.size - SC.PROBE_BAD_MAX;
+    for (const [k] of rows) {
+      if (over <= 0) break;
+      S.probeBad.delete(k);
+      over -= 1;
+      gone += 1;
+    }
+  }
+  return gone;
+}
 /**
  * 功能：跑一轮池子维护：准入复测（adm 是本次准入预算）→ 探活 → 出口/中继打标 → 游标重算。
  * @param env 环境变量
@@ -207,6 +240,8 @@ export function bumpProbeBad(k: string, ok: boolean, now = Date.now()): void {
  * @returns 无
  */
 export async function cronScan(env: Env, adm = 0) {
+  // 每轮先收拾「暂时跳过」表：过期记录对 probeBadSkip 已无意义，表本身也没有自愈路径
+  sweepProbeBad();
   await pxGet(env);
   let pool = await ensurePool(env);
   if (!pool.length || Date.now() - S.poolBuilt > POOL_TTL_MS) {
