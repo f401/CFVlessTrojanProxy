@@ -5136,5 +5136,90 @@ console.log("\n191b) 中继健康表的 merge 口径");
   ok("存活条数进了页面", html.includes("3"), "");
 }
 
+// 第 207 组：快照读失败不能缓存成「空快照」，也不能被记成「没有旧键」（7.206）
+{
+  // 每个场景一个独立计数器，用来证明「失败那次没有把结果缓存住」
+  const mkKv = (fn) => {
+    const box = { n: 0 };
+    const env = {
+      STATS: {
+        get: async (k) => {
+          box.n += 1;
+          return fn(k);
+        },
+        put: async () => {},
+      },
+    };
+    return { env, calls: () => box.n };
+  };
+
+  W.S.snapCache = { v: null, t: 0 };
+  const bad = mkKv(async () => {
+    throw new Error("kv hiccup");
+  });
+  let thrown = false;
+  try {
+    await W.STORE.snap(bad.env);
+  } catch (e) {
+    thrown = true;
+  }
+  eq("快照读失败必须抛错（不能返回空表）", thrown, true);
+  eq("读失败不进缓存", W.S.snapCache.t, 0);
+  eq("读失败后缓存里没有空快照", W.S.snapCache.v, null);
+
+  // KV 恢复：同一个 isolate 里不带 fresh 也必须能读到（旧代码会拿缓存糊弄 5 分钟）
+  const good = mkKv(async () => null);
+  const doc = await W.STORE.snap(good.env);
+  eq("KV 恢复后立刻能读到快照", typeof doc, "object");
+  eq("KV 恢复后真的重新打了一次", good.calls(), 1);
+
+  // 键不存在是「还没有快照」，这种情况可以缓存（否则每次订阅都打一次 KV）
+  W.S.snapCache = { v: null, t: 0 };
+  const miss = mkKv(async () => null);
+  const m1 = await W.STORE.snap(miss.env);
+  const m2 = await W.STORE.snap(miss.env);
+  eq("没有快照键时缓存空表", m1 === m2, true);
+  eq("没有快照键时只打一次 KV", miss.calls(), 1);
+
+  // 路径一：快照读失败 ⇒ getSnap 抛错 ⇒ loadRtt 退回内存，不写 rttMiss
+  W.S.rttMiss.clear();
+  W.S.snapCache = { v: null, t: 0 };
+  const rttFail = mkKv(async () => {
+    throw new Error("kv hiccup");
+  });
+  const mem1 = await W.loadRtt(rttFail.env, "u207a");
+  eq("loadRtt 快照读失败时返回内存那份", typeof mem1, "object");
+  eq("loadRtt 快照读失败不写 rttMiss", W.S.rttMiss.size, 0);
+
+  // 路径二：快照有缓存（空表，属真值），但旧键 rtt:<id> 读失败 ⇒ 同样不能记「没有旧键」
+  W.S.rttMiss.clear();
+  W.S.snapCache = { v: { v: 1, ts: 1, date: "", stats: {}, rtt: {}, errs: [] }, t: Date.now() };
+  const legacyFail = mkKv(async () => {
+    throw new Error("kv hiccup");
+  });
+  const mem2 = await W.loadRtt(legacyFail.env, "u207b");
+  eq("loadRtt 旧键读失败时返回内存那份", typeof mem2, "object");
+  eq("loadRtt 旧键读失败不写 rttMiss", W.S.rttMiss.size, 0);
+
+  // 旧键确实不存在（不抛错）时才允许记 10 分钟，避免每次刷订阅都打一次 KV
+  W.S.rttMiss.clear();
+  const legacyMiss = mkKv(async () => null);
+  await W.loadRtt(legacyMiss.env, "u207c");
+  eq("旧键确实不存在时记 rttMiss", W.S.rttMiss.size, 1);
+
+  const srcSnap = fs.readFileSync("src/store/snapshot.ts", "utf8");
+  ok("快照读走严格读（能区分空与读不到）", srcSnap.includes('kvGetStrict<SnapDoc>(env, "snap")'), "");
+  ok("不再用吞异常的 kvGet 读快照", srcSnap.includes('(await kvGet<SnapDoc>(env, "snap")) || null') === false, "");
+  const cut = srcSnap.indexOf("await eachLimit(head, 8, async");
+  eq("eachLimit 那行有缩进", cut > 2 ? srcSnap.slice(cut - 2, cut) : "?", "  ");
+
+  const srcMetrics = fs.readFileSync("src/nodes/metrics.ts", "utf8");
+  ok("旧键迁移也走严格读", srcMetrics.includes("kvGetStrict<Record<string, RttEntry>>(env, `rtt:${id}`)"), "");
+  ok("metrics 不再引 kvGet", srcMetrics.includes('import { getSnap, kvGet }') === false, "");
+
+  const srcLogs = fs.readFileSync("src/routes/logs.ts", "utf8");
+  ok("日志路径的快照读失败会留痕", srcLogs.includes('logErr("logs snap read failed", "kv")'), "");
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

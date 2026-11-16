@@ -3,7 +3,7 @@ import { RTT_MAX } from "../core/const";
 import { candsFor, costOf, isBlack, isFrozen } from "./score";
 import { S } from "../core/state";
 import { TEN_MB } from "./score";
-import { getSnap, kvGet } from "../store/index";
+import { getSnap, kvGetStrict } from "../store/index";
 
 /* metrics */
 
@@ -91,8 +91,10 @@ export async function loadRtt(env: Env, id: string) {
     const snap = await getSnap(env);
     let stored: Record<string, RttEntry> = ((snap.rtt || {}) as Record<string, Record<string, RttEntry>>)[id] || {};
     if (!Object.keys(stored).length && (S.rttMiss.get(id) || 0) < Date.now()) {
-      // 老键 rtt:<id> 只用于迁移；不存在时记住 10 分钟，避免每次刷订阅都打一次 KV
-      stored = (await kvGet<Record<string, RttEntry>>(env, `rtt:${id}`)) || {};
+      // 老键 rtt:<id> 只用于迁移；不存在时记住 10 分钟，避免每次刷订阅都打一次 KV。
+      // 必须严格读：`kvGet` 会把 KV 异常吞成 null，于是「读不到」被记成「没有旧键」，
+      // 给这个用户压上 10 分钟的 rttMiss —— KV 恢复了也拿不到学到的延迟（v7.206）。
+      stored = (await kvGetStrict<Record<string, RttEntry>>(env, `rtt:${id}`)) || {};
       if (Object.keys(stored).length) S.rttMiss.delete(id);
       else {
         if (S.rttMiss.size > 500) S.rttMiss.clear();

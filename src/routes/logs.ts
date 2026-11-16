@@ -1,6 +1,7 @@
 import { S } from "../core/state";
 import { getSnap, primaryId } from "../store/index";
 import { json } from "../edge/respond";
+import { logErr } from "../nodes/errlog";
 import type { RouteCtx } from "../edge/types";
 
 type UserCtx = RouteCtx & { id: string };
@@ -12,7 +13,11 @@ export async function logs(c: UserCtx): Promise<Response> {
   try {
     const snap = await getSnap(env);
     stored = snap.errs || [];
-  } catch (e) {}
+  } catch (e) {
+    // 快照读失败只是少一份来源（DO 与本 isolate 仍会并进来），但必须留痕：
+    // 否则「错误列表突然只剩几十条」查不出原因（ErrRing 自己 5 秒去重，不会刷屏）
+    logErr("logs snap read failed", "kv");
+  }
   // 再并上 DO 里那份（跨 isolate），否则永远只能看到"当前这个实例"的 50 条
   let fromDo: ErrItem[] = [];
   if (env.METER) {

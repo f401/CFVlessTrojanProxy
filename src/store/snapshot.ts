@@ -60,7 +60,7 @@ export async function usageSnapWrite(env: Env, users?: UserRec[]) {
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
   };
   const today = new Date().toISOString().slice(0, 10);
-await eachLimit(head, 8, async (u) => {
+  await eachLimit(head, 8, async (u) => {
     const v = await meterGet(env, u.id);
     const old = (prev.users || {})[u.id];
     // 只增不减：DO 被重置（重建脚本）时不能把历史快照写回 0。
@@ -277,19 +277,20 @@ async function writeSnap(env: Env, now: number, force = false): Promise<void> {
 
 /**
  * 功能：取快照（带 TTL 缓存，fresh 可强制刷新）。
+ *
+ * 读失败必须**抛错**，不能返回空快照：`SNAP_TTL` 是 5 分钟，一旦把「KV 抖动」
+ * 当成「还没有快照」，`/<uuid>/logs` 的错误列表、`readStats` 的 KV 回退、
+ * `loadRtt` 的延迟学习会在 5 分钟里一致地骗人（`loadRtt` 还会顺带把 `S.rttMiss`
+ * 压上 10 分钟，KV 恢复了也读不到）。三个调用方本来就都有 try/catch，抛出去各自降级。
  * @param env 环境变量
  * @param fresh 忽略缓存
- * @returns 快照对象或 null
+ * @returns 快照对象；键不存在时是空表，**读失败会抛错**（不进缓存）
  */
 export async function getSnap(env: Env, fresh?: boolean) {
   if (!fresh && S.snapCache.v && Date.now() - S.snapCache.t < SNAP_TTL) return S.snapCache.v;
-  let v = null;
-  try {
-    v = (await kvGet<SnapDoc>(env, "snap")) || null;
-  } catch (e) {
-    v = null;
-  }
-  const out: SnapDoc = (v as SnapDoc) || { v: 1, ts: 0, date: "", stats: {}, rtt: {}, errs: [] };
+  // 严格读：抛错路径不碰 S.snapCache，下一次调用会重新打 KV
+  const v = await kvGetStrict<SnapDoc>(env, "snap");
+  const out: SnapDoc = v || { v: 1, ts: 0, date: "", stats: {}, rtt: {}, errs: [] };
   S.snapCache = { v: out, t: Date.now() };
   return out;
 }
