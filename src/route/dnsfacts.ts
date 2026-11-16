@@ -14,9 +14,9 @@
 // 作用点只有一个 —— 选路的代价乘数：确证「纯 v4」时，v6 出口乘 2（贵，但不排除）。
 // 纯 v4 站点在 v6 出口上也**可能**成功（NAT64/HTTP 代理型中继），所以只降权。
 
-/** DNS 事实寿命：24 小时 */
 import { FACT_TTL } from "../core/facts";
 
+/** DNS 事实寿命：24 小时 */
 export const DNS_TTL = FACT_TTL.dns;
 /** 表上限：512 个站点 */
 export const DNS_MAX = 512;

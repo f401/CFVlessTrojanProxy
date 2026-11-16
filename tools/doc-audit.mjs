@@ -99,6 +99,53 @@ function stackedDocs(lines) {
   return out;
 }
 
+/**
+ * 文档挂在 import 上：一段 JSDoc 后面紧跟 `import` 语句。
+ *
+ * 成因是「插入 import 时插在了文档与声明之间」—— 于是被描述的那个常量/函数反倒没有文档，
+ * 而 import 顶上一段说明既无意义又会被读者当成「这个 import 的注解」。7.196 在
+ * `commitfact.ts` 与 `dnsfacts.ts` 各抓到一处，原有四条判据（缺注释/孤儿/叠文档/类表）
+ * 全都看不见它：缺注释只查函数与方法，孤儿查的是「块后是 } 或 EOF」。
+ *
+ * 文件头说明不算（它前面只有注释与空行），因为模块说明本来就该在 import 之上。
+ * @param {string[]} lines 文件行
+ * @returns {{line: number, imp: number}[]} 命中的位置（1 起）
+ */
+function docOnImport(lines) {
+  // 每个位置属于第几个注释块（1 起）：文件头说明是第 1 块，之后的块都不可能是「模块说明」
+  const blockOf = new Array(lines.length);
+  let blocks = 0;
+  let open = false;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    const isComment = t.startsWith("//") || t.startsWith("/*") || t.startsWith("*") || t === "*/";
+    if (isComment) {
+      if (!open) {
+        blocks += 1;
+        open = true;
+      }
+    } else {
+      open = false;
+    }
+    blockOf[i] = blocks;
+  }
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    // 只认真正的 import 语句：`import(` 是名为 import 的方法定义，不在此列
+    if (!/^\s*import\s+[\w{*]/.test(lines[i])) continue;
+    let j = i - 1;
+    while (j >= 0 && lines[j].trim() === "") j--;
+    if (j < 0 || !lines[j].trim().endsWith("*/")) continue;
+    let k = j;
+    while (k >= 0 && !lines[k].trim().startsWith("/**")) k--;
+    if (k < 0) continue;
+    // 文件头说明：这是整份文件的第一个注释块，它本来就该压在 import 之上
+    if (blockOf[k] === 1) continue;
+    out.push({ line: k + 1, imp: i + 1 });
+  }
+  return out;
+}
+
 // 活文档：这两份描述的是「当前系统」，不是历史。它们里提到的东西必须真的在 src 里存在，
 // 否则读者会照着文档去找一个早已删掉的类/函数/文件（7.156 就是靠这条抓到 ARCHITECTURE 的
 // `StatsTable` 行与 v8.md 落地表里的三个设计名）。
@@ -152,6 +199,7 @@ let total = 0;
 let totalCls = 0;
 const orphanRows = [];
 const stackedRows = [];
+const onImportRows = [];
 for (const file of walk(root)) {
   if (only && !file.includes(only)) continue;
   const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
@@ -174,6 +222,8 @@ for (const file of walk(root)) {
   if (orph.length) orphanRows.push({ file, orph, n: orph.length });
   const stk = stackedDocs(lines);
   if (stk.length) stackedRows.push({ file, stk, n: stk.length });
+  const onImp = docOnImport(lines);
+  if (onImp.length) onImportRows.push({ file, onImp, n: onImp.length });
 }
 
 rows.sort((a, b) => b.n - a.n);
@@ -202,6 +252,14 @@ if (stackSum) {
   console.log(`\n叠文档（一段文档后面紧跟另一段文档，前一段没有任何声明可挂）：${stackSum} 处`);
   for (const r of stackedRows) {
     for (const s of r.stk) console.log(`  ${r.file}:${s.line} → 下一段文档在第 ${s.next} 行`);
+  }
+  process.exitCode = 1;
+}
+const onImpSum = onImportRows.reduce((a, r) => a + r.n, 0);
+if (onImpSum) {
+  console.log(`\n文档挂在 import 上（被描述的东西反而没有文档）：${onImpSum} 处`);
+  for (const r of onImportRows) {
+    for (const o of r.onImp) console.log(`  ${r.file}:${o.line} 的文档块 → 第 ${o.imp} 行是 import`);
   }
   process.exitCode = 1;
 }

@@ -3,6 +3,7 @@
 // 设计目标：① IP 级封锁 1 次请求就能感知；② 业务层 403 绝不被「拦截」——
 // 判定只影响「走哪条通道」，永不断开连接；某站点一条通道都不剩时自愈（VerdictTable.clearHost）。
 import { S } from "../core/state";
+import { PAGE_ABS } from "../core/facts";
 import { SC } from "../core/const";
 import { trimAged } from "../core/hostmem";
 import { TrafficEvt } from "../core/hook";
@@ -19,7 +20,7 @@ import { DNS } from "./dnsfacts";
 import { egDerive } from "./egfacts";
 import { BLK } from "./blkfacts";
 
-const BIG = 20000; // 整页（含握手）的下限
+const BIG = PAGE_ABS.big; // 整页（含握手）的下限
 const SMALL_MAX = 12000; // 小响应上限：再大就不当封锁证据
 const JUNK_MAX = 6000; // 中继自家默认页的量级
 const BASE_TTL = 6 * 3600_000; // 「站点能出整页」的记忆
@@ -144,9 +145,9 @@ export class Judge {
       const row = S.peers.get(e.host);
       // 用事件时间 `ty` 而不是 `Date.now()`：回放/聚合的事件按发生时间判窗口，
       // 否则「同一批事件」在回放时永远看不到对照（与上面归批时钟是同一个坑）。
-      const peerBig = !!row && row.some((x) => x.down >= 20000 && ty - x.at <= 120000);
-      if (nip && e.down > 0 && e.down <= 2048 && peerBig) BLK.note({ host: e.host, ip: nip, down: e.down, peerBig: true, at: ty });
-      else if (nip && e.down >= 20000) BLK.contra(e.host, nip);
+      const peerBig = !!row && row.some((x) => x.down >= BIG && ty - x.at <= PAGE_ABS.win);
+      if (nip && e.down > 0 && e.down <= PAGE_ABS.tiny && peerBig) BLK.note({ host: e.host, ip: nip, down: e.down, peerBig: true, at: ty });
+      else if (nip && e.down >= BIG) BLK.contra(e.host, nip);
     }
 
     // 整页是出口族的硬证据，必须在下面「整页直接 return」之前提取，否则永远走不到那条分支。

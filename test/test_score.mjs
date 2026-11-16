@@ -4657,5 +4657,45 @@ console.log("\n191b) 中继健康表的 merge 口径");
   const srcPf = fs.readFileSync("tools/preflight.mjs", "utf8");
   ok("死导出闸门接进了 preflight", srcPf.includes("tools/check-dead.mjs"), "preflight 里没有这一步");
 }
+// 第 196 组：页面尺寸判据只有一个真源；文档不再被 import 挤开
+{
+  const srcFacts = fs.readFileSync("src/core/facts.ts", "utf8");
+  ok("PAGE_ABS 定义在 core/facts", srcFacts.includes("export const PAGE_ABS"), "PAGE_ABS 不在 core/facts.ts");
+
+  // ① 四个曾经各抄一份的文件都不许再出现裸字面量（改一份忘另一份就是这么开始的）
+  for (const f of ["src/route/judge.ts", "src/route/commitfact.ts", "src/route/egfacts.ts", "src/route/relay-health.ts"]) {
+    const s = fs.readFileSync(f, "utf8");
+    eq(f + " 不再写裸 20000", s.includes("20000"), false);
+    eq(f + " 不再写裸 2048", s.includes("2048"), false);
+    ok(f + " 从 PAGE_ABS 取阈值", s.includes("PAGE_ABS"), f + " 没引用 PAGE_ABS");
+  }
+
+  // ② 行为面：五条阈值都必须指向同一个对象（不是五个恰好相等的数字）
+  const pa = W.PAGE_ABS || {};
+  eq("BIG_PEER 与 PAGE_ABS.big 同源", W.BIG_PEER, pa.big);
+  eq("EG_BIG 与 PAGE_ABS.big 同源", W.EG_BIG, pa.big);
+  eq("TINY_ABS 与 PAGE_ABS.tiny 同源", W.TINY_ABS, pa.tiny);
+  eq("EG_TINY 与 PAGE_ABS.tiny 同源", W.EG_TINY, pa.tiny);
+  eq("BIG_WIN 与 PAGE_ABS.win 同源", W.BIG_WIN, pa.win);
+  eq("整页门槛仍是 20KB", pa.big, 20000);
+  eq("小响应上限仍是 2KB", pa.tiny, 2048);
+  eq("同窗口宽度仍是 120 秒", pa.win, 120000);
+
+  // ③ 文档位置：import 必须在它描述的常量之前，否则文档挂到 import 头上、常量反而裸奔
+  const srcCf = fs.readFileSync("src/route/commitfact.ts", "utf8");
+  const iImp = srcCf.indexOf("import { FACT_TTL, PAGE_ABS }");
+  ok("commitfact 的 import 带上了 PAGE_ABS", iImp >= 0, "import 没引用 PAGE_ABS");
+  ok("commitfact 的 import 在 TINY_ABS 文档之前", iImp >= 0 && iImp < srcCf.indexOf("/** tiny 的绝对上限"), "文档又被 import 挤开了");
+  const iDns = fs.readFileSync("src/route/dnsfacts.ts", "utf8").indexOf("/** DNS 事实寿命");
+  ok("DNS_TTL 拿回了自己的文档", iDns >= 0, "DNS_TTL 的文档不见了");
+  const srcDns = fs.readFileSync("src/route/dnsfacts.ts", "utf8");
+  ok("DNS_TTL 的文档与声明相邻", srcDns.slice(iDns, srcDns.indexOf("export const DNS_TTL")).indexOf("import") < 0, "文档与 DNS_TTL 之间隔着 import");
+
+  // ④ 门禁在位：这一型（文档挂在 import 上）此前谁都没看见
+  const srcAudit = fs.readFileSync("tools/doc-audit.mjs", "utf8");
+  ok("注释门禁会查文档挂在 import 上", srcAudit.includes("function docOnImport(lines)"), "docOnImport 不见了");
+  ok("门禁把首个注释块当文件头放过", srcAudit.includes("blockOf[k] === 1"), "文件头判据不见了");
+  ok("门禁真的调用了这条检查", srcAudit.includes("const onImp = docOnImport(lines);"), "没调用 docOnImport");
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

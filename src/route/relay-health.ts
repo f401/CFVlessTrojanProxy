@@ -2,6 +2,8 @@
 // 与判定表的区别：判定表回答「这条中继对这个站点行不行」，这里回答「这条中继本身还活着吗」。
 // 跨 isolate：计数走 /add 搭车上 DO，冷启动从 /hl 拉一次（与判定表的 vt 同一套路）。
 
+import { PAGE_ABS } from "../core/facts";
+
 /** 中继健康记录 */
 export interface RelayStat {
   ok: number; // 整页成功次数（>= BIG）
@@ -24,7 +26,7 @@ export interface HlRow {
   t?: number;
 }
 
-const BIG = 20000;
+const BIG = PAGE_ABS.big;
 const MAX_IP = 200;
 const HL_MS = 30 * 60_000; // 存活证据的半衰期：30 分钟不动就回到中性
 

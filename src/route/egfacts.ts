@@ -8,7 +8,7 @@
 // 一个 `eg=6` 的中继仍然可能在别的站点头等好使，把它从候选里删掉就是 7.57 的老路
 // （通配硬封锁 → 可用池变薄 → 失败率 10%→50%）。
 import { cnt } from "../core/counter";
-import { FACT_TTL } from "../core/facts";
+import { FACT_TTL, PAGE_ABS } from "../core/facts";
 
 /** 一条出口族事实：`i` 中继 IP，`f` 族（4 或 6），`at` 观测时间 */
 export interface EgRow {
@@ -199,10 +199,10 @@ export class EgFacts {
 export const EG = new EgFacts();
 
 /** 「整页」门槛：CF 托管站点对 v6 出口一律回 737B 左右的小页，能出 20KB 说明这条通道确实走了 v4 */
-export const EG_BIG = 20000;
+export const EG_BIG = PAGE_ABS.big;
 
 /** `tiny` 上限：与 `commitfact` 的 `TINY_ABS` 同源，避免两处口径漂移 */
-export const EG_TINY = 2048;
+export const EG_TINY = PAGE_ABS.tiny;
 
 /** 推导 `eg` 时可用的旁证：都是「数据面已经发生的事实」，不需要任何额外探测 */
 export interface EgEv {
