@@ -330,9 +330,10 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
     s0.blackUntil = 0;
     s0.freeUntil = 0;
     s0.streak = 0;
-    await flushPx(env, true);
+    const fx = await flushPx(env, true);
     S.pxFailMem = 0;
-    return json({ ok: true, cur: want, curs: S.curs });
+    // 钉节点要跟着写 KV 锚点，否则别的 isolate 起来会挑回原来那条（返回 ok 但没落盘就是谎报）
+    return json({ ok: true, cur: want, curs: S.curs, anchor: fx.ok ? "ok" : "fail", note: fx.ok ? undefined : fx.err });
   }
 
   // 明文 HTTP 诊断：?http=x.com&r=185.253.117.147:80（r 省略=直连）。
@@ -364,7 +365,7 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
       const inst = url.searchParams.get("n") || "burn";
       const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
       const resp = await withTimeout(stub.fetch(`https://meter/burn?ms=${ms}`), 15000);
-      return json({ ok: true, burn: await resp.json() });
+      return json({ ok: resp.ok, doStatus: resp.status, burn: await resp.json() });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
     }
@@ -378,7 +379,7 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
       if (!inst) return json({ ok: false, error: "need &n=<inst>" });
       const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
       const resp = await withTimeout(stub.fetch("https://meter/stage"), 8000);
-      return json({ ok: true, stage: await resp.json() });
+      return json({ ok: resp.ok, doStatus: resp.status, stage: await resp.json() });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
     }
@@ -391,7 +392,7 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
     try {
       const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
       const resp = await withTimeout(stub.fetch(`https://meter/tim?ms=${Number(url.searchParams.get("tim"))}`), 20000);
-      return json({ ok: true, out: await resp.json() });
+      return json({ ok: resp.ok, doStatus: resp.status, out: await resp.json() });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
     }
@@ -405,7 +406,7 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
       const inst = url.searchParams.get("n") || "it" + Date.now();
       const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
       const resp = await withTimeout(stub.fetch(`https://meter/iter?n=${n}`), 20000);
-      return json({ ok: true, iter: await resp.json() });
+      return json({ ok: resp.ok, doStatus: resp.status, iter: await resp.json() });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
     }
@@ -440,7 +441,7 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
       const inst = url.searchParams.get("n") || "js" + Date.now();
       const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
       const resp = await withTimeout(stub.fetch(`https://meter/burnjs?ms=${ms}`), 20000);
-      return json({ ok: true, burn: await resp.json() });
+      return json({ ok: resp.ok, doStatus: resp.status, burn: await resp.json() });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
     }
@@ -453,7 +454,7 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
       const inst = url.searchParams.get("n") || "cr" + Date.now();
       const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
       const resp = await withTimeout(stub.fetch("https://meter/crypto"), 25000);
-      return json({ ok: true, crypto: await resp.json() });
+      return json({ ok: resp.ok, doStatus: resp.status, crypto: await resp.json() });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
     }
@@ -473,18 +474,22 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
       .split(",")
       .map((x) => Number(x) || 0);
     let seeded = null;
+    let seedOk = false;
+    let seedStatus = 0;
     try {
       const stub = env.METER.get(env.METER.idFromName(id));
       const r = await stub.fetch("https://meter/seed", {
         method: "POST",
         body: JSON.stringify({ up: u0, down: d0, conns: c0, first: Date.now() }),
       });
+      seedOk = r.ok;
+      seedStatus = r.status;
       seeded = await r.json();
       S.meterCache.set(id, { v: seeded, t: Date.now() });
     } catch (e) {
       return json({ ok: false, error: String(errMsg(e)) });
     }
-    return json({ ok: true, seeded });
+    return json({ ok: seedOk, doStatus: seedStatus, seeded });
   }
 
   const h = url.searchParams.get("host") || "example.com";

@@ -6915,5 +6915,63 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
     dsrc.includes("st.pxTries = tries;") && !dsrc.includes("st.pxTries = tries + 1;"), true);
   ok("skipCfRelay 在 cntKeys 里登记", fs.readFileSync("src/core/state.ts", "utf8").includes('"skipCfRelay",'), true);
 }
+// ── 第 248 组：/debug 把 DO 的 5xx 当成成功（D202）────────────────────────────
+{
+  const kv248 = () => {
+    const m = new Map();
+    return {
+      get: async (k) => (m.has(k) ? m.get(k) : null),
+      put: async (k, v) => void m.set(k, v),
+      delete: async (k) => void m.delete(k),
+      list: async () => ({ keys: [...m.keys()].map((name) => ({ name })), list_complete: true }),
+    };
+  };
+  // 所有 fetch 都回 500：模拟 DO 里报错（CPU 墙 / 行为异常）
+  const meter248 = (status, body) => ({
+    idFromName: (n) => n,
+    get: () => ({ fetch: async () => new Response(body, { status, headers: { "content-type": "application/json" } }) }),
+  });
+  const KEY248 = "#probe-admin-248";
+  const ctx248 = (env, qs) => {
+    const url = new URL("https://sim.example.com/7c53c12a-88b1-4fda-b6e7-4da62e47a4e1/debug" + qs);
+    const request = new Request(url.toString(), { headers: { "x-admin-key": String(env.adminKey || "") } });
+    return { request, url, env, id: "7c53c12a-88b1-4fda-b6e7-4da62e47a4e1", exec: { waitUntil() {}, passThroughOnException() {} } };
+  };
+  const run248 = async (qs, opts) => {
+    const kv = kv248();
+    if (opts && opts.putFail) {
+      kv.put = async () => {
+        throw new Error("KV PUT failed: 429 too many writes");
+      };
+    }
+    const env = { STATS: kv, METER: meter248((opts && opts.status) || 500, (opts && opts.body) || '{"error":"boom"}'), adminKey: KEY248 };
+    return (await W.debug(ctx248(env, qs))).json();
+  };
+
+  for (const qs of ["?burn=10&n=p248", "?stage=1&n=p248", "?tim=10&n=p248", "?iter=1000&n=p248", "?burnjs=10&n=p248", "?crypto=1&n=p248"]) {
+    const j = await run248(qs, {});
+    eq(qs + " 时 ok 为 false（DO 5xx 不是成功）", j.ok, false);
+    eq(qs + " 带出 DO 的状态码", j.doStatus, 500);
+  }
+  const halfInput = await run248("?stage=1&n=p248", { status: 200, body: '{"stage":"ok"}' });
+  eq("DO 回 200 时 ok 仍为 true", halfInput.ok, true);
+  eq("DO 回 200 时带出状态码", halfInput.doStatus, 200);
+
+  const seedBad = await run248("?seed=1,2,3", {});
+  eq("回填回 5xx 时 ok 为 false", seedBad.ok, false);
+  eq("回填回 5xx 时带出状态码", seedBad.doStatus, 500);
+
+  const curBad = await run248("?cur=1.2.3.4:443", { putFail: true });
+  eq("钉节点落盘失败时 anchor 为 fail", curBad.anchor, "fail");
+  ok("钉节点落盘失败时带回原因", typeof curBad.note === "string" && curBad.note.length > 0);
+  const curOk = await run248("?cur=1.2.3.4:443", {});
+  eq("钉节点落盘成功时 anchor 为 ok", curOk.anchor, "ok");
+
+  const srcDbg248 = fs.readFileSync("src/routes/debug.ts", "utf8");
+  ok("转发分支不再无条件写 ok: true", !srcDbg248.includes("return json({ ok: true, burn: await resp.json() })"));
+  ok("转发分支带出 DO 状态码", (srcDbg248.match(/ok: resp\.ok, doStatus: resp\.status/g) || []).length >= 6);
+  ok("回填分支用 seedOk", srcDbg248.includes("let seedOk = false;") && srcDbg248.includes("return json({ ok: seedOk, doStatus: seedStatus, seeded });"));
+  ok("钉节点分支用 fx.ok 判定落盘", srcDbg248.includes('anchor: fx.ok ? "ok" : "fail"'));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
