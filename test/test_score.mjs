@@ -5902,5 +5902,53 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   ok("v8.md 写明入口偏好没有服务端端点", v8223.includes("入口偏好没有服务端端点"));
   ok("v8.md 列出了 ?blk=", v8223.includes("`?blk=<host>`"));
 }
+/* ---------- 第 224 组：cron 闸门要有截止时间 ---------- */
+{
+  const L = W.CRONLOCK;
+  ok("闸门对象存在", !!L && typeof L.claim === "function");
+  const t0 = Date.now();
+  W.S.cronAt = 0;
+  ok("空闲时能拿到闸门", L ? L.claim(t0) : false);
+  ok("刚拿到时第二个来者被挡", L ? L.claim(t0 + 1000) === false : false);
+  // 卡死 9 分钟（超过 CRON_STALE_MS=8 分钟）必须能被接管：旧版布尔闩永远挡死
+  W.S.cronAt = t0 - 9 * 60_000;
+  const staleBefore = Number(W.S.cnt.cronStale || 0);
+  ok("卡死超过 8 分钟后可以接管", L ? L.claim(t0) === true : false);
+  ok("接管要计 cronStale", Number(W.S.cnt.cronStale || 0) === staleBefore + 1);
+  ok("接管后持有时间归零", L ? L.age(t0) === 0 : false);
+  if (L) L.release();
+  ok("释放后 age 为 0", (L ? L.age(t0) : -1) === 0);
+  ok("释放后能再次拿到", (L ? L.claim(t0 + 10) : false) === true);
+  if (L) L.release();
+  // 端到端：闸门被卡死的一轮占着时，runCron 仍要排真任务
+  const realFetch224 = globalThis.fetch;
+  globalThis.fetch = async () => new Response("", { status: 200 });
+  try {
+    W.S.cronAt = Date.now() - 9 * 60_000;
+    let done = null;
+    const envCron = { STATS: { get: async () => null, put: async () => {} }, pxSchedH: "0" };
+    await W.runCron(envCron, { waitUntil: (pr) => (done = pr) });
+    ok("卡死时 runCron 仍排任务", done !== null);
+    if (done) await done;
+    eq("跑完后闸门回到空闲", W.S.cronAt, 0);
+  } finally {
+    globalThis.fetch = realFetch224;
+    W.S.cronAt = 0;
+  }
+  // 源码锁：闸门在 lock.ts，两个入口都走 claim/release，S 里不再有布尔闩
+  const lockSrc = fs.existsSync("src/core/lock.ts") ? fs.readFileSync("src/core/lock.ts", "utf8") : "";
+  const cronSrc = fs.readFileSync("src/routes/cron.ts", "utf8");
+  const pipSrc = fs.readFileSync("src/routes/proxyip.ts", "utf8");
+  const stSrc = fs.readFileSync("src/core/state.ts", "utf8");
+  const cnstSrc = fs.readFileSync("src/core/const.ts", "utf8");
+  ok("lock.ts 用 SC.CRON_STALE_MS 判超时", lockSrc.includes("SC.CRON_STALE_MS"));
+  ok("lock.ts 接管时计 cronStale", lockSrc.includes('cnt("cronStale")'));
+  ok("cron.ts 走 CRONLOCK.claim", cronSrc.includes("if (!CRONLOCK.claim()) return;"));
+  ok("proxyip.ts 报告持有毫秒", pipSrc.includes("heldMs: CRONLOCK.age()"));
+  ok("两个入口都不再有布尔闩", !cronSrc.includes("S.cronBusy") && !pipSrc.includes("S.cronBusy"));
+  ok("S 里是时间戳而不是布尔", stSrc.includes("cronAt = 0;") && !stSrc.includes("cronBusy"));
+  ok("CRON_STALE_MS 已定义", /CRON_STALE_MS:\s*8 \* 60_000/.test(cnstSrc));
+  ok("cronStale 已登记进 cntKeys", stSrc.includes('"cronStale",'));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

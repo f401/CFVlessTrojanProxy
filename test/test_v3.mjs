@@ -396,7 +396,7 @@ eq("都没有返回空串", W.primaryId({}), "");
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response("", { status: 200 });
   try {
-    W.S.cronBusy = false;
+    W.S.cronAt = 0;
     let done = null;
     const ctx1 = {
       waitUntil: (p) => {
@@ -406,9 +406,9 @@ eq("都没有返回空串", W.primaryId({}), "");
     const envCron = { STATS: { get: async () => null, put: async () => {} }, pxSchedH: "0" };
     await W.runCron(envCron, ctx1);
     await done; // 等 waitUntil 的任务真正跑完，闸门必须回到 false
-    eq("runCron 结束后闸门释放", W.S.cronBusy, false);
+    eq("runCron 结束后闸门释放", W.S.cronAt, 0);
 
-    W.S.cronBusy = true;
+    W.S.cronAt = Date.now();
     let skipped = null;
     await W.runCron(envCron, {
       waitUntil: (p) => {
@@ -416,11 +416,11 @@ eq("都没有返回空串", W.primaryId({}), "");
       },
     });
     await new Promise((r) => setTimeout(r, 30));
-    eq("cron 忙时不重复跑（闸门保持）", W.S.cronBusy, true);
+    ok("cron 忙时不重复跑（闸门保持）", W.S.cronAt > 0);
     eq("cron 忙时不排新任务", skipped, null);
   } finally {
     globalThis.fetch = realFetch;
-    W.S.cronBusy = false;
+    W.S.cronAt = 0;
   }
 }
 

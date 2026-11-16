@@ -88,6 +88,7 @@ export class AppState {
     "bizSweeps",
     "blkContra",
     "blkMutedSkip",
+    "cronStale",
     "factsJoin",
     "factsDo",
     "factsCacheHit",
@@ -198,7 +199,7 @@ export class AppState {
   // 站点排行缓存（family|mode → 排好序的列表，30 秒），避免每次连接都重算
   hostRankCache: Map<string, { t: number; v: RankRow[] }> = new Map();
   nsWriteAt = 0;
-  cronBusy = false; // cron 在跑：Cron Triggers 偶发重投递时不再叠加一轮
+  cronAt = 0; // cron 闸门的持有时间戳（0 = 空闲）：读写统一走 src/core/lock.ts 的 CRONLOCK
 
   // —— 用户与观测 ——
   usersCache: { v: Auth | null; t: number } = { v: null, t: 0 };

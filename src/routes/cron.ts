@@ -3,6 +3,7 @@ import { eachLimit, errMsg } from "../core/util";
 import { logErr } from "../nodes/metrics";
 import { S } from "../core/state";
 import { cnt } from "../core/counter";
+import { CRONLOCK } from "../core/lock";
 import { cronScan, flushPx } from "../px/pool";
 import { planRound } from "../route/budget";
 import { runTfb } from "../route/tfb";
@@ -22,14 +23,15 @@ import { loadUsers } from "../proxy/protocol";
 export async function runCron(env: Env, ctx: ExecutionContext): Promise<void> {
   // 闸门检查在 waitUntil 之前：忙时连任务都不排，而不是排一个立即返回的空任务。
   // 同一 isolate 内 JS 单线程，check + set 之间不会被打断。
-  if (S.cronBusy) return;
-  S.cronBusy = true;
+  // 闸门是「持有时间戳 + 截止时间」：上一轮超过 CRON_STALE_MS 还没收尾就允许接管，
+  // 否则一次卡死的 DO 子请求会让这个 isolate 的 cron 永久停摆（连手动 refresh 也被挡）。
+  if (!CRONLOCK.claim()) return;
   ctx.waitUntil(
     (async () => {
       try {
         await cronOnce(env);
       } finally {
-        S.cronBusy = false;
+        CRONLOCK.release();
       }
     })(),
   );

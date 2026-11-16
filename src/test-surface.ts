@@ -68,6 +68,7 @@ export { ATTACHER, Attacher } from "./proxy/attacher";
 export { REGION, RegionPicker } from "./proxy/region";
 export { spdSnapshot } from "./core/node-snapshot";
 export { cnt, cntDelta, cntUnsend, cntView } from "./core/counter";
+export { CRONLOCK, CronLock } from "./core/lock";
 export {
   logErr,
   errDup,

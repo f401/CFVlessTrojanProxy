@@ -10,6 +10,7 @@ import { cronScan, nsOf, pxGet } from "../px/pool";
 import { POOL_SOURCES, srcHealth, srcRank } from "../px/probe";
 import { SEL } from "../px/selector";
 import { cntView } from "../core/counter";
+import { CRONLOCK } from "../core/lock";
 import { spdSnapshot } from "../core/node-snapshot";
 import { regionListAsync } from "../px/regions";
 import { primaryId } from "../store/index";
@@ -85,15 +86,18 @@ export async function proxyip(c: UserCtx): Promise<Response> {
     const sn = Number(url.searchParams.get("scan"));
     S.scanN = Number.isFinite(sn) && sn > 12 ? sn : 12;
     // 与 cron 互斥：两轮 cronScan 并发会双跑探活、双写 seed、poolIdx 相互覆盖
-    if (S.cronBusy) return json({ ok: false, error: "cron in progress" });
-    if (Date.now() - S.lastManual > 5000) {
+    // 与 cron 共用同一个闸门（claim 带截止时间：卡死的一轮会被接管，手动 refresh 不再是死路）
+    if (Date.now() - S.lastManual <= 5000) {
+      // 5 秒节流窗口内不动手：也不必占住闸门
+    } else if (!CRONLOCK.claim()) {
+      return json({ ok: false, error: "cron in progress", heldMs: CRONLOCK.age() });
+    } else {
       S.lastManual = Date.now();
-      S.cronBusy = true;
       try {
         await cronScan(env).catch((e) => logErr("cron: " + errMsg(e)));
         SEL.afterScan(env);
       } finally {
-        S.cronBusy = false;
+        CRONLOCK.release();
       }
     }
   }
