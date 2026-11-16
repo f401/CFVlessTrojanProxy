@@ -34,8 +34,12 @@ export function tfBlockOk(prevTag: string, verdict: string): boolean {
  * @returns {void}
  */
 export function tfRemember(host: string, tag: string): void {
+  // 先删再插：`Map.set` 对**已存在的键不移动插入位置**，只 set 的话淘汰序等于「首次探过的时间」——
+  // 而每 30 分钟被 cron 复探的正是最先插进来的那些站点，它们会第一批被淘汰，
+  // 于是「两批共识」（tfBlockOk 要 prevTag）对最该封锁的站点永远不成立（7.224）。
+  S.tfbV.delete(host);
   S.tfbV.set(host, tag);
-  // Map 保持插入顺序：从头删就是「最久没更新的站点」，不必排序
+  // Map 保持插入顺序（先删再插保证了它就是「最近更新序」）：从头删就是最久没再更新的站点
   while (S.tfbV.size > TFB_MEM_MAX) {
     const first = S.tfbV.keys().next();
     if (first.done) break;

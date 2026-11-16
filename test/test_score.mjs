@@ -5950,5 +5950,32 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   ok("CRON_STALE_MS 已定义", /CRON_STALE_MS:\s*8 \* 60_000/.test(cnstSrc));
   ok("cronStale 已登记进 cntKeys", stSrc.includes('"cronStale",'));
 }
+/* ---------- 第 225 组：判定标签表的淘汰序 ---------- */
+{
+  W.S.tfbV.clear();
+  W.tfRemember("hot.example", "chan/none");
+  for (let i = 0; i < 255; i++) W.tfRemember("site" + i + ".example", "chan/none");
+  eq("表在上限内", W.S.tfbV.size, 256);
+  // 复探最热的站点（cron 每 30 分钟就会这样），再插入一个新站点把表推过上限
+  W.tfRemember("hot.example", "chan/none");
+  W.tfRemember("brandnew.example", "chan/none");
+  ok("复探过的热门站点仍在表里", W.S.tfbV.has("hot.example"));
+  ok("最久没复探的站点先被淘汰", !W.S.tfbV.has("site0.example"));
+  eq("表仍然不超上限", W.S.tfbV.size, 256);
+  // 两批共识：热门站点第二次探到 chan 时，上一批标签必须还在
+  eq("复探后仍能读到上一批标签", W.S.tfbV.get("hot.example"), "chan/none");
+  ok("两批共识成立（可以落封锁）", W.tfBlockOk(W.S.tfbV.get("hot.example") || "", "chan"));
+  // 只探过一批的站点不能落封锁
+  ok("没有历史标签的站点不能落封锁", W.tfBlockOk("", "chan") === false);
+  ok("上一批不是 chan 也不能落封锁", W.tfBlockOk("ok/none", "chan") === false);
+  ok("这一批不是 chan 同样不落封锁", W.tfBlockOk("chan/none", "site") === false);
+  W.S.tfbV.clear();
+  // 源码锁：set 之前必须先 delete（Map.set 不移动已存在键的位置）
+  const tfSrc = fs.readFileSync("src/route/tfb.ts", "utf8");
+  const delAt = tfSrc.indexOf("S.tfbV.delete(host);");
+  const setAt = tfSrc.indexOf("S.tfbV.set(host, tag);");
+  ok("tfRemember 里 delete 在 set 之前", delAt > 0 && setAt > delAt);
+  ok("注释写明 Map.set 不移动位置", tfSrc.includes("不移动插入位置"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
