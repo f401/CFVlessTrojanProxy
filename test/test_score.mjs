@@ -5382,7 +5382,7 @@ ok("上游写上限常量是 30 秒", srcUtil211.includes("export const UP_STALL
 ok("ustall 已登记（否则计数会被静默丢掉）", srcState211.includes('"ustall",'));
 ok("泵里改调 upWrite", srcSess211.includes("return st.upWrite(chunk);"));
 ok("泵里不再直接写 writer", srcSess211.includes("w.write(chunk)") === false);
-ok("首包写也走 upWrite", srcAtt211.includes("await conn.upWrite(payload);"));
+ok("首包写也走 upWrite", srcAtt211.includes("await conn.upWrite(payload, FIRST_UP_MS);"));
 ok("blackhole 的超时消息可辨认", srcConn211.includes("withTimeout(p, ms, \"up stall\")"));
 try {
   const mkSock211 = () => { const o = { closed: 0, close() { o.closed += 1; } }; return o; };
@@ -7729,5 +7729,36 @@ const dialerSrc269 = fs.readFileSync("src/proxy/dialer.ts", "utf8");
   ok("dialer 对非法候选是 continue 而不是 break", dialerSrc269.includes("cnt(\"badRelay\");") && dialerSrc269.includes("continue;"), "continue");
   ok("dialer 不再把 checkTarget 和解析失败并成一次 break", !dialerSrc269.includes("checkTarget(p.host, p.port)) break;"), "无合并 break");
 }
+// ---- 第 270 组：首包写入上限比数据面短（黑洞中继早失败） ----
+// 首包写不进去说明这条中继不可用：等满 30 秒会让客户端先放弃（实测 17.5 秒）。
+
+eq("首包上限是 8 秒", W.FIRST_UP_MS, 8000);
+eq("数据面仍是 30 秒", W.UP_STALL_MS, 30000);
+ok("首包上限确实比数据面短", W.FIRST_UP_MS < W.UP_STALL_MS);
+
+// 行为面：upWrite 从不 reject（约定就是「失败被吞掉」），但它必须在传入的上限内返回，
+// 而且要把这次卡顿记进 ustall —— 否则首包黑洞会被当成「一切正常」。
+{
+  const conn270 = Object.create(W.Connection.prototype);
+  conn270.via = "node";
+  conn270.node = "10.9.9.9:443";
+  conn270.writer = { write: () => new Promise(() => {}), releaseLock() {} };
+  const before270 = Number((W.cntView() || {}).ustall || 0);
+  const t0 = Date.now();
+  await conn270.upWrite(new Uint8Array(8), 80);
+  const spent = Date.now() - t0;
+  const after270 = Number((W.cntView() || {}).ustall || 0);
+  ok("黑洞写入在上限内返回（不挂 30 秒）", spent < 3000, `spent=${spent}`);
+  ok("卡顿被记进 ustall", after270 === before270 + 1, `${before270}→${after270}`);
+}
+
+// 源码锁：两处必须成对（改了常量却忘了传参，等于没改）
+{ const sa270 = fs.readFileSync("src/proxy/attacher.ts", "utf8");
+  ok("attacher 给首包传了上限", sa270.includes("conn.upWrite(payload, FIRST_UP_MS)"), "attacher");
+  ok("attacher 导入了 FIRST_UP_MS", /import \{[^}]*FIRST_UP_MS[^}]*\} from "\.\.\/core\/util"/.test(sa270), "import");
+  ok("首包不再用默认上限", sa270.includes("conn.upWrite(payload);") === false, "default");
+  const su270 = fs.readFileSync("src/core/util.ts", "utf8");
+  ok("常量在 util 里且只有一处", su270.split("export const FIRST_UP_MS").length - 1 === 1, "util"); }
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

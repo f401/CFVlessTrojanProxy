@@ -149,3 +149,5 @@ export { handleDns, trojanUdpFrame } from "./proxy/dns";
 export { handleUpgrade } from "./proxy/session";
 
 
+
+export { CONNECT_MS, FIRST_UP_MS, UP_STALL_MS } from "./core/util";

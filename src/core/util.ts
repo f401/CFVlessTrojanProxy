@@ -24,8 +24,17 @@ export const CONNECT_MS = 2500;
  * 超出就按黑洞出口处理。
  */
 export const UP_STALL_MS = 30000;
+/**
+ * 首包写入的上限：**比数据面的 30 秒短得多**。
+ *
+ * 黑洞中继会接受 TCP 连接却永不读取，`write` 就此悬停；而客户端的耐心通常只有十几秒
+ * （实测默认配置下 17.5 秒就放弃并重试）。首包只需要把 ClientHello/请求头送达，正常中继是毫秒级，
+ * 8 秒还没写进去就说明这条中继不可用 —— 早失败让客户端有机会换一条，也让免费计划的
+ * `connect()` 名额（全局 6 个）早点释放。数据面继续用 `UP_STALL_MS`：大块上传确实可能慢。
+ */
+export const FIRST_UP_MS = 8000;
 export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐死
-export const VERSION = "7.269";
+export const VERSION = "7.270";
 export const enc = new TextEncoder();
 export const dec = new TextDecoder();
 

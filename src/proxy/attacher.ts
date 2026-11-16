@@ -5,7 +5,7 @@ import { S } from "../core/state";
 import { SC } from "../core/const";
 import { trimAged } from "../core/hostmem";
 import { cnt } from "../core/counter";
-import { CONNECT_MS, closeQuietly, releaseAll, withTimeout, WS_OPEN } from "../core/util";
+import { CONNECT_MS, FIRST_UP_MS, closeQuietly, releaseAll, withTimeout, WS_OPEN } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
 import { nsEmptyClose, nsFail } from "../nodes/stat";
 import { SEL } from "../px/selector";
@@ -47,7 +47,7 @@ export class Attacher {
     conn.tAttach = Date.now(); // 首字节耗时从这里起算
     conn.ttfb = 0;
 // 首包写也要有上限：黑洞中继接了连接却不读，write 永不返回，而客户端已经等在首字节上
-    if (payload.length) await conn.upWrite(payload);
+    if (payload.length) await conn.upWrite(payload, FIRST_UP_MS);
 
     pipeBack(sock, clientSocket, conn, async (gotData) => {
       // 客户端已经走了（取消下载 / 切网 / 切节点）：别再替它开新中转
