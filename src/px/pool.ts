@@ -344,8 +344,8 @@ export async function cronScan(env: Env, adm = 0) {
       ms: x.ms,
     });
     // 探活 RTT 是「ClientHello → ServerHello」，与真实请求的首字节（含 TLS 握手）不是同一个量：
-    // 写进 nsLatency 会让 pSum 停在 40ms 量级，第一条真实请求就 cus += 330 > CUSUM_H 把它冻 60 秒
-    // （7.183 在 warm.ts 修过同一处）。探活只贡献样本数 pN 与 tcp/tls 的 EWMA。
+    // 写进 nsLatency 会让 pSum 停在 40ms 量级，第一条真实请求就 cusumSum += 330 > CUSUM_H 把它冻 60 秒
+    // （7.183 在 warm.ts 修过同一处）。探活只贡献样本数 probeSamples 与 tcp/tls 的 EWMA。
     nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
   }
 

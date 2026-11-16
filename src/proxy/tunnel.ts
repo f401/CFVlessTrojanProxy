@@ -93,14 +93,14 @@ export function pipeBack(
             if (st.siteFail) {
               nsSiteFail(st.node); // 站点侧：只轻记
             } else {
-              // 中途断流是节点问题：只记 tF 的话 pFail/可用性完全看不到，
+              // 中途断流是节点问题：只记 trafficFailW 的话 pFail/可用性完全看不到，
               // 节点过了 60 秒冻结又原样回到候选表。加 0.5 次失败权重（不走阶梯）。
               const sn = nsGet(st.node),
                 now = Date.now();
               nsDecay(sn, now);
               sn.failW = (sn.failW || 0) + 0.5;
               sn.fail = (sn.fail || 0) + 0.5;
-              sn.tF = (sn.tF || 0) + 0.5;
+              sn.trafficFailW = (sn.trafficFailW || 0) + 0.5;
               // 中途断流的节点先凉 60 秒；站点级试探不冻结（可能只是对这个站不行）
               if (!st.hostTrial) {
                 sn.freeUntil = Math.max(sn.freeUntil || 0, now + 60000);

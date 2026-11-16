@@ -12,7 +12,7 @@ export interface EffView {
   sumW: number;
   sumW2: number;
   recentBytesW: number;
-  pN: number;
+  probeSamples: number;
   latN: number;
 }
 
@@ -45,7 +45,7 @@ function bumpWin(s: NodeStats, now: number, ok: boolean) {
 /** 全零统计行：新建节点、单测与「没有任何样本」的兜底，字段必须与 NodeStats 一致 */
 export const ZERO_STAT: NodeStats = {
   ok: 0, fail: 0, at: 0, msLocal: 0, streak: 0, blackUntil: 0, freeUntil: 0, lastTry: 0,
-  pN: 0, pSum: 0, pSumSq: 0, pF: 0, cus: 0, cusB: 0, tcp: 0, tls: 0, tS: 0, tF: 0, okW: 0, failW: 0, eCloseP: 0,
+  probeSamples: 0, pSum: 0, pSumSq: 0, probeFails: 0, cusumSum: 0, cusumBase: 0, tcp: 0, tls: 0, trafficOkW: 0, trafficFailW: 0, okW: 0, failW: 0, eCloseP: 0,
   stallMs: 0, runMs: 0, bytesDown: 0, hist: new Array(HIST_N).fill(0),
   sumW: 0, sumW2: 0, recentBytesW: 0, lastSampleAt: 0,
   counted: 0,
@@ -72,8 +72,8 @@ export class NodeStatsTable {
         ok: 0, fail: 0, at: 0, msLocal: 0,
         streak: 0, blackUntil: 0, freeUntil: 0, lastTry: 0,
         tcp: 0, tls: 0, okW: 0, failW: 0, stallMs: 0, runMs: 0,
-        pN: 0, pSum: 0, pSumSq: 0, pF: 0, cus: 0, cusB: 0,   // 探活样本 / ttfb 矩 / 变点
-        tS: 0, tF: 0,                            // 真实流量（只用于可用性）
+        probeSamples: 0, pSum: 0, pSumSq: 0, probeFails: 0, cusumSum: 0, cusumBase: 0,   // 探活样本 / ttfb 矩 / 变点
+        trafficOkW: 0, trafficFailW: 0,                            // 真实流量（只用于可用性）
         eCloseP: 0,                               // 空关闭：只记「走了中转」的口径（直连侧走 cnt("eCloseD")，不进节点统计）
         bytesDown: 0, hist: new Array(HIST_N).fill(0),
         sumW: 0, sumW2: 0, recentBytesW: 0, lastSampleAt: 0,
@@ -97,9 +97,9 @@ export class NodeStatsTable {
     const k = Math.pow(0.5, (now - s.at) / SC.HL);
     if (k >= 0.9999) return;
     s.okW *= k; s.failW *= k; s.stallMs *= k; s.runMs *= k;
-    s.pN *= k; s.pF *= k; s.tS *= k; s.tF *= k;
+    s.probeSamples *= k; s.probeFails *= k; s.trafficOkW *= k; s.trafficFailW *= k;
     // pSum/pSumSq 是真实首字节的 EWMA 一二阶矩（nsLatency 写），不是权重，不随半衰期缩放
-    // 空关闭计数必须一起衰减：tS 衰减而它不衰减，比值会单调涨，
+    // 空关闭计数必须一起衰减：trafficOkW 衰减而它不衰减，比值会单调涨，
     // 最终把曾经抽风过一次的节点永久踢出候选表。
     s.eCloseP *= k;
     s.sumW *= k; s.sumW2 *= k * k; s.recentBytesW *= k;
@@ -130,9 +130,9 @@ export class NodeStatsTable {
       sumW: s.sumW * k,
       sumW2: s.sumW2 * k * k,
       recentBytesW: s.recentBytesW * k,
-      pN: s.pN * k,
+      probeSamples: s.probeSamples * k,
       // 延迟观测数：探活 + 成功连接（两者都提供握手耗时）
-      latN: (s.pN + s.okW) * k,
+      latN: (s.probeSamples + s.okW) * k,
     };
   }
   /**
@@ -178,7 +178,7 @@ export class NodeStatsTable {
     const s = nsGet(k), now = Date.now();
     nsDecay(s, now);
     bumpWin(s, now, true);
-    s.okW += 1; s.ok += 1; s.tS = (s.tS || 0) + 1;
+    s.okW += 1; s.ok += 1; s.trafficOkW = (s.trafficOkW || 0) + 1;
     const wasCool = s.blackUntil > now || s.freeUntil > now;
     s.streak = 0; s.blackUntil = 0; s.freeUntil = 0;   // 真流量成功：黑名单和冻结都解除
     // 只有"刚才还在冷却/冻结"才需要打掉候选缓存；每条成功连接都清会让 2 s 过滤缓存永远失效
@@ -202,8 +202,8 @@ export class NodeStatsTable {
     if (!k || !(ms > 0)) return;
     const s = nsGet(k), now = Date.now();
     nsDecay(s, now);
-    s.pN += 1;
-    s.pF *= 0.5;
+    s.probeSamples += 1;
+    s.probeFails *= 0.5;
     // 探活只动探活计数与 tcp/tls 的 EWMA：不要动 s.ok，否则面板成功率会被探测次数灌水；
     // 也不要写 pSum/pSumSq —— 它们是真实首字节矩，混进来会给「还没承载流量」的节点加抖动罚
     if (tcp > 0) s.tcp = s.tcp ? s.tcp * (1 - SC.A) + tcp * SC.A : tcp;
@@ -219,8 +219,8 @@ export class NodeStatsTable {
     if (!k) return;
     const s = nsGet(k), now = Date.now();
     nsDecay(s, now);
-    s.pF += 1;
-    if (s.pF >= 2) {
+    s.probeFails += 1;
+    if (s.probeFails >= 2) {
       s.blackUntil = Math.max(s.blackUntil || 0, now + 10 * 60000);
       // 探活也能拉黑节点：排行缓存里可能还留着它，下次 pick 不能继续推荐
       S.hostRankCache.clear();
@@ -238,7 +238,7 @@ export class NodeStatsTable {
     const s = nsGet(k), now = Date.now();
     nsDecay(s, now);
     bumpWin(s, now, false);
-    s.failW += 1; s.fail += 1; s.tF = (s.tF || 0) + 1;
+    s.failW += 1; s.fail += 1; s.trafficFailW = (s.trafficFailW || 0) + 1;
     s.streak = (s.streak || 0) + 1;
     // 阶梯跟池子大小走：小池子把节点关 20 分钟等于把池子关掉（5 个节点关掉 1 个剩 4 个）。
     // 大池子才敢用长冷却 —— 800 个候选里挑最慢的比挑"刚失败过的"更亏。
@@ -265,7 +265,7 @@ export class NodeStatsTable {
     nsDecay(s, now);
     s.failW += 0.2;
     s.fail += 0.2;       // 面板成功率与 failW 用同一份权重，别让一个被封的站把节点显示成 50%
-    s.tF = (s.tF || 0) + 0.2;
+    s.trafficFailW = (s.trafficFailW || 0) + 0.2;
     s.at = now;
     // 这里不再清排行缓存：站点失败对全局分的影响只有 0.2 次，
     // 而清缓存会让下一个请求重算 200 个节点。站点级画像在 hostNodeMark 里精确失效。
@@ -296,10 +296,10 @@ export class NodeStatsTable {
     // 分位只跟直方图形状有关，而衰减是等比缩放 → 采样时算一次就够，读的时候 O(1)
     s.capBps = pcts(s).cap;
     // 吞吐变点：相对旧 cap 掉六成以上累积对数跌幅，越线立刻丢旧直方图（塌了的节点必须马上掉分）
-    if (prevCap > 0 && bps < prevCap * 0.6) s.cusB += Math.log2(prevCap / Math.max(1, bps)) - 0.3;
-    else s.cusB = Math.max(0, s.cusB - 0.15);
-    if (s.cusB > 1.2) {
-      s.cusB = 0;
+    if (prevCap > 0 && bps < prevCap * 0.6) s.cusumBase += Math.log2(prevCap / Math.max(1, bps)) - 0.3;
+    else s.cusumBase = Math.max(0, s.cusumBase - 0.15);
+    if (s.cusumBase > 1.2) {
+      s.cusumBase = 0;
       s.hist = s.hist.map((v) => v * 0.2);
       s.sumW *= 0.2;
       s.sumW2 *= 0.04;
@@ -319,7 +319,7 @@ export class NodeStatsTable {
     s.runMs += runMs || 0;
     s.at = now;
   }
-  /** 记录本地实测延迟（ttfb，主延迟信号）：winsorize 后进 EWMA，MAD 进 pSumSq，偏离累积进 cus */
+  /** 记录本地实测延迟（ttfb，主延迟信号）：winsorize 后进 EWMA，MAD 进 pSumSq，偏离累积进 cusumSum */
   nsLatency(k: string, ms: number) {
     if (!k || !(ms > 0)) return;
     const s = nsGet(k);   // 必须走 nsGet，否则缺 stallMs/runMs 会让 pStall 变 NaN
@@ -329,9 +329,9 @@ export class NodeStatsTable {
     s.pSumSq = s.pSumSq ? s.pSumSq * 0.6 + Math.abs(x - base) * 0.4 : 0;   // MAD，不是方差
     s.msLocal = Math.round(s.pSum);
     // CUSUM：连续偏高才累加，越过 h 立刻挪走流量（比失败阶梯早好几个样本）
-    s.cus = Math.max(0, s.cus + ms - base - Math.max(SC.CUSUM_K, base * 0.25));
-    if (s.cus > SC.CUSUM_H) {
-      s.cus = 0;
+    s.cusumSum = Math.max(0, s.cusumSum + ms - base - Math.max(SC.CUSUM_K, base * 0.25));
+    if (s.cusumSum > SC.CUSUM_H) {
+      s.cusumSum = 0;
       s.freeUntil = Math.max(s.freeUntil, Date.now() + SC.CUSUM_FREEZE);
       invalidateRank(); // 冻结立刻从候选表里消失，不能等 2 s 过滤缓存过期
       s.pSum = (s.pSum + ms) / 2;   // 认账：以新水位为基准，否则旧基线会一直报警
@@ -427,7 +427,7 @@ export function nsOk(k: string, tcp: number, tls: number) {
   STATS.nsOk(k, tcp, tls);
 }
 
-/** 功能：记一次探活成功（只累加 pN 与 tcp/tls 的 EWMA；首字节矩只由真实连接写）。@param k 节点键。@param ms 握手总耗时（仅校验）。@param tcp 连接毫秒。@param tls TLS 往返毫秒。@returns 无 */
+/** 功能：记一次探活成功（只累加 probeSamples 与 tcp/tls 的 EWMA；首字节矩只由真实连接写）。@param k 节点键。@param ms 握手总耗时（仅校验）。@param tcp 连接毫秒。@param tls TLS 往返毫秒。@returns 无 */
 export function nsProbe(k: string, ms: number, tcp: number, tls: number) {
   STATS.nsProbe(k, ms, tcp, tls);
 }

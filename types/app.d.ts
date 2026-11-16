@@ -88,18 +88,18 @@ interface NodeStats {
   lastTry: number;
 
   /** 探活：延迟样本与三段计时 */
-  pN: number;
+  probeSamples: number;
   pSum: number;
   pSumSq: number;
-  cus: number;
-  cusB: number;
-  pF: number;
+  cusumSum: number;
+  cusumBase: number;
+  probeFails: number;
   tcp: number;
   tls: number;
 
   /** 真实流量：可用性 */
-  tS: number;
-  tF: number;
+  trafficOkW: number;
+  trafficFailW: number;
   okW: number;
   failW: number;
   eCloseP: number;

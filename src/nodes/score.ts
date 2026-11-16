@@ -184,7 +184,7 @@ export class Scorer {
   suspectOf(s: NodeStats | undefined): boolean {
     if (!s) return false;
     const viaP = s.eCloseP || 0;
-    const attempts = (s.tS || 0) + viaP;
+    const attempts = (s.trafficOkW || 0) + viaP;
     return attempts >= 5 && viaP / attempts > 0.5;
   }
   /** 可疑节点的 key 版本（面板/规则共用一份判定） */

@@ -216,7 +216,7 @@ ok(
 );
 
 reset();
-node("e:443", { tS: 0, eCloseP: 6, tcp: 50 });
+node("e:443", { trafficOkW: 0, eCloseP: 6, tcp: 50 });
 eq("中转后大量空关闭 → 可疑", W.emptyCloseSuspect("e:443"), true);
 eq(
   "可疑节点被排除",
@@ -370,7 +370,7 @@ W.logErr("dup-msg-for-test");
 W.logErr("dup-msg-for-test");
 eq("5 秒内同一错误只记一次", W.S.errs.length, e0 + 1);
 
-// 成功连接要给节点记 ok/tS，否则面板永远显示 0、可用性门槛永远不生效
+// 成功连接要给节点记 ok/trafficOkW，否则面板永远显示 0、可用性门槛永远不生效
 reset();
 const c6 = new W.Connection({}, {}, "tput", "");
 c6.id = "u3";
@@ -378,7 +378,7 @@ c6.node = "ok2:443";
 c6.down = 2048;
 c6.flush(true);
 eq("成功连接记一次 ok", (W.S.nstat.get("ok2:443") || {}).okW, 1);
-eq("成功连接进入可用性样本", (W.S.nstat.get("ok2:443") || {}).tS, 1);
+eq("成功连接进入可用性样本", (W.S.nstat.get("ok2:443") || {}).trafficOkW, 1);
 
 // 长连接已经每 60 秒写过站点 bps，收尾不能再用"一生平均"把它拉低
 reset();
@@ -892,14 +892,14 @@ reset();
 for (let i = 0; i < 20; i++) {
   node(`sn${i}:443`, {});
   W.nsGet(`sn${i}:443`).bytesDown = i * 1024 * 1024;
-  W.nsGet(`sn${i}:443`).tS = i + 1;
+  W.nsGet(`sn${i}:443`).trafficOkW = i + 1;
 }
 const snapN = W.spdSnapshot();
 ok("快照包含流量最大的节点", !!snapN["sn19:443"], Object.keys(snapN).join(","));
 eq("快照最多 16 个", Object.keys(snapN).length, 16);
 
 reset();
-node("ln:443", { tcp: 50, pN: 4, okW: 4 });
+node("ln:443", { tcp: 50, probeSamples: 4, okW: 4 });
 eq("latN = 探活 + 成功连接", W.scoreParts("ln:443", "lat").latN, 8);
 
 /* ---------- 13. 归因 / 负载 / 快速窗口 / 站点门槛 ---------- */
@@ -1334,7 +1334,7 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
   const s = W.nsGet("probe-only:443");
   W.nsProbe("probe-only:443", 50, 40, 10);
   eq("探活不增加 ok", s.ok, 0);
-  eq("探活仍记延迟样本", s.pN, 1);
+  eq("探活仍记延迟样本", s.probeSamples, 1);
   W.S.nstat.delete("probe-only:443");
 }
 
@@ -1355,8 +1355,8 @@ eq("lat 滞回仍挡住 5ms 抖动", W.SEL.maybeSwitch({ pxDwellMin: 0 }, "lat")
 // 地区选路必须和全局候选表共用排除规则
 reset();
 W.S.inflight.clear();
-node("rde1:443", { tcp: 60, tls: 10, okW: 5, failW: 0, tS: 5, eCloseP: 6 });
-node("rde2:443", { tcp: 180, tls: 20, okW: 20, failW: 1, tS: 20, eCloseP: 0 });
+node("rde1:443", { tcp: 60, tls: 10, okW: 5, failW: 0, trafficOkW: 5, eCloseP: 6 });
+node("rde2:443", { tcp: 180, tls: 20, okW: 20, failW: 1, trafficOkW: 20, eCloseP: 0 });
 S.alive.get("rde1:443").cc = "DE";
 S.alive.get("rde2:443").cc = "DE";
 eq("可疑节点进不了全局候选", W.candsFor("lat").some((x) => x.k === "rde1:443"), false);
@@ -1369,8 +1369,8 @@ eq("地区只剩可疑节点时仍返回（硬要求，不返回 null）", rLast
 // 地区选路的负载感知：全国流量不能全压在第一名
 reset();
 W.S.inflight.clear();
-node("rjp1:443", { tcp: 60, tls: 10, okW: 20, failW: 1, tS: 20 });
-node("rjp2:443", { tcp: 70, tls: 10, okW: 20, failW: 1, tS: 20 });
+node("rjp1:443", { tcp: 60, tls: 10, okW: 20, failW: 1, trafficOkW: 20 });
+node("rjp2:443", { tcp: 70, tls: 10, okW: 20, failW: 1, trafficOkW: 20 });
 S.alive.get("rjp1:443").cc = "JP";
 S.alive.get("rjp2:443").cc = "JP";
 W.S.inflight.set("rjp1:443", 4);
@@ -3681,7 +3681,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   W.nsProbe("pr.test:443", 120, 90, 30);
   W.nsProbe("pr.test:443", 130, 95, 35);
   const prs = W.S.nstat.get("pr.test:443");
-  eq("探活只累加样本数", prs.pN, 2);
+  eq("探活只累加样本数", prs.probeSamples, 2);
   ok("探活不写首字节矩（否则会给还没承载流量的节点白加抖动罚）", prs.pSum === 0 && prs.pSumSq === 0);
   ok("探活会更新 tcp 的 EWMA", prs.tcp > 0);
   ok("门槛判断写成「跨过那一条」", fs.readFileSync("src/nodes/stat.ts", "utf8").includes("before < EMPTY_CLOSE_BAD"));
@@ -4176,7 +4176,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   eq("没有 kek 时按明文 JSON 存（刻意的降级，不是加密）", await W.seal({}, { y: 2 }), JSON.stringify({ y: 2 }));
   const warmSrc = fs.readFileSync("src/px/warm.ts", "utf8");
   ok("起搏不把探活 RTT 写进真实首字节矩（否则第一条真请求就被 CUSUM 冻结）", !/nsLatency\s*\(/.test(warmSrc));
-  ok("起搏仍然记探活样本（pN / tcp / tls）", /nsProbe\s*\(/.test(warmSrc));
+  ok("起搏仍然记探活样本（probeSamples / tcp / tls）", /nsProbe\s*\(/.test(warmSrc));
   const fbSrc = fs.readFileSync("src/proxy/fallback.ts", "utf8");
   ok("补救链跳过一个被污染的条目，而不是整条放弃", /checkTarget\(host, port\)\)\s*continue;/.test(fbSrc));
   ok("补救链也跳过本站点已判封锁的中继", /HOOK\.chanPref\(host, st\.host\) === 2/.test(fbSrc));
@@ -4258,7 +4258,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   W.nsProbe(pk, 40, 38, 2);
   W.nsProbe(pk, 44, 40, 4);
   const st175 = W.nsGet(pk);
-  eq("探活只累加样本数", st175.pN, 2);
+  eq("探活只累加样本数", st175.probeSamples, 2);
   ok(
     "探活不写首字节矩（pSum 仍是 0）",
     st175.pSum === 0 && st175.pSumSq === 0,
@@ -7192,7 +7192,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 
   // 棘轮基线：本轮从 100 降到 86，门禁必须与之一致
   const base252 = JSON.parse(fs.readFileSync("tools/naming-baseline.json", "utf8"));
-  eq("命名基线降到 83", base252.opaque, 83);
+  eq("命名基线降到 80", base252.opaque, 80);
   ok("命名门禁已接进 preflight", fs.readFileSync("tools/preflight.mjs", "utf8").includes("check-names.mjs"), "");
 }
 
@@ -7205,5 +7205,45 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   ok("选路不再读旧的 bytes 字段", !sel253.includes("st.bytes"), "");
   ok("PickState 与 Connection 同名", sel253.includes("targetBytes?: number;"), "");
 }
+// ── 第 254 组：统计层字段改成语义名（纯内存结构，与线协议无关） ────────────
+{
+  const z254 = W.nsGet("zero254.test:443");
+  eq("统计行有 probeSamples", typeof z254.probeSamples, "number");
+  eq("统计行有 probeFails", typeof z254.probeFails, "number");
+  eq("统计行有 trafficOkW", typeof z254.trafficOkW, "number");
+  eq("统计行有 trafficFailW", typeof z254.trafficFailW, "number");
+  eq("统计行有 cusumSum", typeof z254.cusumSum, "number");
+  eq("统计行有 cusumBase", typeof z254.cusumBase, "number");
+  eq("旧短名 pN 已消失", "pN" in z254, false);
+  eq("旧短名 tS 已消失", "tS" in z254, false);
+  eq("旧短名 cusB 已消失", "cusB" in z254, false);
+
+  W.nsProbe("probe254.test:443", 40, 30, 10);
+  W.nsProbe("probe254.test:443", 42, 31, 11);
+  const p254 = W.nsGet("probe254.test:443");
+  eq("两次探活累加 probeSamples", p254.probeSamples, 2);
+  eq("探活不写首字节矩", p254.pSum, 0);
+
+  W.nsOk("ok254.test:443", 0, 0);
+  const o254 = W.nsGet("ok254.test:443");
+  eq("真实成功累加 trafficOkW", o254.trafficOkW, 1);
+
+  W.nsFail("fail254.test:443");
+  const f254 = W.nsGet("fail254.test:443");
+  eq("真实失败累加 trafficFailW", f254.trafficFailW, 1);
+
+  // 衰减必须一起作用（effView 是只读投影，衰减在两处共用同一套换算）
+  const d254 = W.nsGet("decay254.test:443");
+  d254.trafficOkW = 8; d254.probeSamples = 8; d254.at = Date.now() - W.SC.HL * 2;
+  const v254 = W.effView(d254);
+  eq("effView 暴露的是 probeSamples 而不是旧名", "probeSamples" in v254 && !("pN" in v254), true);
+  ok("平移两个半衰期后 probeSamples 约剩 1/4", Math.abs(v254.probeSamples - 2) < 0.3, String(v254.probeSamples));
+
+  const statSrc = fs.readFileSync("src/nodes/stat.ts", "utf8");
+  ok("stat.ts 不再出现旧字段名", !/\btS\b|\bpN\b|\bcusB\b/.test(statSrc));
+  const typesSrc = fs.readFileSync("types/app.d.ts", "utf8");
+  ok("类型声明也改成新名", typesSrc.includes("trafficOkW") && !/\btS:/.test(typesSrc));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
