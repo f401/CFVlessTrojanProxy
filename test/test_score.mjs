@@ -4985,5 +4985,62 @@ console.log("\n191b) 中继健康表的 merge 口径");
   W.cnt("szBig");
   ok("未登记的键不会凭空出现", !("szBig" in W.S.cnt));
 }
+// —— 第 204 组：池子锚点必须单调（本地旧池子不能把共享代际改小）——
+{
+  const store = Object.create(null);
+  const envS = {
+    STATS: {
+      get: async (k) => (k in store ? store[k] : null),
+      put: async (k, v) => {
+        store[k] = v;
+      },
+    },
+  };
+  const fakePool = (n) => {
+    const a = [];
+    for (let i = 0; i < n; i++) a.push({ k: "h" + i + ":443", h: "1.1.1." + (i % 250), p: 443, cc: "US" });
+    return a;
+  };
+  W.S.colo = "HKG";
+  W.S.seed = { v: 7, ts: 0, poolGen: 0, poolN: 0, builtAt: 0, byColo: {}, cnt: null };
+  W.S.seedReadFail = false;
+  W.S.seedAt = 0;
+  // 第一步：让这块「共享锚点」先到第 6 代 320 条（用写盘本身建立，不手搓 seal）
+  W.S.poolGen = 6;
+  W.S.poolBuilt = 111;
+  W.S.pool = fakePool(320);
+  await W.SEEDS.write(envS, false, true);
+  eq("锚点建立到第 6 代", W.S.seed.poolGen, 6);
+  eq("锚点规模 320", W.S.seed.poolN, 320);
+  // 第二步：本地停在旧代（5 代 200 条）的 isolate 落盘，不得把锚点改小
+  W.S.seedAt = 0;
+  W.S.poolGen = 5;
+  W.S.poolBuilt = 100;
+  W.S.pool = fakePool(200);
+  await W.SEEDS.write(envS, false, true);
+  eq("落后一个代际的 isolate 不会把锚点代际改小", W.S.seed.poolGen, 6);
+  eq("也不会把锚点规模改小", W.S.seed.poolN, 320);
+  eq("也不会把建池时间改小", W.S.seed.builtAt, 111);
+  // 第三步：同代但本地池子更全 → 取较大值
+  W.S.seedAt = 0;
+  W.S.poolGen = 6;
+  W.S.pool = fakePool(400);
+  await W.SEEDS.write(envS, false, true);
+  eq("同代取较大规模", W.S.seed.poolN, 400);
+  // 第四步：本地确实更新 → 用本地那一对
+  W.S.seedAt = 0;
+  W.S.poolGen = 7;
+  W.S.poolBuilt = 222;
+  W.S.pool = fakePool(410);
+  await W.SEEDS.write(envS, false, true);
+  eq("本地更新时代际前移", W.S.seed.poolGen, 7);
+  eq("本地更新时规模取本地", W.S.seed.poolN, 410);
+  eq("本地更新时建池时间取本地", W.S.seed.builtAt, 222);
+  // 源码锁
+  const sd = fs.readFileSync("src/px/seed.ts", "utf8");
+  ok("写盘走 poolAnchor()", sd.includes("const pa = this.poolAnchor();") && sd.includes("const pa0 = this.poolAnchor();"));
+  ok("不再有「本地优先」的锚点写法", !sd.includes("poolGen: S.poolGen || S.seed.poolGen"));
+  ok("落后时的分支原样沿用锚点", sd.includes("return { gen: gSeed, n: nSeed, builtAt: atSeed };"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

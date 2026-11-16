@@ -77,7 +77,9 @@ export class SeedStore {
         cnt: v.cnt || null,
       };
       S.gcnt = (v.cnt || null) as CounterDoc | null;
-      S.poolBuilt = Number(v.builtAt) || 0;
+      // 只有锚点的代际不比本地旧时才认它的建池时间：本地刚建完第 7 代、锚点还停在第 6 代时，
+      // 把 111 写回去等于把「这块池子是什么时候建的」也一起回退了（write 的池子锚点会拿它落盘）。
+      if ((Number(v.poolGen) || 0) >= (S.poolGen || 0)) S.poolBuilt = Number(v.builtAt) || 0;
       // 老版本把延迟/吞吐/成功率/站点偏好写了进来：一律不读（每个 isolate 各自估自己的），
       // 下一轮 write 会用新结构整体覆盖，30 天 TTL 兜底。
     }
@@ -90,7 +92,27 @@ export class SeedStore {
   }
 
   /**
-   * 把本地统计合并进「本机房」的桶并落盘。只写自己的桶，不碰别的机房。
+   * 功能：算出这次落盘要写进共享锚点的池子代际、规模与建池时间。
+   * 旧口径是「本地优先」（`S.poolGen || S.seed.poolGen`），但本地 `S.pool` 完全可能停在旧代：
+   * `ensurePool` 是内存优先的，一个从不重建池子的 isolate 每 55 分钟照样落盘一次，
+   * 于是它把别的 isolate 刚写上去的新代际与更大的 `poolN` 一起改小 —— 后起的 isolate
+   * 按锚点读回旧代池子，`commitPool` 再按 `max+1` 算代，正好撞回已经存在的更新代，
+   * 把别人刚建好的池子覆盖掉（KV 没有 CAS，这个回退把「并发撞车」变成了「必然撞车」）。
+   * 所以代际单调：本地比锚点新才用本地；同代取较大的规模；本地更旧就原样沿用锚点。
+   * @returns {{gen: number, n: number, builtAt: number}} 代际、规模、建池时间
+   */
+  private poolAnchor() {
+    const gLocal = S.poolGen || 0;
+    const gSeed = Number(S.seed.poolGen) || 0;
+    const nSeed = Number(S.seed.poolN) || 0;
+    const atSeed = Number(S.seed.builtAt) || 0;
+    if (gLocal > gSeed) return { gen: gLocal, n: S.pool.length || nSeed, builtAt: S.poolBuilt || atSeed };
+    if (gLocal === gSeed) return { gen: gSeed, n: Math.max(S.pool.length, nSeed, 0), builtAt: Math.max(S.poolBuilt || 0, atSeed) };
+    return { gen: gSeed, n: nSeed, builtAt: atSeed };
+  }
+
+  /**
+   * 鎶婃湰鍦扮粺璁″悎骞惰繘「本机房」的桶并落盘。只写自己的桶，不碰别的机房。
    * @param {object} env Worker 环境
    * @returns {Promise<{ok:boolean,err?:string}>} 结果
    */
@@ -125,13 +147,14 @@ export class SeedStore {
     const nodes = scored.slice(0, SEED_MAX).map((x) => x.n);
     if (!nodes.length) {
       // 没有节点可写：只把池子代际等全局字段刷上去，别动任何机房的桶
+      const pa0 = this.poolAnchor();
       S.seed = {
         ...S.seed,
         v: SEED_VER,
         ts: Date.now(),
-        poolGen: S.poolGen || S.seed.poolGen || 0,
-        poolN: S.pool.length || S.seed.poolN || 0,
-        builtAt: S.poolBuilt || S.seed.builtAt || 0,
+        poolGen: pa0.gen,
+        poolN: pa0.n,
+        builtAt: pa0.builtAt,
         cnt: S.seed.cnt || null,
       };
       try {
@@ -179,12 +202,13 @@ export class SeedStore {
         if (k2 !== BUCKET_DEF && !keep.includes(k2)) delete byColo[k2];
       }
     }
+    const pa = this.poolAnchor();
     S.seed = {
       v: SEED_VER,
       ts: Date.now(),
-      poolGen: S.poolGen || S.seed.poolGen || 0,
-      poolN: S.pool.length || S.seed.poolN || 0,
-      builtAt: S.poolBuilt || S.seed.builtAt || 0,
+      poolGen: pa.gen,
+      poolN: pa.n,
+      builtAt: pa.builtAt,
       byColo,
       cnt: gc,
     };
