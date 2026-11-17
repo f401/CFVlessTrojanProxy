@@ -1,6 +1,4 @@
-import { renderAdminHint, renderHtml, renderLogin } from "./panel";
-import { renderAdmin } from "./panel-admin";
-import { renderStatsHtml } from "./panel-stats";
+import { renderAdmin, renderAdminHint, renderHtml, renderLogin, renderStatsHtml } from "./panel";
 
 export interface StatsIn {
   env: Env;

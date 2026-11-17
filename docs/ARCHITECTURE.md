@@ -243,8 +243,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `CronLock`（`CRONLOCK`） | `src/core/lock.ts` | cron 闸门：持有时间戳 + `SC.CRON_STALE_MS` 截止；超时接管计 `cronStale`（布尔闩卡死即永久停摆） |
 | `TfbBook`（`TFB`） | `src/route/tfbbook.ts` | 起搏记账（上次开批时间 + 本窗口批数；`sweep` 是唯一清理入口，上限与 `SC.PX_MAX` 同源） |
 | `TransportRegistry`（`TRANSPORTS`） | `src/core/transport.ts` | 探测传输的注册表：业务侧只说「要一个能探测的传输」，具体实现（userland TLS / 运行时 fetch）由这里决定。7.271 起 `probeTf` 不再写死 tunnelfetch |
-| `TunnelFetchTransport` | `src/core/transport-tunnelfetch.ts` | 用 `tunnelfetch`（userland TLS 1.3）探测，能把 TCP 落到中继上 —— 唯一能回答「这条中继到目标行不行」的实现 |
-| `GatewayFetchTransport` | `src/core/transport-tunnelfetch.ts` | 用运行时自带 `fetch` 探测，只能直连；留着做「同一目标、两条腿」的对照，与上一条并排看才能分清「目标拒绝这个出口族」与「中继不可用」 |
+| `TunnelFetchTransport` | `src/core/transport.ts` | 用 `tunnelfetch`（userland TLS 1.3）探测，能把 TCP 落到中继上 —— 唯一能回答「这条中继到目标行不行」的实现 |
+| `GatewayFetchTransport` | `src/core/transport.ts` | 用运行时自带 `fetch` 探测，只能直连；留着做「同一目标、两条腿」的对照，与上一条并排看才能分清「目标拒绝这个出口族」与「中继不可用」 |
 | `BoundedMap` | `src/core/table.ts` | 有界「键 → 行」表（容量 + 寿命 + 淘汰顺序）；`RelPerfTable` 与 `TfbBook` 继承的淘汰规则就这一份，7.251 前四处各写一遍，于是出现过「上限判在插入之前」那种偏差 |
 | `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps）；`siteKey`/`hostKey`/`hostScore` 与四个薄包装同在此文件 |
 | `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |
@@ -266,19 +266,19 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `ConnSettle`（`SETTLE`） | `src/proxy/conn-settle.ts` | 一条连接结束时的结算流水线：收尾采样 → pStall 占比 → 节点观测聚合 → 首眼观测（含站点画像与通道证据）→ PEND 记账；只读 `SettleView`，状态仍归 `Connection` |
 | `SampleWindow` | `src/proxy/sample-window.ts` | 一条连接的两个采样窗口边界（节点级 5 秒 / 站点级 60 秒）：**无论能不能出样本都推进起点**，只有真的交出样本才推进 `lastEmit`；背压占比按本连接累计毫秒算 |
 | `ClientFlow` | `src/proxy/client-flow.ts` | 客户端这一侧的流量控制：唯一读 `ws.bufferedAmount` 的地方，也是唯一区分「客户端自己走了」（记 `ccut`）与「真卡死」（记 `stall`）的地方 |
-| `DebugMeterProbes` | `src/routes/debug-meter.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
-| `DebugTables` | `src/routes/debug-tables.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：只读表、不拨号、不改状态 |
+| `DebugMeterProbes` | `src/routes/debug.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
+| `DebugTables` | `src/routes/debug.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：只读表、不拨号、不改状态 |
 | `DebugNets` | `src/routes/debug-nets.ts` | 会对外拨号的诊断分支门面：七个分支在四个组件里，这里只按「只读 → 测速 → 诊断 → 探活 → 抓源 → 钉住 → 明文 HTTP → 判定批 → 真握手 → 回填 → seed → 兜底」的顺序派发（顺序变了，`?diag=x&refill=1` 会先花一次抓源） |
 | `DebugBench` | `src/routes/debug-nets.ts` | 出口测速（花 fetch 子请求，同文件） |
 | `DebugDiag` | `src/routes/debug-nets.ts` | 站点诊断（读样本免费、主动探活占 `connect()`，同文件） |
 | `DebugProbe` | `src/routes/debug-nets.ts` | 三个探针：原始 ClientHello / 明文 HTTP / IPv6 可达性（同文件） |
 | `DebugTf` | `src/routes/debug-nets.ts` | 判定批与真握手（子请求 + DO CPU，同文件） |
-| `DebugActions` | `src/routes/debug-actions.ts` | 会改状态的诊断操作（refill/cur/restore/seed）：全部先过 `adminOnly`，都会写 KV 或 DO |
+| `DebugActions` | `src/routes/debug.ts` | 会改状态的诊断操作（refill/cur/restore/seed）：全部先过 `adminOnly`，都会写 KV 或 DO |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表 |
 | `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
 
-自由函数集中在 `src/core/{util,net,hist,quota,hosts,bytes,sha224,timeouts,ws,concurrency,errors,env-parse,proto-names}.ts`、`src/proxy/protocol.ts`、`src/views/{html,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。
+自由函数集中在 `src/core/{util,net,hist,quota,hosts,hostmem,http80,table,enums,types,facts,hook,state,const,counter,lock,latobs,firstobs,node-snapshot,transport}.ts`（编解码 / SHA-224 / WS / 超时 / 并发 / 环境解析 / 协议名 / 错误文本都在 `util.ts` 一个文件里，7.290 起不再拆分）、`src/proxy/protocol.ts`、`src/views/{html,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。
 
 ## 注释约定
 

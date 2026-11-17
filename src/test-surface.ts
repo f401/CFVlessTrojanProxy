@@ -109,8 +109,7 @@ export { PEND, RESTORE_MAX, nodeSnapGet, flushSnap, usageSnapWrite, readStats, r
 export { doFetch, meterGet } from "./store/meter-client";
 export { runCron } from "./routes/cron";
 export { proxyip } from "./routes/proxyip";
-export { debug } from "./routes/debug";
-export { METER_PROBES, DebugMeterProbes } from "./routes/debug-meter";
+export { debug, ACTIONS, DebugActions, DebugMeterProbes, DebugTables, METER_PROBES, TABLES } from "./routes/debug";
 export {
   BENCH,
   DIAGONE,
@@ -173,10 +172,16 @@ export { BLK_TTL, BIG_PEER, BIG_WIN, DEAD_TTL, TINY_ABS, WRITE_GAP, commitFact, 
 export { FACT, FactShadow, shadowCtx, shadowObs } from "./route/factshadow";
 /** 四类事实的门面（OOP 收口后唯一的上行/合并入口） */
 export { FACTS, FactsStore } from "./route/factsstore";
-/** tunnelfetch 探针（出口族对照实验用） */
-export { probeTf } from "./core/tf";
-export { GATEWAY_TRANSPORT, TUNNEL_TRANSPORT, TRANSPORTS, TransportRegistry } from "./core/transport";
-export { GatewayFetchTransport, TunnelFetchTransport } from "./core/transport-tunnelfetch";
+/** 探测传输层：抽象、两个实现与门面现在同住 `core/transport.ts`（出口族对照实验用） */
+export {
+  GATEWAY_TRANSPORT,
+  GatewayFetchTransport,
+  TRANSPORTS,
+  TUNNEL_TRANSPORT,
+  TransportRegistry,
+  TunnelFetchTransport,
+  probeTf,
+} from "./core/transport";
 export { probeHttp80, relayIpOf, splitRelay } from "./core/http80";
 export { parseProxyIp } from "./proxy/dial";
 export { cfHttpCode, refreshCfHttp } from "./proxy/cfverdict";

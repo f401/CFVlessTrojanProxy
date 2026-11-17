@@ -1,4 +1,4 @@
-import { probeTf } from "../core/tf";
+import { probeTf } from "../core/transport";
 
 /**
  * 功能：计量 DO 里那些「只为诊断存在」的端点。

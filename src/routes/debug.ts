@@ -1,15 +1,338 @@
 import { S } from "../core/state";
 import { vtDelta, vtLoad } from "../route/verdictsync";
-import { doFetch } from "../store/index";
-import { ACTIONS } from "./debug-actions";
-import { METER_PROBES } from "./debug-meter";
+import { doFetch, PEND, restoreUsage } from "../store/index";
 import { NETS } from "./debug-nets";
-import { TABLES } from "./debug-tables";
-
 import type { RouteCtx } from "../edge/types";
+import { cntView } from "../core/counter";
+import { json } from "../edge/respond";
+import { BLK } from "../route/blkfacts";
+import { planView } from "../route/budget";
+import { BLK_TTL } from "../route/commitfact";
+import { DEAD } from "../route/deadfacts";
+import { EG } from "../route/egfacts";
+import { FACTS } from "../route/factsstore";
+import { prefsJson } from "../route/prefs";
+import { PS } from "../route/psfacts";
+import { HEALTH } from "../route/relay-health";
+import { REL_SAMPLE_TTL, RELPERF } from "../route/relperf";
+import { VT } from "../route/verdict";
+import { errMsg, withTimeout } from "../core/util";
+import { adminOnly } from "../edge/auth";
+import { STATS } from "../nodes/score";
+import { commitPool, flushPx, pxSet } from "../px/pool";
+import { EXTRA_HOSTS, refillPool } from "../px/probe";
+
+// ---- 并入自 debug-tables.ts ----
 
 /** 诊断路由的上下文：`/<uuid>/debug` 挂在用户前缀下，所以一定带着 `id` */
 type DebugCtx = RouteCtx & { id: string };
+
+/**
+ * 只读诊断表：把内存里的判定、事实、健康度直接摊开。
+ *
+ * 为什么单独成类：这十一个分支全是「读一张表、包成 JSON」，不写任何状态，
+ * 唯一的例外是 `&do=1` 时把 DO 环形缓冲也取回来（`doFetch` 会记一次子请求计数）。
+ * 和测量类（要拨号）、写操作类（要管理员校验并改 KV）混在一个函数里时，
+ * 「这次请求到底会不会改变服务端状态」看不出来。
+ */
+export class DebugTables {
+  /**
+   * 依次尝试每个只读分支。
+   * @param c 路由上下文（含 `env` / `id`）
+   * @param url 请求 URL
+   * @returns 命中的分支响应；没有任何只读参数时返回 `null`，交给后面的测量/写操作分支
+   */
+  async read(c: DebugCtx, url: URL): Promise<Response | null> {
+    const { env, id } = c;
+    // 判死的会挪到队尾，30 分钟复活
+    if (url.searchParams.get("dd")) return json({ rows: DEAD.snap() });
+    // 站点 × 中继的成功率事实（本 isolate）：样本越多越可信，因子越靠近 1
+    if (url.searchParams.get("pss")) {
+      const host = String(url.searchParams.get("pss"));
+      return json({ host, rows: PS.snap(host) });
+    }
+    if (url.searchParams.get("eg")) return json({ rows: EG.snap() });
+    if (url.searchParams.get("rt")) {
+      const host = String(url.searchParams.get("rt") || "").slice(0, 80);
+      return json({ host, rows: RELPERF.snap(host), alive: S.alive.size, ttl: REL_SAMPLE_TTL });
+    }
+    // 站点 × 中继的封锁行（v7.222）：文档里从 v8 起就写着 `?blk=<host>`，代码里一直没有这个分支。
+    // 只读内存表，不打 DO：要看别处 isolate 回传的行得配合 `?do=1` 那条链（那里是 /meter/vt）。
+    if (url.searchParams.get("blk")) {
+      const bh = String(url.searchParams.get("blk") || "").slice(0, 80);
+      const rows = BLK.snap().filter((r) => r.k === bh || r.k.startsWith(bh + "|"));
+      return json({ host: bh, muted: BLK.muted(bh), rows: rows.slice(0, 60), ttl: BLK_TTL });
+    }
+    // 事实层五张表一次看全（v7.222）：eg / ps / dead / blk2 / dns，容量与条数都能直接看出来
+    if (url.searchParams.get("facts") === "1") {
+      return json({ tables: FACTS.snap(), counters: cntView() });
+    }
+    // 本轮预算分配（v7.222）：与 `?vt=<host>` 分支里的 plan 同一口径，省得为了看预算先造一个 host
+    if (url.searchParams.get("plan") === "1") {
+      return json({ plan: planView(S.pool.length, S.alive.size), counters: cntView() });
+    }
+    const vtHost = String(url.searchParams.get("vt") || "").slice(0, 80);
+    if (vtHost) {
+      // 只读表：userland TLS 探测已在 7.69 删除（免费计划必然 1102），证据一律来自真实流量与 tfb。
+      // 这里曾经还回三个恒空字段（ips / nodes / rows）——它们来自已删除的扫描器，
+      // 于是「扫描结果为空」和「根本没有扫描」在响应里长得一模一样（v7.154 删掉）。
+      const plan = planView(S.pool.length, S.alive.size);
+      const pol = { same: S.polSame, diff: S.polDiff, why: S.polWhy };
+      return json({ host: vtHost, table: VT.all(), pol, plan, counters: cntView() });
+    }
+    // 站点偏好表：判定表按通道聚合后的「能打通 / 打不通」两栏
+    if (url.searchParams.get("hl") === "1") {
+      let ring: unknown = [];
+      if (url.searchParams.get("do") === "1") {
+        try {
+          const raw = String(c.env.uuid || c.env.uuids).split(",")[0].trim().toLowerCase();
+          const rr = await doFetch(c.env, raw, "https://meter/hl");
+          ring = ((await rr.json()) as { hl?: unknown }).hl || [];
+        } catch {
+          ring = [];
+        }
+      }
+      return json({ local: HEALTH.json(20), sizes: HEALTH.counts(), ring });
+    }
+    if (url.searchParams.get("prefs") === "1") {
+      return json({ prefs: prefsJson(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });
+    }
+    if (url.searchParams.get("cl") === "1") {
+      const local = PEND.clSnap(40);
+      let ring: ClRec[] = [];
+      if (url.searchParams.get("do") === "1" && env.METER) {
+        try {
+          const r = await doFetch(env, id, "https://meter/cl");
+          const j = (await r.json()) as { cl?: ClRec[] };
+          if (Array.isArray(j.cl)) ring = j.cl;
+        } catch {
+          ring = [];
+        }
+      }
+      return json({ local, ring, now: Date.now() });
+    }
+    return null;
+  }
+}
+
+/** 只读诊断表的单例（无状态，但保持与其它诊断组件一致的调用形状） */
+export const TABLES = new DebugTables();
+
+// ---- 并入自 debug-actions.ts ----
+
+/**
+ * 会改服务端状态的诊断操作：抓源、钉当前节点、回填用量。
+ *
+ * 为什么单独成类：这四个分支都必须先过 `adminOnly`，而且都在写 KV / DO。
+ * 与只读表分支放在一起时，「哪些参数会真的改状态」只能靠逐行读 `await` 才知道；
+ * 分成一个类之后，`DebugActions` 的方法列表本身就是「这台机器上能被改的东西」清单。
+ */
+export class DebugActions {
+  /**
+   * 重新抓一遍池子源并（默认）提交。
+   * @param c 路由上下文
+   * @param url 请求 URL（`?refill=1&dry=1&force=1`）
+   * @returns 命中时返回抓取/提交结果，否则 `null`
+   */
+  async refill(c: DebugCtx, url: URL): Promise<Response | null> {
+    if (url.searchParams.get("refill") !== "1") return null;
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    // 和 cron 共用同一套抓取/去重/2MB 截断，别再维护第二份
+    const refill = await refillPool(c.env);
+    const merged = refill.pool;
+    // 默认提交（debug 端点已有 UUID 鉴权）；&dry=1 只看不写，&force=1 无视线池 60% 守卫
+    let commit: Record<string, unknown> = { ok: true, skipped: true };
+    if (merged.length && url.searchParams.get("dry") !== "1") {
+      commit = await commitPool(c.env, merged, url.searchParams.get("force") === "1");
+    }
+    return json({
+      sources: refill.sources,
+      merged: merged.length,
+      pool: merged.length,
+      committed: !!commit.ok && !commit.skipped,
+      gen: commit.gen || 0,
+      reason: commit.reason || "",
+      kvLastWrite: S.kvStat,
+      extra: EXTRA_HOSTS,
+    });
+  }
+
+  /**
+   * 手动指定当前节点：`?cur=1.2.3.4:443`（用于对比不同节点的真实速度）。
+   * @param c 路由上下文
+   * @param url 请求 URL
+   * @returns 命中时返回钉住结果（含写 KV 锚点是否成功），否则 `null`
+   */
+  async pinCurrent(c: DebugCtx, url: URL): Promise<Response | null> {
+    if (!url.searchParams.get("cur")) return null;
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const want = String(url.searchParams.get("cur")).trim();
+    if (!/^[0-9a-zA-Z.\-]+:\d+$/.test(want)) return json({ ok: false, error: "格式应为 host:port" });
+    await pxSet(c.env, { cur: want });
+    // 把这条节点的惩罚清掉：手动指定的语义就是「我就要用这条，别拿历史失败拦我」
+    const stat = STATS.nsGet(want);
+    stat.blackUntil = 0;
+    stat.freeUntil = 0;
+    stat.streak = 0;
+    const fx = await flushPx(c.env, true);
+    S.pxFailMem = 0;
+    // 钉节点要跟着写 KV 锚点，否则别的 isolate 起来会挑回原来那条（返回 ok 但没落盘就是谎报）
+    return json({
+      ok: true,
+      cur: want,
+      curs: S.curs,
+      anchor: fx.ok ? "ok" : "fail",
+      note: fx.ok ? undefined : fx.err,
+    });
+  }
+
+  /**
+   * 从 KV 快照回填用量：只在 DO 累计仍为 0 时生效，重建脚本后靠它恢复历史数字。
+   * @param c 路由上下文
+   * @param url 请求 URL（`?restore=1`）
+   * @param id 用户标识（DO 实例名）
+   * @returns 命中时返回回填结果，否则 `null`
+   */
+  async restore(c: DebugCtx, url: URL, id: string): Promise<Response | null> {
+    if (url.searchParams.get("restore") !== "1") return null;
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const v = await restoreUsage(c.env, id);
+    return json({ ok: !!v, restored: v || null });
+  }
+
+  /**
+   * 手动回填用量（仅在 DO 累计为 0 时生效）。
+   * @param c 路由上下文
+   * @param url 请求 URL（`?seed=<up>,<down>,<conns>`）
+   * @param id 用户标识（DO 实例名）
+   * @returns 命中时返回 DO 的原始应答，否则 `null`
+   */
+  async seed(c: DebugCtx, url: URL, id: string): Promise<Response | null> {
+    if (!url.searchParams.get("seed")) return null;
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    // 三个数缺省为 0：只回填他关心的那一维（例如只想补 down）
+    const [up0, down0, conns0] = String(url.searchParams.get("seed"))
+      .split(",")
+      .map((x) => Number(x) || 0);
+    // 分别记 HTTP 状态与解析结果：DO 回 500 时 `seeded` 里通常是 `{ ok: false }`，
+    // 而网络层失败会走 catch —— 两种失败要让调用方一眼分开
+    let seeded = null;
+    let seedOk = false;
+    let seedStatus = 0;
+    try {
+      const r = await doFetch(c.env, id, "https://meter/seed", {
+        method: "POST",
+        body: JSON.stringify({ up: up0, down: down0, conns: conns0, first: Date.now() }),
+      });
+      seedOk = r.ok;
+      seedStatus = r.status;
+      seeded = await r.json();
+      // 回填成功后立刻刷新本地缓存：否则下一次 `/` 仍读到回填前的 0
+      S.meterCache.set(id, { v: seeded, t: Date.now() });
+    } catch (e) {
+      return json({ ok: false, error: String(errMsg(e)) });
+    }
+    return json({ ok: seedOk, doStatus: seedStatus, seeded });
+  }
+}
+
+/** 会改状态的诊断操作单例 */
+export const ACTIONS = new DebugActions();
+
+// ---- 并入自 debug-meter.ts ----
+/**
+ * 一条「计量 DO 诊断探测」的调用规格。
+ * 六个诊断端点的形状完全一样：校验管理员 → 取一个带实例名的 DO → 带上参数 fetch →
+ * 把 DO 的响应体塞进 `{ ok, doStatus, <item> }`。差别只有参数名、默认实例名、超时与结果键，
+ * 所以它们应该是数据，而不是六个几乎逐字重复的 if 块。
+ */
+export interface ProbeSpec {
+  /** URL 上的开关参数名（`?burn=` 等），值会被当作数字参数带给 DO */
+  readonly param: string;
+  /** DO 端点的完整地址（`https://meter/<name>`；查询串由 `queryKey` 单独拼） */
+  readonly url: string;
+  /** DO 查询串里放查询值的参数名（`ms` / `n`），空串表示这个端点不收查询值 */
+  readonly queryKey: string;
+  /** 没给查询值时用的默认值（数字） */
+  readonly queryDefault: number;
+  /** 结果在响应 JSON 里的键名 */
+  readonly item: string;
+  /** 这个调用的上限毫秒数（DO 里有独立预算，但请求本身可能挂住） */
+  readonly budgetMs: number;
+  /** 实例名的前缀：同一个前缀 + 时间戳，避免上一次被 CPU 墙打断的实例把队列挂在 pending */
+  readonly instPrefix: string;
+  /** 是否必须带 `&n=<inst>`（读回上一次探测写下的阶段标记时才需要固定实例） */
+  readonly needInst: boolean;
+}
+
+/**
+ * 计量 DO 的诊断探测端点集合。
+ *
+ * 为什么单独一个类：`src/routes/debug.ts` 原来把六个分支写成一串 if，每块都要自己
+ * 「取 stub、拼查询串、包超时、处理 5xx」；四个动作漏一个就是一个只会在线上才发现的坑
+ * （7.202 的 `ok: true` 常量、7.187 的裸 `connect`、7.126 的漏 `withTimeout`）。
+ * 现在规格集中在 `SPECS` 里，调用路径只有一条，漏掉任何一步都不可能只影响一个端点。
+ */
+export class DebugMeterProbes {
+  /**
+   * 六个诊断端点的调用规格（`?burn=` / `?stage=` / `?tim=` / `?iter=` / `?burnjs=` / `?crypto=`）。
+   * `stage` 是唯一需要固定实例名的：它读回「上一次探测写下的阶段标记」，换个实例就读不到。
+   */
+  readonly specs: readonly ProbeSpec[] = [
+    { param: "burn", url: "https://meter/burn", queryKey: "ms", queryDefault: 50, item: "burn", budgetMs: 15000, instPrefix: "burn", needInst: false },
+    { param: "stage", url: "https://meter/stage", queryKey: "", queryDefault: 0, item: "stage", budgetMs: 8000, instPrefix: "", needInst: true },
+    { param: "tim", url: "https://meter/tim", queryKey: "ms", queryDefault: 0, item: "out", budgetMs: 20000, instPrefix: "t", needInst: false },
+    { param: "iter", url: "https://meter/iter", queryKey: "n", queryDefault: 1000000, item: "iter", budgetMs: 20000, instPrefix: "it", needInst: false },
+    { param: "burnjs", url: "https://meter/burnjs", queryKey: "ms", queryDefault: 20, item: "burn", budgetMs: 20000, instPrefix: "js", needInst: false },
+    { param: "crypto", url: "https://meter/crypto", queryKey: "", queryDefault: 0, item: "crypto", budgetMs: 25000, instPrefix: "cr", needInst: false },
+  ];
+
+  /**
+   * 按 URL 参数派发一次诊断探测（只处理 `specs` 里的六个参数）。
+   * @param {RouteCtx & { id: string }} c 请求上下文（已经过 UUID 校验，含 env 与用户 id）
+   * @param {URL} url 请求 URL
+   * @param {string} id 用户 id：DO 实例名以它开头，避免不同用户的探测互相干扰
+   * @returns {Promise<Response | null>} 命中参数时返回响应；六个参数都没有时返回 `null`，交给调用方的其余分支
+   */
+  async run(c: RouteCtx & { id: string }, url: URL, id: string): Promise<Response | null> {
+    const spec = this.specs.find((s) => url.searchParams.get(s.param) !== null);
+    // 不是这六个参数中的任何一个：让 `debug()` 继续往下走它自己的分支
+    if (!spec) return null;
+    const deny = await adminOnly(c);
+    if (deny) return deny;
+    const env = c.env;
+    // 诊断端点全都要一个计量 DO；没绑定时如实报错，而不是抛一个读不懂的 TypeError
+    if (!env.METER) return json({ ok: false, error: "no METER" });
+    const given = url.searchParams.get("n") || "";
+    // 需要固定实例却没说实例名：直接回错，免得读回一条随机实例上的空阶段标记
+    if (spec.needInst && !given) return json({ ok: false, error: "need &n=<inst>" });
+    // 实例名：显式给的优先；否则「前缀 + 时间戳」，让上一次被 CPU 墙打断的实例不会串到这一次
+    const inst = given || spec.instPrefix + Date.now();
+    const rawValue = url.searchParams.get(spec.param) || "";
+    const value = spec.queryKey ? Number(rawValue || spec.queryDefault) : 0;
+    // 查询串：只有收查询值的端点才拼，`/stage` 与 `/crypto` 是空查询；`spec.url` 保持完整字面量，
+    // 这样 `tools/check-wire.mjs` 的「有实现必须有调用方」仍然能按字符串找到这条端点
+    const query = spec.queryKey ? `?${spec.queryKey}=${value}` : "";
+    try {
+      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
+      // 跨 DO 边界的返回值在类型上是 unknown，这里显式收窄成 Response 再读 ok/status/json
+      const resp = (await withTimeout(stub.fetch(spec.url + query), spec.budgetMs)) as Response;
+      // `ok` 必须是 DO 的真实状态：7.202 之前这里写死 `ok: true`，DO 回 500 也报成功
+      return json({ ok: resp.ok, doStatus: resp.status, [spec.item]: await resp.json() });
+    } catch (e) {
+      return json({ ok: false, error: errMsg(e) });
+    }
+  }
+}
+
+/** 单例：探测本身不持有任何状态，安全共享（规格表是只读常量） */
+export const METER_PROBES = new DebugMeterProbes();
+
+// ---- 门面（对外导出面保持不变） ----
 
 /**
  * `/<uuid>/debug`：把所有诊断入口按固定顺序分派给三类组件。

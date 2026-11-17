@@ -24,7 +24,7 @@ const storeSrc = () =>
 const statAll = () => fs.readFileSync("src/nodes/stat.ts", "utf8");
 
 /**
- * 诊断路由四段源码拼在一起：`debug.ts`（编排）/ `debug-tables.ts`（只读表）/ `debug-nets.ts`（会拨号的测量）/ `debug-actions.ts`（会改状态的写）。
+ * 诊断路由的源码拼在一起：`debug.ts`（编排 + 只读表 + 会改状态的写 + 计量 DO 诊断）/ `debug-nets.ts`（会拨号的测量）。
  * v7.283 把原来 450 行的一条 if 链按「读 / 量 / 写」拆开，源码锁改成「在整个诊断模块里存在」。
  * @returns {string} 四段源码
  */
@@ -56,7 +56,7 @@ const netsAll = () => fs.readFileSync("src/routes/debug-nets.ts", "utf8");
  * @returns {string} 四段源码
  */
 const debugAll = () =>
-  ["src/routes/debug.ts", "src/routes/debug-tables.ts", "src/routes/debug-nets.ts", "src/routes/debug-actions.ts"]
+  ["src/routes/debug.ts", "src/routes/debug-nets.ts"]
     .map((f) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : ""))
     .join("\n");
 import * as W from "./_bundle.mjs";
@@ -4102,8 +4102,8 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   W.refreshCfHttp("dedupe.test", ctx);
   eq("刚探过一次就不再立刻重探（负缓存 20 秒）", launches.length, 1);
 
-  const tfSrc = fs.readFileSync("src/core/tf.ts", "utf8");
-  const tfImpl272 = fs.readFileSync("src/core/transport-tunnelfetch.ts", "utf8");
+  const tfSrc = fs.readFileSync("src/core/transport.ts", "utf8");
+  const tfImpl272 = fs.readFileSync("src/core/transport.ts", "utf8");
   ok("probeTf 的实现在传输层里，且整段包在超时里", tfSrc.includes("PROBE_BUDGET_MS") && tfImpl272.includes("withTimeout(work, timeoutMs"));
   const h80 = fs.readFileSync("src/core/http80.ts", "utf8");
   ok("probeHttp80 用 splitRelay 解析中继", /relay \? splitRelay\(relay, 80\)/.test(h80));
@@ -4223,7 +4223,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   ok("shadowRate 文档不再举「显示 10 实际 0」这个错例", !uSrc.includes("实际 0"));
 
   // 4) RTT 表有 5 列，"暂无数据" 必须跨 5 列
-  const pSrc = fs.readFileSync("src/views/panel-stats.ts", "utf8");
+  const pSrc = fs.readFileSync("src/views/panel.ts", "utf8");
   ok("「暂无数据」跨满 RTT 表的 5 列", pSrc.includes("<td colspan=5>暂无数据</td>"));
 }
 
@@ -4293,7 +4293,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   // 中继地址：IPv6 字面量自带冒号，split(":") 会把它拆成两截
   ok("splitRelay 认得 [v6]:port", JSON.stringify(W.splitRelay("[2a06:98c0::1]:443", 443)) === '["2a06:98c0::1",443]', true);
   ok("splitRelay 认得不带端口的裸 IPv6", JSON.stringify(W.splitRelay("2a06:98c0::1", 443)) === '["2a06:98c0::1",443]', true);
-  const tfImpl271 = fs.readFileSync("src/core/transport-tunnelfetch.ts", "utf8");
+  const tfImpl271 = fs.readFileSync("src/core/transport.ts", "utf8");
   ok(
     "传输层用 splitRelay 拆中继（代码里不再有 lastIndexOf，注释里留历史说明不算）",
     tfImpl271.includes("splitRelay(relay, 443)") && !/^\s*const i = relay\.lastIndexOf/m.test(tfImpl271),
@@ -7040,7 +7040,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 
   const srcDbg248 = debugAll();
   ok("转发分支不再无条件写 ok: true", !srcDbg248.includes("return json({ ok: true, burn: await resp.json() })"));
-  const srcMeter275 = fs.readFileSync("src/routes/debug-meter.ts", "utf8");
+  const srcMeter275 = fs.readFileSync("src/routes/debug.ts", "utf8");
   ok("转发分支带出 DO 状态码", srcMeter275.includes("ok: resp.ok, doStatus: resp.status"));
   ok("六个转发分支已交给 DebugMeterProbes", srcDbg248.includes("METER_PROBES.run(c, url, id)") && !srcDbg248.includes("searchParams.get(\"burn\")"));
   ok("回填分支用 seedOk", srcDbg248.includes("let seedOk = false;") && srcDbg248.includes("return json({ ok: seedOk, doStatus: seedStatus, seeded });"));
@@ -7848,11 +7848,17 @@ ok("首包上限确实比数据面短", W.FIRST_UP_MS < W.UP_STALL_MS);
   ok("gateway 承认自己不能落中继", W.TRANSPORTS.get("gateway").relayAware === false);
   const gw271 = await W.TRANSPORTS.get("gateway").probe("example.com", "1.2.3.4:443", "/", 500);
   ok("gateway 遇到中继会如实报错而不是静默直连", gw271.ok === false && String(gw271.err).includes("relay"));
-  const tfSrc271 = fs.readFileSync("src/core/tf.ts", "utf8");
-  ok("probeTf 自己不再 import tunnelfetch", !tfSrc271.includes('from "tunnelfetch"'));
-  ok("probeTf 通过注册表取传输", tfSrc271.includes("TRANSPORTS.get("));
-  const implSrc271 = fs.readFileSync("src/core/transport-tunnelfetch.ts", "utf8");
-  ok("tunnelfetch 的实现搬进了专用模块", implSrc271.includes('import { Client } from "tunnelfetch"'));
+  const tfSrc271 = fs.readFileSync("src/core/transport.ts", "utf8");
+  ok("probeTf 门面走注册表，不自己 new Client", tfSrc271.includes("TRANSPORTS.get(") && /export async function probeTf\(/.test(tfSrc271));
+  ok("业务侧调用文件不直接 import tunnelfetch", !fs.readFileSync("src/store/meter-diagnostics.ts", "utf8").includes("tunnelfetch"));
+  // 7.309 把抽象、两个实现与门面合进了同一个文件；真正要紧的不变量是「全仓只有一处碰这个库」
+  const tfUsers271 = [];
+  for (const f of fs.readdirSync("src", { recursive: true })) {
+    const q = String(f).replace(/\\/g, "/");
+    if (!q.endsWith(".ts")) continue;
+    if (fs.readFileSync("src/" + q, "utf8").includes('from "tunnelfetch"')) tfUsers271.push(q);
+  }
+  eq("全仓只有一个文件 import tunnelfetch", tfUsers271.join(","), "core/transport.ts");
   const pkg271 = JSON.parse(fs.readFileSync("package.json", "utf8"));
   ok("tunnelfetch 是声明的依赖（不再是隐式依赖）", Boolean(pkg271.dependencies && pkg271.dependencies.tunnelfetch));
   const regSrc271 = fs.readFileSync("src/core/transport.ts", "utf8");
@@ -8024,7 +8030,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   const dbgSrc275 = debugAll().split(/\r?\n/).join("\n");
   ok("debug.ts 只留一行委托", dbgSrc275.includes("METER_PROBES.run(c, url, id)"));
   ok("debug.ts 不再自己读这六个参数", !dbgSrc275.includes("searchParams.get(\"burn\")") && !dbgSrc275.includes("searchParams.get(\"burnjs\")") && !dbgSrc275.includes("searchParams.get(\"crypto\")"));
-  const dmSrc275 = fs.readFileSync("src/routes/debug-meter.ts", "utf8");
+  const dmSrc275 = fs.readFileSync("src/routes/debug.ts", "utf8");
   ok("派发路径带出真实状态码", dmSrc275.includes("ok: resp.ok, doStatus: resp.status"));
   ok("派发路径统一用 withTimeout 包住 DO 调用", dmSrc275.includes("withTimeout(stub.fetch(") && dmSrc275.includes("spec.budgetMs"));
 }
@@ -8155,7 +8161,14 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   const aNets278 = netsAll();
   const cli278 = fs.readFileSync("src/store/meter-client.ts", "utf8");
   // 计数点唯一：`S.doCalls` 只在 `doFetch` 里自增，所以任何绕过它的 stub.fetch 都会让 /health 少记一块
-  ok("debug.ts 不再直接取 METER 存根", !/env\.METER\.get\(/.test(aSrc278));
+  // 合并后 DebugMeterProbes 与其余三段同住一个文件：只有它允许直接取 DO 存根（它要带自己的超时）
+  const probeSlice278 = (() => {
+    const i = aSrc278.indexOf("export class DebugMeterProbes");
+    const j = aSrc278.indexOf("// ---- 门面（对外导出面保持不变） ----");
+    return i < 0 ? "" : aSrc278.slice(i, j < 0 ? aSrc278.length : j);
+  })();
+  const rest278 = probeSlice278 ? aSrc278.split(probeSlice278).join("") : aSrc278;
+  ok("只有计量探测类直接取 METER 存根", probeSlice278.includes("METER") && !/env\.METER!?\.get\(/.test(rest278));
   ok("诊断模块六条 DO 读取全走 doFetch", (debugAll().match(/doFetch\(/g) || []).length === 6);
   ok("debug.ts 不再自己拼 connect", !/connect\(\{/.test(aSrc278));
   ok("debug.ts 不再引用 CONNECT_MS", !aSrc278.includes("CONNECT_MS"));
@@ -8384,15 +8397,23 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
 // —— 283：调试路由按「读 / 量 / 写」拆成三个组件（7.283） ——
 {
   const g = "283";
-  const orch = fs.readFileSync("src/routes/debug.ts", "utf8");
-  const tabs = fs.readFileSync("src/routes/debug-tables.ts", "utf8");
+  // 7.309 把「只读表 / 写操作 / 计量探测 / 编排」合进了同一个文件：按类与函数边界切片再判，
+  // 判据（编排层不读参数、只读层不建连、写层必过管理员）一条不变。
+  const whole283 = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const cut283 = (from, to) => {
+    const i = whole283.indexOf(from);
+    const j = to ? whole283.indexOf(to, i + 1) : -1;
+    return i < 0 ? "" : whole283.slice(i, j < 0 ? whole283.length : j);
+  };
+  const orch = cut283("export async function debug(", "");
+  const tabs = cut283("export class DebugTables", "// ---- 并入自 debug-actions.ts ----");
   const nets = netsAll();
-  const acts = fs.readFileSync("src/routes/debug-actions.ts", "utf8");
+  const acts = cut283("export class DebugActions", "// ---- 并入自 debug-meter.ts ----");
   // 编排层只按固定顺序调用三个组件，自己不再读任何参数：这条锁防的是「拆完之后又往编排里塞逻辑」
   ok(`[${g}] 编排层不再自己判断参数`, !orch.includes("searchParams.get(\"dd\")") && !orch.includes("searchParams.get(\"bench\")"));
   eq(`[${g}] 编排层按顺序调用十二个组件方法`, ["TABLES.read(", "NETS.bench(", "NETS.diag(", "NETS.rawProbe(", "ACTIONS.refill(", "ACTIONS.pinCurrent(", "NETS.http(", "METER_PROBES.run(", "NETS.tfb(", "NETS.tf(", "ACTIONS.restore(", "ACTIONS.seed(", "NETS.host("].every((x) => orch.includes(x)), true);
   ok(`[${g}] 编排层保持「只读在测量与写之前」`, orch.indexOf("TABLES.read(") < orch.indexOf("NETS.bench(") && orch.indexOf("NETS.bench(") < orch.indexOf("ACTIONS.refill("));
-  ok(`[${g}] 编排层不超 120 行`, orch.split(/\r?\n/).length <= 120);
+  ok(`[${g}] 编排层不超 120 行`, orch.length > 0 && orch.split(/\r?\n/).length <= 120);
   // 只读表：十一个分支都在这里，且不出现拨号/建连/写 KV 的能力
   eq(`[${g}] 只读表层持有十一个分支`, ["\"dd\"", "\"pss\"", "\"eg\"", "\"rt\"", "\"blk\"", "\"facts\"", "\"plan\"", "\"vt\"", "\"hl\"", "\"prefs\"", "\"cl\""].every((x) => tabs.includes("searchParams.get(" + x + ")")), true);
   ok(`[${g}] 只读表层不建连、不写状态`, !tabs.includes("SOCKET_DIALER.open(") && !tabs.includes("pxSet(") && !tabs.includes("flushPx(") && !tabs.includes("refillPool("));
@@ -9059,6 +9080,63 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("singbox 仍是可解析 JSON", (() => { try { JSON.parse(sb); return true; } catch { return false; } })(), "singbox 输出不是 JSON");
   eq("SUBVIEW 的 links 分发就是 renderLinks", W.SUBVIEW.render({ env: env308, url: url308, id: id308, host: "edge.example.com", learned: {}, regions: ["HK"] }, "links"), lk);
   eq("SUBVIEW 的 singbox 分发就是 renderSingbox", W.SUBVIEW.render({ env: env308, url: url308, id: id308, host: "edge.example.com", learned: {}, regions: ["HK"] }, "singbox"), sb);
+}
+
+// ===== 309. 三个家族并回单文件：传输层 / 面板 / 调试路由 =====
+// 7.271–7.308 那段「按体积把函数搬进新文件」的做法把文件数从 158 涨到 177，类只多 7 个。
+// 用户的口径是「减少文件数、增加类的数量」，于是从 7.297 起改成两件事：① 同段生命周期提基类；
+// ② 拆过头的同族合回去。本轮合掉三个家族，锁的是「合完之后能力还在、边界仍可分辨」。
+{
+  const g = "309";
+  const gone = [
+    "src/core/transport-types.ts",
+    "src/core/transport-tunnelfetch.ts",
+    "src/core/tf.ts",
+    "src/views/panel-admin.ts",
+    "src/views/panel-stats.ts",
+    "src/routes/debug-tables.ts",
+    "src/routes/debug-actions.ts",
+    "src/routes/debug-meter.ts",
+  ];
+  eq(`[${g}] 八份被并掉的文件都不在了`, gone.every((f) => !fs.existsSync(f)), true);
+
+  const tf = fs.readFileSync("src/core/transport.ts", "utf8");
+  eq(`[${g}] 传输层：契约、两个实现、注册表与门面同住一个文件`,
+    ["export interface TransportProbe", "export interface ProbeTransport", "export class TunnelFetchTransport",
+      "export class GatewayFetchTransport", "export class TransportRegistry", "export async function probeTf",
+      "export const TRANSPORTS"].every((x) => tf.includes(x)), true);
+  ok(`[${g}] 传输层里没有循环：实现不再 import 别的 transport 文件`,
+    !/from "\.\/transport-(types|tunnelfetch)"/.test(tf));
+
+  const panel = fs.readFileSync("src/views/panel.ts", "utf8");
+  eq(`[${g}] 面板：五个渲染入口都在 panel.ts`,
+    ["renderHtml", "renderLogin", "renderAdminHint", "renderAdmin", "renderStatsHtml"].every((x) => new RegExp("export function " + x + "\\(").test(panel)), true);
+  ok(`[${g}] 页面壳一次性从 panel.ts 取齐（不再分三条 import）`,
+    fs.readFileSync("src/views/pageview.ts", "utf8").includes('from "./panel"'));
+
+  const dbg = fs.readFileSync("src/routes/debug.ts", "utf8");
+  eq(`[${g}] 调试路由：四段都在一个文件`,
+    ["export class DebugTables", "export class DebugActions", "export class DebugMeterProbes", "export async function debug("].every((x) => dbg.includes(x)), true);
+  eq(`[${g}] 上下文类型只声明一次`, (dbg.match(/type DebugCtx = RouteCtx & \{ id: string \};/g) || []).length, 1);
+  ok(`[${g}] 调试路由仍把测量放在另一个文件`, fs.existsSync("src/routes/debug-nets.ts"));
+
+  // 文件数：合完之后应当明显少于 7.296 那轮的 176
+  const tsFiles = [];
+  const collect = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const q = dir + "/" + e.name;
+      if (e.isDirectory()) collect(q);
+      else if (e.name.endsWith(".ts")) tsFiles.push(q);
+    }
+  };
+  collect("src");
+  ok(`[${g}] src 下的 ts 文件数已降到 125 以内（本次合并前是 130）`, tsFiles.length <= 125);
+
+  // 能力面：三个单例与两个传输都还在窗口里
+  ok(`[${g}] 三个调试单例仍可用`,
+    W.TABLES instanceof W.DebugTables && W.ACTIONS instanceof W.DebugActions && W.METER_PROBES instanceof W.DebugMeterProbes);
+  ok(`[${g}] 注册表仍能取到两个实现`,
+    W.TRANSPORTS.names().length === 2 && Boolean(W.TRANSPORTS.get("gateway")) && Boolean(W.TRANSPORTS.get("tunnelfetch")));
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
