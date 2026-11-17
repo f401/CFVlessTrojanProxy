@@ -236,6 +236,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `MeterDiagnostics` | `src/store/meter-diagnostics.ts` | 计量 DO 的诊断端点（stage/tim/iter/burn/burnjs/crypto/tfb/tf）：每个端点一个方法，不落盘、不碰账目 |
 | `MeterState` | `src/store/meter-state.ts` | 账本本体：五件账本 + 七张事实表 + 代号；`adopt()`/`restore()` 把落盘口径逐项映射到内存字段，`parts()` 反着来，`snapshot()`/`rollback()` 供 `/add` 落盘失败时回滚 |
 | `MeterAdd` | `src/store/meteradd.ts` | `/add` 的合并器：日计数、错误环、连接观测、判定表、六张事实表、中继存活度、节点快照、用量各一个私有方法，`apply()` 只负责顺序；`FactMerger` 是它的私有成员，不再需要模块级单例 |
+| `MeterEndpoints` | `src/store/meter.ts` | 计量 DO 的端点实现：`/add`、`/seed`、`/set` 三个会改账本的（各自处理回滚）与 `/cl`/`/hl`/`/vt`/`/cnt` 四个只读的；`Meter` 只留串行化、落盘与生命周期 |
 | `VerdictTable`（`VT`） | `src/route/verdict.ts` | 判定表（站点 × 通道）：状态机、TTL/上限、弱证据不得冲掉强证据、通配目标拒写；公开类型与 `VT_TTL_MS` 同住这一个文件，调用方直接用 `VT.set(...)`/`VT.bad(...)`（7.300 删掉了十二个同名转发函数） |
 | `Judge`（`JUDGE`） | `src/route/judge.ts` | 流量侧弱证据的累加与落判定 |
 | `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级：三张按站点的内存表（`pin`/`rot`/`seq`）+ 排序链 `neg → pos → score → vAt` |

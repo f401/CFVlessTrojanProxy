@@ -9555,6 +9555,59 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("旧日期的计数被丢掉", [m319b.dayCounter.d, m319b.dayCounter.x], ["2999-01-01", 5]);
 }
 
+/**
+ * 第 320 组：计量 DO 的端点实现从 `Meter` 里拆成一个类（同一个文件里）
+ *
+ * 为什么这么断言：这一组要证的不是「代码搬家了」，而是「搬完之后每个人都还只干自己的事」——
+ * `Meter` 只剩串行化与落盘，端点类拿的是账本 + DO 状态 + 落盘回调三样，
+ * 而 `MeterEndpoints` 是同一个文件里的第二个类（用户要求「减少文件数、增加类的数量」）。
+ */
+{
+  const msrc = fs.readFileSync("src/store/meter.ts", "utf8");
+  ok("[320] 端点实现是同一个文件里的第二个类", msrc.includes("export class MeterEndpoints"));
+  ok("[320] 不再有独立的端点文件", !fs.existsSync("src/store/meter-endpoints.ts"));
+  ok("[320] 单文件仍受 560 行上限", msrc.split(/\r?\n/).length <= 560);
+
+  // Meter 只剩生命周期：字段 + 构造 + loadShards + save + fetch
+  ok("[320] Meter 持有端点类字段", msrc.includes("private readonly endpoints: MeterEndpoints;"));
+  ok("[320] 端点在构造函数里装配", msrc.includes("this.endpoints = new MeterEndpoints(this.ledger, this.state, () => this.save());"));
+  const meterBody = msrc.slice(msrc.indexOf("export class Meter {"), msrc.indexOf("export class MeterEndpoints"));
+  ok("[320] Meter 不再自己实现端点分发", !meterBody.includes("async handle(req: Request)"));
+  ok("[320] Meter 不再自己处理 /add", !meterBody.includes("async add(req: Request)"));
+  ok("[320] Meter 不再自己序列化用量", !meterBody.includes("json(): Response"));
+
+  // 端点类：八个方法各就各位
+  const ep = msrc.slice(msrc.indexOf("export class MeterEndpoints"));
+  for (const m of ["handle(", "add(req", "seed(req", "set(req", "read(p", "readBody(req", "json()", "earlierFirst("]) {
+    ok(`[320] 端点类有 ${m}`, ep.includes(` ${m}`));
+  }
+  ok("[320] 合并器挂在端点类上", ep.includes("private readonly adder = new MeterAdd();"));
+  ok("[320] 端点用注入的落盘回调", ep.includes("await this.persist();"));
+  ok("[320] 端点不持有 Meter 本身", !ep.includes("MeterHost"));
+
+  // 行为面：搬完之后分派与累计行为一位不变
+  const d320 = mkDO();
+  await d320.m.fetch(
+    new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 3, down: 4, conns: 1 }) }),
+  );
+  await d320.m.fetch(
+    new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 2, down: 6, conns: 1 }) }),
+  );
+  const j320 = await (await d320.m.fetch(new Request("https://m/get"))).json();
+  eq("[320] 两次 /add 仍累加", [j320.up, j320.down, j320.conns], [5, 10, 2]);
+  const c320 = await (await d320.m.fetch(new Request("https://m/cnt"))).json();
+  eq("[320] /cnt 仍返回四张表", Object.keys(c320).sort(), ["c", "e", "g", "s"]);
+  const v320 = await (await d320.m.fetch(new Request("https://m/vt"))).json();
+  eq("[320] /vt 仍返回七张事实表", Object.keys(v320).sort(), ["blk2", "dead", "dns", "eg", "hl", "ps", "vt"]);
+  // /set 只在任一维度更大时写：这里 conns=9 比当前 2 大，应当恢复
+  await d320.m.fetch(
+    new Request("https://m/set", { method: "POST", body: JSON.stringify({ up: 5, down: 10, conns: 9 }) }),
+  );
+  const s320 = await (await d320.m.fetch(new Request("https://m/get"))).json();
+  eq("[320] /set 只按更大的连接数恢复", s320.conns, 9);
+  eq("[320] /set 不把已更大的字节数改小", [s320.up, s320.down], [5, 10]);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
