@@ -183,7 +183,7 @@ export { parseProxyIp } from "./proxy/dial";
 export { cfHttpCode, refreshCfHttp } from "./proxy/cfverdict";
 
 export { handleDns, trojanUdpFrame } from "./proxy/dns";
-export { handleUpgrade } from "./proxy/session";
+export { ProxySession, handleUpgrade } from "./proxy/session";
 
 
 

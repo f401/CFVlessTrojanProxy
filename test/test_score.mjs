@@ -5446,7 +5446,8 @@ const srcSess211 = fs.readFileSync("src/proxy/session.ts", "utf8");
 const srcAtt211 = fs.readFileSync("src/proxy/attacher.ts", "utf8");
 ok("上游写上限常量是 30 秒", srcUtil211.includes("export const UP_STALL_MS = 30000;"));
 ok("ustall 已登记（否则计数会被静默丢掉）", srcState211.includes('"ustall",'));
-ok("泵里改调 upWrite", srcSess211.includes("return st.upWrite(chunk);"));
+// 泵（现在是 ProxySession.feed）里仍走 upWrite；chunk 类型收窄后要显式转成 Uint8Array 再交给它。
+ok("泵里改调 upWrite", srcSess211.includes("st.upWrite(chunk instanceof Uint8Array ? chunk : toU8(chunk))"));
 ok("泵里不再直接写 writer", srcSess211.includes("w.write(chunk)") === false);
 ok("首包写也走 upWrite", srcAtt211.includes("await conn.upWrite(payload, FIRST_UP_MS);"));
 ok("blackhole 的超时消息可辨认", srcConn211.includes("withTimeout(p, ms, \"up stall\")"));
@@ -7444,7 +7445,7 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   ok("attacher 的客户端连接叫 clientSocket", attSrc.includes("clientSocket: WebSocketLike") && !/\bws:\s*WebSocketLike/.test(attSrc), "ws");
   ok("拨号器与地区选择器也用 conn", dSrc.includes("conn: Connection") && rSrc.includes("conn: Connection"), "dialer/region");
   ok("计量 DO 的状态字段叫 state", mSrc.includes("state: DurableObjectState;") && !mSrc.includes("this.st."), "meter");
-  ok("会话把字段名对上了（clientSocket / conn）", fs.readFileSync("src/proxy/session.ts", "utf8").includes("clientSocket: serverWS, conn: st"), "session");
+  ok("会话把字段名对上了（clientSocket / conn）", (() => { const x = fs.readFileSync("src/proxy/session.ts", "utf8"); return x.includes("clientSocket: this.serverWS") && x.includes("conn: st") && x.includes("private readonly conn: Connection;"); })(), "session");
   ok("命名门禁的 ALLOW 覆盖了线协议键", gateSrc.includes('["at", "观测时刻（线协议键）"]') && gateSrc.includes('["v6", "IPv6 观测计数（线协议键）"]'), "allow");
   ok("登记过的短名要求文档写明含义", docSrc.includes("## 7. 线协议键（登记例外）") && docSrc.includes("| `at` |") && docSrc.includes("| `v6` |"), "doc");
   ok("文档写明新增短名两处都要登记", docSrc.includes("`tools/check-names.mjs`") && docSrc.includes("`ALLOW`"), "doc2");
@@ -9439,6 +9440,56 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("管理密钥太短时拒绝", shortKey.status === 503);
   const notAdmin = await W.admin(mkAdm317({ adminKey: "0123456789abcdef" }, "health", [], "GET"));
   ok("非 /admin 前缀直接 404", notAdmin.status === 404);
+}
+
+/* ---------- 318. 数据面会话是一个对象：握手 / 首帧解析 / 拨号 / 收尾各一个方法 ---------- */
+{
+  const sessSrc = fs.readFileSync("src/proxy/session.ts", "utf8");
+  ok("会话是类，入口只做创建与一次执行", /export async function handleUpgrade\(request: Request, env: Env, ctx: ExecutionContext\): Promise<Response> \{\s*return new ProxySession\(request, env, ctx\)\.run\(\);\s*\}/m.test(sessSrc));
+  ok("入口函数里不再有管道代码", sessSrc.slice(sessSrc.indexOf("export async function handleUpgrade")).indexOf("pipeTo") < 0);
+  ok("四段各自成方法", ["feed", "parseHead", "dial", "finish"].every((n) => sessSrc.includes("private async " + n + "(") || sessSrc.includes("private " + n + "(")));
+  ok("拨号的两条路各自成方法", sessSrc.includes("private async dialRegion(") && sessSrc.includes("private async dialFallback("));
+  ok("连接对象是它的字段", sessSrc.includes("private readonly conn: Connection;"));
+  ok("已连上就只转发，不再解析协议头", sessSrc.indexOf("if (st.sock) return st.upWrite(") < sessSrc.indexOf("await this.parseHead("));
+  ok("地区分流先于拨号策略", sessSrc.indexOf("if (this.ipRegion) return this.dialRegion(") < sessSrc.indexOf("return await DIALER.open("));
+  ok("数据面不反向依赖判定层", sessSrc.indexOf('from "../route/') < 0 && sessSrc.indexOf("from \"../route") < 0);
+
+  // 行为面：参数解析搬进了构造函数，用最小环境构造一次就能验证（构造过程没有任何 I/O）。
+  const RealPair = globalThis.WebSocketPair;
+  class FakeWS318 {
+    constructor() {
+      this.readyState = 1;
+      this.bufferedAmount = 0;
+      this.sent = [];
+    }
+    accept() {}
+    send(d) {
+      this.sent.push(d);
+    }
+    close() {}
+  }
+  globalThis.WebSocketPair = class {
+    constructor() {
+      this[0] = new FakeWS318();
+      this[1] = new FakeWS318();
+    }
+  };
+  const ps318 = new W.ProxySession(
+    new Request("https://edge.test/x?mode=lat&px=1&sz=b&rg=hk&ip=phone-1&rx=1.2.3.4:443"),
+    {},
+    { waitUntil: () => {}, passThroughOnException: () => {} },
+  );
+  eq("模式取自查询串", ps318.mode, "lat");
+  eq("强制中转开关", ps318.pxForce, 1);
+  eq("目标流量档位", ps318.conn.targetBytes, W.SC.SZ_B);
+  eq("地区参数转成大写", ps318.ipRegion, "HK");
+  eq("标签截断后留用", ps318.ipTag, "phone-1");
+  eq("诊断钉住的中继", ps318.conn.forceRelayIp, "1.2.3.4:443");
+  const ps318b = new W.ProxySession(new Request("https://edge.test/x?mode=bogus&px=0&rx=bad host!"), {}, {});
+  eq("非法模式回落到吞吐", ps318b.mode, "tput");
+  eq("强制直连开关", ps318b.pxForce, -1);
+  eq("非法 ?rx= 被丢掉", ps318b.conn.forceRelayIp, "");
+  globalThis.WebSocketPair = RealPair;
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
