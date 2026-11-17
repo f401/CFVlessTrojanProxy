@@ -6,13 +6,24 @@ import { logErr } from "../nodes/metrics";
 import { pxPolicy } from "./probe";
 import { freezeNode, isBlack, isFrozen, STATS, CANDS } from "../nodes/score";
 import { S } from "../core/state";
-import { ROTATION } from "./rotation";
+import type { Rotation } from "./rotation";
 
 /**
  * 失败账本：`onFail` 只改内存里的分数与窗口，`bumpFail` 额外给节点记一次真实失败，
  * `resetFail` 在连接真的拿到整页时把窗口清掉（否则一次抖动会压住一整轮）。
  */
 export class FailBook {
+  /**
+   * 换节点判定器（`./rotation` 的 `Rotation`，无字段、状态全在 `S`）。
+   *
+   * 为什么由构造注入而不是自己去 `new`：连到阈值要不要换节点，是「挑谁」这条链上的
+   * 决策，而这个类只管记账。7.356 前它直接引模块级 `ROTATION`，于是读 `Selector`
+   * 的人看不出「换节点」这件事其实挂在门面上；现在门面持有唯一实例并传进来，
+   * 一个 `Selector` 里的记账与换节点判定用的是同一份状态入口。
+   * @param rotation 门面持有的换节点判定器
+   */
+  constructor(private readonly rotation: Rotation) {}
+
   /**
    * 失败处理：记账 → 必要时回滚/换节点。
    * 站点级试探（Connection.hostTrial）的失败只冻结它自己，不动主游标，也不进全局失败记忆。
@@ -89,8 +100,9 @@ export class FailBook {
       S.prev.tput = "";
       S.prev.lat = "";
     }
-    ROTATION.maybeSwitch(env, "lat");
-    ROTATION.maybeSwitch(env, "tput");
+    // 到量了：两个模式各自重新评估一次（判定在 Rotation 里，这里只触发）
+    this.rotation.maybeSwitch(env, "lat");
+    this.rotation.maybeSwitch(env, "tput");
   }
 
   /** 链路健康：清零计数。成功样本由 Connection.flush 在收尾时统一记一次。 */

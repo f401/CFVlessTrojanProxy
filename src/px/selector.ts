@@ -3,12 +3,12 @@
 // 失败怎么记（./failbook 的 `FailBook`）；这个文件只做委托与再导出，不再有算法。
 
 import { PICK } from "./pickpath";
-import { ROTATION } from "./rotation";
+import { Rotation } from "./rotation";
 import { FailBook } from "./failbook";
 import type { PickState } from "./pickpath";
 
 export { PICK } from "./pickpath";
-export { ROTATION, dwellOf } from "./rotation";
+export { Rotation, dwellOf } from "./rotation";
 export { FailBook } from "./failbook";
 export type { PickState } from "./pickpath";
 
@@ -18,10 +18,16 @@ export type { PickState } from "./pickpath";
  */
 export class Selector {
   /**
+   * 换节点判定器：什么条件算「该换了」、留在新节点上至少多久，都封在 `Rotation` 里。
+   * 7.356 前它是模块级 `ROTATION`，且失败记账器直接引它 —— 读门面看不出这件
+   * 决策挂在谁身上。现在门面持有唯一实例，并把同一个实例交给记账器。
+   */
+  private readonly rotation = new Rotation();
+  /**
    * 失败记账器：罚多重、什么时候清、连带要不要换节点都封在 `FailBook` 里。
    * 7.347 前它是模块级 `FAILS`，读门面时看不出谁在用它、用了几次。
    */
-  private readonly fails = new FailBook();
+  private readonly fails = new FailBook(this.rotation);
   /** 按国家挑一个节点（地区硬要求：调用方不得回落到直连/全球） */
   async region(env: Env, cc: string | null, mode: Mode = "tput", avoid = "") {
     // 实现见 PickPath.region：这个类只做委托。
@@ -42,7 +48,7 @@ export class Selector {
   /** 重新评估是否该换节点（cron 与失败路径共用） */
   maybeSwitch(env: Env, mode: Mode) {
     // 实现见 Rotation.maybeSwitch：这个类只做委托。
-    return ROTATION.maybeSwitch(env, mode);
+    return this.rotation.maybeSwitch(env, mode);
   }
 
   /**
@@ -103,7 +109,7 @@ export class Selector {
   /** cron 扫描收尾：重算两个模式的游标，再做定时轮换 */
   afterScan(env: Env) {
     // 实现见 Rotation.afterScan：这个类只做委托。
-    return ROTATION.afterScan(env);
+    return this.rotation.afterScan(env);
   }
 
   /**
@@ -113,7 +119,7 @@ export class Selector {
    */
   sched(env: Env) {
     // 实现见 Rotation.sched：这个类只做委托。
-    return ROTATION.sched(env);
+    return this.rotation.sched(env);
   }
 }
 

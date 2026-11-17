@@ -106,6 +106,3 @@ export class Rotation {
     S.seedDirty = true;
   }
 }
-
-/** 进程内唯一实例 */
-export const ROTATION = new Rotation();

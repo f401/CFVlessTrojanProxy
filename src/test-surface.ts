@@ -56,7 +56,7 @@ export { EMPTY_CLOSE_BAD, NodeStatsTable, STATS, TEN_MB, ZERO_STAT } from "./nod
 export { SC } from "./core/const";
 export { SEL, Selector } from "./px/selector";
 export { FailBook } from "./px/failbook";
-export { dwellOf } from "./px/selector";
+export { Rotation, dwellOf } from "./px/selector";
 export { PICK, PickPath } from "./px/pickpath";
 export { ThompsonPicker } from "./px/ts";
 export { SitePick, PathPrefs } from "./px/pickpath";
