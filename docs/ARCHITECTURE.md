@@ -267,6 +267,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `ConnSettle`（`SETTLE`） | `src/proxy/conn-settle.ts` | 一条连接结束时的结算流水线：收尾采样 → pStall 占比 → 节点观测聚合 → 首眼观测（含站点画像与通道证据）→ PEND 记账；只读 `SettleView`，状态仍归 `Connection` |
 | `SampleWindow` | `src/proxy/connection.ts` | 一条连接的两个采样窗口边界（节点级 800ms 窗口 / 5 秒出样本间隔 / 站点级 60 秒）：窗口太短或间隔未到都不推进起点，小样本只推进起点不交样本 |
 | `ClientFlow` | `src/proxy/connection.ts` | 客户端这一侧的流量控制：唯一读 `ws.bufferedAmount` 的地方，也是唯一区分「客户端自己走了」（记 `ccut`）与「真卡死」（记 `stall`）的地方 |
+| `DebugSuite`（`DEBUG`） | `src/routes/debug.ts` | 调试路由四个组件的持有者（读表 / 测网 / 写操作 / 计量探测）：收成一个对象后，「这次调试动用了哪些能力」在同一处读完，也是判断「某个参数会不会真的拨号」的入口 |
 | `DebugMeterProbes` | `src/routes/debug.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
 | `DebugTables` | `src/routes/debug.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：只读表、不拨号、不改状态 |
 | `DebugNets` | `src/routes/debug-nets.ts` | 会对外拨号的诊断分支门面：七个分支在四个组件里，这里只按「只读 → 测速 → 诊断 → 探活 → 抓源 → 钉住 → 明文 HTTP → 判定批 → 真握手 → 回填 → seed → 兜底」的顺序派发（顺序变了，`?diag=x&refill=1` 会先花一次抓源） |

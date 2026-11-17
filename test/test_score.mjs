@@ -7042,7 +7042,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   ok("转发分支不再无条件写 ok: true", !srcDbg248.includes("return json({ ok: true, burn: await resp.json() })"));
   const srcMeter275 = fs.readFileSync("src/routes/debug.ts", "utf8");
   ok("转发分支带出 DO 状态码", srcMeter275.includes("ok: resp.ok, doStatus: resp.status"));
-  ok("六个转发分支已交给 DebugMeterProbes", srcDbg248.includes("METER_PROBES.run(c, url, id)") && !srcDbg248.includes("searchParams.get(\"burn\")"));
+  ok("六个转发分支已交给 DebugMeterProbes", srcDbg248.includes("DEBUG.probes.run(c, url, id)") && !srcDbg248.includes("searchParams.get(\"burn\")"));
   ok("回填分支用 seedOk", srcDbg248.includes("let seedOk = false;") && srcDbg248.includes("return json({ ok: seedOk, doStatus: seedStatus, seeded });"));
   ok("钉节点分支用 fx.ok 判定落盘", srcDbg248.includes('anchor: fx.ok ? "ok" : "fail"'));
 }
@@ -8021,14 +8021,14 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   eq("没有 METER 绑定时报 no METER", noMeter275.body.error, "no METER");
 
   // ⑥ 结构断言：规格表是数据、类持有派发、debug.ts 只剩一行委托
-  ok("暴露了 DebugMeterProbes 单例", W.METER_PROBES && typeof W.METER_PROBES.run === "function");
-  eq("规格表六行对应六个端点", W.METER_PROBES.specs.length, 6);
+  ok("暴露了 DebugMeterProbes 单例", W.DEBUG.probes && typeof W.DEBUG.probes.run === "function");
+  eq("规格表六行对应六个端点", W.DEBUG.probes.specs.length, 6);
   ok(
     "规格表覆盖六个参数名",
-    ["burn", "stage", "tim", "iter", "burnjs", "crypto"].every((p) => W.METER_PROBES.specs.some((x) => x.param === p)),
+    ["burn", "stage", "tim", "iter", "burnjs", "crypto"].every((p) => W.DEBUG.probes.specs.some((x) => x.param === p)),
   );
   const dbgSrc275 = debugAll().split(/\r?\n/).join("\n");
-  ok("debug.ts 只留一行委托", dbgSrc275.includes("METER_PROBES.run(c, url, id)"));
+  ok("debug.ts 只留一行委托", dbgSrc275.includes("DEBUG.probes.run(c, url, id)"));
   ok("debug.ts 不再自己读这六个参数", !dbgSrc275.includes("searchParams.get(\"burn\")") && !dbgSrc275.includes("searchParams.get(\"burnjs\")") && !dbgSrc275.includes("searchParams.get(\"crypto\")"));
   const dmSrc275 = fs.readFileSync("src/routes/debug.ts", "utf8");
   ok("派发路径带出真实状态码", dmSrc275.includes("ok: resp.ok, doStatus: resp.status"));
@@ -8411,8 +8411,8 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   const acts = cut283("export class DebugActions", "// ---- 并入自 debug-meter.ts ----");
   // 编排层只按固定顺序调用三个组件，自己不再读任何参数：这条锁防的是「拆完之后又往编排里塞逻辑」
   ok(`[${g}] 编排层不再自己判断参数`, !orch.includes("searchParams.get(\"dd\")") && !orch.includes("searchParams.get(\"bench\")"));
-  eq(`[${g}] 编排层按顺序调用十二个组件方法`, ["TABLES.read(", "NETS.bench(", "NETS.diag(", "NETS.rawProbe(", "ACTIONS.refill(", "ACTIONS.pinCurrent(", "NETS.http(", "METER_PROBES.run(", "NETS.tfb(", "NETS.tf(", "ACTIONS.restore(", "ACTIONS.seed(", "NETS.host("].every((x) => orch.includes(x)), true);
-  ok(`[${g}] 编排层保持「只读在测量与写之前」`, orch.indexOf("TABLES.read(") < orch.indexOf("NETS.bench(") && orch.indexOf("NETS.bench(") < orch.indexOf("ACTIONS.refill("));
+  eq(`[${g}] 编排层按顺序调用十二个组件方法`, ["DEBUG.tables.read(", "DEBUG.nets.bench(", "DEBUG.nets.diag(", "DEBUG.nets.rawProbe(", "DEBUG.actions.refill(", "DEBUG.actions.pinCurrent(", "DEBUG.nets.http(", "DEBUG.probes.run(", "DEBUG.nets.tfb(", "DEBUG.nets.tf(", "DEBUG.actions.restore(", "DEBUG.actions.seed(", "DEBUG.nets.host("].every((x) => orch.includes(x)), true);
+  ok(`[${g}] 编排层保持「只读在测量与写之前」`, orch.indexOf("DEBUG.tables.read(") < orch.indexOf("DEBUG.nets.bench(") && orch.indexOf("DEBUG.nets.bench(") < orch.indexOf("DEBUG.actions.refill("));
   ok(`[${g}] 编排层不超 120 行`, orch.length > 0 && orch.split(/\r?\n/).length <= 120);
   // 只读表：十一个分支都在这里，且不出现拨号/建连/写 KV 的能力
   eq(`[${g}] 只读表层持有十一个分支`, ["\"dd\"", "\"pss\"", "\"eg\"", "\"rt\"", "\"blk\"", "\"facts\"", "\"plan\"", "\"vt\"", "\"hl\"", "\"prefs\"", "\"cl\""].every((x) => tabs.includes("searchParams.get(" + x + ")")), true);
@@ -8424,7 +8424,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok(`[${g}] 测网层的判定批走 doFetch`, nets.includes("doFetch(c.env, \"tf-probe\""));
   // 写层：四个分支都必须先过 adminOnly（数量锁：少一个就意味着有条写操作不需要管理员）
   eq(`[${g}] 写层四个分支都先过管理员检查`, acts.split("await adminOnly(c)").length - 1, 4);
-  eq(`[${g}] 三个组件各导出单例`, ["export const TABLES", "export const NETS", "export const ACTIONS"].every((x) => (tabs + nets + acts).includes(x)), true);
+  eq(`[${g}] 三个组件由组合根持有（不再各导出一个模块级单例）`, ["readonly tables = new DebugTables();", "readonly nets = new DebugNets();", "readonly actions = new DebugActions();"].every((x) => whole283.includes(x)), true);
   // 行为：缺管理员时写分支直接拒绝，不会真的去抓源
   const env283 = { uuid: "11111111-1111-1111-1111-111111111111" };
   const mk283 = (q) => ({
@@ -8767,10 +8767,11 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   ok("五个类都在同一个文件里",
     ["export class DebugNets", "export class DebugBench", "export class DebugDiag", "export class DebugProbe", "export class DebugTf"]
       .every((n) => src.includes(n)), "");
-  ok("五个单例都在",
-    ["const NETS = new DebugNets();", "const BENCH = new DebugBench();", "const DIAGONE = new DebugDiag();",
-      "const PROBES = new DebugProbe();", "const TFPROBES = new DebugTf();"]
-      .every((n) => src.includes(n)), "");
+  // 四个单例里 NETS 搬进了组合根，其余三个（测速/探活/真握手）仍在本文件，服务内部复用
+  ok("NETS 已搬进组合根，其余三个仍在 debug-nets.ts",
+    !src.includes("const NETS = new DebugNets();") &&
+      ["const BENCH = new DebugBench();", "const DIAGONE = new DebugDiag();", "const PROBES = new DebugProbe();", "const TFPROBES = new DebugTf();"]
+        .every((n) => src.includes(n)), "");
   ok("上下文类型只声明一次", (src.match(/type DebugCtx = /g) || []).length === 1, "");
   // 只有两个类要管理员：改动状态的那两个分支（判定批与真握手不写状态，但会花 DO 的 CPU）
   ok("需要管理员的入口都过了 adminOnly", (src.match(/await adminOnly\(c\)/g) || []).length >= 2, "");
@@ -8779,7 +8780,7 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   const u0 = new URL("https://x.test/debug");
   eq("测速缺参返回 null", await W.BENCH.bench(u0), null);
   eq("原始探活缺参返回 null", await W.PROBES.rawProbe(u0), null);
-  ok("单例可判定", W.NETS instanceof W.DebugNets && W.BENCH instanceof W.DebugBench, "");
+  ok("单例可判定", W.DEBUG.nets instanceof W.DebugNets && W.BENCH instanceof W.DebugBench, "");
 }
 
 
@@ -9147,7 +9148,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
 
   // 能力面：三个单例与两个传输都还在窗口里
   ok(`[${g}] 三个调试单例仍可用`,
-    W.TABLES instanceof W.DebugTables && W.ACTIONS instanceof W.DebugActions && W.METER_PROBES instanceof W.DebugMeterProbes);
+    W.DEBUG.tables instanceof W.DebugTables && W.DEBUG.actions instanceof W.DebugActions && W.DEBUG.probes instanceof W.DebugMeterProbes);
   ok(`[${g}] 注册表仍能取到两个实现`,
     W.TRANSPORTS.names().length === 2 && Boolean(W.TRANSPORTS.get("gateway")) && Boolean(W.TRANSPORTS.get("tunnelfetch")));
 }
@@ -9333,6 +9334,33 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     Object.keys(t313.eg).length === 2 && t313.eg["203.0.113.9"].f === 4 && t313.dns["bad.example"] === undefined && t313.dns["example.com"].v === 1,
     JSON.stringify(t313));
   ok(`[${g}] 连不上表只收判死行（n>=2）`, t313.dead["198.51.100.4"] === undefined && t313.dead["198.51.100.5"].n === 3);
+}
+
+
+{
+  // 第 314 组：调试路由的四个模块级单例收进一个组合根。
+  // 收的理由不是「少几个名字」，而是它们只在一个地方按固定顺序出场：
+  // 分散成四个 export 时，读代码的人得自己拼「这次调试动用了哪些能力」，
+  // 也就看不出「点这个参数会不会真的拨号」。
+  const dbg = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const netsSrc = fs.readFileSync("src/routes/debug-nets.ts", "utf8");
+  ok("四个单例已收进组合根", ["export const TABLES = new DebugTables();", "export const ACTIONS = new DebugActions();", "export const METER_PROBES = new DebugMeterProbes();"].every((x) => !dbg.includes(x)), "");
+  ok("debug-nets.ts 不再自带 NETS", !netsSrc.includes("export const NETS = new DebugNets();"), "");
+  ok("组合根声明四个组件字段",
+    ["readonly tables = new DebugTables();", "readonly nets = new DebugNets();", "readonly actions = new DebugActions();", "readonly probes = new DebugMeterProbes();"]
+      .every((x) => dbg.includes(x)), "");
+  ok("组合根只有一个实例", (dbg.match(/export const DEBUG = new DebugSuite\(\);/g) || []).length === 1, String((dbg.match(/export const DEBUG = new DebugSuite\(\);/g) || []).length));
+  // 编排层必须经组合根出场：这样「一次调试用了什么」在同一个对象上可数
+  ok("编排层全部经组合根调用",
+    !/^\s+(TABLES|NETS|ACTIONS|METER_PROBES)\./m.test(dbg) && (dbg.match(/DEBUG\.(tables|nets|actions|probes)\./g) || []).length >= 13,
+    String((dbg.match(/DEBUG\.(tables|nets|actions|probes)\./g) || []).length));
+  eq("四个旧名字在测试窗口里都拿不到", [W.TABLES, W.NETS, W.ACTIONS, W.METER_PROBES].every((x) => x === undefined), true);
+  // 行为面：组合根持有的就是那四个实例，且规格表仍是只读常量
+  ok("组合根持有四个组件", W.DEBUG instanceof W.DebugSuite && W.DEBUG.tables instanceof W.DebugTables && W.DEBUG.nets instanceof W.DebugNets && W.DEBUG.actions instanceof W.DebugActions && W.DEBUG.probes instanceof W.DebugMeterProbes, "");
+  eq("计量探测的规格表是六个只读端点", W.DEBUG.probes.specs.length, 6);
+  ok("规格表是只读声明", dbg.includes("readonly specs: readonly ProbeSpec[]"), "");
+  eq("组合根是唯一实例", W.DEBUG === W.DEBUG, true);
+  ok("源码文件数仍在预算内", fs.readdirSync("src", { recursive: true }).filter((f) => String(f).endsWith(".ts")).length <= 113, "");
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

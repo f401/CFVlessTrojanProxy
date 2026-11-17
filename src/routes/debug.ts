@@ -1,7 +1,7 @@
 import { S } from "../core/state";
 import { vtDelta, vtLoad } from "../route/verdictsync";
 import { doFetch, PEND, restoreUsage } from "../store/index";
-import { NETS } from "./debug-nets";
+import { DebugNets } from "./debug-nets";
 import type { RouteCtx } from "../edge/types";
 import { cntView } from "../core/counter";
 import { json } from "../edge/respond";
@@ -116,8 +116,6 @@ export class DebugTables {
 }
 
 /** 只读诊断表的单例（无状态，但保持与其它诊断组件一致的调用形状） */
-export const TABLES = new DebugTables();
-
 // ---- 并入自 debug-actions.ts ----
 
 /**
@@ -241,8 +239,6 @@ export class DebugActions {
 }
 
 /** 会改状态的诊断操作单例 */
-export const ACTIONS = new DebugActions();
-
 // ---- 并入自 debug-meter.ts ----
 /**
  * 一条「计量 DO 诊断探测」的调用规格。
@@ -330,7 +326,28 @@ export class DebugMeterProbes {
 }
 
 /** 单例：探测本身不持有任何状态，安全共享（规格表是只读常量） */
-export const METER_PROBES = new DebugMeterProbes();
+// ---- 组合根：四个组件由同一处持有 ----
+
+/**
+ * 功能：调试路由四个组件的持有者 —— 读表、测网、写操作、计量探测。
+ *
+ * 为什么收成一个：四个组件各自 `export const` 时，调用方要记四个名字、四份 import，
+ * 而它们只在 `debug()` 里按固定顺序出场；收进一个对象后「这次调试动用了哪些能力」
+ * 在一个地方就能读完（也正是判断「这个参数会不会真的拨号」的入口）。
+ */
+export class DebugSuite {
+  /** 只读表：判定、事实层、健康度、连接记录 */
+  readonly tables = new DebugTables();
+  /** 会对外拨号的测量：出口测速、站点诊断、原始探活、明文 HTTP、判定批 */
+  readonly nets = new DebugNets();
+  /** 会改状态的写操作：抓源、钉节点、回填用量（都先过 `adminOnly`） */
+  readonly actions = new DebugActions();
+  /** 计量 DO 的诊断探测（不持有状态，规格表是只读常量） */
+  readonly probes = new DebugMeterProbes();
+}
+
+/** 进程内唯一的调试组件组 */
+export const DEBUG = new DebugSuite();
 
 // ---- 门面（对外导出面保持不变） ----
 
@@ -371,42 +388,42 @@ export async function debug(c: DebugCtx): Promise<Response> {
   }
 
   // 1) 只读表
-  const table = await TABLES.read(c, url);
+  const table = await DEBUG.tables.read(c, url);
   if (table) return table;
 
   // 2) 会对外拨号的测量（顺序敏感：bench 与 diag 都要花真流量）
-  const bench = await NETS.bench(url);
+  const bench = await DEBUG.nets.bench(url);
   if (bench) return bench;
-  const diag = await NETS.diag(c, url);
+  const diag = await DEBUG.nets.diag(c, url);
   if (diag) return diag;
-  const probe = await NETS.rawProbe(url);
+  const probe = await DEBUG.nets.rawProbe(url);
   if (probe) return probe;
 
   // 3) 会改状态的写操作
-  const refill = await ACTIONS.refill(c, url);
+  const refill = await DEBUG.actions.refill(c, url);
   if (refill) return refill;
-  const pin = await ACTIONS.pinCurrent(c, url);
+  const pin = await DEBUG.actions.pinCurrent(c, url);
   if (pin) return pin;
 
   // 4) 明文 HTTP 与计量 DO 诊断（各自一次 DO 或直连往返）
-  const http = await NETS.http(c, url);
+  const http = await DEBUG.nets.http(c, url);
   if (http) return http;
   // 六个「计量 DO 诊断」端点（?burn= / ?stage= / ?tim= / ?iter= / ?burnjs= / ?crypto=）交给
   // `DebugMeterProbes`：它们的形状完全一样（校验管理员 → 取带实例名的 DO → 带超时 fetch →
   // 包成 { ok, doStatus, <item> }），写成六个 if 块时每一步都可能在某一块里漏掉。
-  const meterProbe = await METER_PROBES.run(c, url, id);
+  const meterProbe = await DEBUG.probes.run(c, url, id);
   if (meterProbe) return meterProbe;
-  const tfb = await NETS.tfb(c, url);
+  const tfb = await DEBUG.nets.tfb(c, url);
   if (tfb) return tfb;
-  const tf = await NETS.tf(c, url);
+  const tf = await DEBUG.nets.tf(c, url);
   if (tf) return tf;
 
   // 5) 回填类（都要管理员）
-  const restore = await ACTIONS.restore(c, url, id);
+  const restore = await DEBUG.actions.restore(c, url, id);
   if (restore) return restore;
-  const seed = await ACTIONS.seed(c, url, id);
+  const seed = await DEBUG.actions.seed(c, url, id);
   if (seed) return seed;
 
   // 6) 兜底：两个地址族各查一次，再试一次 v6 建连
-  return NETS.host(url);
+  return DEBUG.nets.host(url);
 }

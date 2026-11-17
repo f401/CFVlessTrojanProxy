@@ -452,4 +452,3 @@ export class DebugNets {
 }
 
 /** 会对外拨号的诊断分支门面单例 */
-export const NETS = new DebugNets();
