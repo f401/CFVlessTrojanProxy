@@ -2,7 +2,7 @@ import { EG } from "./egfacts";
 import { PS } from "./psfacts";
 import { BLK } from "./blkfacts";
 import { DNS } from "./dnsfacts";
-import { capFactor } from "./capfacts";
+import { CAP } from "./capfacts";
 
 /**
  * 功能：把「本类事实是否启用」翻译成一个乘数。关掉就是 1，等于这条事实完全没上线。
@@ -35,7 +35,7 @@ export function factMul(on: ReadonlySet<string>, host: string, ip: string, mode:
   m *= pick(on, "eg", EG.bias(ip, cf));
   m *= pick(on, "dns", DNS.penOf(host, EG.famOf(ip)));
   m *= pick(on, "ps", PS.factor(host, ip));
-  m *= pick(on, "cap", capFactor(ip, mode));
+  m *= pick(on, "cap", CAP.factor(ip, mode));
   m *= pick(on, "blk", BLK.penOf(host, ip));
   return m;
 }

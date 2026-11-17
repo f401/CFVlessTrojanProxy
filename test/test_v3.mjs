@@ -304,9 +304,9 @@ ok("expire 被转成秒", /expire=1[78]\d{8}/.test(h["Subscription-Userinfo"]));
 }
 
 /* ---------- 主 UUID / 跨 isolate 归属 ---------- */
-eq("主 UUID 取列表第一个（小写）", W.primaryId({ uuid: "AAA-BBB,CCC-DDD" }), "aaa-bbb");
-eq("没有 uuid 时回落 uuids", W.primaryId({ uuids: "EEE-FFF" }), "eee-fff");
-eq("都没有返回空串", W.primaryId({}), "");
+eq("主 UUID 取列表第一个（小写）", W.PEND.id({ uuid: "AAA-BBB,CCC-DDD" }), "aaa-bbb");
+eq("没有 uuid 时回落 uuids", W.PEND.id({ uuids: "EEE-FFF" }), "eee-fff");
+eq("都没有返回空串", W.PEND.id({}), "");
 
 /* ---------- 面板托管用户的 Trojan 密码 ---------- */
 {

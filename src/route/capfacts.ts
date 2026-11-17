@@ -183,23 +183,3 @@ export class CapFacts {
 
 /** 全局容量表。 */
 export const CAP = new CapFacts();
-
-/**
- * 功能：薄包装 —— 登记一次吞吐取样。
- * @param ip 中继 IP
- * @param kbs 速率（KB/s）
- * @returns {boolean} 是否记下容量比
- */
-export function capNote(ip: string, kbs: number): boolean {
-  return CAP.note(ip, kbs);
-}
-
-/**
- * 功能：薄包装 —— 读代价倍数（吞吐模式）。
- * @param ip 中继 IP
- * @param mode 模式
- * @returns {number} 代价倍数
- */
-export function capFactor(ip: string, mode: string): number {
-  return CAP.factor(ip, mode);
-}

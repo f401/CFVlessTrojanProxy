@@ -13,7 +13,7 @@ import { vtAck, vtDelta, vtNack, vtLoad } from "./verdictsync";
 import { chanPref } from "./prefs";
 import { relNote } from "./relperf";
 import { DEAD } from "./deadfacts";
-import { capNote } from "./capfacts";
+import { CAP } from "./capfacts";
 import { FACTS } from "./factsstore";
 import type { FactsDelta } from "./factsstore";
 import { FACT_ALL, factOnce } from "./factflags";
@@ -101,7 +101,7 @@ export class PolicyWiring {
     HOOK.chanPref = (ip: string, host = ""): number => chanPref(ip, host);
     HOOK.win = (host: string): { d: boolean; r: boolean } => policy.win(host);
     HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => relNote(host, ip, ttfb, kbs);
-    HOOK.capNote = (ip: string, kbs: number): void => { capNote(ip, kbs); };
+    HOOK.capNote = (ip: string, kbs: number): void => { CAP.note(ip, kbs); };
     HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
     HOOK.deadNote = (ip: string, ok: boolean): void => DEAD.note(ip, ok);
     HOOK.factsDelta = (): FactsDelta => FACTS.delta();

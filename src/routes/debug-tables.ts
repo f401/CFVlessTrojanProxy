@@ -10,9 +10,9 @@ import { FACTS } from "../route/factsstore";
 import { prefsJson } from "../route/prefs";
 import { PS } from "../route/psfacts";
 import { HEALTH } from "../route/relay-health";
-import { REL_SAMPLE_TTL, relSnap } from "../route/relperf";
+import { REL_SAMPLE_TTL, RELPERF } from "../route/relperf";
 import { VT } from "../route/verdict";
-import { clSnapshot, doFetch } from "../store/index";
+import { doFetch, PEND } from "../store/index";
 
 import type { RouteCtx } from "../edge/types";
 
@@ -46,7 +46,7 @@ export class DebugTables {
     if (url.searchParams.get("eg")) return json({ rows: EG.snap() });
     if (url.searchParams.get("rt")) {
       const host = String(url.searchParams.get("rt") || "").slice(0, 80);
-      return json({ host, rows: relSnap(host), alive: S.alive.size, ttl: REL_SAMPLE_TTL });
+      return json({ host, rows: RELPERF.snap(host), alive: S.alive.size, ttl: REL_SAMPLE_TTL });
     }
     // 站点 × 中继的封锁行（v7.222）：文档里从 v8 起就写着 `?blk=<host>`，代码里一直没有这个分支。
     // 只读内存表，不打 DO：要看别处 isolate 回传的行得配合 `?do=1` 那条链（那里是 /meter/vt）。
@@ -90,7 +90,7 @@ export class DebugTables {
       return json({ prefs: prefsJson(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });
     }
     if (url.searchParams.get("cl") === "1") {
-      const local = clSnapshot(40);
+      const local = PEND.clSnap(40);
       let ring: ClRec[] = [];
       if (url.searchParams.get("do") === "1" && env.METER) {
         try {

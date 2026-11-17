@@ -25,7 +25,7 @@ const NEED = [
   { sym: "egDerive", own: "src/route/egfacts.ts", why: "出口族推导的生产调用点（judge.onTraffic）" },
   { sym: "commitFact", own: "src/route/commitfact.ts", why: "写入决策器被真实链路调用" },
   { sym: "CAP.note", own: "src/route/capfacts.ts", why: "吞吐容量写入点（经 HOOK.capNote 的薄包装 capNote）", via: "capNote" },
-  { sym: "capFactor", own: "src/route/capfacts.ts", why: "选路读取容量比" },
+  { sym: "CAP.factor", own: "src/route/capfacts.ts", why: "选路读取容量比（薄包装 capFactor 已删）" },
 ];
 
 // 槽位不是「调用」而是「注册」：符号扫描看不见它们，于是出现过一个真洞 ——

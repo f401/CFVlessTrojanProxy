@@ -9,7 +9,7 @@ import { ensurePool, pxGet, aliveList } from "./pool";
 import { seedAlive } from "./warm";
 import { S } from "../core/state";
 import { shadowRate } from "../core/util";
-import { hostKey, hostRank, hostUntried } from "../nodes/metrics";
+import { hostKey, HOSTS } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { bestFor, candsFor, costOf, isBlack, isFrozen, usable, STATS } from "../nodes/score";
 import { pickThom } from "./ts";
@@ -112,7 +112,7 @@ export class SitePick {
       //    少于 3 个节点有样本时排序没有比较意义（门槛在下面也要求 sampled>=3），
       //    直接跳过：省掉一次遍历全部节点的 hostRank 构建。
       if (tried >= 3) {
-        const rank = hostRank(host, m);
+        const rank = HOSTS.rank(host, m);
         if (rank.length) {
           const best = rank[0].k;
           const bs = hm!.get(best);
@@ -142,7 +142,7 @@ export class SitePick {
     if (cur && base > 0 && !(st && st.retried) && host && fam && Math.random() < base) {
       const hm = S.hostNode.get(fam);
       if (!hm || hm.size < 3) {
-        const t0 = hostUntried(host, m);
+        const t0 = HOSTS.untried(host, m);
         if (t0) {
           STATS.nsGet(t0).lastTry = Date.now();
           if (st) {

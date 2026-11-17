@@ -3,7 +3,7 @@ import { errMsg, shadowRate } from "../core/util";
 import { SC } from "../core/const";
 import { S } from "../core/state";
 import { json } from "../edge/respond";
-import { hostRank, logErr } from "../nodes/metrics";
+import { HOSTS, logErr } from "../nodes/metrics";
 import { costOf, scoreParts, STATS } from "../nodes/score";
 import { nodeSnapGet } from "../store/index";
 import { cronScan, nsOf, pxGet } from "../px/pool";
@@ -13,7 +13,7 @@ import { cnt, cntView } from "../core/counter";
 import { CRONLOCK } from "../core/lock";
 import { spdSnapshot } from "../core/node-snapshot";
 import { regionListAsync } from "../px/regions";
-import { primaryId } from "../store/index";
+import { PEND } from "../store/index";
 import { adminOnly } from "../edge/auth";
 
 import type { RouteCtx } from "../edge/types";
@@ -33,7 +33,7 @@ export async function proxyip(c: UserCtx): Promise<Response> {
     let doSrc: "ok" | "fail" | "none" = env.METER ? "ok" : "none";
     if (env.METER) {
       try {
-        const stub = env.METER.get(env.METER.idFromName(primaryId(env) || id));
+        const stub = env.METER.get(env.METER.idFromName(PEND.id(env) || id));
         const r = await stub.fetch("https://meter/cnt");
         // 非 2xx 时 json() 可能照样解析出一份错误体（7.214 的 vtFetch 就是这么把 5xx 当成空表的），
         // 所以先按状态码判失败，别让「DO 报错」伪装成「今天零用量」。
@@ -206,7 +206,7 @@ export async function proxyip(c: UserCtx): Promise<Response> {
           bad += s.bad;
           if (s.ttfb && (!ttfb || s.ttfb < ttfb)) ttfb = s.ttfb;
         }
-        const rank = hostRank(h, modeQ);
+        const rank = HOSTS.rank(h, modeQ);
         return {
           host: h,
           nodes: m.size,

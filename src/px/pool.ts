@@ -14,7 +14,7 @@ import { cronScan } from "./scan";
 // 存活表与探活冷却搬去 ./alive；一轮维护搬去 ./scan。这里全部原样再导出，
 // 让 `../px/pool` 依旧是候选池的唯一入口（调用点与单测零改动）。
 export { commitPool, ensurePool };
-export { ALIVE, ALIVE_MAX, AliveBoard, PROBE_COOL, ProbeCooldown, SEED_COLD_N, aliveList, bumpProbeBad, noteProbe, probeBadSkip, pxGet, sweepProbeBad } from "./alive";
+export { ALIVE, ALIVE_MAX, AliveBoard, PROBE_COOL, ProbeCooldown, SEED_COLD_N, aliveList, bumpProbeBad, noteProbe, pxGet } from "./alive";
 export { PoolScan, cronScan } from "./scan";
 
 /* 代理节点：状态 / 信誉分桶 / 选择 / cron */

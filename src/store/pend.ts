@@ -243,15 +243,6 @@ export class PendingLedger {
 export const PEND = new PendingLedger();
 
 /**
- * 功能：取主用户 id（薄包装，委托 PEND.id）。
- * @param env 环境变量
- * @returns 用户 id；没有时返回空串
- */
-export function primaryId(env: Env): string {
-  return PEND.id(env);
-}
-
-/**
  * 功能：把一段流量记进待上报账本（薄包装，委托 PEND.add）。
  * @param id 用户 id
  * @param up 上行字节
@@ -281,25 +272,5 @@ export function scheduleFlush(env: Env, delay?: number): void {
  */
 export function kickFlush(env: Env, id: string | null): void {
   PEND.kick(env, id);
-}
-
-/**
- * 功能：把待上报账本 POST 给 DO（薄包装，委托 PEND.flush）。
- * @param env 环境变量
- * @param force 忽略节流
- * @param max 本轮最多带几个用户（由 `planRound` 的 pend 分账传入）
- * @returns 无
- */
-export async function pendFlush(env: Env, force?: boolean, max: number = SC.PEND_MAX): Promise<void> {
-  await PEND.flush(env, force, max);
-}
-
-/**
- * 功能：连接观测快照（薄包装，委托 PEND.clSnap）。
- * @param max 最多返回几行
- * @returns 观测行列表
- */
-export function clSnapshot(max = 40): ClRec[] {
-  return PEND.clSnap(max);
 }
 

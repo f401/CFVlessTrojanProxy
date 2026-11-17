@@ -28,6 +28,6 @@ console.log(`节点数 ${N}`);
 bench("candsFor(lat)", () => W.candsFor("lat"));
 bench("candsFor(tput)", () => W.candsFor("tput"));
 bench("pick(带站点偏好)", (i) => W.SEL.pick({ pxShadow: 0.05 }, "tput", { host: `site${i % 50}.test` }), 500);
-bench("hostRank(tput)", () => W.hostRank("site1.test", "tput"), 500);
+bench("hostRank(tput)", () => W.HOSTS.rank("site1.test", "tput"), 500);
 console.log(`候选数记录 S.candN = ${S.candN}`);
 console.log(`单节点 costOf ≈ ${(bench("costOf x1", () => W.costOf("n0:443", "tput"), 2000) / 1000).toFixed(2)} µs`);

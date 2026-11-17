@@ -14,7 +14,7 @@ import { cnt } from "../core/counter";
 import { SC } from "../core/const";
 import { kickFlush } from "../store/index";
 import { SEL } from "../px/selector";
-import { flushSnap, pendFlush, statBump } from "../store/index";
+import { flushSnap, PEND, statBump } from "../store/index";
 import { closeQuietly, enc, safeSend, toU8, withTimeout } from "../core/util";
 import { connect } from "cloudflare:sockets";
 
@@ -240,7 +240,7 @@ export async function handleUpgrade(request: Request, env: Env, ctx: ExecutionCo
       if (!st.id) cnt("noPayload"); // 握手期就结束的连接（占大多数），以前完全不可见
       st.flush(true);
       if (ctx && ctx.waitUntil) {
-        ctx.waitUntil(pendFlush(env));
+        ctx.waitUntil(PEND.flush(env));
         ctx.waitUntil(flushSnap(env));
       }
     });

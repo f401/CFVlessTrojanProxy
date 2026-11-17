@@ -1,5 +1,5 @@
 import { S } from "../core/state";
-import { getSnap, primaryId } from "../store/index";
+import { getSnap, PEND } from "../store/index";
 import { json } from "../edge/respond";
 import { logErr } from "../nodes/errlog";
 import { cnt } from "../core/counter";
@@ -28,7 +28,7 @@ export async function logs(c: UserCtx): Promise<Response> {
   if (env.METER) {
     try {
       // 错误环形只挂在主 uuid 的 DO 上：用别人的 id 读永远为空
-      const stub = env.METER.get(env.METER.idFromName(primaryId(env) || id));
+      const stub = env.METER.get(env.METER.idFromName(PEND.id(env) || id));
       const r = await stub.fetch("https://meter/cnt");
       const j = await r.json();
       fromDo = (j && j.e) || [];

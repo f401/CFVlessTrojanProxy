@@ -13,7 +13,7 @@ import { loadUsers } from "./proxy/protocol";
 import { regionListAsync } from "./px/regions";
 
 import { S } from "./core/state";
-import { pendFlush } from "./store/index";
+import { PEND } from "./store/index";
 
 /**
  * 组装根：只做三件事 —— HTTP 分发、WebSocket 升级、cron 入口。
@@ -81,7 +81,7 @@ export default {
       // 只以路由表的 stats 标志为准：这里以前还抄了一份硬编码子路径列表，两处一旦漂移
       // 就会出现「表里标了 stats、装配根没推增量」的静默陈旧读数（v7.135 删掉那份副本）。
       if (env.METER && def.stats) {
-        await pendFlush(env);
+        await PEND.flush(env);
         S.meterCache.delete(id);
       }
 

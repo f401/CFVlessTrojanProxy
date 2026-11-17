@@ -14,7 +14,7 @@ import { FACT_ALL } from "./factflags";
 import { BLK } from "./blkfacts";
 import { DEAD } from "./deadfacts";
 import { factMul } from "./factmul";
-import { relCostMode, relSnap } from "./relperf";
+import { RELPERF } from "./relperf";
 import { EG } from "./egfacts";
 import { cfHttpCode } from "../proxy/cfverdict";
 
@@ -113,7 +113,7 @@ export function rankOf(c: Ctx): Ranked {
   // 站点 × 中继的实测代价：同一个中继对不同站点快慢差一个数量级，所以它比站点无关的健康度更贴题。
   // 没样本的排到 1e6 之后再用健康度打破并列 —— 「量过且慢」不会被当成「没量过」重新插队。
   const scoreOf = (ip: string): number => {
-    const r = relCostMode(c.mode === "lat" ? "lat" : "tput", c.host, ip);
+    const r = RELPERF.costFor(c.mode === "lat" ? "lat" : "tput", c.host, ip);
     const base = r < 1e6 ? r : 1e6 + hOf(ip) * 1000;
     // 出口族偏置与成功率折价都只是乘数，绝不剔候选（v8 §15 I1/I2）
     return base * factMul(c.facts || FULL_ON, c.host, ip, c.mode || "tput", !!c.cfHost);
@@ -202,7 +202,7 @@ export function decideCf(c: Ctx, r: Ranked, src: PinSource): Choice | null {
     !stick.some((ip) => VT.at(c.host, "r:" + ip) > 0) && !stick.some((ip) => JUDGE.posOn(c.host, ip));
   // 一次扫描同时拿到「量过几条」与「量过哪些」：7.188 之前这里把同一张表扫了三遍（每遍还要排序），
   // 而 CF 托管目标是热路径（闭环证明里 400 条请求有 379 条走这条分支）。
-  const relRows = relSnap(c.host);
+  const relRows = RELPERF.snap(c.host);
   const fresh = relRows.length;
   // 只给「本站点一次都没量过」的中继采样机会，而且必须已经有 1 条样本做锚：
   // 全池轮换会把 0/4、2/4 全 403 的中继塞给用户（实测 tput 2/8），

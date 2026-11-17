@@ -133,14 +133,6 @@ export function errCount(msg: unknown): void {
 }
 
 /**
- * 功能：当前窗口被限流丢掉的条数（薄包装，委托 ERRS.dropped）。
- * @returns 条数
- */
-export function errDup(): number {
-  return ERRS.dropped();
-}
-
-/**
  * 功能：当前窗口的错误直方图（薄包装，委托 ERRS.hist）。
  * @returns [{k, n}] 最多 8 条，按次数降序
  */

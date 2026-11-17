@@ -6,7 +6,7 @@
 import { SC } from "../core/const";
 import { S } from "../core/state";
 import { STATS } from "../nodes/score";
-import { bumpProbeBad, noteProbe, probeBadSkip } from "./alive";
+import { bumpProbeBad, noteProbe, PROBE_COOL } from "./alive";
 import { keyOf } from "./const";
 import { type ProbeHit, probeBatch } from "./probe-batch";
 
@@ -49,7 +49,7 @@ export class ScanProbe {
     // 不再占名额。公开池里九成以上是死的，纯轮转时它们每轮都被重复探一遍，好候选永远排不上。
     const open = this.pool.filter((c) => {
       const k = c.h + ":" + c.p;
-      return !S.alive.has(k) && !probeBadSkip(k);
+      return !S.alive.has(k) && !PROBE_COOL.skip(k);
     });
     // 全都有结论时退回「没进池的候选」做低频复检（能在池里的靠头部复测 + 真实流量，不用再探活）
     const live = this.pool.filter((c) => !S.alive.has(c.h + ":" + c.p));

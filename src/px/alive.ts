@@ -99,16 +99,6 @@ export class ProbeCooldown {
 export const PROBE_COOL = new ProbeCooldown();
 
 /**
- * 功能：这个候选是否暂时不占探活名额（委托 `PROBE_COOL.skip`）。
- * @param key 候选键（`host:port`）
- * @param now 当前时间（毫秒）
- * @returns 冷却中为 true
- */
-export function probeBadSkip(key: string, now: number = Date.now()): boolean {
-  return PROBE_COOL.skip(key, now);
-}
-
-/**
  * 功能：记一次探活失败/成功（委托 `PROBE_COOL.bump`，cronScan 与测试共用，保证「过期重置」只写一遍）。
  * @param key 候选键（`host:port`）
  * @param ok 探活是否通过
@@ -117,15 +107,6 @@ export function probeBadSkip(key: string, now: number = Date.now()): boolean {
  */
 export function bumpProbeBad(key: string, ok: boolean, now: number = Date.now()): void {
   PROBE_COOL.bump(key, ok, now);
-}
-
-/**
- * 功能：清理「暂时跳过」表（委托 `PROBE_COOL.sweep`）。
- * @param now 当前时间（毫秒）
- * @returns 这一次删掉的行数
- */
-export function sweepProbeBad(now: number = Date.now()): number {
-  return PROBE_COOL.sweep(now);
 }
 
 /**

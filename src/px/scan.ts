@@ -7,7 +7,7 @@
 import { S } from "../core/state";
 import { logErr } from "../nodes/metrics";
 import { STATS } from "../nodes/score";
-import { pxGet, sweepProbeBad } from "./alive";
+import { PROBE_COOL, pxGet } from "./alive";
 import { POOL_TTL_MS, refillPool } from "./probe";
 import { commitPool, ensurePool } from "./poolgen";
 import { ScanAlive } from "./scan-alive";
@@ -45,7 +45,7 @@ export class PoolScan {
    */
   async run(): Promise<void> {
     // 每轮先收拾「暂时跳过」表：过期记录对跳过判断已无意义，表本身也没有自愈路径
-    sweepProbeBad();
+    PROBE_COOL.sweep();
     await pxGet(this.env);
     // 空池子直接结束这一轮：没有候选可探，写任何东西都是噪声
     if (!(await this.loadPool())) return;

@@ -253,26 +253,6 @@ export function hostDirectMark(host: string, ok: boolean): void {
 }
 
 /**
- * 功能：站点上的节点排行（薄包装，委托 HOSTS.rank）。
- * @param host 目标域名
- * @param mode 模式
- * @returns 按分数升序的 { k, v } 列表
- */
-export function hostRank(host: string, mode: Mode): RankRow[] {
-  return HOSTS.rank(host, mode);
-}
-
-/**
- * 功能：该站没试过且全局分最好的节点（薄包装，委托 HOSTS.untried）。
- * @param host 目标域名
- * @param mode 模式
- * @returns 节点 key；没有时返回空串
- */
-export function hostUntried(host: string, mode: Mode): string {
-  return HOSTS.untried(host, mode);
-}
-
-/**
  * 站点族键：同一站点的不同子域共享一份样本。
  * 通用规则（不针对任何具体网站）：取可注册域，即 host 的最后两段；
  * 若倒数第二段是常见二级后缀（co/com/net/org/gov/edu/ac），则保留三段。

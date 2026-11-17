@@ -78,7 +78,7 @@ export {
   isFrozen,
   usable,
 } from "./nodes/score";
-export { nsOf, pxGet, flushPx, noteProbe, probeBadSkip, bumpProbeBad, sweepProbeBad } from "./px/pool";
+export { nsOf, pxGet, flushPx, noteProbe, bumpProbeBad } from "./px/pool";
 export { POOL, Pool } from "./px/pool";
 export { ALIVE, ALIVE_MAX, PROBE_COOL, PoolScan, SEED_COLD_N, cronScan, aliveList } from "./px/pool";
 export { ScanAlive } from "./px/scan-alive";
@@ -95,14 +95,11 @@ export { cnt, cntDelta, cntUnsend, cntView } from "./core/counter";
 export { CRONLOCK, CronLock } from "./core/lock";
 export {
   logErr,
-  errDup,
   hostNodeMark,
   hostDirectMark,
   diagVerdict,
-  hostRank,
   hostScore,
   hostKey,
-  hostUntried,
   errKind,
   errCount,
   errHist,
@@ -110,7 +107,7 @@ export {
 export { ERRS } from "./nodes/errlog";
 export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES, pxPolicy } from "./px/probe";
 export { regionListAsync } from "./px/regions";
-export { PEND, RESTORE_MAX, clSnapshot, nodeSnapGet, pendFlush, primaryId, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
+export { PEND, RESTORE_MAX, nodeSnapGet, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
 export { doFetch, meterGet } from "./store/meter-client";
 export { runCron } from "./routes/cron";
 export { proxyip } from "./routes/proxyip";
@@ -157,11 +154,11 @@ export { PolicyWiring, WIRING } from "./route/policy-wiring";
 export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, tfBlockOk, tfRemember, pickFresh } from "./route/tfb";
 export { TFB, TfbBook } from "./route/tfbbook";
-export { RELPERF, REL_SAMPLE_TTL, RelPerfTable, relCost, relCostFor, relCostMode, relCostOf, relNote, relSnap } from "./route/relperf";
+export { RELPERF, REL_SAMPLE_TTL, RelPerfTable, relCostFor, relCostOf, relNote } from "./route/relperf";
 export { Mode, St } from "./core/enums";
 export { BoundedMap } from "./core/table";
 export { EG, EG_BIG, EG_TINY, EG_TTL, EgFacts, egCounts, egDerive } from "./route/egfacts";
-export { CAP, CAP_MAX, CAP_TTL, CapFacts, capFactor } from "./route/capfacts";
+export { CAP, CAP_MAX, CAP_TTL, CapFacts } from "./route/capfacts";
 export { ALIVE_TARGET, srcStat } from "./px/aliveplan";
 export { FACT_ALL, factList, factOn, factParse } from "./route/factflags";
 export { factMul } from "./route/factmul";

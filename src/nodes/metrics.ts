@@ -5,4 +5,4 @@
 export * from "./rtt";
 export * from "./site";
 export * from "./diag";
-export { ERRS, ErrRing, errKind, errCount, errDup, errHist, logErr } from "./errlog";
+export { ERRS, ErrRing, errKind, errCount, errHist, logErr } from "./errlog";

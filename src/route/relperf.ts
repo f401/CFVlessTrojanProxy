@@ -271,33 +271,3 @@ export const RELPERF = new RelPerfTable();
 export function relNote(host: string, relayIp: RelayIp, firstByteMs: DurationMs, kiloBytesPerSec: KiloBytesPerSec): void {
   RELPERF.note(host, relayIp, firstByteMs, kiloBytesPerSec);
 }
-
-/**
- * 薄包装：取排序代价。
- * @param host 站点
- * @param relayIp 中继出口
- * @returns 预计 512KB 耗时（毫秒），没样本 1e6
- */
-export function relCost(host: string, relayIp: RelayIp): number {
-  return RELPERF.cost(host, relayIp);
-}
-
-/**
- * 薄包装：调试快照。
- * @param host 站点
- * @returns 该站点已量过的中继（按代价升序）
- */
-export function relSnap(host: string): RelRow[] {
-  return RELPERF.snap(host);
-}
-
-/**
- * 薄包装：按传输模式取排序代价。
- * @param modeToken 传输模式（`tput` / `lat`）
- * @param host 站点
- * @param relayIp 中继出口
- * @returns 毫秒；没量过 1e6
- */
-export function relCostMode(modeToken: string, host: string, relayIp: RelayIp): number {
-  return RELPERF.costFor(modeToken, host, relayIp);
-}

@@ -1,7 +1,7 @@
 // store 层的门面（OOP P3）：把 KV / 快照 / 用量累积 / Meter 客户端收成一个入口，
 // 上层只跟 STORE 打交道，换实现（KV→DO、快照格式）不用改调用方。
 import { kvGet, kvGetStrict, kvSet } from "./kv";
-import { clSnapshot, kickFlush, pendAdd, pendFlush, primaryId, scheduleFlush } from "./pend";
+import { kickFlush, PEND, pendAdd, scheduleFlush } from "./pend";
 import { flushSnap, getSnap, restoreUsage, usageSnapGet } from "./snapshot";
 import { nodeSnapGet, readStats, statBump } from "./stats";
 
@@ -51,12 +51,12 @@ export class Store {
 
   /** 功能：flush 是薄包装，直接委托 pendFlush。@param env Env。@param force? boolean。@returns 转发 pendFlush 的返回值（Promise<void>） */
   flush(env: Env, force?: boolean): Promise<void> {
-    return pendFlush(env, force);
+    return PEND.flush(env, force);
   }
 
   /** 功能：primary 是薄包装，直接委托 primaryId。@param env Env。@returns 转发 primaryId 的返回值（string） */
   primary(env: Env): string {
-    return primaryId(env);
+    return PEND.id(env);
   }
 
   // —— 快照 ——
@@ -98,7 +98,7 @@ export class Store {
   // —— 观测 ——
   /** 功能：conns 是薄包装，直接委托 clSnapshot。@param max。@returns 转发 clSnapshot 的返回值（ClRec[]） */
   conns(max = 40): ClRec[] {
-    return clSnapshot(max);
+    return PEND.clSnap(max);
   }
 }
 

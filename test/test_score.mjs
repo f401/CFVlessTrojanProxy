@@ -612,7 +612,7 @@ for (let i = 0; i < 3; i++) {
   W.hostNodeMark("site.test", "fast:443", { ok: true, bad: false, bytes: 1000, ttfb: 60 });
   W.hostNodeMark("site.test", "slow:443", { ok: true, bad: false, bytes: 1000, ttfb: 500 });
 }
-eq("站点排行：快的在前", W.hostRank("site.test", "lat")[0].k, "fast:443");
+eq("站点排行：快的在前", W.HOSTS.rank("site.test", "lat")[0].k, "fast:443");
 
 const st1 = { host: "site.test" };
 eq("按站点选节点", W.SEL.pick({ pxShadow: 0 }, "tput", st1), "fast:443");
@@ -620,7 +620,7 @@ eq("命中偏好不算试探", st1.hostTrial, false);
 
 // 冻结的节点不能出现在站点排行里
 W.freezeNode("fast:443");
-eq("冻结节点被跳过", W.hostRank("site.test", "tput")[0].k, "slow:443");
+eq("冻结节点被跳过", W.HOSTS.rank("site.test", "tput")[0].k, "slow:443");
 W.STATS.nsGet("fast:443").freeUntil = 0;
 
 // 冷启动：新域名第一次一定挑一个没试过的节点
@@ -642,7 +642,7 @@ node("u1:443", { tcp: 50 });
 node("u2:443", { tcp: 80 });
 node("u3:443", { tcp: 300 });
 W.hostNodeMark("untried.test", "u1:443", { ok: 1, bad: 0, bytes: 10, ttfb: 50 });
-eq("未试节点 = 全局最优且没在这个站出现过", W.hostUntried("untried.test", "lat"), "u2:443");
+eq("未试节点 = 全局最优且没在这个站出现过", W.HOSTS.untried("untried.test", "lat"), "u2:443");
 
 // 游标指向上一代候选池的节点：pick 必须自愈，而不是继续拨死地址
 reset();
@@ -690,7 +690,7 @@ node("f2:443", { tcp: 60 });
 W.hostNodeMark("www.example.com", "f1:443", { ok: true, bad: false, bytes: 100, ttfb: 70 });
 W.hostNodeMark("img.example.com", "f2:443", { ok: true, bad: false, bytes: 100, ttfb: 200 });
 eq("同族两个域名共用一张表", W.S.hostNode.get("example.com").size, 2);
-eq("族内按首字节排序", W.hostRank("example.com", "lat")[0].k, "f1:443");
+eq("族内按首字节排序", W.HOSTS.rank("example.com", "lat")[0].k, "f1:443");
 
 // 保质期：7 小时前的样本降权 300ms
 reset();
@@ -700,11 +700,11 @@ W.hostNodeMark("stale.test", "old:443", { ok: true, bad: false, bytes: 1, ttfb: 
 W.hostNodeMark("stale.test", "new:443", { ok: true, bad: false, bytes: 1, ttfb: 300 });
 W.S.hostNode.get("stale.test").get("old:443").at = Date.now() - 7 * 3600e3;
 W.S.hostRankCache.clear();
-eq("过期样本被降权", W.hostRank("stale.test", "lat")[0].k, "new:443");
+eq("过期样本被降权", W.HOSTS.rank("stale.test", "lat")[0].k, "new:443");
 
 // 新样本要让缓存失效
 W.hostNodeMark("stale.test", "old:443", { ok: true, bad: false, bytes: 1, ttfb: 50 });
-eq("新样本刷新排行", W.hostRank("stale.test", "lat")[0].k, "old:443");
+eq("新样本刷新排行", W.HOSTS.rank("stale.test", "lat")[0].k, "old:443");
 
 // 站点级 lat 与 tput 可以选出不同节点（TTFB 快 ≠ 带宽大）
 reset();
@@ -712,14 +712,14 @@ node("fast-ttfb:443", { tcp: 50 });
 node("fat-pipe:443", { tcp: 300 });
 W.hostNodeMark("speed.test", "fast-ttfb:443", { ok: 1, bad: 0, bytes: 100, ttfb: 50, bps: 1048576 });
 W.hostNodeMark("speed.test", "fat-pipe:443", { ok: 1, bad: 0, bytes: 100, ttfb: 300, bps: 8 * 1048576 });
-eq("站点 lat：首字节快的优先", W.hostRank("speed.test", "lat")[0].k, "fast-ttfb:443");
-eq("站点 tput：带宽大的优先", W.hostRank("speed.test", "tput")[0].k, "fat-pipe:443");
+eq("站点 lat：首字节快的优先", W.HOSTS.rank("speed.test", "lat")[0].k, "fast-ttfb:443");
+eq("站点 tput：带宽大的优先", W.HOSTS.rank("speed.test", "tput")[0].k, "fat-pipe:443");
 
 // 域名族：写入用 api.x.com，读取用 x.com 也要命中同一张表
 reset();
 node("g1:443", { tcp: 50 });
 W.hostNodeMark("api.github.com", "g1:443", { ok: 1, bad: 0, bytes: 100, ttfb: 60 });
-eq("族键读写一致", W.hostRank("github.com", "lat")[0].k, "g1:443");
+eq("族键读写一致", W.HOSTS.rank("github.com", "lat")[0].k, "g1:443");
 const stFam = { host: "api.github.com" };
 eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1:443");
 
@@ -1630,7 +1630,7 @@ ok("大池子失败首档 ≈60 秒", blBig > 55000 && blBig < 65000, blBig);
 reset();
 S.cagg.clear();
 S.cagg.set("x:443", { n: 3, ok: 2, dn: 4096, v: [100, 200, 300] });
-const cl = W.clSnapshot(10);
+const cl = W.PEND.clSnap(10);
 ok("连接观测按节点聚合", cl.length === 1 && cl[0].k === "x:443" && cl[0].n === 3 && cl[0].ok === 2 && cl[0].p50 === 200, JSON.stringify(cl));
 ok("聚合后的下行字节累加", cl.length === 1 && cl[0].dn === 4096, cl.length ? cl[0].dn : -1);
 
@@ -2264,16 +2264,16 @@ console.log("\n70) 增量上报");
 // 71) 错误日志：限流与表满
 console.log("\n71) 错误日志限流");
 {
-  const d0 = W.errDup();
+  const d0 = W.ERRS.dropped();
   W.logErr("t71 dup probe", "h1");
   W.logErr("t71 dup probe", "h1");
   W.logErr("t71 dup probe", "h1");
-  ok("限流丢掉的也算进账", W.errDup() - d0 === 2, String(W.errDup() - d0));
-  const d1 = W.errDup();
+  ok("限流丢掉的也算进账", W.ERRS.dropped() - d0 === 2, String(W.ERRS.dropped() - d0));
+  const d1 = W.ERRS.dropped();
   for (let i = 0; i < 240; i++) W.logErr(`t71 flood ${i}`, `h${i}`);
   W.logErr("t71 dup probe", "h1");
-  eq("表被灌满后，5 秒内的旧键仍被限流（不再整表清空）", W.errDup() - d1, 1);
-  ok("灌满没把限流表清空", W.errDup() - d1 === 1, String(W.errDup() - d1));
+  eq("表被灌满后，5 秒内的旧键仍被限流（不再整表清空）", W.ERRS.dropped() - d1, 1);
+  ok("灌满没把限流表清空", W.ERRS.dropped() - d1 === 1, String(W.ERRS.dropped() - d1));
 }
 
 // 72) 探活失败记录的时效
@@ -2283,21 +2283,21 @@ console.log("\n72) 探活失败过期");
   const t0 = 1_700_000_000_000;
   ok("阈值是 3", W.SC.SCAN_BAD_MAX === 3, String(W.SC.SCAN_BAD_MAX));
   ok("过期时长 30 分钟", W.SC.PROBE_BAD_TTL === 1800000, String(W.SC.PROBE_BAD_TTL));
-  ok("没失败过不跳过", W.probeBadSkip(key, t0) === false, "false");
+  ok("没失败过不跳过", W.PROBE_COOL.skip(key, t0) === false, "false");
   W.bumpProbeBad(key, false, t0);
-  ok("失败 1 次不跳过", W.probeBadSkip(key, t0) === false, "false");
+  ok("失败 1 次不跳过", W.PROBE_COOL.skip(key, t0) === false, "false");
   W.bumpProbeBad(key, false, t0 + 1000);
   W.bumpProbeBad(key, false, t0 + 2000);
-  ok("连续 3 次后跳过", W.probeBadSkip(key, t0 + 3000) === true, "true");
-  ok("30 分钟后自动作废", W.probeBadSkip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 1) === false, "false");
+  ok("连续 3 次后跳过", W.PROBE_COOL.skip(key, t0 + 3000) === true, "true");
+  ok("30 分钟后自动作废", W.PROBE_COOL.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 1) === false, "false");
   // 真正过了 TTL 之后再失败，才算新一轮
   W.bumpProbeBad(key, false, t0 + 2000 + W.SC.PROBE_BAD_TTL + 5000);
-  ok("过期后再失败从 1 重新数（还不跳过）", W.probeBadSkip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 5000) === false, "false");
+  ok("过期后再失败从 1 重新数（还不跳过）", W.PROBE_COOL.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 5000) === false, "false");
   W.bumpProbeBad(key, false, t0 + 2000 + W.SC.PROBE_BAD_TTL + 6000);
   W.bumpProbeBad(key, false, t0 + 2000 + W.SC.PROBE_BAD_TTL + 7000);
-  ok("重新数满 3 次又跳过", W.probeBadSkip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 7000) === true, "true");
+  ok("重新数满 3 次又跳过", W.PROBE_COOL.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 7000) === true, "true");
   W.bumpProbeBad(key, true, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000);
-  ok("探活成功立刻清除", W.probeBadSkip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000) === false, "false");
+  ok("探活成功立刻清除", W.PROBE_COOL.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000) === false, "false");
 }
 
 console.log("\n73) 业务 4xx 不被误升级成封锁");
@@ -2339,15 +2339,15 @@ console.log("\n75) 正记忆优先复用");
   W.RELPERF.clear();
   W.relNote("a.example.com", "203.0.113.7", 200, 1600);
   W.relNote("a.example.com", "203.0.113.9", 400, 300);
-  eq("快中继代价更低", W.relCost("a.example.com", "203.0.113.7") < W.relCost("a.example.com", "203.0.113.9"), true);
-  eq("没量过的中继代价是 1e6", W.relCost("a.example.com", "203.0.113.99"), 1e6);
-  eq("样本按站点分开存", W.relCost("b.example.com", "203.0.113.7"), 1e6);
+  eq("快中继代价更低", W.RELPERF.cost("a.example.com", "203.0.113.7") < W.RELPERF.cost("a.example.com", "203.0.113.9"), true);
+  eq("没量过的中继代价是 1e6", W.RELPERF.cost("a.example.com", "203.0.113.99"), 1e6);
+  eq("样本按站点分开存", W.RELPERF.cost("b.example.com", "203.0.113.7"), 1e6);
   // 两条中继都能通时，选代价更低的那条（健康度都未知 → 由站点 × 中继决定）
   const ctxR = { host: "a.example.com", cfHost: true, clientV6: false, relays: ["203.0.113.9", "203.0.113.7"], legacyWantsRelay: true };
   eq("按站点 × 中继选更快的那条", W.POLICY.decide(ctxR).chan.ip, "203.0.113.7");
-  eq("调试快照按代价升序", W.relSnap("a.example.com")[0].relayIp, "203.0.113.7");
+  eq("调试快照按代价升序", W.RELPERF.snap("a.example.com")[0].relayIp, "203.0.113.7");
   W.RELPERF.clear();
-  eq("清空后代价回到未知", W.relCost("a.example.com", "203.0.113.7"), 1e6);
+  eq("清空后代价回到未知", W.RELPERF.cost("a.example.com", "203.0.113.7"), 1e6);
 }
 
 // 第 38d 组：两种模式对「快」的定义不同
@@ -2359,14 +2359,14 @@ console.log("\n75) 正记忆优先复用");
   eq("delay 模式选首字节更快的那条", W.POLICY.decide({ host: "c.example.com", cfHost: true, clientV6: false, relays: ["203.0.113.12", "203.0.113.11"], legacyWantsRelay: true, mode: "lat" }).chan.ip, "203.0.113.11");
   eq("tput 模式选拉 1MB 更快的那条", W.POLICY.decide({ host: "c.example.com", cfHost: true, clientV6: false, relays: ["203.0.113.11", "203.0.113.12"], legacyWantsRelay: true, mode: "tput" }).chan.ip, "203.0.113.12");
   // 新站点没量过这条中继时，用它在别处学到的容量兜底（+200ms 罚），不该退回 1e6 重学一遍
-  eq("新站点沿用跨站点学到的中继容量", W.relCostMode("tput", "d.example.com", "203.0.113.12") < 1e6, true);
-  eq("本站点亲测比跨站点兜底更便宜", W.relCostMode("tput", "c.example.com", "203.0.113.12") < W.relCostMode("tput", "d.example.com", "203.0.113.12"), true);
+  eq("新站点沿用跨站点学到的中继容量", W.RELPERF.costFor("tput", "d.example.com", "203.0.113.12") < 1e6, true);
+  eq("本站点亲测比跨站点兜底更便宜", W.RELPERF.costFor("tput", "c.example.com", "203.0.113.12") < W.RELPERF.costFor("tput", "d.example.com", "203.0.113.12"), true);
   // 小响应（4 字节 403 页 / 只量到首字节）不能被当成「小带宽」重罚：
   // 否则 45KB 的正常首页（2.5 秒 = 18KB/s）会比 403 页（4 字节 = 46KB/s）更贵，排序反向。
   W.relNote("h.example.com", "203.0.113.30", 80, 0);
   W.relNote("h.example.com", "203.0.113.32", 300, 100);
-  eq("没量到吞吐的样本按首字节+固定罚计", Math.round(W.relCostMode("tput", "h.example.com", "203.0.113.30")), 2080);
-  eq("没量到吞吐的样本比实测很慢的中继更便宜", W.relCostMode("tput", "h.example.com", "203.0.113.30") < W.relCostMode("tput", "h.example.com", "203.0.113.32"), true);
+  eq("没量到吞吐的样本按首字节+固定罚计", Math.round(W.RELPERF.costFor("tput", "h.example.com", "203.0.113.30")), 2080);
+  eq("没量到吞吐的样本比实测很慢的中继更便宜", W.RELPERF.costFor("tput", "h.example.com", "203.0.113.30") < W.RELPERF.costFor("tput", "h.example.com", "203.0.113.32"), true);
   W.RELPERF.clear();
 }
 
@@ -3380,26 +3380,26 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   W.relNote(H, A, 100, 0);
   W.relNote(H, A, 100, 0);
   W.relNote(H, A, 100, 0);
-  eq("小响应样本不会把吞吐拽下去（100 + 512000/800）", Math.round(W.relCostMode("tput", H, A)), 740);
-  eq("调试快照里的速率也还是 800", Math.round(W.relSnap(H)[0].kiloBytesPerSec), 800);
+  eq("小响应样本不会把吞吐拽下去（100 + 512000/800）", Math.round(W.RELPERF.costFor("tput", H, A)), 740);
+  eq("调试快照里的速率也还是 800", Math.round(W.RELPERF.snap(H)[0].kiloBytesPerSec), 800);
   // 反过来：先只有小响应（没量到吞吐），再来一次大下载
   W.RELPERF.clear();
   const B = "203.0.113.141";
   W.relNote(H, B, 100, 0);
   W.relNote(H, B, 100, 800);
-  eq("第一次量到吞吐时不被旧的 0 稀释", Math.round(W.relCostMode("tput", H, B)), 740);
+  eq("第一次量到吞吐时不被旧的 0 稀释", Math.round(W.RELPERF.costFor("tput", H, B)), 740);
   // 一次都没量到吞吐：走「首字节 + 2000」的兜底，不能落到 32KB/s 的下限
   W.RELPERF.clear();
   const C = "203.0.113.142";
   W.relNote(H, C, 80, 0);
   W.relNote(H, C, 80, 0);
-  eq("从没量到吞吐的样本按首字节 + 固定罚计", Math.round(W.relCostMode("tput", H, C)), 2080);
+  eq("从没量到吞吐的样本按首字节 + 固定罚计", Math.round(W.RELPERF.costFor("tput", H, C)), 2080);
   // 跨站点聚合表同样不能把 0 混进来
   W.RELPERF.clear();
   const D = "203.0.113.143";
   W.relNote("agg-a.example", D, 100, 800);
   W.relNote("agg-a.example", D, 100, 0);
-  eq("聚合表沿用已量到的容量（+200ms 表示不是本站点亲测）", Math.round(W.relCostMode("tput", "agg-b.example", D)), 940);
+  eq("聚合表沿用已量到的容量（+200ms 表示不是本站点亲测）", Math.round(W.RELPERF.costFor("tput", "agg-b.example", D)), 940);
   W.RELPERF.clear();
 }
 
@@ -4448,14 +4448,14 @@ console.log("\n176) 预算账本与续回边界");
   ok("诊断的跨 isolate 封锁改读 /vt 的 blk2", dS.indexOf('doFetch(env, id, "https://meter/vt")') >= 0 && dS.indexOf("jj.blk2") >= 0, "debug.ts");
   ok("诊断用 blk2 的 at 与 BLK_TTL 算剩余寿命", dS.indexOf("r.at + BLK_TTL - now2") >= 0, "debug.ts");
   const pS = policyAll();
-  eq("决策里同一张实测表只扫一遍", pS.split("relSnap(c.host)").length - 1, 1);
+  eq("决策里同一张实测表只扫一遍", pS.split("RELPERF.snap(c.host)").length - 1, 1);
   ok("冷启动闸门复用同一个计数", pS.indexOf("fresh === 0") >= 0, "policy.ts");
   // 行为面：量过的那条照旧进表，样本数只累加不重置
   W.RELPERF.clear();
   W.RELPERF.note("rel188.example", "203.0.113.21", 300, 900);
-  eq("量过的那条被记进站点 × 中继表", W.relSnap("rel188.example").length, 1);
+  eq("量过的那条被记进站点 × 中继表", W.RELPERF.snap("rel188.example").length, 1);
   W.RELPERF.note("rel188.example", "203.0.113.21", 320, 950);
-  eq("样本数照样累加（只增不重置）", W.relSnap("rel188.example")[0].samples, 2);
+  eq("样本数照样累加（只增不重置）", W.RELPERF.snap("rel188.example")[0].samples, 2);
   W.RELPERF.clear();
 }
 /* ── 179. 吞吐容量表：上限与寿命必须落在插入路径上；残槽 HOOK.psNote 不该存在 ── */
@@ -5558,22 +5558,22 @@ try {
     W.S.rankCache = { t: 0, at: {}, v: {}, step: {} };
   };
   setup213();
-  const a213 = W.hostUntried(g213host, "lat");
+  const a213 = W.HOSTS.untried(g213host, "lat");
   ok("影子试探先给全局排行第一名", Boolean(a213), a213);
   W.STATS.nsGet(a213).lastTry = Date.now();
-  const b213 = W.hostUntried(g213host, "lat");
+  const b213 = W.HOSTS.untried(g213host, "lat");
   ok("刚试过的节点不会被第二条并发请求立刻再选一次", b213 !== a213, a213 + " / " + b213);
   ok("换到的是另一条真实候选", g213keys.includes(b213), b213);
   W.STATS.nsGet(a213).lastTry = Date.now() - 60000;
-  eq("过了窗口期可以再用它", W.hostUntried(g213host, "lat"), a213);
+  eq("过了窗口期可以再用它", W.HOSTS.untried(g213host, "lat"), a213);
   setup213();
   for (const k of g213keys) W.STATS.nsGet(k).lastTry = Date.now();
-  const c213 = W.hostUntried(g213host, "lat");
+  const c213 = W.HOSTS.untried(g213host, "lat");
   ok("全都在窗口内时退回一条，不能返回空串", Boolean(c213), c213);
   W.S.alive = new Map([[g213keys[0], { h: "10.213.0.1", p: 443, cc: "HK" }]]);
   W.S.hostNode.delete(g213host);
   W.S.rankCache = { t: 0, at: {}, v: {}, step: {} };
-  eq("只有一条候选时在同一条上再试", W.hostUntried(g213host, "lat"), g213keys[0]);
+  eq("只有一条候选时在同一条上再试", W.HOSTS.untried(g213host, "lat"), g213keys[0]);
   W.S.alive = oldAlive;
   W.S.rankCache = oldRank;
 
@@ -6051,7 +6051,7 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   const PB = W.S.probeBad;
   const key226 = (i) => `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}:443`;
   const t0 = Date.now();
-  const sw = W.sweepProbeBad;
+  const sw = (t) => W.PROBE_COOL.sweep(t);
   eq("上限常量在位", W.SC.PROBE_BAD_MAX, 2048);
   // 过期记录：对 probeBadSkip 已经无意义，必须清掉
   PB.clear();
@@ -6080,13 +6080,13 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   // 判据与 TTL 同源：过 TTL 后不再判「跳过」
   PB.clear();
   for (let i = 0; i < 3; i++) W.bumpProbeBad(key226(9), false, t0);
-  ok("连续 3 次失败后判跳过", W.probeBadSkip(key226(9), t0));
-  ok("过了 TTL 不再判跳过", W.probeBadSkip(key226(9), t0 + W.SC.PROBE_BAD_TTL + 1) === false);
+  ok("连续 3 次失败后判跳过", W.PROBE_COOL.skip(key226(9), t0));
+  ok("过了 TTL 不再判跳过", W.PROBE_COOL.skip(key226(9), t0 + W.SC.PROBE_BAD_TTL + 1) === false);
   PB.clear();
   // 源码锁：清理函数存在、且 cronScan 每轮都调它
   const poolSrc226 = scanAll();
 const aliveSrc226 = fs.readFileSync("src/px/alive.ts", "utf8");
-  ok("cronScan 每轮都扫这张表", poolSrc226.includes("sweepProbeBad();"));
+  ok("cronScan 每轮都扫这张表", poolSrc226.includes("PROBE_COOL.sweep();"));
   ok("扫的时候先看 TTL", aliveSrc226.includes("if (now - entry.at > SC.PROBE_BAD_TTL) {"));
   ok("超上限按 at 升序淘汰", aliveSrc226.includes("sort((a, b) => a[1].at - b[1].at)"));
 }
@@ -6247,7 +6247,7 @@ W.S.cagg.clear();
 clPut("p230.two", [100, 900]);
 clPut("p230.ten", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 clPut("p230.big", Array.from({ length: 64 }, (_, i) => (i + 1) * 10));
-const clRows = W.clSnapshot(40);
+const clRows = W.PEND.clSnap(40);
 const clBy = Object.fromEntries(clRows.map((r) => [r.k, r]));
 eq("两个样本时 p50 是较小那个（不是最大值）", clBy["p230.two"].p50, 100);
 eq("两个样本时 p95 才是最大值", clBy["p230.two"].p95, 900);
@@ -6256,7 +6256,7 @@ eq("十个样本时 p95 是最大值", clBy["p230.ten"].p95, 10);
 eq("64 个样本时 p50 是第 32 个", clBy["p230.big"].p50, 320);
 W.S.cagg.delete("p230.zero");
 W.S.cagg.set("p230.zero", { n: 0, ok: 0, dn: 0, v: [] });
-eq("没有样本的行不会进快照", W.clSnapshot(40).some((r) => r.k === "p230.zero"), false);
+eq("没有样本的行不会进快照", W.PEND.clSnap(40).some((r) => r.k === "p230.zero"), false);
 W.S.cagg.clear();
 const pendSrc = fs.readFileSync("src/store/pend.ts", "utf8");
 ok("分位索引用 nearest-rank", pendSrc.includes("Math.ceil(p * v.length) - 1"));
@@ -6361,7 +6361,7 @@ if (typeof W.doFetch === "function") {
 }
 ok("计数点只有一处（meter-client 的 doFetch）", (mc233.split("S.doCalls += 1;").length - 1) === 1 && (pd233.split("S.doCalls += 1;").length - 1) === 0);
 ok("pend 的用量批次改走 doFetch", pd233.includes("doFetch(env, id, \"https://meter/add\"") && !pd233.includes("idFromName(id)).fetch"));
-ok("stats 的读用量与回填都走 doFetch", st233.includes("doFetch(env, primaryId(env) || id, \"https://meter/cnt\")") && st233.includes("doFetch(env, id, \"https://meter/seed\""));
+ok("stats 的读用量与回填都走 doFetch", st233.includes("doFetch(env, PEND.id(env) || id, \"https://meter/cnt\")") && st233.includes("doFetch(env, id, \"https://meter/seed\""));
 ok("snapshot 的回填走 doFetch", sn233.includes("doFetch(env, id, \"https://meter/set\""));
 ok("verdictsync 的读事实走 doFetch", vs233.includes("doFetch(env, raw, \"https://meter/vt\")"));
 
@@ -6625,14 +6625,14 @@ ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 D
   for (let i = 0; i < 20; i++) W.S.pend.set("p242-u" + i, { up: 10, down: 20, conns: 1 });
   W.S.pendAt = 0;
   W.S.pendMs = 0;
-  await W.pendFlush(env242, true, 5);
+  await W.PEND.flush(env242, true, 5);
   eq("给了 5 的额度就只发 5 次 DO 往返", sent242.length, 5);
   eq("剩下的留在账本里等下一轮", W.S.pend.size, 15);
   sent242.length = 0;
   for (let i = 0; i < 40; i++) W.S.pend.set("p242-v" + i, { up: 1, down: 1, conns: 1 });
   W.S.pendAt = 0;
   W.S.pendMs = 0;
-  await W.pendFlush(env242, true);
+  await W.PEND.flush(env242, true);
   eq("不传额度时回到 PEND_MAX", sent242.length, W.SC.PEND_MAX);
 
   const reads242 = [];
@@ -6653,7 +6653,7 @@ ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 D
   ok("budget 不再把上报/快照当固定支出", !bud242.includes("pend: 1,") && !bud242.includes("snap: 4,"));
   ok("budget 有分账常量", bud242.includes("export const SHARE_PEND = 0.5;") && bud242.includes("export const SHARE_SNAP = 0.3;"));
   ok("planRound 按占比切并夹到各自上限", bud242.includes("cap(sub * SHARE_PEND, SC.PEND_MAX)") && bud242.includes("cap(sub * SHARE_SNAP, SC.SNAP_MAX)"));
-  ok("cron 把三个额度分别传下去", cron242.includes("pendFlush(env, true, plan.pend)") && cron242.includes("usageSnapWrite(env, users.list, plan.snap)") && cron242.includes("restorePick(allIds, plan.restore)"));
+  ok("cron 把三个额度分别传下去", cron242.includes("PEND.flush(env, true, plan.pend)") && cron242.includes("usageSnapWrite(env, users.list, plan.snap)") && cron242.includes("restorePick(allIds, plan.restore)"));
   ok("cron 不再自己夹 RESTORE_MAX", !cron242.includes("RESTORE_MAX"));
   ok("pendFlush 尊重传入额度", pend242.includes("Math.min(SC.PEND_MAX, max)"));
   ok("usageSnapWrite 尊重传入额度", snap242.includes("Math.min(SC.SNAP_MAX, max)"));
@@ -6679,7 +6679,7 @@ ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 D
   W.S.pend.set("u243a", { up: 10, down: 20, conns: 1 });
   W.S.pendAt = 0;
   W.S.pendMs = 0;
-  await W.pendFlush(envDown, true, 5);
+  await W.PEND.flush(envDown, true, 5);
   ok("账本上报失败有计数", d243("pendFail") >= 1, String(d243("pendFail")));
   // 用量快照：读失败早退 / 写失败各一个计数
   await W.usageSnapWrite(envDown, [{ id: "u243a" }], 2);
@@ -8242,7 +8242,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok("alive.ts 同时有冷却表与存活表", aliveSrc279.includes("export class ProbeCooldown") && aliveSrc279.includes("export class AliveBoard"), "");
   ok(
     "pool.ts 原样再导出旧名字（调用点零改动）",
-    ["probeBadSkip", "bumpProbeBad", "sweepProbeBad", "pxGet", "aliveList", "cronScan", "PoolScan", "ALIVE"].every((n) => poolSrc279.includes(n)),
+    ["PROBE_COOL", "bumpProbeBad", "pxGet", "aliveList", "cronScan", "PoolScan", "ALIVE"].every((n) => poolSrc279.includes(n)),
     "",
   );
 
@@ -8434,7 +8434,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   // 三块各就各位
   eq(`[${g}] 入口 RTT 三个入口在 rtt.ts`, ["export function rttMark", "export function rttLearn", "export async function loadRtt"].every((x) => rttSrc.includes(x)), true);
   ok(`[${g}] rtt.ts 不定义类（状态在 S.rtt，无独占状态）`, !/^export class /m.test(rttSrc));
-  eq(`[${g}] 站点画像与族键在 site.ts`, ["export class HostProfile", "export const HOSTS", "export function siteKey", "export function hostKey", "export function hostScore", "export function hostNodeMark", "export function hostDirectMark", "export function hostRank", "export function hostUntried"].every((x) => siteSrc.includes(x)), true);
+  eq(`[${g}] 站点画像与族键在 site.ts`, ["export class HostProfile", "export const HOSTS", "export function siteKey", "export function hostKey", "export function hostScore", "export function hostNodeMark", "export function hostDirectMark"].every((x) => siteSrc.includes(x)), true);
   eq(`[${g}] 诊断结论在 diag.ts`, ["export function diagVerdict"].every((x) => diagSrc.includes(x)), true);
   ok(`[${g}] diag.ts 是纯函数（不读 S、不做 IO）`, !diagSrc.includes("S.") && !diagSrc.includes("await ") && !diagSrc.includes("fetch("));
   // 行为：拆分不改变任何判定
@@ -8917,6 +8917,41 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("首字节样本写进矩", row302.pSum > 0 && row302.msLocal > 0, true);
 }
 
+
+
+/* ---------- 第 303 组：十三个薄包装退场，能力挂在单例上 ---------- */
+{
+  // 旧名字必须真的拿不到（不是「导出成 undefined」而是压根没有这个导出）
+  const gone = ["errDup", "hostRank", "hostUntried", "probeBadSkip", "sweepProbeBad", "capFactor", "capNote",
+    "relCost", "relCostMode", "relSnap", "clSnapshot", "pendFlush", "primaryId"];
+  for (const n of gone) ok("旧入口已删除：" + n, W[n] === undefined);
+
+  // 能力仍然在，而且挂在它们操作的那张表上
+  ok("冷却表自己判跳过", typeof W.PROBE_COOL.skip === "function" && typeof W.PROBE_COOL.sweep === "function");
+  ok("画像表自己给排行", typeof W.HOSTS.rank === "function" && typeof W.HOSTS.untried === "function");
+  ok("容量表自己给因子与记账", typeof W.CAP.factor === "function" && typeof W.CAP.note === "function");
+  ok("实测表自己给代价与快照", typeof W.RELPERF.cost === "function" && typeof W.RELPERF.costFor === "function" && typeof W.RELPERF.snap === "function");
+  ok("待上报账本自己报 id / 冲账 / 连接快照", typeof W.PEND.id === "function" && typeof W.PEND.flush === "function" && typeof W.PEND.clSnap === "function");
+  ok("错误环自己报丢弃数", typeof W.ERRS.dropped === "function");
+
+  // 行为面：没有样本时都不能凭空造出证据
+  eq("没量过的站点 × 中继代价是 1e6", W.RELPERF.costFor("tput", "no-such-303.test", "203.0.113.203"), 1e6);
+  eq("没量过的直连代价也是 1e6", W.RELPERF.cost("no-such-303.test", "203.0.113.203"), 1e6);
+  eq("没量过的站点快照为空", W.RELPERF.snap("no-such-303.test"), []);
+  eq("懒模式容量因子恒 1", W.CAP.factor("203.0.113.204", "lat"), 1);
+  eq("没有冷却记录的键不跳过", W.PROBE_COOL.skip("cool303.test:443"), false);
+  ok("丢弃计数是个数字", typeof W.ERRS.dropped() === "number");
+
+  // 源码锁：这些名字只以「对象.方法」的形态出现，不再有同名模块函数
+  const relSrc303 = fs.readFileSync("src/route/relperf.ts", "utf8");
+  const pendSrc303 = fs.readFileSync("src/store/pend.ts", "utf8");
+  const siteSrc303 = fs.readFileSync("src/nodes/site.ts", "utf8");
+  const aliveSrc303 = fs.readFileSync("src/px/alive.ts", "utf8");
+  ok("实测表不再有模块函数", !/export function rel(Cost|CostMode|Snap)\(/.test(relSrc303));
+  ok("账本不再有模块函数", !/export function (pendFlush|clSnapshot|primaryId)\(/.test(pendSrc303));
+  ok("画像表不再有模块函数", !/export function (hostRank|hostUntried)\(/.test(siteSrc303));
+  ok("冷却表不再有模块函数", !/export function (probeBadSkip|sweepProbeBad)\(/.test(aliveSrc303));
+}
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

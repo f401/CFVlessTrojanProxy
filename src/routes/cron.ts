@@ -11,7 +11,7 @@ import { TFB } from "../route/tfbbook";
 import { DNS } from "../route/dnsfacts";
 import { probeFam } from "../proxy/dial";
 import { SEL } from "../px/selector";
-import { flushSnap, pendFlush, restorePick, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
+import { flushSnap, PEND, restorePick, restoreUsage, usageSnapGet, usageSnapWrite } from "../store/index";
 import { loadUsers } from "../proxy/protocol";
 
 /**
@@ -104,7 +104,7 @@ async function cronOnce(env: Env): Promise<void> {
   }
   // 定时持久化的唯一入口：每轮 cron 最多各写 1 次
   try {
-    await pendFlush(env, true, plan.pend);
+    await PEND.flush(env, true, plan.pend);
   } catch (e) {}
   // cronScan 内部已经落过一次 seed（且自带 55 分钟节流），这里只补写脏数据
   try {
