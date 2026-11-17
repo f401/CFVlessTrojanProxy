@@ -7,24 +7,21 @@ import { SC } from "../core/const";
 import { S } from "../core/state";
 import { isCfIp } from "../core/net";
 import { DIRECT } from "./channel";
-import { vAll, vAt, vBad, vClearHost, vOk, vSetState } from "./verdict";
-import { cfHttpCode } from "../proxy/cfverdict";
+import { vAll, vAt, vBad, vOk } from "./verdict";
 import { HEALTH, ipOf } from "./relay-health";
-import { CF_NEG, JUDGE } from "./judge";
-import { EG } from "./egfacts";
-import { relCostMode, relSnap } from "./relperf";
+import { JUDGE } from "./judge";
 import { psBest } from "./psfacts";
-import { isDead } from "./deadfacts";
-import { BLK } from "./blkfacts";
-import { factMul } from "./factmul";
-import { FULL_ON, HOST_MEM_MAX } from "./policy-ctx";
+import { HOST_MEM_MAX } from "./policy-ctx";
 import type { Choice, Ctx } from "./policy-ctx";
 import { WIRING } from "./policy-wiring";
 import { cnt } from "../core/counter";
 import { St } from "../core/enums";
+import { rankOf } from "./policy-rank";
+import { decideCf } from "./policy-cf";
+import type { PinSource } from "./policy-cf";
 
 /** 选路策略：纯内存、可单测；所有「哪条通道」的判断都收敛在这里 */
-export class Policy {
+export class Policy implements PinSource {
   /**
    * 冷启动钉住表：站点 → { 中继 IP, 到期时间 }。
    *
@@ -99,6 +96,18 @@ export class Policy {
   }
 
   /**
+   * 功能：取下一个轮换序号（吞吐模式冷启动时让前几条连接落在不同中继上）。
+   *
+   * 为什么是游标而不是随机：容量差异要「尽快覆盖几条」，随机抽样在 16 条候选上
+   * 会重复命中同一条（生日问题），轮换保证 N 条请求就覆盖 N 条中继。
+   * @param limit 候选条数
+   * @returns 0..limit-1 的下标
+   */
+  nextRotation(limit: number): number {
+    return this.rot++ % limit;
+  }
+
+  /**
    * 功能：该中继对某站点是否可用（判定表里没有「被封」结论）。
    * 只看站点级结论：通配级封锁在 7.57 事故后就不再有写入者，7.133 起判定表的写入入口
    * 直接拒绝 `*` 行（`blockWild`），所以这里不再查询通配键。
@@ -116,83 +125,17 @@ export class Policy {
    * @returns 选中的通道与理由
    */
   decide(c: Ctx): Choice {
-    let usable = c.relays.filter((ip) => this.chanOk(ip, c.host));
-    // 比例兜底：被判死的通道超过 3/4 时，只保留最近判死的两条，其余解除 ——
-    // 一次机房级风控不该让整池永久出局（复检 5% 太慢，这里直接放开多数）。
-    const blockedRatio = c.relays.length ? (c.relays.length - usable.length) / c.relays.length : 0;
-    if (blockedRatio > 0.75 && usable.length < 2) {
-      // 只对「被判死的」动手：7.268 之前这里对整个 c.relays 排序，把唯一能打通那条的正证据
-      // 也一起重置成 unknown（它的证据比最近四条判死更旧 ⇒ 排在后面 ⇒ 被 slice(2) 扫到），
-      // 结果 okOnes 变空、`vAt` 又被刷成「刚刚」⇒ 冷启动判据以为量过、好中继优先也失效。
-      const dead = c.relays.filter((ip) => vBad(c.host, "r:" + ip));
-      const sorted = dead.slice().sort((a, b) => vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a));
-      for (const ip of sorted.slice(2)) vSetState(c.host, "r:" + ip, 0, 1);
-      usable = c.relays.filter((ip) => this.chanOk(ip, c.host));
-    }
-    // 自愈：全部通道都被判死 → 清掉该站点的结论（宁可再试一次，也不能让站点没路可走）
-    if (!usable.length && c.relays.length) {
-      vClearHost(c.host);
-      usable = c.relays.slice();
-    }
-    // 站点级自愈：整池都被同一站点写满 ⇒ 判据失效/站点在拒绝所有人，清空并静默 30 分钟。
-    // 分母必须是**整池** `c.relays`（用 `usable` 时分子会被同一个事件剔掉，见 v7.143）。
-    // 位置必须在**所有早返回之前**：下面的 5% 复检与「直连被判死」两条路径都不会走到排序，
-    // 把维护动作挂在它们后面就等于「每次请求有 5% 的概率跳过自愈」——
-    // 这是在单测偶发失败（4 次跑 1 次红）里发现的（v7.154）。
-    BLK.sweep(c.host, c.relays);
+    // 候选视图（排序 + 分类）由 policy-rank.ts 算，本函数只做「谁先谁后」的裁决。
+    const r = rankOf(c);
     // 探索：被判死的通道按 5% 概率复检 —— 判死只是「当前证据」，网络会变，不试就永远好不了。
     // 成功的大响应会经 Judge 把它改回 ok；失败只会刷新 TTL，代价是一次连接的尝试。
-    const blocked = c.relays.filter((ip) => !this.chanOk(ip, c.host));
-    if (blocked.length && Math.random() < 0.05) {
-      return { chan: { kind: "r", ip: blocked[0] as string }, why: "explore" };
+    if (r.blocked.length && Math.random() < 0.05) {
+      return { chan: { kind: "r", ip: r.blocked[0] as string }, why: "explore" };
     }
-
     // 直连已被实测/差分判死（任何站点都适用）→ 直接换中继
-    if (usable.length && vBad(c.host, "d")) {
-      const nonCf0 = usable.filter((ip) => !isCfIp(ip));
-      return { chan: { kind: "r", ip: (nonCf0[0] || usable[0]) as string }, why: "dir-blocked" };
+    if (r.usable.length && vBad(c.host, "d")) {
+      return { chan: { kind: "r", ip: (r.nonCf[0] || r.usable[0]) as string }, why: "dir-blocked" };
     }
-    // 粘性：最近对该站点留下过证据的通道排前面（vAt 为最后证据时间，没证据的为 0 排最后）。
-    // 突发场景下「每条连接都按健康度盲选」会分散到少数 v6 出口/质量差的中继；按站点证据排序能让
-    // 已经证明「这个站点走它能成」的同一条中继被反复复用 —— 普适规则，不含站点特判。
-    // 短负面记忆（10 分钟）优先于粘性：刚回过异常小响应的通道先让开一条连接，过期自动恢复。
-    // CF 托管目标额外参考「这条中继对 CF 站点普遍不友好」的通用记录（站点无关，但只在本 isolate）。
-    const negOf = (ip: string): number =>
-      JUDGE.negOn(c.host, ip) || (c.cfHost && JUDGE.negOn(CF_NEG, ip)) ? 1 : 0;
-    // 正记忆（10 分钟）：这条中继刚给本站出过整页 → 排在同类之前。
-    // 冷 isolate 的盲选是主要残差来源，把「刚证明能成的那条」钉在队首是最省的修法（不跨 isolate 共享）。
-    const posOf = (ip: string): number => (JUDGE.posOn(c.host, ip) ? 0 : 1);
-    // 健康度（本 isolate 的中继吞吐/成功率）作为下一层：它跟站点无关，但对「这条中继背后是不是坏 egres」有信息量。
-    const hIdx = new Map<string, number>(HEALTH.rank(usable).map((ip, i) => [ip, i]));
-    const hOf = (ip: string): number => hIdx.get(ip) ?? 99;
-    // 站点 × 中继的实测代价：同一个中继对不同站点快慢差一个数量级，所以它比「站点无关的健康度」更贴题。
-    // 按模式取：吞吐优先看「拉 1MB 要多久」，延迟优先只看首字节（别被大文件样本带偏）。
-    // 有样本就按样本排；没样本的排到 1e6 之后，再用站点无关的健康度打破并列 ——
-    // 这样「量过且慢」不会被当成「没量过」重新插队，冷启动仍能靠健康度挑到合理的几条。
-    const scoreOf = (ip: string): number => {
-      const r = relCostMode(c.mode === "lat" ? "lat" : "tput", c.host, ip);
-      const base = r < 1e6 ? r : 1e6 + hOf(ip) * 1000;
-      // 出口族偏置（v8 §5）：v4 出口通过率明显更高，但这里只乘系数、不改候选集合——
-      // v6 出口照样有机会被选中，只是要明显更便宜才会排到前面。
-      // 再叠「站点 × 中继」成功率折价：没有样本时因子恒为 1（接入前后逐位相同）；
-      // 有样本时把实测过不了的通道乘贵 —— 仍然只是乘数，绝不剔候选（v8 §15 I2）。
-      // blk：判为「这个站点在这个出口上被封锁」时只乘 6 倍代价（v8 §15 的 I1：永不剔候选）
-      // dns：确证「纯 v4 站点」时把 v6 出口乘 2 —— 结构性过不去，不是状态不好。
-      return base * factMul(c.facts || FULL_ON, c.host, ip, c.mode || "tput", !!c.cfHost);
-    };
-    const ranked = usable
-      .slice()
-      .sort(
-        (a, b) =>
-          negOf(a) - negOf(b) ||
-          posOf(a) - posOf(b) ||
-          scoreOf(a) - scoreOf(b) ||
-          vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a),
-      );
-    // v8 §15 的 I1：dead 是唯一允许缩小候选的事实 —— 而且这里只把判死的中继挪到队尾，
-    // 不是删除：全池都判死时仍要发出请求（leastBad），否则用户看到的是「无候选」而不是业务页。
-    const live = ranked.filter((ip) => !isDead(ip));
-    const stick = live.length ? live : ranked;
     // 康复通道（v8 §3.2 / D12）：每 20 条请求放 1 条「历史上有过整页、但现在排在最后」的中继。
     // 不这么做就存在死锁：被降权的通道再也拿不到样本 → 成功率永远停在先验 → 永远回不来。
     // 用序号而不是随机数，是为了让「第 20 条会康复」这件事可复现、可断言。
@@ -202,90 +145,25 @@ export class Policy {
     this.seq.set(c.host, nth);
     // 站点名不是有限集合：超过上限就压回（见 trim 的注释）
     if (this.seq.size > HOST_MEM_MAX || this.pin.size > HOST_MEM_MAX) this.trim();
-    if (nth % 20 === 0 && stick.length > 1) {
+    if (nth % 20 === 0 && r.stick.length > 1) {
       // 闸门看「历史最好」而不是会衰减的当前均值：这条通道唯一的用途就是打破
       // 「被降权 → 拿不到样本 → 永远回不来」的死锁；用均值等于把这次机会交给运气
       // （实测口径：成过一次、之后连败十条的通道，均值早已 < 0.6，而它正是最该被放一条的）。
-      const back = stick.filter((ip) => psBest(c.host, ip) >= 0.6 || JUDGE.posOn(c.host, ip));
+      const back = r.stick.filter((ip) => psBest(c.host, ip) >= 0.6 || JUDGE.posOn(c.host, ip));
       const worst = back.length ? (back[back.length - 1] as string) : "";
-      if (worst && worst !== stick[0]) {
+      if (worst && worst !== r.stick[0]) {
         cnt("rehab");
         return { chan: { kind: "r", ip: worst }, why: "rehab" };
       }
     }
-    const nonCf = stick.filter((ip) => !isCfIp(ip));
-    // 优先挑「本站点已实测打得通」的中继；通配键已不可能存在（7.133 起写入端直接拒绝）
-    const okOnes = stick.filter((ip) => vOk(c.host, "r:" + ip));
-
     // 直连成功证据只信 5 分钟：边缘出口会漂移。这条必须排在「客户端 v6」与「有中继就用中继」之前 ——
     // 客户端地址族只影响落到哪个 POP，不会传给目标（本地配对实测：直连 30/30 vs 中继 26/30）。
     const dAt = vAt(c.host, "d");
     if (vOk(c.host, "d") && dAt && Date.now() - dAt < 300000) return { chan: DIRECT, why: "direct-ok" };
-
-    if (c.clientV6 && c.cfHost) {
-      // F6：v6 客户端打 CF 目标必 403，只有非 CF 主机能改判
-      // 回退顺序用 `stick`（已把判死的挪到队尾），不能退回 `usable` —— 那里面还留着判死的通道；
-      // 选谁交给排序结果（`stick` 已按 neg/pos/score 排好），不再按池子迭代顺序取第一条。
-      const pool = nonCf.length ? nonCf : stick.length ? stick : usable;
-      if (pool.length) {
-        const ip = (okOnes.find((x) => pool.includes(x)) || pool[0]) as string;
-        return { chan: { kind: "r", ip }, why: "v6-cf" };
-      }
-      return { chan: DIRECT, why: "v6-cf-none" };
-    }
-
-    if (c.cfHost) {
-      // CF 托管目标：直连/CF 中继都是 CF→CF，会把客户端出口原样透传，能改判的只有非 CF 主机。
-      // 本出口的 fetch 状态码只作辅助证据（CF→CF 的 fetch 常返回 200，隧道却 403）。
-      const code = cfHttpCode(c.host);
-      // 吞吐模式：还没有任何「本站点可用」的证据时，**逐条轮换**而不是钉死一条 60 秒。
-      // 为什么：中继容量实测差 3–4 倍（1103 vs 300 KB/s），钉住一条时其余中继永远没有样本，
-      // 「按站点 × 中继挑最快」就永远学不出来；轮换几条后样本足够，再交给下面的排序去利用。
-      const coldSite = !stick.some((ip) => vAt(c.host, "r:" + ip) > 0) && !stick.some((ip) => JUDGE.posOn(c.host, ip));
-      // 一次扫描同时拿到「量过几条」与「量过哪些」：7.188 之前这里把同一张表扫了三遍（每遍还要排序），
-      // 而 CF 托管目标是热路径（闭环证明里 400 条请求有 379 条走这条分支）。
-      const relRows = relSnap(c.host);
-      const fresh = relRows.length;
-      // 只给「本站点一次都没量过」的中继采样机会，而且必须已经有 1 条样本做锚：
-      // 全池轮换会把 0/4、2/4 全 403 的中继塞给用户（实测 tput 2/8），
-      // 完全不轮换又永远学不出容量差异（只剩一条中继有样本）。小步、只朝没试过的走。
-      const seen = new Set(relRows.map((row) => row.relayIp));
-      const unmeasured = stick.filter((ip) => !JUDGE.negOn(c.host, ip) && !seen.has(ip));
-      if (c.mode !== "lat" && coldSite && fresh >= 1 && unmeasured.length > 0) {
-        const ip = unmeasured[this.rot++ % unmeasured.length] as string;
-        return { chan: { kind: "r", ip }, why: "rel-rot" };
-      }
-      // 冷启动：该站点没有任何通道证据、本出口也没拿到状态码、也还没有「站点×中继」样本
-      // → 钉住单条中继 60 秒（理由见 pinFor）。一旦有了样本就交给 stick 排序，避免钉住覆盖实测结论。
-      if (!code && coldSite && fresh === 0) {
-        // 钉住的那条一旦进了负面记忆就立刻换下一条：否则一次坏 egress 会在 60 秒里吞掉整个站点
-        const pool = (nonCf.length ? nonCf : stick).filter((ip) => !JUDGE.negOn(c.host, ip));
-        const cip = this.pinFor(c.host, pool.length ? pool : nonCf.length ? nonCf : stick);
-        if (cip) return { chan: { kind: "r", ip: cip }, why: "cold-pin" };
-      }
-      // 曾经这里有一条「只要本站在某条中继上有过成功记录就直接用它」的短路（`cf-ok-relay`）。
-      // 本地闭环证明（`tools/exp-v8proof.mjs`）把它钉成了缺陷：v6 出口有 12.5% 的概率蒙过一次，
-      // 一旦蒙过就把整站钉在这条 v6 上，`eg`/`score` 全被绕过（400 条里 399 条走这条短路，成功率 10.8%）。
-      // v8 的纪律是「事实只改顺序」：让 `posOf`（最近出过整页）+ `scoreOf`（含族偏置）去排序即可，
-      // 蒙过一次的 v6 中继会因为 `eg=6` 的 ×40 而排在已知 v4 后面。
-      // 非 CF 主机是唯一能把「客户端 IP 透传」这条封禁规则改判掉的通道，所以优先；
-      // 注意「直连成功证据优先」那一条已经在本函数上半部（direct-ok），不在这里重复。
-      if (nonCf.length) return { chan: { kind: "r", ip: nonCf[0] }, why: "cf-noncf" };
-      // 「本出口 fetch 得 200」不等于「隧道直连得 200」：fetch 走的是 CF 自己的出口，
-      // 隧道直连可能落在一个对 CF 托管站点不友好的边缘出口上（实测 200 → 隧道 403）。
-      // 所以只有在**隧道直连自己有过成功证据**（vOk(host,"d")）时才选直连；否则宁可走一条已知可用的中继。
-      // 直连成功证据只信 5 分钟内：边缘出口会漂移，"十分钟前直连 200" 不代表这一分钟还行。
-      // 30 分钟 TTL 内一直选直连，一次幸运 200 会换来一串 4 字节 403（实测 tput 15/20 → 20/20 的差别就来自这里）。
-      if (code === 403 && stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "http403" };
-      if (code === 200 && !stick.length) return { chan: DIRECT, why: "http200" };
-      if (stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "cf-any" };
-      // 冷 isolate 兜底：`S.alive` 还没探出来时 `stick` 是空的，原来的结局是直连 → 403。
-      // 事实层里已有「这条中继送回过整页」的 v4 出口（DO 读到的），先把它们用起来，
-      // 比直连稳得多（钉中继实测 v4 9/9 200、直连约 1/6）。只挑一条，失败交给 dialect 的重试。
-      // 事实里的 v4 出口也可能刚被判死：不挑 dead，否则兜底会把请求送到已知连不上的中继
-      const eg4 = EG.v4List().filter((x) => !isDead(x));
-      if (eg4.length) return { chan: { kind: "r", ip: eg4[0] as string }, why: "eg-pin" };
-    }
+    // 剩下的局面全在 policy-cf.ts：CF 托管目标的六个分支（v6 客户端 / 未量过轮换 / 冷启动钉住 /
+    // 优先非 CF / 本出口状态码 / 事实层兜底）。它对非 CF 目标返回 null，表示「不归它管」。
+    const cf = decideCf(c, r, this);
+    if (cf) return cf;
     return { chan: DIRECT, why: "direct" };
   }
 

@@ -66,6 +66,10 @@ const psAll = () =>
 const scanAll = () =>
   ["src/px/scan.ts", "src/px/scan-probe.ts", "src/px/scan-alive.ts", "src/px/scan-house.ts", "src/px/probe-batch.ts"]
     .map((f) => fs.readFileSync(f, "utf8")).join("\n");
+/** 功能：把决策本体、候选排序与 CF 分支树三份源码合并成一段文本（源码锁读它）。 */
+const policyAll = () =>
+  ["src/route/policy.ts", "src/route/policy-rank.ts", "src/route/policy-cf.ts"]
+    .map((f) => fs.readFileSync(f, "utf8")).join("\n");
 
 const eq = (n, a, b) => {
   // want 是 undefined / 函数，或拿到的东西是函数时，序列化比较会两边都变成 undefined，
@@ -4434,7 +4438,7 @@ console.log("\n176) 预算账本与续回边界");
   const dS = debugAll();
   ok("诊断的跨 isolate 封锁改读 /vt 的 blk2", dS.indexOf('doFetch(env, id, "https://meter/vt")') >= 0 && dS.indexOf("jj.blk2") >= 0, "debug.ts");
   ok("诊断用 blk2 的 at 与 BLK_TTL 算剩余寿命", dS.indexOf("r.at + BLK_TTL - now2") >= 0, "debug.ts");
-  const pS = fs.readFileSync("src/route/policy.ts", "utf8");
+  const pS = policyAll();
   eq("决策里同一张实测表只扫一遍", pS.split("relSnap(c.host)").length - 1, 1);
   ok("冷启动闸门复用同一个计数", pS.indexOf("fresh === 0") >= 0, "policy.ts");
   // 行为面：量过的那条照旧进表，样本数只累加不重置
@@ -7750,7 +7754,7 @@ ok("文档写明判定状态只用枚举", fs.readFileSync("docs/命名约定.md
   eq("比例兜底后仍记得能打通的那条", W.vState(H268, "r:" + rels[4]), 1);
   ok("释放确实放开了被判死的中继", rels.slice(0, 4).some((ip) => W.vState(H268, "r:" + ip) === 0));
   ok("最近判死的两条仍然保留结论", rels.slice(0, 2).every((ip) => W.vState(H268, "r:" + ip) === 2));
-  const pol268 = fs.readFileSync("src/route/policy.ts", "utf8");
+  const pol268 = policyAll();
   ok("释放只在被判死的集合上做", pol268.includes("const dead = c.relays.filter((ip) => vBad(c.host, \"r:\" + ip));"));
   ok("排序也只在被判死的集合上做", pol268.includes("const sorted = dead.slice()"));
 }
@@ -8685,6 +8689,45 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   eq("探活批处理可调用", typeof W.probeBatch === "function", true);
   eq("复测执行器算头部键", Array.isArray(new W.ScanAlive().keys()), true);
   eq("cronScan 仍是唯一入口", typeof W.cronScan === "function", true);
+}
+//
+// [292] 决策本体 / 候选排序 / CF 分支树三层分开
+//
+{
+  const polSrc = fs.readFileSync("src/route/policy.ts", "utf8");
+  const rankSrc = fs.readFileSync("src/route/policy-rank.ts", "utf8");
+  const cfSrc = fs.readFileSync("src/route/policy-cf.ts", "utf8");
+  eq("决策本体只留裁决顺序", (polSrc.match(/^  [a-zA-Z]\w*\(/gm) || []).length > 5, true);
+  ok("决策本体不再自己算排序键", !polSrc.includes("const scoreOf =") && !polSrc.includes("const negOf ="));
+  ok("决策本体不再自己做比例兜底与自愈", !polSrc.includes("blockedRatio") && !polSrc.includes("vClearHost("));
+  ok("决策本体不再自己扫事实表", !polSrc.includes("BLK.sweep(") && !polSrc.includes("isDead(") && !polSrc.includes("relSnap("));
+  ok("决策本体调 rankOf", polSrc.includes("const r = rankOf(c);"));
+  ok("决策本体把 CF 分支树交出去", polSrc.includes("const cf = decideCf(c, r, this);"));
+  eq("决策本体已缩到 250 行以内", polSrc.split("\n").length <= 250, true);
+  ok("候选层导出视图与入口", rankSrc.includes("export interface Ranked") && rankSrc.includes("export function rankOf(c: Ctx): Ranked {"));
+  ok("候选层保留比例兜底", rankSrc.includes("blockedRatio > 0.75 && usable.length < 2"));
+  ok("候选层保留自愈", rankSrc.includes("vClearHost(c.host)") && rankSrc.includes("BLK.sweep(c.host, c.relays)"));
+  ok("候选层自己排序", rankSrc.includes("const ranked = usable") && !rankSrc.includes("DIRECT"));
+  ok("CF 分支树只认 CF 目标", cfSrc.includes("if (!c.cfHost) return null;"));
+  ok("CF 分支树不改排序", !cfSrc.includes("relCostMode(") && !cfSrc.includes("psBest(") && !cfSrc.includes(".sort("));
+  ok("CF 分支树用结构化接口借状态", cfSrc.includes("export interface PinSource") && cfSrc.includes("pinFor(host: string, list: string[]): string;"));
+  ok("策略本体声明自己可当 PinSource", polSrc.includes("export class Policy implements PinSource"));
+  eq("轮换游标按条数取模", [W.POLICY.nextRotation(3), W.POLICY.nextRotation(3), W.POLICY.nextRotation(3), W.POLICY.nextRotation(3)], [0, 1, 2, 0]);
+  W.vClear();
+  const v6c = W.decide({ host: "v6cf292.test", cfHost: true, clientV6: true, relays: ["104.18.32.1", "203.0.113.9"], legacyWantsRelay: true, mode: "tput" });
+  eq("v6 客户端打 CF 目标走非 CF 中继", v6c.why, "v6-cf");
+  eq("v6-cf 挑的是非 CF 那条", v6c.chan.ip, "203.0.113.9");
+  const plain = W.decide({ host: "plain292.test", cfHost: false, clientV6: false, relays: [], legacyWantsRelay: false, mode: "tput" });
+  eq("非 CF 目标没候选时直连", plain.why, "direct");
+  W.vSetState("rank292.test", "r:45.136.117.194", 2, 1);
+  const rk = W.rankOf({ host: "rank292.test", cfHost: true, clientV6: false, relays: ["45.136.117.194", "203.0.113.9"], legacyWantsRelay: true, mode: "tput" });
+  eq("被判死的不进可用集合", rk.usable.includes("45.136.117.194"), false);
+  eq("被判死的进复检集合", rk.blocked.includes("45.136.117.194"), true);
+  // 排序只对可用集合做：被判死的那条不进 ordering，复检走 r.blocked（5% 探索专用通道）
+  eq("排序结果只来自可用集合", rk.stick.includes("45.136.117.194"), false);
+  eq("排序结果条数等于可用条数", rk.ranked.length, rk.usable.length);
+  eq("非 CF 目标时 CF 分支树返回 null", W.decideCf({ host: "plain292.test", cfHost: false, clientV6: false, relays: [], legacyWantsRelay: false }, rk, W.POLICY), null);
+  W.vClear();
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
