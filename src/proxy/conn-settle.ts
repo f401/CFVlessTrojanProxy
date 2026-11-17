@@ -333,5 +333,3 @@ export class ConnSettle {
   }
 }
 
-/** 全局单例：无状态，省一次构造 */
-export const SETTLE = new ConnSettle();

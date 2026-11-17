@@ -4,7 +4,7 @@ import { hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { STATS } from "../nodes/score";
 import { S } from "../core/state";
-import { SETTLE } from "./conn-settle";
+import { ConnSettle } from "./conn-settle";
 import { sampleWeight, SAMPLE_MIN_BYTES, SITE_MIN_BYTES, stalledWindow } from "./conn-settle";
 
 // ---- 并入自 sample-window.ts ----
@@ -247,6 +247,9 @@ export class Connection {
   readonly win = new SampleWindow();
   /** 客户端背压与「客户端先走」的归因 */
   readonly flow = new ClientFlow();
+  /** 功能：关连接时的结算流水线（收尾采样 / 节点观测 / 首眼观测 / PEND 记账），无状态
+   *  7.348 起由连接自己持有：它是唯一调用方，挂模块上时读不懂这两处凭什么叫「结算」。 */
+  private readonly settle = new ConnSettle();
   /** 本连接已贡献给直方图的权重（上限 SC.CONN_W_CAP） */
   sampleW = 0;
   inflightKey = ""; // 已经计入在途的节点（变更时迁移）
@@ -512,10 +515,10 @@ export class Connection {
       this.clearInflight();
       // 收尾逻辑必须在"零字节"提前返回之前：鉴权成功但一个字节都没传的连接
       // （探测、被客户端立刻取消）也要计入 node/direct 与种子刷新，否则计数和信誉表会漏掉这一整类连接。
-      if (this.id) SETTLE.close(this);
+      if (this.id) this.settle.close(this);
     }
     if (!this.id) return;
-    SETTLE.pend(this);
+    this.settle.pend(this);
   }
 
   /** 释放持有的 socket / 写锁 */

@@ -8509,12 +8509,13 @@ eq("策略是否生效是只读属性", W.POLICY.enabled, W.SC.POLICY > 0);
   const connSrc286 = fs.readFileSync("src/proxy/connection.ts", "utf8");
   const settleSrc286 = fs.readFileSync("src/proxy/conn-settle.ts", "utf8");
   const sampSrc286 = fs.readFileSync("src/proxy/conn-settle.ts", "utf8");
-  ok("结算流水线是独立的类 + 单例", settleSrc286.includes("export class ConnSettle") && settleSrc286.includes("export const SETTLE = new ConnSettle();"), "");
+  // 7.348：单例收进 Connection 自己持有，判据改成「类还在、模块级实例没了」
+  ok("结算流水线是独立的类（模块级单例已并入连接）", settleSrc286.includes("export class ConnSettle") && !settleSrc286.includes("export const SETTLE"), "");
   ok("结算只读结构化视图（不 import Connection）", settleSrc286.includes("export interface SettleView") && !settleSrc286.includes("Connection }"), "");
   ok("结算入口只有 close / pend 两条", settleSrc286.includes("close(v: SettleView): void") && settleSrc286.includes("pend(v: SettleView): void"), "");
   ok("连接本体不再自己结算节点分数", !connSrc286.includes("STATS.nsOk(") && !connSrc286.includes("STATS.nsStall(") && !connSrc286.includes("markSeedDirty("), "");
   ok("连接本体不再自己记 PEND 账", !connSrc286.includes("statBump(") && !connSrc286.includes("scheduleFlush("), "");
-  ok("flush 只负责调度结算", connSrc286.includes("SETTLE.close(this)") && connSrc286.includes("SETTLE.pend(this)"), "");
+  ok("flush 只负责调度结算", connSrc286.includes("this.settle.close(this)") && connSrc286.includes("this.settle.pend(this)"), "");
   ok("通道证据也搬进结算", !connSrc286.includes("HOOK.traffic") && settleSrc286.includes("HOOK.traffic"), "");
   const sampBlock286 = sampSrc286.slice(sampSrc286.indexOf("export const SAMPLE_STD_BYTES"), sampSrc286.indexOf("export const CAGG_MAX"));
   ok("采样换算是纯函数（不读 S、不计数、不 await）", !sampBlock286.includes("S.") && !sampBlock286.includes("cnt(") && !sampBlock286.includes("await ") && sampBlock286.includes("export function sampleWeight") && sampBlock286.includes("export function stalledWindow") && sampBlock286.includes("export function kbsOf"), "采样换算块必须是纯函数");
@@ -8524,7 +8525,7 @@ eq("策略是否生效是只读属性", W.POLICY.enabled, W.SC.POLICY > 0);
   ok("背压窗口判据是一半以上时间", W.stalledWindow(600, 0, 1000) && !W.stalledWindow(500, 0, 1000), "");
   eq("小样本的吞吐记 0（4 字节 403 页不算速度）", W.kbsOf(4096, 80), 0);
   ok("过 1MB 才算真实吞吐", Math.abs(W.kbsOf(1048576, 1000) - 1024) < 1e-6, `got=${W.kbsOf(1048576, 1000)}`);
-  ok("结算类是单例可实例化", W.SETTLE instanceof W.ConnSettle, "");
+  ok("结算类可实例化、模块级实例已撤", typeof W.ConnSettle === "function" && W.SETTLE === undefined, "");
   ok("连接仍持有自己的采样权重（状态归连接）", connSrc286.includes("this.sampleW += use;") && settleSrc286.includes("takeWeight(bytes: number, dt: number, factor?: number): number;"), "");
 }
 console.log("\n[287] 判定表只有一个文件：类型、表本体、单例都在 verdict.ts");
@@ -9224,7 +9225,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
         settle311.includes("export function stalledWindow") &&
         settle311.includes("export function kbsOf") &&
         settle311.includes("export function sampleWeight") &&
-        settle311.includes("export const SETTLE = new ConnSettle();"),
+        !settle311.includes("export const SETTLE"),
       "conn-settle.ts 必须同时住着换算与结算",
     );
     const sub311 = fs.readFileSync("src/views/sub.ts", "utf8");
@@ -11598,6 +11599,23 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   await W.SEL.softFail("n347.test:443");
   eq("softFail 仍只轻记、不动主游标计数", W.S.pxFailMem, 0);
 }
+
+
+  // ---- 第 348 组：结算流水线由连接自己持有（7.348）----
+  {
+    const settleSrc348 = fs.readFileSync("src/proxy/conn-settle.ts", "utf8");
+    const connSrc348 = fs.readFileSync("src/proxy/connection.ts", "utf8");
+    const cls348 = settleSrc348.slice(settleSrc348.indexOf("export class ConnSettle"));
+    ok("结算类还在", cls348.length > 200, "");
+    eq("结算文件里不再有模块级实例", settleSrc348.includes("export const SETTLE"), false);
+    eq("连接按类名 import", connSrc348.includes('import { ConnSettle } from "./conn-settle";'), true);
+    eq("连接不再 import 单例", connSrc348.includes("import { SETTLE }"), false);
+    eq("连接持有自己的结算器", connSrc348.includes("private readonly settle = new ConnSettle();"), true);
+    eq("结算调用走字段", connSrc348.split("this.settle.").length - 1 >= 2, true);
+    eq("连接正文里没有裸单例调用", /(?<![.\w])SETTLE\./.test(connSrc348.split("export class Connection")[1] || ""), false);
+    ok("两个入口仍是 close / pend", typeof W.ConnSettle.prototype.close === "function" && typeof W.ConnSettle.prototype.pend === "function", "");
+    ok("测试窗口里没有模块级实例", W.SETTLE === undefined, "");
+  }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

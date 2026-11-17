@@ -270,7 +270,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `LatObs` | `src/core/obs.ts` | 首字节 / 总耗时 / 抖动三类窗口统计器 |
 | `FirstObs` | `src/core/obs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
 | `Attacher` | `src/proxy/attacher.ts` | 上游挂载与补救链：`run()` 只装配，收尾交给 `onClose()`；中转再试一条 / IPv6 兜底 / proxyip 三段各一方法 |
-| `ConnSettle`（`SETTLE`） | `src/proxy/conn-settle.ts` | 一条连接结束时的结算流水线：收尾采样 → pStall 占比 → 节点观测聚合 → 首眼观测（含站点画像与通道证据）→ PEND 记账；只读 `SettleView`，状态仍归 `Connection` |
+| `ConnSettle`（`Connection.settle`） | `src/proxy/conn-settle.ts` | 一条连接结束时的结算流水线：收尾采样 → pStall 占比 → 节点观测聚合 → 首眼观测（含站点画像与通道证据）→ PEND 记账；只读 `SettleView`，状态仍归 `Connection`；7.348 起由连接自己持有，模块级 `SETTLE` 已撤 |
 | `SampleWindow` | `src/proxy/connection.ts` | 一条连接的两个采样窗口边界（节点级 800ms 窗口 / 5 秒出样本间隔 / 站点级 60 秒）：窗口太短或间隔未到都不推进起点，小样本只推进起点不交样本 |
 | `ClientFlow` | `src/proxy/connection.ts` | 客户端这一侧的流量控制：唯一读 `ws.bufferedAmount` 的地方，也是唯一区分「客户端自己走了」（记 `ccut`）与「真卡死」（记 `stall`）的地方 |
 | `DebugSuite`（`DEBUG`） | `src/routes/debug.ts` | 调试路由四个组件的持有者（读表 / 测网 / 写操作 / 计量探测）：收成一个对象后，「这次调试动用了哪些能力」在同一处读完，也是判断「某个参数会不会真的拨号」的入口 |
