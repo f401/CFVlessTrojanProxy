@@ -253,8 +253,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `EgFacts`（`EG`） | `src/route/egfacts.ts` | 出口族事实（中继 IP → v4/v6）与 ×40 的族偏置，含 pending/ack |
 | `DnsFacts`（`DNS`） | `src/route/dnsfacts.ts` | 「纯 v4 站点」确证（24 小时）与 v6 出口折价 |
 | PsFacts（PS） | src/route/psfacts.ts | 站点 × 中继「能不能过」成功率表（45 分钟半衰期）：形状、先验与表本体同在此文件，待上报队列与有界化继承自 FactTable |
-| `BlkFacts`（`BLK`） | `src/route/blkfacts.ts` | 单 IP 封锁事实（键为站点 + 出口 IP、三批确认、只乘 6 倍代价、站点级自愈） |
-| `BlkOutbox` | `src/route/blkfacts.ts` | 封锁事实的待上报队列（与表本体同文件）：只有 `ack()` 才清 pending，且只清这一批真的发出去的行 |
+| `BlkFacts`（`BLK`） | `src/route/blkfacts.ts` | 单 IP 封锁事实（键为站点 + 出口 IP、三批确认、只乘 6 倍代价、站点级自愈）；表本体 / 待上报队列 / 有界化继承自 `FactTable` |
+| `FactTable`（抽象基类） | `src/route/fact-table.ts` | 六张事实表的公共生命周期：`ack()` 只清这一批真的发出去的行、`nack()` 什么都不清、有界化只在插入路径上；子类只声明寿命 / 上限 / 批次与线格式编解码 |
 | `DeadFacts` | `src/route/deadfacts.ts` | 中继「连不上」事实（唯一允许把候选挪到队尾的事实） |
 | `CapFacts` | `src/route/capfacts.ts` | 吞吐容量表（相对池内中位数的容量比，带噪声门） |
 | `FactShadow` | `src/route/factshadow.ts` | 事实写入决策器的影子统计（% 形，不参与决策） |

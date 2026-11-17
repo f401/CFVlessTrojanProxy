@@ -105,6 +105,18 @@ export abstract class FactTable<Row extends TimedRow, Wire> {
   }
 
   /**
+   * 功能：撤掉某个键的待上报证据（「这条结论被反向证据推翻了」时用）。
+   *
+   * 与 `forget` 的区别：`forget` 只删表里那一行，待上报队列里可能还躺着它 —— 不一起撤掉，
+   * 下一轮 `delta()` 会把一条已经作废的结论送到 DO，别的 isolate 收下之后又把它当成事实。
+   * @param {string} key 键
+   * @returns {void}
+   */
+  protected unpend(key: string): void {
+    this.pending.delete(key);
+  }
+
+  /**
    * 功能：读一行，过期就地删除。
    * @param {string} key 键
    * @param {EpochMs} now 当前时间

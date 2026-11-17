@@ -6291,7 +6291,7 @@ ok("索引下限夹到 0（p 很小时不能取负）", pendSrc.includes("Math.m
   eq("最新写入的静默仍在", W.BLK.muted(`h${N231 - 1}.g231.test`, t231 + 1000), true);
   eq("静默到期后不再静音", W.BLK.muted(`h${N231 - 1}.g231.test`, t231 + 31 * 60000), false);
   ok("常量在位", blkSrc.includes("export const BLK_MUTE_MAX = 256;"), "");
-  ok("sweep 写完也过守卫", blkSrc.includes("if (this.mute.size > BLK_MUTE_MAX) this.trim(now);"), "");
+  ok("sweep 写完也过守卫", blkSrc.includes("if (this.mute.size > BLK_MUTE_MAX) this.trimMaps(now);"), "");
   ok("trim 削静默表", blkSrc.includes("if (this.mute.size > BLK_MUTE_MAX) {"), "");
   ok("muted 读到过期就删", blkSrc.includes("if (until && until <= now) {"), "");
   W.BLK.clear();
@@ -8702,41 +8702,46 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   eq("非 CF 目标时 CF 分支树返回 null", W.decideCf({ host: "plain292.test", cfHost: false, clientV6: false, relays: [], legacyWantsRelay: false }, rk, W.POLICY), null);
   W.VT.clear();
 }
-/* ---------- 第 293 组：封锁事实的形状、上报队列与状态机分家（v7.293） ---------- */
+/* ---------- 第 293 组：封锁事实的形状、上报队列与状态机分家（v7.293；v7.306 起队列归基类） ---------- */
 {
   const factsSrc = fs.readFileSync("src/route/blkfacts.ts", "utf8");
+  const baseSrc = fs.readFileSync("src/route/fact-table.ts", "utf8");
   ok("两个旧文件都不再单独存在",
     ["blk-types.ts", "blk-outbox.ts"].every((f) => !fs.existsSync("src/route/" + f)), "");
-  ok("形状、队列、状态机同在一个文件",
+  ok("形状与状态机同在一个文件、队列归基类",
     factsSrc.includes("export const BLK_BATCH = 3;") && factsSrc.includes("export interface BlkWire {") &&
-      factsSrc.includes("export class BlkOutbox") && factsSrc.includes("export class BlkFacts"), "");
-  // 队列类同在一个文件里：判「有没有自己记账」要看 BlkFacts 的类体。
-  const blkBody = factsSrc.slice(factsSrc.indexOf("export class BlkFacts"));
-  ok("状态机不再自己声明队列", !blkBody.includes("private pend =") && !blkBody.includes("private sent =") && blkBody.includes("private outbox = new BlkOutbox();"), "");
-  ok("队列层带每批上限", factsSrc.includes("export const BLK_DELTA_MAX = 60;") && factsSrc.includes("if (out.length >= BLK_DELTA_MAX) break;"), "");
-  ok("只有 ack 与自愈入口能删待发", (factsSrc.match(/this\.pending\.delete\(/g) || []).length === 2 && !/nack\(\): void \{[\s\S]{0,220}pending\.clear/.test(factsSrc), "");
-  const box = new W.BlkOutbox();
-  for (let i = 0; i < 70; i++) box.push("k" + i, { n: 3, at: 1000 + i });
-  const first = box.delta();
-  eq("每批只交 60 行", first.length, 60);
+      factsSrc.includes("export class BlkFacts extends FactTable<Row, BlkWire>") && !factsSrc.includes("class BlkOutbox"), "");
+  ok("状态机不再自己声明队列", !factsSrc.includes("private pending") && !factsSrc.includes("private sent"), "");
+  ok("每批上限由子类声明、基类执行",
+    factsSrc.includes("return BLK_DELTA_MAX;") && baseSrc.includes("if (out.length >= this.batchMax) break;"), "");
+  ok("只有 ack 能删待发，且这条纪律只在基类",
+    baseSrc.includes("if (cur && cur.at <= at) this.pending.delete(key);") &&
+      (baseSrc.match(/this\.pending\.delete\(/g) || []).length === 2 &&
+      !/nack\(\): void \{[\s\S]{0,220}pending\.clear/.test(baseSrc), "");
+  // 行为面用真表驱动：note 要三批 × 每批 3 次才写行，之后 delta/ack/nack 走继承来的实现
+  W.BLK.clear();
+  const t0 = 5000000;
+  const feed293 = (host, ip, base) => {
+    for (let b = 0; b < 3; b += 1) for (let k = 0; k < 3; k += 1) W.BLK.note({ host, ip, down: 40, peerBig: true, at: base + b * 61000 + k * 1000 });
+  };
+  feed293("q293.test", "198.51.100.7", t0);
+  eq("三批之后才写行", W.BLK.penOf("q293.test", "198.51.100.7", t0 + 130000), W.BLK_PEN);
+  const out293 = W.BLK.delta();
+  eq("确认后进待上报", out293.length, 1);
+  eq("待上报行带批数与时间", out293[0].n, W.BLK_BATCH);
   eq("上限常量可见", W.BLK_DELTA_MAX, 60);
-  box.ack();
-  const second = box.delta();
-  eq("被上限挤掉的 10 行还在队列里", second.length, 10);
-  box.nack();
-  eq("nack 之后同一批原样重发", box.delta().length, 10);
-  const box2 = new W.BlkOutbox();
-  box2.push("a|1.1.1.1", { n: 3, at: 5 });
-  box2.drop("a|1.1.1.1");
-  eq("drop 之后不再重发", box2.delta().length, 0);
-  const box3 = new W.BlkOutbox();
-  box3.push("b|1.1.1.1", { n: 3, at: 7 });
-  box3.delta();
-  box3.push("b|1.1.1.1", { n: 3, at: 9 });
-  box3.ack();
-  eq("ack 只清发出时那一版，新观测留着", box3.delta().map((r) => r.at), [9]);
+  W.BLK.ack();
+  eq("ack 之后同一行不再重发", W.BLK.delta().length, 0);
+  // nack 什么都不清：同一批下一轮原样再给一次（重发 = 重试，幂等靠 at）
+  feed293("q293b.test", "198.51.100.8", t0 + 200000);
+  eq("第二条通道也进了待上报", W.BLK.delta().length, 1);
+  W.BLK.nack();
+  eq("nack 之后同一批原样重发", W.BLK.delta().length, 1);
+  // 反向证据要把待上报一起撤掉：作废的结论不能送到 DO
+  W.BLK.contra("q293b.test", "198.51.100.8");
+  eq("反向证据后不再重发", W.BLK.delta().length, 0);
+  W.BLK.clear();
 }
-
 /* ---------- 第 294 组：会拨号的诊断分支按「花哪种预算」分成五个类，但都在一个文件里（v7.297 合回） ---------- */
 {
   const src = fs.readFileSync("src/routes/debug-nets.ts", "utf8");
@@ -8999,6 +9004,39 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   }
   W.PS.clear();
   W.EG.clear();
+}
+/* ---------- 第 306 组：五张事实表共用一个基类（v7.306） ---------- */
+{
+  const base = fs.readFileSync("src/route/fact-table.ts", "utf8");
+  const tables = {
+    dead: "src/route/deadfacts.ts",
+    dns: "src/route/dnsfacts.ts",
+    eg: "src/route/egfacts.ts",
+    ps: "src/route/psfacts.ts",
+    blk: "src/route/blkfacts.ts",
+  };
+  ok("五张事实表都继承同一个基类",
+    Object.values(tables).every((f) => /extends FactTable</.test(fs.readFileSync(f, "utf8"))), "");
+  const cap306 = fs.readFileSync("src/route/capfacts.ts", "utf8");
+  ok("容量表刻意不继承（没有线格式与待上报队列）",
+    !cap306.includes("extends FactTable<") && cap306.includes("CAP_MAX"), "");
+  ok("基类提供 unpend 并写明与 forget 的区别",
+    base.includes("protected unpend(key: string): void {") && base.includes("与 `forget` 的区别"), "");
+  ok("有界化写在插入路径上", /put\([\s\S]{0,400}this\.trim\(now\);/.test(base), "");
+  ok("封锁表不再自己做容量淘汰", !fs.readFileSync(tables.blk, "utf8").includes("private drop("), "");
+  ok("封锁表的队列字段全部消失",
+    !fs.readFileSync(tables.blk, "utf8").includes("outbox"), "");
+  // 行为面：delta 与 ack 之间又记了一条更新的观测，那条不能被 ack 清掉（只有 ack 清「发出去的那一版」）
+  W.PS.clear();
+  const now306 = 7000000;
+  W.PS.note("h306.test", "198.51.100.31", true, now306);
+  eq("第一条已进待上报", W.PS.delta().length, 1);
+  W.PS.note("h306.test", "198.51.100.31", false, now306 + 1000);
+  W.PS.ack();
+  eq("ack 之后新观测仍待上报", W.PS.delta().length, 1);
+  W.PS.ack();
+  eq("第二次 ack 之后才清空", W.PS.delta().length, 0);
+  W.PS.clear();
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

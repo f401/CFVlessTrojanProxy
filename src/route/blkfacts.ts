@@ -1,5 +1,6 @@
 import { cnt } from "../core/counter";
 import { BLK_TTL } from "./commitfact";
+import { FactTable } from "./fact-table";
 
 // ---- 并入自 blk-types.ts ----
 // `blk` 事实的形状与刻度：三条独立确认门槛 + 上报行格式。
@@ -55,96 +56,10 @@ export interface BlkWire {
   at: number;
 }
 
-// ---- 并入自 blk-outbox.ts ----
-// `blk` 事实的上报队列：谁清、谁不清，是这张表唯一会永久丢证据的地方。
-//
-// 单独成文件的理由（两条都是线上事故）：
-// - v7.143：`ack()` 一次清空全部 pending，而 `delta()` 每批最多交 60 行 ⇒ 被上限挤掉的行
-//   既没发出去、也不再重发，证据永久丢失；
-// - v7.221：静音期内的站点不该再收别处的事实，否则自愈结论会被当场撤销（那条判据在
-//   `BlkFacts.load`，不在这里，但同属「pending / mute 的语义」）。
-// 所以「只有 ack() 才清 pending，且只清真正发出去的那批」这条纪律，现在只在一个文件里成立。
-
-
-/** 每批最多交出多少行（DO 的 `/add` 一次最多合并这么多键） */
+// 批次上限：「一批最多交出多少行」（DO 的 `/add` 一次最多合并这么多键）。
+// 待上报队列本身在基类 `FactTable` 里（7.306 起）：`ack()` 只清这一批真发出去的行、`nack()` 什么都不清，
+// 那两条纪律只在 `src/route/fact-table.ts` 维护一份，本表不再自己抄（7.143 事故就是这么来的）。
 export const BLK_DELTA_MAX = 60;
-
-/**
- * 功能：封锁事实的待上报队列。
- *
- * 两张表的分工：`pending` 是「还没被 DO 收下的证据」，`sent` 是「这一批已经交出去的行」。
- * 只有 `ack()` 能清 `pending`，而且只清 `sent` 里那批 —— 这是 7.143 的修法。
- */
-export class BlkOutbox {
-  /** 还没被确认的证据（键 → 行） */
-  private pending = new Map<string, Row>();
-  /** 这一批真正发出去的行（键 → 发出时的 at）：ack 只清它们，见 ack() 的注释 */
-  private sent = new Map<string, number>();
-
-  /**
-   * 功能：登记一条新证据（下一轮 `delta()` 会带走它）。
-   * @param key 事实键 `host|relay`
-   * @param row 证据行
-   * @returns {void}
-   */
-  push(key: string, row: Row): void {
-    this.pending.set(key, row);
-  }
-
-  /**
-   * 功能：丢掉某个键的待发证据（站点级自愈时用）。
-   * @param key 事实键
-   * @returns {void}
-   */
-  drop(key: string): void {
-    this.pending.delete(key);
-  }
-
-  /**
-   * 功能：导出待上报增量。
-   * @returns {BlkWire[]} 最多 `BLK_DELTA_MAX` 行；交出的行同时记进 `sent`
-   */
-  delta(): BlkWire[] {
-    const out: BlkWire[] = [];
-    for (const [k, r] of this.pending) {
-      out.push({ k, n: r.n, at: r.at });
-      this.sent.set(k, r.at);
-      if (out.length >= BLK_DELTA_MAX) break;
-    }
-    return out;
-  }
-
-  /**
-   * 功能：上报成功 —— 只清这一批真正发出去的行。
-   * @returns {void}
-   */
-  ack(): void {
-    // 只清这一批真正发出去的行：delta() 有上限（本表最多 60 行），一次清空全部 pending 会让
-    // 超出上限的行既没发出去、也不再重发 —— 证据就这样永久丢了（v7.143 修）。
-    // 只在值没变新时才清：delta 与 ack 之间可能又记了一条更新的观测，那条还没发过。
-    for (const [k, at] of this.sent) {
-      const cur = this.pending.get(k);
-      if (cur && cur.at <= at) this.pending.delete(k);
-    }
-    this.sent.clear();
-  }
-
-  /**
-   * 功能：上报失败 —— 什么都不清（重发 = 重试，幂等靠 `at`）。
-   * @returns {void}
-   */
-  nack(): void {
-    // 保留 pending：上报失败时下一轮 delta() 会把同一批原样再给一次（重发 = 重试，幂等靠 at）。
-    // 清掉它就等于「这条证据从此不会送到 DO」—— 与 v8 §3 的 pending 语义相反（只有 ack 才清）。
-    this.sent.clear();
-  }
-
-  /** 功能：清空两张表（单测用）。@returns {void} */
-  clear(): void {
-    this.pending.clear();
-    this.sent.clear();
-  }
-}
 
 // ---- 门面（对外导出面保持不变） ----
 // 「这个站点在这个出口上被单 IP 封锁」事实（v8 §3 的 `blk`）。
@@ -161,18 +76,59 @@ export class BlkOutbox {
 // 只是「顺序变差」而不是「发不出去」，才可能满足「业务 403 绝对不会被误伤」。
 
 
-// 形状与刻度搬到了 blk-types.ts、上报队列搬到了 blk-outbox.ts（7.293）：
-// 这里只剩状态机本体（批确认、反向证据、自愈、容量淘汰）。导出面一字未改。
+// 这里只剩状态机本体（批确认、反向证据、自愈）：形状与刻度、待上报队列、容量淘汰
+// 分别在 `blk-types` 合回来的常量段与基类 `FactTable` 里（7.293 / 7.306）。导出面一字未改。
 
 /**
  * 功能：单 IP 封锁事实表。键是 `站点|出口 IP`（不是站点级，也不是通配）。
+ *
+ * 表本体、待上报队列与有界化都继承自 `FactTable`（7.306）：本类只负责三件事 ——
+ * 批确认机（`batch`）、站点级自愈的静默窗（`mute`）、以及「反向证据优先」这条合并纪律。
  */
-export class BlkFacts {
-  private rows = new Map<string, Row>();
+export class BlkFacts extends FactTable<Row, BlkWire> {
+  /** 累计中的批进度（键 → 批状态）；与 `rows` 是两个独立状态机 */
   private batch = new Map<string, Batch>();
-  // 待发队列（pending / sent 的纪律）在 blk-outbox.ts：只有 ack 才清，且只清真的发出去的那批
-  private outbox = new BlkOutbox();
+  /** 自愈后的静默窗（站点 → 到期时刻） */
   private mute = new Map<string, number>();
+
+  /** 功能：封锁行寿命（超过 `BLK_TTL` 的结论不再参与定价）。@returns {number} 毫秒 */
+  protected get ttlMs(): number {
+    return BLK_TTL;
+  }
+
+  /** 功能：表上限。@returns {number} 行数 */
+  protected get maxRows(): number {
+    return BLK_MAX;
+  }
+
+  /** 功能：每批上行上限。@returns {number} 行数 */
+  protected get batchMax(): number {
+    return BLK_DELTA_MAX;
+  }
+
+  /**
+   * 功能：把一行编成线格式。
+   * @param {string} key 事实键 `host|relay`
+   * @param {Row} row 行
+   * @returns {BlkWire} 线格式
+   */
+  protected toWire(key: string, row: Row): BlkWire {
+    return { k: key, n: row.n, at: row.at };
+  }
+
+  /**
+   * 功能：把线格式解码成一行（坏行返回 null）。
+   * @param {BlkWire} wire 线格式
+   * @returns {{ key: string; row: Row } | null} 解出来的键与行
+   */
+  protected parseWire(wire: BlkWire): { key: string; row: Row } | null {
+    if (!wire || typeof wire.k !== "string") return null;
+    const at = Number(wire.at);
+    if (!Number.isFinite(at)) return null;
+    // 键必须是 `host|relay`：站点名里不会出现 `|`，所以最后一个 `|` 就是分隔符
+    if (wire.k.lastIndexOf("|") <= 0) return null;
+    return { key: wire.k, row: { n: BLK_BATCH, at } };
+  }
 
   /**
    * 功能：喂一次 tiny 观测。
@@ -189,7 +145,7 @@ export class BlkFacts {
     if (this.muted(o.host, o.at)) return false;
     // `batch` 与 `mute` 都按「见过的键」增长（rows 有 BLK_MAX 与 drop，这两张没有）：
     // 超过上限时扫一遍 —— 批的有效窗口只有 BLK_GAP，更旧的批下次只会被当成换批重置。
-    if (this.batch.size + this.mute.size > BLK_MAX) this.trim(o.at);
+    if (this.batch.size + this.mute.size > BLK_MAX) this.trimMaps(o.at);
     const k = o.host + "|" + o.ip;
     const b = this.batch.get(k);
     if (!b) {
@@ -218,11 +174,9 @@ export class BlkFacts {
       return false;
     }
     this.batch.delete(k);
-    const row: Row = { n: BLK_BATCH, at: o.at };
-    this.rows.set(k, row);
-    this.outbox.push(k, row);
+    // 写入与「登记待上报 + 就地有界化」都在基类 put 里：漏掉后半段就是 7.189 那个形状
+    this.put(k, { n: BLK_BATCH, at: o.at }, o.at);
     cnt("blkWrote");
-    if (this.rows.size > BLK_MAX) this.drop(o.at);
     return true;
   }
   /**
@@ -236,7 +190,7 @@ export class BlkFacts {
     this.batch.delete(k);
     // 这个出口刚刚给出整页 ⇒ 之前的封锁结论不成立，连已确认的行一起清掉
     if (this.rows.delete(k)) cnt("blkContra");
-    this.outbox.drop(k);
+    this.unpend(k);
   }
 
   /**
@@ -247,10 +201,9 @@ export class BlkFacts {
    * @returns {number} 代价倍数
    */
   penOf(host: string, ip: string, now = Date.now()): number {
-    const r = this.rows.get(host + "|" + ip);
-    if (!r) return 1;
-    if (now - r.at > BLK_TTL) return 1;
-    return BLK_PEN;
+    // get 会把过期行就地删掉：判据与「这行还算不算证据」是同一件事，不该各写一遍
+    const r = this.get(host + "|" + ip, now);
+    return r ? BLK_PEN : 1;
   }
 
   /**
@@ -277,7 +230,7 @@ export class BlkFacts {
    * @param {number} now 当前时间
    * @returns {void}
    */
-  private trim(now: number): void {
+  private trimMaps(now: number): void {
     for (const [k, b] of this.batch) if (now - b.at > BLK_GAP * 2) this.batch.delete(k);
     for (const [h, until] of this.mute) if (until <= now) this.mute.delete(h);
     // 过期清不掉（短时间见过一大堆键）时按 `at` 兜底 —— 扔掉一条批进度最多丢两次投票，
@@ -313,33 +266,18 @@ export class BlkFacts {
     for (const ip of cands) {
       const k = host + "|" + ip;
       this.rows.delete(k);
-      this.outbox.drop(k);
+      this.unpend(k);
       this.batch.delete(k);
     }
     this.mute.set(host, now + BLK_MUTE);
     // 唯一一条不经过 note() 的写入：这里也得过一遍守卫，否则静默表只受 TTL 约束
-    if (this.mute.size > BLK_MUTE_MAX) this.trim(now);
+    if (this.mute.size > BLK_MUTE_MAX) this.trimMaps(now);
     cnt("bizSweeps");
     return true;
   }
 
-  /**
-   * 功能：导出待上报增量（队列纪律见 `blk-outbox.ts`）。
-   * @returns {BlkWire[]} 最多 60 行
-   */
-  delta(): BlkWire[] {
-    return this.outbox.delta();
-  }
+  // delta / ack / nack 由基类提供：只有 ack 才清待上报，且只清这一批真的发出去的行
 
-  /** 功能：上报成功。@returns {void} */
-  ack(): void {
-    this.outbox.ack();
-  }
-
-  /** 功能：上报失败（丢弃待发，事实保留）。@returns {void} */
-  nack(): void {
-    this.outbox.nack();
-  }
 
   /**
    * 功能：合并远端事实（只认更新的 `at`）。
@@ -367,7 +305,7 @@ export class BlkFacts {
       this.rows.set(r.k, { n: BLK_BATCH, at });
       n += 1;
     }
-    if (this.rows.size > BLK_MAX) this.drop(0);
+    if (this.rows.size > BLK_MAX) this.trim(0);
     return n;
   }
 
@@ -378,33 +316,18 @@ export class BlkFacts {
    */
   snap(now = Date.now()): Array<{ k: string; at: number; live: boolean }> {
     const out: Array<{ k: string; at: number; live: boolean }> = [];
-    for (const [k, r] of this.rows) out.push({ k, at: r.at, live: now - r.at <= BLK_TTL });
+    for (const [k, r] of this.entries(now)) out.push({ k, at: r.at, live: true });
     out.sort((a, b) => b.at - a.at);
     return out.slice(0, 12);
   }
 
   /** 功能：清空（单测用）。@returns {void} */
   clear(): void {
-    this.rows.clear();
+    super.clear();
     this.batch.clear();
-    this.outbox.clear();
     this.mute.clear();
   }
 
-  /**
-   * 功能：容量淘汰 —— 先扔过期行，再按时间扔最旧的。
-   * @param {number} now 当前时间（0 = 只做容量淘汰）
-   * @returns {void}
-   */
-  private drop(now: number): void {
-    if (now > 0) for (const [k, r] of this.rows) if (now - r.at > BLK_TTL) this.rows.delete(k);
-    if (this.rows.size <= BLK_MAX) return;
-    const keys = [...this.rows.entries()].sort((a, b) => a[1].at - b[1].at);
-    for (const [k] of keys) {
-      if (this.rows.size <= BLK_MAX) break;
-      this.rows.delete(k);
-    }
-  }
 }
 
 /** 进程内唯一实例 */
