@@ -5510,9 +5510,9 @@ try {
   eq("扫完整轮才写 candN", W.S.candN, N212);
   ok("整轮确实是分片扫的", calls212 > 1, "calls=" + calls212);
   const ts212 = fs.readFileSync("src/px/ts.ts", "utf8");
-  const sc212 = fs.readFileSync("src/nodes/score.ts", "utf8");
+  const sc212 = fs.readFileSync("src/nodes/score-cands.ts", "utf8");
   ok("pickThom 的分母是存活表大小", ts212.includes("const nPool = S.alive.size ||"), "");
-  ok("score 只在扫完时写 candN", sc212.includes("if (st.pos >= st.keys.length) S.candN = st.ok;"), "");
+  ok("候选表只在扫完时写 candN", sc212.includes("if (st.pos >= st.keys.length) S.candN = st.ok;"), "");
   ok("注释写明不能用 candN 当池子大小", ts212.includes("只反映「已经扫过的那一段」"), "");
   W.S.alive.clear();
   for (const [k212, v212] of bak212) W.S.alive.set(k212, v212);
@@ -8502,5 +8502,48 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   eq("清站点把该目标的行全删掉", W.vAll("rt287.example").length, 0);
   W.vClear();
 }
+// 第 288 组：371 行的 score.ts 拆成「代价 / 健康度 / 候选表」三层后，职责边界必须只有一种读法（7.288）
+{
+  const facSrc = fs.readFileSync("src/nodes/score.ts", "utf8");
+  const healthSrc = fs.readFileSync("src/nodes/score-health.ts", "utf8");
+  const costSrc = fs.readFileSync("src/nodes/score-cost.ts", "utf8");
+  const candSrc = fs.readFileSync("src/nodes/score-cands.ts", "utf8");
+  ok("门面只做再导出（≤14 行）", facSrc.split("\n").length <= 14, String(facSrc.split("\n").length));
+  ok("门面转出三块",
+    ["score-health", "score-cost", "score-cands"].every((m) => facSrc.includes(`export * from "./${m}"`)), "");
+  ok("门面不再定义任何一个函数", !/export function /.test(facSrc), "");
+  // 空壳类：一个字段都没有、方法全在读 S —— 按 AGENTS.md 的约定不该存在
+  ok("空壳类 Scorer 已删除", W.Scorer === undefined && W.SCORER === undefined, "");
+  ok("三个模块都不再出现 class Scorer",
+    [facSrc, healthSrc, costSrc, candSrc].every((t) => !t.includes("class Scorer")), "");
+  // 健康度层只读 S.nstat：写出这六个判断，不碰 alive/候选表
+  ok("健康度层有六个判断",
+    ["export function isBlack", "export function isFrozen", "export function freezeNode",
+      "export function suspectOf", "export function emptyCloseSuspect", "export function usable"]
+      .every((n) => healthSrc.includes(n)), "");
+  ok("健康度层不引用候选表", !healthSrc.includes("rankedCands") && !healthSrc.includes("candsFor"), "");
+  // 代价层是纯计算：两个入口 + 一个分解类型
+  ok("代价层只有两个函数",
+    (costSrc.match(/^export function /gm) || []).length === 2, "");
+  ok("代价层不引用候选表", !costSrc.includes("rankedCands") && !costSrc.includes("CAND_"), "");
+  // 候选表层依赖另两层，并把 CAND_* 收成私有常量（外部不该知道 224/64/128 这些数）
+  ok("候选表层四个入口齐备",
+    ["export function rankedCands", "export function candsFor", "export function nextNode", "export function bestFor"]
+      .every((n) => candSrc.includes(n)), "");
+  ok("候选表层不再导出 CAND_ 常量", !/export const CAND_/.test(candSrc), "");
+  ok("候选表层依赖代价层与健康度层",
+    candSrc.includes('from "./score-cost"') && candSrc.includes('from "./score-health"'), "");
+  // 行为面：门面转发仍然指向真实实现
+  ok("门面 scoreParts 仍能算分解", typeof W.scoreParts("g288:443", "lat").score === "number", "");
+  W.S.alive.set("g288:443", { h: "g288", p: 443, cc: "", ms: 120 });
+  ok("门面 candsFor 仍看得到存活表", W.candsFor("lat").some((r) => r.k === "g288:443"), "");
+  ok("门面 bestFor 返回存活表里的键", typeof W.bestFor("lat") === "string" && W.bestFor("lat").length > 0, W.bestFor("lat"));
+  ok("门面 usable 认可用", W.usable("g288:443") === true, "");
+  W.freezeNode("g288:443");
+  ok("冻结后立即不可用", W.usable("g288:443") === false && W.isFrozen("g288:443") === true, "");
+  W.S.alive.delete("g288:443");
+  W.invalidateRank();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

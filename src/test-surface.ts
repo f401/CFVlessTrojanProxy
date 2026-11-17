@@ -65,6 +65,7 @@ export {
   emptyCloseSuspect,
   freezeNode,
   isFrozen,
+  usable,
 } from "./nodes/score";
 export { nsOf, pxGet, flushPx, noteProbe, probeBadSkip, bumpProbeBad, sweepProbeBad } from "./px/pool";
 export { POOL, Pool } from "./px/pool";
