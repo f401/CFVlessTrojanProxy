@@ -34,7 +34,7 @@ const statAll = () => fs.readFileSync("src/nodes/stat.ts", "utf8");
  * @returns {string} 四段源码
  */
 const metricsAll = () =>
-  ["src/nodes/metrics.ts", "src/nodes/rtt.ts", "src/nodes/site.ts", "src/nodes/diag.ts"]
+  ["src/nodes/metrics.ts"]
     .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
     .join("\n");
 
@@ -8425,19 +8425,14 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
 {
   const g = "284";
   const face = fs.readFileSync("src/nodes/metrics.ts", "utf8");
-  const rttSrc = fs.readFileSync("src/nodes/rtt.ts", "utf8");
-  const siteSrc = fs.readFileSync("src/nodes/site.ts", "utf8");
-  const diagSrc = fs.readFileSync("src/nodes/diag.ts", "utf8");
-  // 门面只转出：一旦有人在门面里补函数，导出面就会有两份真源
-  ok(`[${g}] 门面不再定义函数或类`, !/^(export )?(async )?function /m.test(face) && !/^export class /m.test(face));
-  eq(`[${g}] 门面按四块转出`, ["\"./rtt\"", "\"./site\"", "\"./diag\"", "\"./errlog\""].every((x) => face.includes(x)), true);
-  ok(`[${g}] 门面不超过 12 行`, face.split(/\r?\n/).length <= 12);
-  // 三块各就各位
-  eq(`[${g}] 入口 RTT 三个入口在 rtt.ts`, ["export function rttMark", "export function rttLearn", "export async function loadRtt"].every((x) => rttSrc.includes(x)), true);
-  ok(`[${g}] rtt.ts 不定义类（状态在 S.rtt，无独占状态）`, !/^export class /m.test(rttSrc));
-  eq(`[${g}] 站点画像与族键在 site.ts`, ["export class HostProfile", "export const HOSTS", "export function siteKey", "export function hostKey", "export function hostScore", "export function hostNodeMark", "export function hostDirectMark"].every((x) => siteSrc.includes(x)), true);
-  eq(`[${g}] 诊断结论在 diag.ts`, ["export function diagVerdict"].every((x) => diagSrc.includes(x)), true);
-  ok(`[${g}] diag.ts 是纯函数（不读 S、不做 IO）`, !diagSrc.includes("S.") && !diagSrc.includes("await ") && !diagSrc.includes("fetch("));
+  // 7.307 把 rtt / site / diag 三块并回了 metrics.ts：它们没有各自独立的生命周期，
+  // 拆开之后「读诊断结论的人」要跨四个 import 才拼得出全貌，而四块之间本来就是同一次排查的四个视角。
+  ok(`[${g}] 三块旧文件都不在了`, ["src/nodes/rtt.ts", "src/nodes/site.ts", "src/nodes/diag.ts"].every((x) => !fs.existsSync(x)));
+  eq(`[${g}] 入口 RTT、站点画像、诊断结论都在 metrics.ts`, ["export function rttMark", "export function rttLearn", "export async function loadRtt", "export class HostProfile", "export const HOSTS", "export function siteKey", "export function diagVerdict"].every((x) => face.includes(x)), true);
+  ok(`[${g}] 入口 RTT 不配类（状态在 S.rtt，没有独占的跨请求状态）`, !/^export class Rtt/m.test(face));
+  const diagBody = face.slice(face.indexOf("export function diagVerdict"), face.indexOf("export function diagVerdict") + 700);
+  ok(`[${g}] 诊断结论是纯函数（函数体内不读 S、不 IO）`, !diagBody.includes("S.") && !diagBody.includes("await ") && !diagBody.includes("fetch("));
+  ok(`[${g}] 这一层仍受单文件上限约束`, face.split(/\r?\n/).length <= 560);
   // 行为：拆分不改变任何判定
   eq(`[${g}] 没有样本时结论是 empty`, W.diagVerdict([], null).kind, "empty");
   eq(`[${g}] 全被判且直连也不通是 unknown`, W.diagVerdict([{ node: "a:1", n: 2, ok: 0, bad: 2 }], { ok: 0, bad: 0 }).kind, "unknown");
@@ -8949,7 +8944,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   // 源码锁：这些名字只以「对象.方法」的形态出现，不再有同名模块函数
   const relSrc303 = fs.readFileSync("src/route/relperf.ts", "utf8");
   const pendSrc303 = fs.readFileSync("src/store/pend.ts", "utf8");
-  const siteSrc303 = fs.readFileSync("src/nodes/site.ts", "utf8");
+  const siteSrc303 = fs.readFileSync("src/nodes/metrics.ts", "utf8");
   const aliveSrc303 = fs.readFileSync("src/px/alive.ts", "utf8");
   ok("实测表不再有模块函数", !/export function rel(Cost|CostMode|Snap)\(/.test(relSrc303));
   ok("账本不再有模块函数", !/export function (pendFlush|clSnapshot|primaryId)\(/.test(pendSrc303));
