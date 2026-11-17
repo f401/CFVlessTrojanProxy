@@ -228,8 +228,6 @@ export class AliveBoard {
   }
 }
 
-/** 进程内唯一实例：存活表只有 `S.alive` 这一张 */
-export const ALIVE = new AliveBoard();
 
 /**
  * 功能：取轮换模块的对外快照。冷启动只继承「本机房」的信誉（名单只有名字）。
@@ -238,7 +236,7 @@ export const ALIVE = new AliveBoard();
  */
 export async function pxGet(env: Env) {
   await SEEDS.read(env);
-  if (!S.alive.size) ALIVE.seedCold();
+  if (!S.alive.size) new AliveBoard().seedCold();
   for (const m of MODES) {
     if (!S.curs[m]) {
       const c = CANDS.list(m);
@@ -274,5 +272,5 @@ export async function pxGet(env: Env) {
  */
 export async function aliveList(env: Env): Promise<NodeEntry[]> {
   await pxGet(env);
-  return ALIVE.list();
+  return new AliveBoard().list();
 }

@@ -1,7 +1,7 @@
 import { S } from "../core/state";
 import { logErr } from "../nodes/metrics";
 import { STATS, isBlack, isFrozen, CANDS } from "../nodes/score";
-import { PROBE_COOL, pxGet, bumpProbeBad, noteProbe, ALIVE, ALIVE_MAX } from "./alive";
+import { PROBE_COOL, pxGet, bumpProbeBad, noteProbe, AliveBoard, ALIVE_MAX } from "./alive";
 import { POOL_TTL_MS, refillPool, probeSni, chunks, probeProxy } from "./probe";
 import { commitPool, ensurePool } from "./poolgen";
 import { SC } from "../core/const";
@@ -238,14 +238,16 @@ export class ScanAlive {
  * 一轮维护的收尾器：裁剪与记账，不产生新候选。
  */
 export class ScanHouse {
+  // 存活表的读写器：无字段，状态全在 `S.alive`；7.350 前它是模块级 `ALIVE`。
+  private readonly board = new AliveBoard();
   /**
    * 功能：裁存活表 —— 先移出被重罚的（冷却 ≥30 分钟），再按上限裁到 `ALIVE_MAX`。
    * @param pool 这一轮的池子快照（裁剪时优先保留仍在池里的）
    * @returns 是否改动过（改动过要清站点排行缓存）
    */
   prune(pool: PoolEntry[]): boolean {
-    const pruned = ALIVE.pruneOverPunished();
-    const trimmed = ALIVE.trimToMax(pool);
+    const pruned = this.board.pruneOverPunished();
+    const trimmed = this.board.trimToMax(pool);
     return pruned || trimmed;
   }
 
@@ -254,7 +256,7 @@ export class ScanHouse {
    * @returns 无
    */
   async countries(): Promise<void> {
-    await ALIVE.fillCountries();
+    await this.board.fillCountries();
   }
 
   /**
@@ -293,7 +295,7 @@ export class ScanHouse {
     // 每轮最多两个站点：每次瞄准 = 4 条节点 × 一次握手，预算要留给探活
     for (const [h, t] of S.needPx) if (t > tNow && targets.length < 2) targets.push(h);
     if (!targets.length) return;
-    const pool4 = (await ALIVE.list())
+    const pool4 = (await this.board.list())
       .filter((x) => !isBlack(keyOf(x)) && !isFrozen(keyOf(x)))
       .slice(0, 4);
     if (!pool4.length) return;

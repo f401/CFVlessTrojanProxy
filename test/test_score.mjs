@@ -8294,11 +8294,12 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
     ["in279.test:443", { h: "in279.test", p: 443, cc: "", ms: 50 }],
     ["out279.test:443", { h: "out279.test", p: 443, cc: "", ms: 10 }],
   ]);
-  const trimmed = W.ALIVE.trimToMax([{ h: "in279.test", p: 443 }], 1);
+  // 7.350 起存活表读写器由执行器自己持有，测试直接造一个（无字段，状态在 S.alive）
+  const trimmed = new W.AliveBoard().trimToMax([{ h: "in279.test", p: 443 }], 1);
   eq("裁剪先删不在池子里的那条", W.S.alive.has("out279.test:443"), false);
   eq("裁剪保住池子里的那条（哪怕它更慢）", W.S.alive.has("in279.test:443"), true);
   eq("裁剪返回「动过表」", trimmed, true);
-  eq("池子够小就不动", W.ALIVE.trimToMax([{ h: "in279.test", p: 443 }], 8), false);
+  eq("池子够小就不动", new W.AliveBoard().trimToMax([{ h: "in279.test", p: 443 }], 8), false);
 }
 
 // ──────────────────────────────── 第 280 组：选择器一分为三（挑谁 / 什么时候换 / 失败怎么记）────────────────────────────────
@@ -8681,7 +8682,7 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   eq("批探活按 PROBE_CONC 切段且认合并键", orche.includes("chunks(keys, SC.PROBE_CONC)") && orche.includes("splitRelay(key, 443)"), true);
   eq("新候选执行器负责进存活表", orche.slice(orche.indexOf("class ScanProbe")).includes("S.alive.set("), true);
   eq("复测执行器记探活失败", orche.slice(orche.indexOf("class ScanAlive")).includes("STATS.nsProbeFail("), true);
-  eq("收尾执行器做裁剪与落盘", orche.slice(orche.indexOf("class ScanHouse")).includes("ALIVE.trimToMax(") && orche.includes("SEEDS.write("), true);
+  eq("收尾执行器做裁剪与落盘", orche.slice(orche.indexOf("class ScanHouse")).includes("this.board.trimToMax(") && orche.includes("SEEDS.write("), true);
   eq("scan.ts 仍在单文件上限内", orche.split(/\r?\n/).length <= 560, true);
   eq("三个执行器都能构造", [W.ScanProbe, W.ScanAlive, W.ScanHouse].every((f) => typeof f === "function"), true);
   eq("探活批处理可调用", typeof W.probeBatch === "function", true);
@@ -11662,6 +11663,51 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     ok("349·测试窗口只留 PREFS", W.PREFS !== undefined && W.prefsOf === undefined && W.chanPref === undefined && W.prefsJson === undefined, "");
     W.VT.clear();
   }
+
+
+// ──────────────────────────────── 第 350 组：存活表读写器由收尾执行器自己持有（模块级 ALIVE 退场）────────────────────────────────
+{
+  /** 功能：把 src 下的 ts 文件拼成一段文本，供源码锁用。@returns 全部源码 */
+  const walk350 = (dir) => {
+    let out = "";
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = dir + "/" + e.name;
+      if (e.isDirectory()) out += walk350(p);
+      else if (e.name.endsWith(".ts")) out += fs.readFileSync(p, "utf8") + "\n";
+    }
+    return out;
+  };
+  const src350 = walk350("src");
+  const alive350 = fs.readFileSync("src/px/alive.ts", "utf8");
+  const scan350 = fs.readFileSync("src/px/scan.ts", "utf8");
+  const pool350 = fs.readFileSync("src/px/pool.ts", "utf8").replace(/\r\n/g, "\n");
+  const house350 = scan350.slice(
+    scan350.indexOf("export class ScanHouse"),
+    scan350.indexOf("export class PoolScan"),
+  ).replace(/\r\n/g, "\n");
+
+  // 结构 6 条：单例消失、门面不再转出、窗口里没有、执行器自己持有、类内改走字段、import 按类名
+  eq("[350] 存活表读写器不再有模块级单例", (src350.match(/export const ALIVE = new AliveBoard\(\);/g) || []).length, 0);
+  eq("[350] 池子门面不再转出 ALIVE", /export \{ ALIVE,/.test(pool350), false);
+  eq("[350] 测试窗口里没有 ALIVE", W.ALIVE, undefined);
+  eq("[350] 收尾执行器自己持有读写器", house350.includes("private readonly board = new AliveBoard();"), true);
+  eq("[350] 执行器内部改成调用字段", (house350.match(/this\.board\./g) || []).length, 4);
+  eq("[350] 改按类名 import（不再 import 单例）", scan350.includes("noteProbe, AliveBoard, ALIVE_MAX"), true);
+
+  // 行为 4 条：能构造、字段是那个类、仍能列存活表、仍能裁剪
+  ok("[350] 收尾执行器可构造且持有读写器", new W.ScanHouse().board instanceof W.AliveBoard);
+  W.S.alive.clear();
+  W.S.alive.set("a350.test:443", { h: "a350.test", p: 443, cc: "AA", ms: 60 });
+  eq("[350] 读写器仍能列存活表", new W.ScanHouse().board.list().length, 1);
+  W.S.alive.set("b350.test:443", { h: "b350.test", p: 443, cc: "", ms: 900 });
+  eq(
+    "[350] 读写器仍能按池子裁剪",
+    new W.ScanHouse().board.trimToMax([{ h: "a350.test", p: 443 }], 1),
+    true,
+  );
+  eq("[350] 对外列表入口仍在", typeof W.aliveList === "function", true);
+  W.S.alive.clear();
+}
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

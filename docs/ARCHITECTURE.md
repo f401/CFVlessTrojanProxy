@@ -218,12 +218,12 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | 快照读写（自由函数 `flushSnap` / `writeSnap` / `getSnap` / `usageSnapWrite`） | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存（无跨请求状态要独占，所以没有类）；`writeSnap` 只做编排，读快照 / 全局闸门 / 建骨架 / 合并用量 / 合并延迟 / 落盘各成一个函数；`usageSnapWrite` 同样只编排：读旧值 / 轮转切批 / 逐用户合并 / 搬旧值 / 落盘各成一个函数 |
 | `PendingLedger`（`PEND`） | `src/store/pend.ts` | 待上报账本与 flush 定时器：`flush` 只编排（摘批 → 拼体 → 发 → 确认或退回 → 退避），搭车增量由 `PendCarry` 记账（`owner`/`sync`/`rows`） |
 | `Pool` | `src/px/pool.ts` | 门面：`nsOf`/`pxSet`/`flushPx` 与 `Pool` 的九个委托方法；存活表与探活冷却在 `alive.ts`，一轮维护在 `scan.ts`，代际提交在 `poolgen.ts` |
-| `AliveBoard`（`ALIVE`） | `src/px/alive.ts` | 存活表：冷启动从种子名单铺底（四档回退）、裁「重罚」、超 `ALIVE_MAX` 按先删不在池里的再删最慢的收缩、补国家码；`pxGet()`/`aliveList()` 是它的门面 |
+| `AliveBoard`（`ScanHouse.board`） | `src/px/alive.ts` | 存活表：冷启动从种子名单铺底（四档回退）、裁「重罚」、超 `ALIVE_MAX` 按先删不在池里的再删最慢的收缩、补国家码；无字段（状态全在 `S.alive`），7.350 起由收尾执行器 `ScanHouse` 自己持有、不再有模块级 `ALIVE`，`pxGet()`/`aliveList()` 里按需现造一个 |
 | `ProbeCooldown`（`PROBE_COOL`） | `src/px/alive.ts` | 探活坏点表：`skip()` 判「暂时跳过」、`bump()` 记连续失败、`sweep()` 先删过期再按 `PROBE_BAD_MAX` 淘汰最久没更新的 |
 | `PoolScan` | `src/px/scan.ts` | 一轮池子维护的**编排**：取池子 → 准入复测 → 探新候选 → 头部复测 → 其余存活项环切刷新 → 裁剪与统计 → 中转实测 → 落盘；顺序只在这一处，三个执行器（`ScanProbe`/`ScanAlive`/`ScanHouse`）与批探活（`probeBatch`）都住在同一个文件里 |
 | `ScanProbe` | `src/px/scan.ts` | 新候选扫描：在「还没有结论」的候选里轮转（全都有结论时退回复检没进池的）、按 `PROBE_CONC` 切成段、成功进存活表并记节点统计、同 /24 慢 3 倍以上的排进下一轮复测 |
 | `ScanAlive` | `src/px/scan.ts` | 存活节点复测：准入复测队列（每次 4 条）→ 头部（游标 + 吞吐前 3）→ 其余环切 12 条；只有头部与环切失败记探活失败，复测只做「把延迟拉回来」 |
-| `ScanHouse` | `src/px/scan.ts` | 一轮的收尾：裁存活表（重罚先出、再按 `ALIVE_MAX`）、补国家码、清节点统计表（6 小时无动静 + 75% 硬上限）、中转实测（每轮最多 2 站点 × 4 节点）、seed 落盘（≥55 分钟） |
+| `ScanHouse` | `src/px/scan.ts` | 一轮的收尾（存活表读写器由它自己持有，7.350 起不再有模块级 `ALIVE`）：裁存活表（重罚先出、再按 `ALIVE_MAX`）、补国家码、清节点统计表（6 小时无动静 + 75% 硬上限）、中转实测（每轮最多 2 站点 × 4 节点）、seed 落盘（≥55 分钟） |
 | `SourceHealth`（`SOURCES`） | `src/px/probe.ts` | 池子源健康度（连续失败降权、1 小时冷却、不删源） |
 | `RawProbe` | `src/px/probe.ts` | 一次原始探测的会话（建连 → 写报文 → 按预算收首段字节）：`open` 负责 sslip.io 回退、`tcpMs`/`elapsedMs` 只在建连时刻上算、`peek` 收够/到点/提前判据三选一退出、`close` 保证迟到连上的 socket 也被关（免费计划全局只有 6 个并发 `connect()`）；两个探测只保留「首段字节怎么判」 |
 | `SeedStore` | `src/px/seed.ts` | 跨 isolate 的种子表（只存名字） |
