@@ -26,6 +26,7 @@ export { SUBVIEW, SubscriptionView } from "./views/subview";
 export { ROUTES, RouteTable } from "./routes/table";
 export { PAGES, PageView } from "./views/pageview";
 export { loadRtt, rttLearn, rttMark } from "./nodes/metrics";
+export { HOSTS, HostProfile, siteKey } from "./nodes/metrics";
 export { subHeaders, effectiveQuota } from "./core/quota";
 export { S } from "./core/state";
 export { EMPTY_CLOSE_BAD, NodeStatsTable, STATS, TEN_MB, ZERO_STAT } from "./nodes/stat";

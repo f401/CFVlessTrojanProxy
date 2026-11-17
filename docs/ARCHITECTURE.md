@@ -10,7 +10,7 @@ core/     const util net state quota 无业务依赖：常量 / 工具 / 目标�
 store/    index kv crypto         适配器：KV / 加密 / 快照 / 计量 / Meter DO
           snapshot pend stats
           meter-client meter
-nodes/    stat stat-types stat-table stat-view stat-observe score metrics  节点域：统计（表 / 派生 / 观测）、评分、画像与看板行
+nodes/    stat(+types/table/view/observe) score site rtt diag metrics errlog  节点域：统计（表 / 派生 / 观测）、评分、站点画像/族键、入口 RTT、诊断结论
 px/       pool poolgen poolsrc rawprobe geo failpolicy seed selector pickpath rotation failbook 中转域：候选池、抓取源、探活、选择器
           const regions              共享常量 / 地区列表（打破 pool 互引）
 proxy/    protocol dial session     数据面：协议、拨号、会话
@@ -238,7 +238,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `TunnelFetchTransport` | `src/core/transport-tunnelfetch.ts` | 用 `tunnelfetch`（userland TLS 1.3）探测，能把 TCP 落到中继上 —— 唯一能回答「这条中继到目标行不行」的实现 |
 | `GatewayFetchTransport` | `src/core/transport-tunnelfetch.ts` | 用运行时自带 `fetch` 探测，只能直连；留着做「同一目标、两条腿」的对照，与上一条并排看才能分清「目标拒绝这个出口族」与「中继不可用」 |
 | `BoundedMap` | `src/core/table.ts` | 有界「键 → 行」表（容量 + 寿命 + 淘汰顺序）；`RelPerfTable` 与 `TfbBook` 继承的淘汰规则就这一份，7.251 前四处各写一遍，于是出现过「上限判在插入之前」那种偏差 |
-| `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps） |
+| `HostProfile`（`HOSTS`） | `src/nodes/site.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps）；`siteKey`/`hostKey`/`hostScore` 与四个薄包装同在此文件 |
 | `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |
 | 预算分配（自由函数 `planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核）：判定额度这一项在 7.149 随 `round.ts` 一起删掉，现在只有 `adm` 与 `cap` |
 | `FactsStore`（`FACTS`） | `src/route/factsstore.ts` | 会同步事实表的门面：冷启动合并 → 上行增量 → ack/nack 三段生命周期 |

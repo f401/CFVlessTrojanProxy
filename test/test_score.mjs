@@ -26,6 +26,16 @@ const statAll = () =>
  * v7.283 把原来 450 行的一条 if 链按「读 / 量 / 写」拆开，源码锁改成「在整个诊断模块里存在」。
  * @returns {string} 四段源码
  */
+/**
+ * 指标层四段源码拼在一起：`metrics.ts`（门面）/ `rtt.ts`（入口 RTT 学习）/ `site.ts`（站点画像与族键）/ `diag.ts`（诊断结论）。
+ * v7.284 把 430 行的 `metrics.ts` 拆成四块，源码锁改成「在整个指标模块里存在」。
+ * @returns {string} 四段源码
+ */
+const metricsAll = () =>
+  ["src/nodes/metrics.ts", "src/nodes/rtt.ts", "src/nodes/site.ts", "src/nodes/diag.ts"]
+    .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
+    .join("\n");
+
 const debugAll = () =>
   ["src/routes/debug.ts", "src/routes/debug-tables.ts", "src/routes/debug-nets.ts", "src/routes/debug-actions.ts"]
     .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
@@ -5248,7 +5258,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   const cut = srcSnap.indexOf("await eachLimit(head, 8, async");
   eq("eachLimit 那行有缩进", cut > 2 ? srcSnap.slice(cut - 2, cut) : "?", "  ");
 
-  const srcMetrics = fs.readFileSync("src/nodes/metrics.ts", "utf8");
+  const srcMetrics = metricsAll();
   ok("旧键迁移也走严格读", srcMetrics.includes("kvGetStrict<Record<string, RttEntry>>(env, `rtt:${id}`)"), "");
   ok("metrics 不再引 kvGet", srcMetrics.includes('import { getSnap, kvGet }') === false, "");
 
@@ -5536,7 +5546,7 @@ try {
   const stCode = stSrc.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\/\/.*$/, "")).join("\n");
   ok("节点统计里不再有 eCloseD（只写不读）", !stCode.includes("eCloseD"));
   ok("影子试探的窗口常量进了 SC", fs.readFileSync("src/core/const.ts", "utf8").includes("UNTRIED_GAP: 20000"));
-  ok("untried 会读 lastTry", fs.readFileSync("src/nodes/metrics.ts", "utf8").includes("SC.UNTRIED_GAP"));
+  ok("untried 会读 lastTry", metricsAll().includes("SC.UNTRIED_GAP"));
   ok("selector 仍在返回前记 lastTry", fs.readFileSync("src/px/pickpath.ts", "utf8").includes("nsGet(t0).lastTry = Date.now();"));
   ok("直连空关闭的全局计数保留", fs.readFileSync("src/proxy/attacher.ts", "utf8").includes('cnt("eCloseD")'));
   ok("类型里也没有 eCloseD", !fs.readFileSync("types/app.d.ts", "utf8").includes("eCloseD"));
@@ -8373,6 +8383,34 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok(`[${g}] 没有管理员时回填分支被拒`, seed283.status === 403 || seed283.status === 401);
   const pin283 = await W.debug(mk283("?cur=1.2.3.4:443"));
   ok(`[${g}] 没有管理员时钉节点分支被拒`, pin283.status === 403 || pin283.status === 401);
+}
+
+// —— 284：指标层一分为四（7.284） ——
+{
+  const g = "284";
+  const face = fs.readFileSync("src/nodes/metrics.ts", "utf8");
+  const rttSrc = fs.readFileSync("src/nodes/rtt.ts", "utf8");
+  const siteSrc = fs.readFileSync("src/nodes/site.ts", "utf8");
+  const diagSrc = fs.readFileSync("src/nodes/diag.ts", "utf8");
+  // 门面只转出：一旦有人在门面里补函数，导出面就会有两份真源
+  ok(`[${g}] 门面不再定义函数或类`, !/^(export )?(async )?function /m.test(face) && !/^export class /m.test(face));
+  eq(`[${g}] 门面按四块转出`, ["\"./rtt\"", "\"./site\"", "\"./diag\"", "\"./errlog\""].every((x) => face.includes(x)), true);
+  ok(`[${g}] 门面不超过 12 行`, face.split(/\r?\n/).length <= 12);
+  // 三块各就各位
+  eq(`[${g}] 入口 RTT 三个入口在 rtt.ts`, ["export function rttMark", "export function rttLearn", "export async function loadRtt"].every((x) => rttSrc.includes(x)), true);
+  ok(`[${g}] rtt.ts 不定义类（状态在 S.rtt，无独占状态）`, !/^export class /m.test(rttSrc));
+  eq(`[${g}] 站点画像与族键在 site.ts`, ["export class HostProfile", "export const HOSTS", "export function siteKey", "export function hostKey", "export function hostScore", "export function hostNodeMark", "export function hostDirectMark", "export function hostRank", "export function hostUntried"].every((x) => siteSrc.includes(x)), true);
+  eq(`[${g}] 诊断结论在 diag.ts`, ["export function diagVerdict"].every((x) => diagSrc.includes(x)), true);
+  ok(`[${g}] diag.ts 是纯函数（不读 S、不做 IO）`, !diagSrc.includes("S.") && !diagSrc.includes("await ") && !diagSrc.includes("fetch("));
+  // 行为：拆分不改变任何判定
+  eq(`[${g}] 没有样本时结论是 empty`, W.diagVerdict([], null).kind, "empty");
+  eq(`[${g}] 全被判且直连也不通是 unknown`, W.diagVerdict([{ node: "a:1", n: 2, ok: 0, bad: 2 }], { ok: 0, bad: 0 }).kind, "unknown");
+  eq(`[${g}] 全被判但直连正常是 pool`, W.diagVerdict([{ node: "a:1", n: 2, ok: 0, bad: 2 }], { ok: 3, bad: 1 }).kind, "pool");
+  eq(`[${g}] 单地区集中是 geo`, W.diagVerdict([{ node: "a:1", n: 2, ok: 0, bad: 2, cc: "us" }, { node: "b:1", n: 2, ok: 0, bad: 2, cc: "us" }, { node: "c:1", n: 2, ok: 2, bad: 0 }], { ok: 0, bad: 0 }).kind, "geo");
+  // siteKey 只做「最后两段，二级后缀保留三段」，不看是不是 IP；IP 字面量由 hostKey 原样保留
+  eq(`[${g}] 族键取可注册域`, [W.siteKey("a.b.example.co.uk"), W.siteKey("api.x.com"), W.siteKey("shop.example.com")], ["example.co.uk", "x.com", "example.com"]);
+  eq(`[${g}] hostKey 对 IP 字面量原样返回`, W.hostKey("1.2.3.4"), "1.2.3.4");
+  eq(`[${g}] 没有吞吐样本时 tput 模式回 -1`, W.hostScore({ n: 3, bad: 0, ttfb: 100, at: Date.now() }, "tput", Date.now()), -1);
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
