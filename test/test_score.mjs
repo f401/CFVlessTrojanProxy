@@ -1981,7 +1981,7 @@ ok("Dialer 与 Connection 解耦（不持有 session 状态）", typeof W.Dialer
 ok("RegionPicker 已是会话持有的组件（模块级实例 7.346 起消失）", W.REGION === undefined && typeof W.RegionPicker.prototype.open === "function", "REGION");
 ok("RegionPicker 可构造", typeof W.RegionPicker === "function", "RegionPicker");
 // ═══ 第 50 组：Attacher（P5-4）═══
-ok("Attacher 是类实例且可 run()", typeof W.ATTACHER === "object" && typeof W.ATTACHER.run === "function", "ATTACHER");
+ok("Attacher 是类实例且可 run()", typeof W.Attacher === "function" && typeof W.Attacher.prototype.run === "function" && W.ATTACHER === undefined, "ATTACHER 单例已退场（7.354）");
 ok("Attacher 可构造", typeof W.Attacher === "function", "Attacher");
 // ═══ 第 51 组：SubscriptionView（P6-1）═══
 ok("SubscriptionView 是类实例且可 render()", typeof W.SUBVIEW === "object" && typeof W.SUBVIEW.render === "function", "SUBVIEW");
@@ -8142,12 +8142,12 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   // 历史自伤：首包那条注释曾被脚本顶到第 0 列（块内层级读起来是断的）
   ok("没有第 0 列的注释行", !/^\/\//m.test(aSrc277));
   // 行为：close 抛错要吞掉，正常时把关闭码与原因原样传下去
-  ok("endClient 存在", typeof W.ATTACHER.endClient === "function");
+  ok("endClient 存在", typeof new W.Attacher().endClient === "function");
   const seen = [];
   const fakeOk = { readyState: 1, close: (code, reason) => seen.push([code, reason]) };
   let threw = false;
   try {
-    W.ATTACHER.endClient(fakeOk, 1011, "proxyip failed");
+    new W.Attacher().endClient(fakeOk, 1011, "proxyip failed");
   } catch (e) {
     threw = true;
   }
@@ -8155,7 +8155,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   const fakeGone = { readyState: 3, close: () => { throw new Error("already closed"); } };
   let threw2 = false;
   try {
-    W.ATTACHER.endClient(fakeGone, 1000, "done");
+    new W.Attacher().endClient(fakeGone, 1000, "done");
   } catch (e) {
     threw2 = true;
   }
@@ -9941,7 +9941,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
       (pxBody.match(/parseProxyIp\(/g) || []).length === 1 && pxBody.includes("trimAged(S.needPx, SC.PX_MAX);") &&
         pxBody.includes("STATS.nsFail("));
     eq("[326] 五段都挂在同一个实例上",
-      ["onClose", "viaRelayFailed", "directEmpty", "tryV6", "tryProxyip"].every((n) => typeof W.ATTACHER[n] === "function"), true);
+      ["onClose", "viaRelayFailed", "directEmpty", "tryV6", "tryProxyip"].every((n) => typeof new W.Attacher()[n] === "function"), true);
     ok("[326] 关闭客户端仍只有一个出口（endClient）",
       (attSrc.match(/\.close\(/g) || []).length === 1);
   }
@@ -11781,6 +11781,40 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     const stats = v.stats({ env, id: "u353", stats: { up: 0, down: 0, conns: 0 }, learned: {}, nodeRows: [], errs: [] });
     return panel.includes("<!doctype") && stats.includes("<!doctype");
   })(), "渲染不出来");
+}
+
+{
+  // ---- 第 354 组：上游挂载器由会话自己持有，模块级 ATTACHER 退场 ----
+  const atSrc354 = fs.readFileSync("src/proxy/attacher.ts", "utf8");
+  const sesSrc354 = fs.readFileSync("src/proxy/session.ts", "utf8");
+  const walk354 = (dir) => {
+    const out = [];
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = dir + "/" + e.name;
+      if (e.isDirectory()) out.push(...walk354(p));
+      else if (e.name.endsWith(".ts")) out.push(p);
+    }
+    return out;
+  };
+  const all354 = walk354("src").map((p) => fs.readFileSync(p, "utf8")).join("\n");
+  ok("[354] 挂载器模块不再导出模块级单例", !atSrc354.includes("export const ATTACHER"), "attacher.ts 里还有单例");
+  ok("[354] 挂载器类仍在原文件里", atSrc354.includes("export class Attacher {"), "");
+  ok("[354] 会话按类名引入挂载器", sesSrc354.includes('import { Attacher } from "./attacher";'), "");
+  ok("[354] 会话自己持有挂载器", sesSrc354.includes("private readonly attacher = new Attacher();"), "");
+  ok("[354] 挂上游走自己的字段", sesSrc354.includes("await this.attacher.run(") && !sesSrc354.includes("ATTACHER.run("), "还有裸 ATTACHER.run");
+  ok("[354] 全仓没有模块级 ATTACHER 单例", !all354.includes("export const ATTACHER ="), "src/ 里还有");
+  ok("[354] 窗口里 ATTACHER 已退场", W.ATTACHER === undefined, "W.ATTACHER 仍在");
+  ok("[354] 六个补救方法都还在原型上", ["run", "onClose", "viaRelayFailed", "directEmpty", "tryV6", "tryProxyip"].every((n) => typeof W.Attacher.prototype[n] === "function"), "");
+  ok("[354] 两个挂载器实例互不相同（无共享状态）", new W.Attacher() !== new W.Attacher(), "");
+  ok("[354] 独立实例关客户端时仍吞掉「已关闭」的异常", (() => {
+    const calls = [];
+    const live = { close: (code, reason) => { calls.push(code + ":" + reason); }, send: () => {} };
+    const gone = { close: () => { throw new Error("already closed"); }, send: () => {} };
+    const a = new W.Attacher();
+    a.endClient(live, 1011, "proxyip failed");
+    a.endClient(gone, 1000, "done");
+    return calls.length === 1 && calls[0] === "1011:proxyip failed";
+  })(), "关客户端的口径变了");
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

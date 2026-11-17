@@ -92,7 +92,7 @@ export type { ProbeHit } from "./px/scan";
 export { DIALER, Dialer } from "./proxy/dialer";
 export { SOCKET_DIALER, SocketDialer } from "./proxy/socket-dialer";
 export { MeterDiagnostics } from "./store/meter-diagnostics";
-export { ATTACHER, Attacher } from "./proxy/attacher";
+export { Attacher } from "./proxy/attacher";
 export { RegionPicker } from "./proxy/region";
 export { cnt, cntDelta, cntUnsend, cntView } from "./core/counter";
 export { CRONLOCK, CronLock } from "./core/lock";

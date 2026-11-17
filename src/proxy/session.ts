@@ -8,7 +8,7 @@ import { checkTarget, parseProxyIp } from "./dial";
 import { DIALER } from "./dialer";
 import { RegionPicker } from "./region";
 import { handleDns } from "./dns";
-import { ATTACHER } from "./attacher";
+import { Attacher } from "./attacher";
 import { dialAnother } from "./fallback";
 import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./protocol";
 import { cnt } from "../core/counter";
@@ -42,6 +42,9 @@ export class ProxySession {
   // 地区钉住（`?rg=`）时的挑选器：只有 dialRegion 一个分支用它，所以挂在这个会话上，
   // 而不是留成模块级单例（7.346 起 —— 模块级实例在门面上看不出「谁在用」）。
   private readonly regionPicker = new RegionPicker();
+  // 上游挂载器没有任何字段（补救链的状态全在 Connection 里），但「谁在挂上游」属于会话自己：
+  // 7.354 前它是模块级 `ATTACHER`，读 session.ts 时看不出这个会话用什么挂载上游。
+  private readonly attacher = new Attacher();
   // 用户表在 run() 里才读（ctor 只解析参数、不碰 KV）；给一份空表让类型成立，
   // 真实值一定在首帧到达之前就绪。
   private users: Auth = { uuids: new Set<string>(), trojan: new Map<string, string>(), list: [] };
@@ -169,7 +172,7 @@ export class ProxySession {
     // 目标是 CF 托管站点时首个连接会被静默丢弃，靠 onClose 重试到 proxyip。
     const sock = await this.dial(r.host, r.port);
     if (!sock) return;
-    await ATTACHER.run(
+    await this.attacher.run(
       {
         env: this.env,
         clientSocket: this.serverWS,
