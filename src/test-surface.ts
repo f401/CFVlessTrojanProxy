@@ -141,6 +141,8 @@ export { FACT, FactShadow, shadowCtx, shadowObs } from "./route/factshadow";
 export { FACTS, FactsStore } from "./route/factsstore";
 /** tunnelfetch 探针（出口族对照实验用） */
 export { probeTf } from "./core/tf";
+export { GATEWAY_TRANSPORT, TUNNEL_TRANSPORT, TRANSPORTS, TransportRegistry } from "./core/transport";
+export { GatewayFetchTransport, TunnelFetchTransport } from "./core/transport-tunnelfetch";
 export { probeHttp80, relayIpOf, splitRelay } from "./core/http80";
 export { parseProxyIp } from "./proxy/dial";
 export { cfHttpCode, refreshCfHttp } from "./proxy/cfverdict";

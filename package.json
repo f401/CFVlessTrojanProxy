@@ -19,6 +19,9 @@
     "insertorder": "node tools/check-insertorder.mjs",
     "body": "node tools/body-audit.mjs --max 0"
   },
+  "dependencies": {
+    "tunnelfetch": "1.13.1"
+  },
   "devDependencies": {
     "prettier": "3.9.10",
     "typescript": "5.6.3"

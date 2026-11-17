@@ -223,6 +223,9 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `RelayLedger` | `src/route/relay-ledger.ts` | 中继健康表的两张账本（已同步快照 + 待确认行）：`forget()` 是唯一删除入口，`counts()` 暴露规模以发现表外键 |
 | `CronLock`（`CRONLOCK`） | `src/core/lock.ts` | cron 闸门：持有时间戳 + `SC.CRON_STALE_MS` 截止；超时接管计 `cronStale`（布尔闩卡死即永久停摆） |
 | `TfbBook`（`TFB`） | `src/route/tfbbook.ts` | 起搏记账（上次开批时间 + 本窗口批数；`sweep` 是唯一清理入口，上限与 `SC.PX_MAX` 同源） |
+| `TransportRegistry`（`TRANSPORTS`） | `src/core/transport.ts` | 探测传输的注册表：业务侧只说「要一个能探测的传输」，具体实现（userland TLS / 运行时 fetch）由这里决定。7.271 起 `probeTf` 不再写死 tunnelfetch |
+| `TunnelFetchTransport` | `src/core/transport-tunnelfetch.ts` | 用 `tunnelfetch`（userland TLS 1.3）探测，能把 TCP 落到中继上 —— 唯一能回答「这条中继到目标行不行」的实现 |
+| `GatewayFetchTransport` | `src/core/transport-tunnelfetch.ts` | 用运行时自带 `fetch` 探测，只能直连；留着做「同一目标、两条腿」的对照，与上一条并排看才能分清「目标拒绝这个出口族」与「中继不可用」 |
 | `BoundedMap` | `src/core/table.ts` | 有界「键 → 行」表（容量 + 寿命 + 淘汰顺序）；`RelPerfTable` 与 `TfbBook` 继承的淘汰规则就这一份，7.251 前四处各写一遍，于是出现过「上限判在插入之前」那种偏差 |
 | `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps） |
 | `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |

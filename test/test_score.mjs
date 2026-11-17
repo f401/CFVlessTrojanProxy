@@ -4038,7 +4038,8 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   eq("刚探过一次就不再立刻重探（负缓存 20 秒）", launches.length, 1);
 
   const tfSrc = fs.readFileSync("src/core/tf.ts", "utf8");
-  ok("probeTf 有自己的时间预算", tfSrc.includes("const TF_MS = 8000;") && tfSrc.includes("withTimeout(work, TF_MS"));
+  const tfImpl272 = fs.readFileSync("src/core/transport-tunnelfetch.ts", "utf8");
+  ok("probeTf 的实现在传输层里，且整段包在超时里", tfSrc.includes("PROBE_BUDGET_MS") && tfImpl272.includes("withTimeout(work, timeoutMs"));
   const h80 = fs.readFileSync("src/core/http80.ts", "utf8");
   ok("probeHttp80 用 splitRelay 解析中继", /relay \? splitRelay\(relay, 80\)/.test(h80));
   // ps 行的线格式只有一份（psfacts.ts 的 PsWire），出站必须真的带上 top（7.163 漏的跟随）
@@ -4227,10 +4228,10 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   // 中继地址：IPv6 字面量自带冒号，split(":") 会把它拆成两截
   ok("splitRelay 认得 [v6]:port", JSON.stringify(W.splitRelay("[2a06:98c0::1]:443", 443)) === '["2a06:98c0::1",443]', true);
   ok("splitRelay 认得不带端口的裸 IPv6", JSON.stringify(W.splitRelay("2a06:98c0::1", 443)) === '["2a06:98c0::1",443]', true);
-  const tfSrc = fs.readFileSync("src/core/tf.ts", "utf8");
+  const tfImpl271 = fs.readFileSync("src/core/transport-tunnelfetch.ts", "utf8");
   ok(
-    "probeTf 用 splitRelay 拆中继（代码里不再有 lastIndexOf，注释里留历史说明不算）",
-    tfSrc.includes("splitRelay(relay, 443)") && !/^\s*const i = relay\.lastIndexOf/m.test(tfSrc),
+    "传输层用 splitRelay 拆中继（代码里不再有 lastIndexOf，注释里留历史说明不算）",
+    tfImpl271.includes("splitRelay(relay, 443)") && !/^\s*const i = relay\.lastIndexOf/m.test(tfImpl271),
     true,
   );
   const tfbSrc = fs.readFileSync("src/route/tfb.ts", "utf8");
@@ -7759,6 +7760,32 @@ ok("首包上限确实比数据面短", W.FIRST_UP_MS < W.UP_STALL_MS);
   ok("首包不再用默认上限", sa270.includes("conn.upWrite(payload);") === false, "default");
   const su270 = fs.readFileSync("src/core/util.ts", "utf8");
   ok("常量在 util 里且只有一处", su270.split("export const FIRST_UP_MS").length - 1 === 1, "util"); }
+
+﻿// 第 271 组：探测传输层（7.271 起 probeTf 不再写死 tunnelfetch）
+{
+  eq("注册表里有两个传输", W.TRANSPORTS.names().length, 2);
+  ok("tunnelfetch 与 gateway 都在", W.TRANSPORTS.names().includes("tunnelfetch") && W.TRANSPORTS.names().includes("gateway"));
+  eq("默认传输是 tunnelfetch", W.TRANSPORTS.current(), "tunnelfetch");
+  eq("拼错的名字不生效", W.TRANSPORTS.use("nope"), false);
+  eq("拼错之后仍是原传输", W.TRANSPORTS.current(), "tunnelfetch");
+  ok("取不存在的名字回落到当前", W.TRANSPORTS.get("nope").transportName === "tunnelfetch");
+  eq("可以切到 gateway", W.TRANSPORTS.use("gateway"), true);
+  eq("切换后 current 变了", W.TRANSPORTS.current(), "gateway");
+  W.TRANSPORTS.use("tunnelfetch");
+  ok("tunnelfetch 承认自己能落中继", W.TRANSPORTS.get("tunnelfetch").relayAware === true);
+  ok("gateway 承认自己不能落中继", W.TRANSPORTS.get("gateway").relayAware === false);
+  const gw271 = await W.TRANSPORTS.get("gateway").probe("example.com", "1.2.3.4:443", "/", 500);
+  ok("gateway 遇到中继会如实报错而不是静默直连", gw271.ok === false && String(gw271.err).includes("relay"));
+  const tfSrc271 = fs.readFileSync("src/core/tf.ts", "utf8");
+  ok("probeTf 自己不再 import tunnelfetch", !tfSrc271.includes('from "tunnelfetch"'));
+  ok("probeTf 通过注册表取传输", tfSrc271.includes("TRANSPORTS.get("));
+  const implSrc271 = fs.readFileSync("src/core/transport-tunnelfetch.ts", "utf8");
+  ok("tunnelfetch 的实现搬进了专用模块", implSrc271.includes('import { Client } from "tunnelfetch"'));
+  const pkg271 = JSON.parse(fs.readFileSync("package.json", "utf8"));
+  ok("tunnelfetch 是声明的依赖（不再是隐式依赖）", Boolean(pkg271.dependencies && pkg271.dependencies.tunnelfetch));
+  const regSrc271 = fs.readFileSync("src/core/transport.ts", "utf8");
+  ok("注册表是独立模块且有类文档", regSrc271.includes("class TransportRegistry") && regSrc271.includes("功能：按名字保存"));
+}
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
