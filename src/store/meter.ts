@@ -1,6 +1,6 @@
 import { factsOut } from "./factout";
 import { unseal } from "./index";
-import { applyAdd } from "./meteradd";
+import { MeterAdd } from "./meteradd";
 import { cnt } from "../core/counter";
 import { readShards, saveState } from "./metershard";
 import { MeterState } from "./meter-state";
@@ -21,6 +21,8 @@ export class Meter {
   ledger: MeterState;
   /** 请求串行队列：/add 与 /set 交错会让内存和 storage 的顺序不一致 */
   q: Promise<unknown> = Promise.resolve();
+  /** `/add` 的合并器：八段口径各一个方法，`Meter` 只负责落盘与回滚 */
+  private readonly adder = new MeterAdd();
   /**
    * 构造：从 storage 恢复累计值；blockConcurrencyWhile 保证恢复完成前不处理请求。
    * @param {DurableObjectState} state DO 状态对象（storage / blockConcurrencyWhile）
@@ -162,7 +164,7 @@ export class Meter {
       // 快照只覆盖「就地累加」的字段：事实表按时间戳幂等、用量/日计数/节点快照整体替换，
       // 连接观测是加法合并（行在表里就地累加）—— 所以 `cl` 必须深拷，否则回滚回不去。
       const snap = this.ledger.snapshot();
-      applyAdd(this.ledger, d);
+      this.adder.apply(this.ledger, d);
       // 每次都落盘：DO 随时可能被驱逐，靠内存攒着会在驱逐时全丢；
       // 落盘失败必须回滚内存，否则 pendFlush 重发同一批会把用量算两遍。
       try {

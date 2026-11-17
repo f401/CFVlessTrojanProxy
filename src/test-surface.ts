@@ -162,6 +162,7 @@ export { FO, FirstObs, FO_GRAY, FO_LIMIT, FO_PAGE, LAT, LatObs, spdSnapshot } fr
 export { DNS, DnsFacts, DNS_TTL } from "./route/dnsfacts";
 export { BLK, BLK_BATCH, BLK_DELTA_MAX, BLK_GAP, BLK_MIN, BLK_PEN, BlkFacts } from "./route/blkfacts";
 export { FACT_TTL, PAGE_ABS, mergeAt, mergeBlk } from "./core/facts";
+export { MeterAdd } from "./store/meteradd";
 export { FactMerger } from "./store/factmerge";
 export type { FactTables } from "./store/factmerge";
 export { BLK_TTL, BIG_PEER, BIG_WIN, DEAD_TTL, TINY_ABS, WRITE_GAP, commitFact, factKey, isTiny } from "./route/commitfact";

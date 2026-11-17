@@ -8044,7 +8044,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok("Meter 持有账本对象", msSrc276.includes("ledger: MeterState;"));
   ok("Meter 不再自己声明用量字段", !msSrc276.includes("usage: UsageMeter;"));
   ok("Meter 不再自己声明七张事实表", !msSrc276.includes("vt: Record<string, number |"));
-  ok("Meter 的 /add 合并把状态对象交出去", msSrc276.includes("applyAdd(this.ledger, d)"));
+  ok("Meter 的 /add 合并把状态对象交给合并器", msSrc276.includes("this.adder.apply(this.ledger, d)"));
   ok("快照取自状态对象", msSrc276.includes("this.ledger.snapshot()"));
   ok("落盘失败回滚走状态对象", msSrc276.includes("this.ledger.rollback(snap)"));
   ok("落盘形状由 parts() 给出", msSrc276.includes("saveState(this.env, this.state.storage, this.ledger.parts())"));
@@ -9490,6 +9490,69 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("强制直连开关", ps318b.pxForce, -1);
   eq("非法 ?rx= 被丢掉", ps318b.conn.forceRelayIp, "");
   globalThis.WebSocketPair = RealPair;
+}
+
+
+// [319] /add 的合并器：八段口径各一个方法，模块级单例消失
+// 判据：这八件事的合并口径完全不同（有的相加、有的「一条证据整体胜出」、有的取更严格的状态），
+// 以前全写在一个 145 行的函数体里；改一段必须通读八段才知道会不会动到邻居。
+{
+  const addSrc319 = fs.readFileSync("src/store/meteradd.ts", "utf8");
+  const msSrc319 = fs.readFileSync("src/store/meter.ts", "utf8");
+  ok("合并器是一个类", addSrc319.includes("export class MeterAdd"));
+  ok("那个 145 行的函数已经不存在", !addSrc319.includes("export function applyAdd("));
+  for (const name of ["dayCounter", "errors", "connRing", "verdicts", "relayHealth", "snapshots", "usage"]) {
+    ok("合并器自己有 " + name + " 一步", addSrc319.includes("  private " + name + "(m: AddTarget, d: MeterBody): void {"));
+  }
+  ok("六张事实表仍交给 FactMerger", addSrc319.includes("private readonly merger = new FactMerger();"));
+  ok("按顺序分派八段", addSrc319.includes("this.dayCounter(m, d);") && addSrc319.includes("this.usage(m, d);"));
+  ok("模块级单例没有了", !/^(export )?const MERGER = /m.test(addSrc319));
+  ok("Meter 持有一个合并器", msSrc319.includes("private readonly adder = new MeterAdd();"));
+  ok("Meter 把账本交给合并器", msSrc319.includes("this.adder.apply(this.ledger, d);"));
+
+  // 行为面：真合并一次，八段各自生效
+  const adder319 = new W.MeterAdd();
+  const mk319 = () => ({
+    usage: { up: 0, down: 0, conns: 0, dU: 0, dD: 0, ts: 0, first: 0, d: "" },
+    dayCounter: {},
+    nodeSnapshots: Object.create(null),
+    errors: [],
+    connRing: [],
+    vt: {},
+    hl: {},
+    eg: {},
+    ps: {},
+    dead: {},
+    blk2: {},
+    dns: {},
+  });
+  const m319 = mk319();
+  adder319.apply(m319, {
+    up: 10,
+    down: 20,
+    conns: 2,
+    e: [{ t: 1000, m: "first" }],
+    hl: [{ i: "1.2.3.4", o: 3, b: 1, d: 0 }],
+    spd: { "n:443": { at: 5 } },
+    cl: [{ k: "n:443", n: 2, ok: 2, p50: 100, p95: 200, dn: 4096 }],
+  });
+  eq("用量三段都加上去了", [m319.usage.up, m319.usage.down, m319.usage.conns], [10, 20, 2]);
+  eq("当日字节同步累加", [m319.usage.dU, m319.usage.dD], [10, 20]);
+  eq("错误环收下那条", m319.errors.length, 1);
+  eq("中继存活度整条落表", [m319.hl["1.2.3.4"].o, m319.hl["1.2.3.4"].b], [3, 1]);
+  eq("节点快照按原值存", m319.nodeSnapshots["n:443"].at, 5);
+  eq("连接观测进来了", [m319.connRing.length, m319.connRing[0].n], [1, 2]);
+  eq("首次使用时间只写一次", m319.usage.first === m319.usage.ts, true);
+
+  // 行为面：更少的证据不能覆盖更老的更强证据（7.181 的口径）
+  adder319.apply(m319, { hl: [{ i: "1.2.3.4", o: 1, b: 1, d: 0 }] });
+  eq("条数少的证据不覆盖", [m319.hl["1.2.3.4"].o, m319.hl["1.2.3.4"].b], [3, 1]);
+
+  // 行为面：昨日计数不会把今天回滚
+  const m319b = mk319();
+  m319b.dayCounter = { d: "2999-01-01", x: 5 };
+  adder319.apply(m319b, { c: { d: "2000-01-01", x: 1 } });
+  eq("旧日期的计数被丢掉", [m319b.dayCounter.d, m319b.dayCounter.x], ["2999-01-01", 5]);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
