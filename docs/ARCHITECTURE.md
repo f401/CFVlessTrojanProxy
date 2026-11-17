@@ -13,7 +13,7 @@ store/    index kv crypto         适配器：KV / 加密 / 快照 / 计量 / Me
           snapshot pend stats
           meter-client meter
 nodes/    stat(+types/table/view/observe) score(+health/cost/cands) site rtt diag metrics errlog  节点域：统计（表 / 派生 / 观测）、评分、站点画像/族键、入口 RTT、诊断结论
-px/       pool poolgen poolsrc rawprobe geo failpolicy seed selector pickpath rotation failbook 中转域：候选池、抓取源、探活、选择器
+px/       pool poolgen probe seed selector pickpath rotation failbook 中转域：候选池、抓取源、探活、选择器
           const regions              共享常量 / 地区列表（打破 pool 互引）
 proxy/    protocol dial session     数据面：协议、拨号、会话
           fallback tunnel connection
@@ -218,10 +218,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Pool` | `src/px/pool.ts` | 门面：`nsOf`/`pxSet`/`flushPx` 与 `Pool` 的九个委托方法；存活表与探活冷却在 `alive.ts`，一轮维护在 `scan.ts`，代际提交在 `poolgen.ts` |
 | `AliveBoard`（`ALIVE`） | `src/px/alive.ts` | 存活表：冷启动从种子名单铺底（四档回退）、裁「重罚」、超 `ALIVE_MAX` 按先删不在池里的再删最慢的收缩、补国家码；`pxGet()`/`aliveList()` 是它的门面 |
 | `ProbeCooldown`（`PROBE_COOL`） | `src/px/alive.ts` | 探活坏点表：`skip()` 判「暂时跳过」、`bump()` 记连续失败、`sweep()` 先删过期再按 `PROBE_BAD_MAX` 淘汰最久没更新的 |
-| `PoolScan` | `src/px/scan.ts` | 一轮池子维护的**编排**：取池子 → 准入复测 → 探新候选 → 头部复测 → 其余存活项环切刷新 → 裁剪与统计 → 中转实测 → 落盘；顺序只在这一处，动作在 `scan-probe.ts`/`scan-alive.ts`/`scan-house.ts` |
-| `ScanProbe` | `src/px/scan-probe.ts` | 新候选扫描：在「还没有结论」的候选里轮转（全都有结论时退回复检没进池的）、按 `PROBE_CONC` 切成段、成功进存活表并记节点统计、同 /24 慢 3 倍以上的排进下一轮复测 |
-| `ScanAlive` | `src/px/scan-alive.ts` | 存活节点复测：准入复测队列（每次 4 条）→ 头部（游标 + 吞吐前 3）→ 其余环切 12 条；只有头部与环切失败记探活失败，复测只做「把延迟拉回来」 |
-| `ScanHouse` | `src/px/scan-house.ts` | 一轮的收尾：裁存活表（重罚先出、再按 `ALIVE_MAX`）、补国家码、清节点统计表（6 小时无动静 + 75% 硬上限）、中转实测（每轮最多 2 站点 × 4 节点）、seed 落盘（≥55 分钟） |
+| `PoolScan` | `src/px/scan.ts` | 一轮池子维护的**编排**：取池子 → 准入复测 → 探新候选 → 头部复测 → 其余存活项环切刷新 → 裁剪与统计 → 中转实测 → 落盘；顺序只在这一处，三个执行器（`ScanProbe`/`ScanAlive`/`ScanHouse`）与批探活（`probeBatch`）都住在同一个文件里 |
+| `ScanProbe` | `src/px/scan.ts` | 新候选扫描：在「还没有结论」的候选里轮转（全都有结论时退回复检没进池的）、按 `PROBE_CONC` 切成段、成功进存活表并记节点统计、同 /24 慢 3 倍以上的排进下一轮复测 |
+| `ScanAlive` | `src/px/scan.ts` | 存活节点复测：准入复测队列（每次 4 条）→ 头部（游标 + 吞吐前 3）→ 其余环切 12 条；只有头部与环切失败记探活失败，复测只做「把延迟拉回来」 |
+| `ScanHouse` | `src/px/scan.ts` | 一轮的收尾：裁存活表（重罚先出、再按 `ALIVE_MAX`）、补国家码、清节点统计表（6 小时无动静 + 75% 硬上限）、中转实测（每轮最多 2 站点 × 4 节点）、seed 落盘（≥55 分钟） |
 | `SourceHealth`（`SOURCES`） | `src/px/probe.ts` | 池子源健康度（连续失败降权、1 小时冷却、不删源） |
 | `SeedStore` | `src/px/seed.ts` | 跨 isolate 的种子表（只存名字） |
 | `Selector`（`SEL`） | `src/px/selector.ts` | 门面：十个方法各一行委托给下面三个执行器，不再有算法 |

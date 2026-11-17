@@ -80,11 +80,9 @@ export {
 } from "./nodes/score";
 export { nsOf, pxGet, flushPx, noteProbe, bumpProbeBad } from "./px/pool";
 export { POOL, Pool } from "./px/pool";
-export { ALIVE, ALIVE_MAX, PROBE_COOL, PoolScan, SEED_COLD_N, cronScan, aliveList } from "./px/pool";
-export { ScanAlive } from "./px/scan-alive";
-export { ScanHouse } from "./px/scan-house";
-export { ScanProbe } from "./px/scan-probe";
-export { probeBatch } from "./px/probe-batch";
+export { ALIVE, ALIVE_MAX, PROBE_COOL, PoolScan, SEED_COLD_N, aliveList, cronScan } from "./px/pool";
+export { ScanAlive, ScanHouse, ScanProbe, probeBatch, probeOne } from "./px/scan";
+export type { ProbeHit } from "./px/scan";
 export { DIALER, Dialer } from "./proxy/dialer";
 export { SOCKET_DIALER, SocketDialer } from "./proxy/socket-dialer";
 export { METER_DIAGNOSTICS, MeterDiagnostics } from "./store/meter-diagnostics";

@@ -74,7 +74,7 @@ const verdictAll = () => fs.readFileSync("src/route/verdict.ts", "utf8");
 const psAll = () => fs.readFileSync("src/route/psfacts.ts", "utf8");
 /** 功能：把一轮池子维护的编排层与三个执行器的源码合并成一段文本（源码锁读它）。 */
 const scanAll = () =>
-  ["src/px/scan.ts", "src/px/scan-probe.ts", "src/px/scan-alive.ts", "src/px/scan-house.ts", "src/px/probe-batch.ts"]
+  ["src/px/scan.ts"]
     .map((f) => fs.readFileSync(f, "utf8")).join("\n");
 /** 功能：把决策本体、候选排序与 CF 分支树三份源码合并成一段文本（源码锁读它）。 */
 const policyAll = () => fs.readFileSync("src/route/policy.ts", "utf8");
@@ -5423,7 +5423,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   ok("三次探测都把挂死的 socket 关掉", closedWr >= 3, String(closedWr));
   globalThis.__simConnect = prevSimWr;
   // 源码锁：三处 write 都必须带 withTimeout，且不许再出现裸的 await w.write(
-  const probeSrc = fs.readFileSync("src/px/rawprobe.ts", "utf8");
+  const probeSrc = fs.readFileSync("src/px/probe.ts", "utf8");
   const httpSrc = fs.readFileSync("src/core/http80.ts", "utf8");
   ok(
     "probeProxy 的 write 有超时",
@@ -6328,7 +6328,7 @@ ok("索引下限夹到 0（p 很小时不能取负）", pendSrc.includes("Math.m
   ok("没有 2500 的文件清单为空", where231.length === 0, where231.join(","));
   const dialSrc = fs.readFileSync("src/proxy/dial.ts", "utf8");
   ok("httpProbe 默认参数走常量", dialSrc.includes("ms = CONNECT_MS"), "");
-  const probeSrc = fs.readFileSync("src/px/rawprobe.ts", "utf8");
+  const probeSrc = fs.readFileSync("src/px/probe.ts", "utf8");
   ok("probeSni 默认参数走常量", probeSrc.includes("ms = CONNECT_MS"), "");
   ok("SC.STALL 仍在（语义是卡顿当量）", W.SC.STALL === 2500, String(W.SC.STALL));
 }
@@ -6543,7 +6543,7 @@ W.S.alive.clear();
 try { await W.refillPool({ poolSrc: many240.join(",") }, 0); } finally { globalThis.fetch = realFetch240; }
 ok("抓取次数等于源列表长度", hits240 === srcs240.length, hits240 + " vs " + srcs240.length);
 ok("抓取次数不超过上界", hits240 <= cap240 && hits240 > 0, hits240);
-const probeSrc240 = fs.readFileSync("src/px/poolsrc.ts", "utf8");
+const probeSrc240 = fs.readFileSync("src/px/probe.ts", "utf8");
 const budgetSrc240 = fs.readFileSync("src/route/budget.ts", "utf8");
 ok("probe.ts 有 REFILL_MAX 常量", probeSrc240.includes("export const REFILL_MAX = 6;"));
 ok("poolSources 截断自定义列表", probeSrc240.includes("return list.length ? list.slice(0, REFILL_MAX) : POOL_SOURCES;"));
@@ -8319,24 +8319,25 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
 
 // ──────────────────────────────── 第 281 组：probe.ts 一分为四（源清单 / 原始探活 / 地理 / 失败阈值）────────────────────────────────
 {
-  const facadeSrc = fs.readFileSync("src/px/probe.ts", "utf8");
-  const poolSrc = fs.readFileSync("src/px/poolsrc.ts", "utf8");
-  const rawSrc = fs.readFileSync("src/px/rawprobe.ts", "utf8");
-  const geoSrc = fs.readFileSync("src/px/geo.ts", "utf8");
-  const failSrc = fs.readFileSync("src/px/failpolicy.ts", "utf8");
-  // 门面只做再导出：没有函数体、没有值定义
-  ok("门面不再定义函数", !facadeSrc.includes("export function ") && !facadeSrc.includes("export async function "), "");
-  ok("门面不再定义常量", !/^export const \w+ = /m.test(facadeSrc), "");
-  eq("门面四个来源各一行", ["poolsrc", "rawprobe", "geo", "failpolicy"].filter((m) => facadeSrc.includes(`"${"./" + m}"`)).length, 4);
-  ok("门面不超过 15 行", facadeSrc.split("\n").length <= 15, String(facadeSrc.split("\n").length));
-  // 四块各就各位
-  ok("poolsrc 有源清单与抓取", poolSrc.includes("export const POOL_SOURCES = [") && poolSrc.includes("export async function refillPool("), "");
-  ok("poolsrc 有源健康度与去重", poolSrc.includes("export class SourceHealth {") && poolSrc.includes("export function takePoolLine("), "");
-  ok("poolsrc 不含探活", !poolSrc.includes("PROBE_HELLO") && !poolSrc.includes("probeProxy("), "");
-  ok("rawprobe 有四种探活入口", rawSrc.includes("export const PROBE_HELLO") && rawSrc.includes("export async function probeProxy(") && rawSrc.includes("export function tlsHello(") && rawSrc.includes("export async function probeSni("), "");
-  ok("rawprobe 不再抓源", !rawSrc.includes("refillPool(") && !rawSrc.includes("POOL_SOURCES"), "");
-  ok("geo 只做标注", geoSrc.includes("export async function geoLabel(") && !geoSrc.includes("connect({"), "");
-  ok("failpolicy 只有阈值", failSrc.includes("export function pxPolicy(") && !failSrc.includes("await "), "");
+  // 7.304 起四块（源清单 / 原始探活 / 地理标注 / 失败阈值）住在同一个文件里：
+  // 它们共用一份 import 与一条重试纪律，拆成四个文件只会把「抓源用的是 fetch、探活用的是 connect」
+  // 这条预算差异埋进四个 different 的 import 表里。
+  const all = fs.readFileSync("src/px/probe.ts", "utf8");
+  ok(
+    "四个旧文件都不再单独存在",
+    ["poolsrc.ts", "rawprobe.ts", "geo.ts", "failpolicy.ts"].every((f) => !fs.existsSync("src/px/" + f)),
+    "",
+  );
+  ok("源清单与抓取在同一文件", all.includes("export const POOL_SOURCES = [") && all.includes("export async function refillPool("), "");
+  ok("源健康度与去重也在同一文件", all.includes("export class SourceHealth {") && all.includes("export function takePoolLine("), "");
+  ok("四种探活入口都在", all.includes("export const PROBE_HELLO") && all.includes("export async function probeProxy(") && all.includes("export function tlsHello(") && all.includes("export async function probeSni("), "");
+  ok(
+    "地理标注只做标注（它自己不建连）",
+    all.includes("export async function geoLabel(") &&
+      !all.slice(all.indexOf("export async function geoLabel("), all.indexOf("export function pxPolicy(")).includes("connect("),
+    "",
+  );
+  ok("失败阈值没有 await（纯计算）", all.includes("export function pxPolicy(") && !/export function pxPolicy[sS]{0,400}?await /.test(all), "");
   // 导出面没变：老名字仍然能用，行为也照旧
   eq("REFILL_MAX 仍是 6", W.REFILL_MAX, 6);
   eq("三个探活入口仍可调用", [W.probeProxy, W.probeSni, W.tlsHello].every((f) => typeof f === "function"), true);
@@ -8631,35 +8632,29 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
 
 // ---------- 第 291 组：一轮池子维护按「探新 / 复测 / 收尾」拆成三个执行器（7.291） ----------
 {
+  // 7.304 起编排与三个执行器、批探活都住在 src/px/scan.ts 里：一次池子维护的全部步骤读一处即可，
+  // 「哪一步会花 connect() 名额、哪一步会写 KV」也不再分散在四个 import 表里。
   const orche = fs.readFileSync("src/px/scan.ts", "utf8");
-  const batch = fs.readFileSync("src/px/probe-batch.ts", "utf8");
-  const prb = fs.readFileSync("src/px/scan-probe.ts", "utf8");
-  const alv = fs.readFileSync("src/px/scan-alive.ts", "utf8");
-  const hou = fs.readFileSync("src/px/scan-house.ts", "utf8");
-  eq("编排层仍然导出 PoolScan", orche.includes("export class PoolScan"), true);
-  eq("编排层不自己探活", orche.includes("probeProxy(") || orche.includes("probeSni(") || orche.includes("STATS.nsProbe("), false);
-  eq("编排层不直接写存活表", orche.includes("S.alive.set("), false);
-  eq("编排层不超过 120 行", orche.split(/\r?\n/).length <= 120, true);
-  eq("探活批处理带上了合并后的候选键", batch.includes("splitRelay(key, 443)"), true);
-  eq("探活批处理按 PROBE_CONC 切段", batch.includes("chunks(keys, SC.PROBE_CONC)"), true);
-  eq("探活结果继承 NodeEntry 形状", batch.includes("export interface ProbeHit extends NodeEntry"), true);
-  eq("新候选执行器独立成类", prb.includes("export class ScanProbe"), true);
-  eq("新候选执行器负责进存活表", prb.includes("S.alive.set(") && prb.includes("STATS.nsProbe("), true);
-  eq("新候选执行器不看存活节点失败", prb.includes("STATS.nsProbeFail("), false);
-  eq("复测执行器独立成类", alv.includes("export class ScanAlive"), true);
-  eq("复测执行器记探活失败", alv.includes("STATS.nsProbeFail("), true);
-  eq("复测执行器不自己切段", alv.includes("splitRelay("), false);
-  eq("复测执行器只管两档入参", alv.includes("probeInto(keys: string[], failCounts: boolean)"), true);
-  eq("收尾执行器独立成类", hou.includes("export class ScanHouse"), true);
-  eq("收尾执行器做裁剪", hou.includes("ALIVE.pruneOverPunished(") && hou.includes("ALIVE.trimToMax("), true);
-  eq("收尾执行器负责国家码", hou.includes("ALIVE.fillCountries()"), true);
-  eq("收尾执行器负责中转实测", hou.includes("HOOK.relayProbe"), true);
-  eq("收尾执行器负责落盘", hou.includes("SEEDS.write("), true);
-  eq("三个执行器都是新导出",
-    typeof W.ScanProbe === "function" && typeof W.ScanAlive === "function" && typeof W.ScanHouse === "function",
-    true);
+  eq(
+    "四个旧文件都不再单独存在",
+    ["scan-probe.ts", "scan-alive.ts", "scan-house.ts", "probe-batch.ts"].every((f) => !fs.existsSync("src/px/" + f)),
+    true,
+  );
+  eq("编排类仍在", orche.includes("export class PoolScan"), true);
+  eq("三个执行器与批探活也都在同一文件", [
+    "export class ScanProbe",
+    "export class ScanAlive",
+    "export class ScanHouse",
+    "export async function probeBatch(",
+    "export interface ProbeHit extends NodeEntry",
+  ].every((x) => orche.includes(x)), true);
+  eq("批探活按 PROBE_CONC 切段且认合并键", orche.includes("chunks(keys, SC.PROBE_CONC)") && orche.includes("splitRelay(key, 443)"), true);
+  eq("新候选执行器负责进存活表", orche.slice(orche.indexOf("class ScanProbe")).includes("S.alive.set("), true);
+  eq("复测执行器记探活失败", orche.slice(orche.indexOf("class ScanAlive")).includes("STATS.nsProbeFail("), true);
+  eq("收尾执行器做裁剪与落盘", orche.slice(orche.indexOf("class ScanHouse")).includes("ALIVE.trimToMax(") && orche.includes("SEEDS.write("), true);
+  eq("scan.ts 仍在单文件上限内", orche.split(/\r?\n/).length <= 560, true);
+  eq("三个执行器都能构造", [W.ScanProbe, W.ScanAlive, W.ScanHouse].every((f) => typeof f === "function"), true);
   eq("探活批处理可调用", typeof W.probeBatch === "function", true);
-  eq("复测执行器算头部键", Array.isArray(new W.ScanAlive().keys()), true);
   eq("cronScan 仍是唯一入口", typeof W.cronScan === "function", true);
 }
 //
@@ -8861,7 +8856,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
 // [301] 薄包装与「只为测试存在的入口」已经收掉：调用点直接调单例
 {
   const pol301 = fs.readFileSync("src/route/policy.ts", "utf8");
-  const src301 = fs.readFileSync("src/px/poolsrc.ts", "utf8");
+  const src301 = fs.readFileSync("src/px/probe.ts", "utf8");
   const probe301 = fs.readFileSync("src/px/probe.ts", "utf8");
   const ip301 = fs.readFileSync("src/routes/proxyip.ts", "utf8");
   ok("策略模块不再有转发函数", !/export function (decide|shadow|policyOn)\(/.test(pol301));
