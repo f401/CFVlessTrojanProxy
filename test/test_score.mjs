@@ -3783,8 +3783,9 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   ok("session 的守卫注明了两条拨号路径都不会回 null", sSrc.includes("两条拨号路径都不返回 null"));
   // 脚本补丁曾把一条语句顶格（缩进 0），块内的层级读起来是断的。
   const cLines = fs.readFileSync("src/proxy/connection.ts", "utf8").split(/\r?\n/);
-  const relLine = cLines.find((l) => l.includes("HOOK.relPerf?.(this.host"));
-  ok("relPerf 那行和同块其它语句同层级（10 空格）", !!relLine && /^ {10}HOOK\.relPerf\?\./.test(relLine));
+  const settleLines = fs.readFileSync("src/proxy/conn-settle.ts", "utf8").split(/\r?\n/);
+  const relLine = settleLines.find((l) => l.includes("HOOK.relPerf?.(v.host"));
+  ok("relPerf 那行和同块其它语句同层级（4 空格）", !!relLine && /^ {4}HOOK\.relPerf\?\./.test(relLine));
   ok("closing 块里没有顶格的语句", cLines.filter((l) => /^\S/.test(l) && !/^(import|export|\/\/|\/\*|\}|type |const |function |class )/.test(l)).length === 0);
 }
 {
@@ -5012,14 +5013,14 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
 {
   const st = fs.readFileSync("src/core/state.ts", "utf8");
   const cw = fs.readFileSync("tools/check-wire.mjs", "utf8");
-  const cn = fs.readFileSync("src/proxy/connection.ts", "utf8");
+  const cn = fs.readFileSync("src/proxy/connection.ts", "utf8") + fs.readFileSync("src/proxy/conn-settle.ts", "utf8");
   ok("szBig 已从登记表删除（触发条件不可达）", !/^\s*"szBig",/m.test(st));
   ok("psSent 已从登记表删除", !/^\s*"psSent",/m.test(st));
   ok("egProbe 已从登记表删除", !/^\s*"egProbe",/m.test(st));
   ok("e4retry 已从登记表删除", !/^\s*"e4retry",/m.test(st));
   ok("vtSeen 已从登记表删除", !/^\s*"vtSeen",/m.test(st));
   ok("vtPend 计数键已删除（S.vtPend 是另一张表）", !/^\s*"vtPend",/m.test(st));
-  eq("connection.ts 的 tput 都走 cnt()", (cn.match(/cnt\("tput"\)/g) || []).length, 2);
+  eq("connection.ts 与 conn-settle.ts 的 tput 都走 cnt()", (cn.match(/cnt\("tput"\)/g) || []).length, 2);
   ok("connection.ts 不再直接改 S.cnt.tput", !cn.includes("S.cnt.tput"));
   ok("check-wire 有动态键白名单", cw.includes("DYN_CNT"));
   ok("check-wire 会对死登记键报红", cw.includes("没有任何 cnt("));
@@ -7328,10 +7329,10 @@ for (let i = 0; i < 10; i++) total256c += st256c.takeWeight(512 * 1024, 1000);
 ok("不打折时额度用完就不再给样本", Math.abs(total256c - W.SC.CONN_W_CAP) < 1e-6, `total=${total256c}`);
 const st256d = new W.Connection(env256, { waitUntil() {}, passThroughOnException() {} }, W.Mode.Throughput, "1.1.1.1");
 eq("负折扣不会让权重变成负数", st256d.takeWeight(512 * 1024, 1000, -5), 0);
-const csrc256 = fs.readFileSync("src/proxy/connection.ts", "utf8");
-eq("两处调用都把折扣一起传进去", csrc256.split("stallWin > dt * 0.5 ? 0.3 : 1)").length - 1, 2);
+const csrc256 = ["src/proxy/connection.ts", "src/proxy/conn-settle.ts", "src/proxy/conn-sample.ts"].map((f) => fs.readFileSync(f, "utf8")).join("\n");
+eq("两处调用都把折扣一起传进去", csrc256.split("? 0.3 : 1)").length - 1, 2);
 ok("调用点不再自己乘 0.3", !csrc256.includes("w *= 0.3"), "");
-ok("封顶按报出的量计", csrc256.includes("Math.min(room, w * Math.max(0, Math.min(1, factor)))"), "");
+ok("封顶按报出的量计", fs.readFileSync("src/proxy/conn-sample.ts", "utf8").includes("Math.min(room, raw * clamped)"), "");
 // ── 第 257 组：「按插入序」判据做成门禁（棘轮）────────────────────────────
 // 这条判据背后是 7.177 / 7.181 / 7.187 / 7.215 / 7.224 五条缺陷：插入序切片切到最旧的那批，
 // 或 Map.set 不移动位置导致「淘汰 = 删最热的键」。现在三处允许点都写了理由，新增一处就红。
@@ -7619,9 +7620,9 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
     ok(`${f} 不再内联解析 node → IP`, !body.includes('lastIndexOf(":")'), f);
   }
   ok("judge.ts 用 relayIpOf", src264("src/route/judge.ts").includes("relayIpOf(e.node)"));
-  ok("connection.ts 用 relayIpOf", src264("src/proxy/connection.ts").includes("relayIpOf(this.node)"));
+  ok("结算模块用 relayIpOf", src264("src/proxy/conn-settle.ts").includes("relayIpOf(v.node)"));
   ok("fallback.ts 用 splitRelay 拆补救链地址", src264("src/proxy/fallback.ts").includes("const [host, port] = splitRelay(alt, 443);"));
-  ok("四份文件都从 core/http80 取解析", ["src/route/judge.ts", "src/route/factshadow.ts", "src/proxy/connection.ts", "src/proxy/fallback.ts"].every((f) => src264(f).includes('from "../core/http80"')));
+  ok("四份文件都从 core/http80 取解析", ["src/route/judge.ts", "src/route/factshadow.ts", "src/proxy/conn-settle.ts", "src/proxy/fallback.ts"].every((f) => src264(f).includes('from "../core/http80"')));
 }
 
 ﻿// 第 265 组：拆地址只准有一份实现（7.265）
@@ -8436,6 +8437,30 @@ console.log("\n[285] 策略本体与 HOOK 装配拆成两层");
   const viaReal = W.HOOK.decide({ host: "x285.example", cfHost: false, clientV6: false, legacyWantsRelay: false });
   ok("装回真策略后不再是假实现", viaReal.why !== "fake-why" && typeof viaReal.why === "string");
   ok("旧导出仍在（decide / shadow / policyOn）", typeof W.decide === "function" && typeof W.shadow === "function" && W.policyOn() === true);
+}
+{
+  // 第 286 组：连接结束时的结算流水线独立成类（v7.286）
+  // 一条连接结束时要做六件事（收尾采样 / pStall 占比 / 节点观测聚合 / 首眼观测 / 站点画像 / PEND 记账），
+  // 而热路径每 512KB 只做「加字节 → 比阈值」。两者混在一个 420 行的类里时，看不出哪个字段只在这里被读。
+  const connSrc286 = fs.readFileSync("src/proxy/connection.ts", "utf8");
+  const settleSrc286 = fs.readFileSync("src/proxy/conn-settle.ts", "utf8");
+  const sampSrc286 = fs.readFileSync("src/proxy/conn-sample.ts", "utf8");
+  ok("结算流水线是独立的类 + 单例", settleSrc286.includes("export class ConnSettle") && settleSrc286.includes("export const SETTLE = new ConnSettle();"), "");
+  ok("结算只读结构化视图（不 import Connection）", settleSrc286.includes("export interface SettleView") && !settleSrc286.includes("Connection }"), "");
+  ok("结算入口只有 close / pend 两条", settleSrc286.includes("close(v: SettleView): void") && settleSrc286.includes("pend(v: SettleView): void"), "");
+  ok("连接本体不再自己结算节点分数", !connSrc286.includes("nsOk(") && !connSrc286.includes("nsStall(") && !connSrc286.includes("markSeedDirty("), "");
+  ok("连接本体不再自己记 PEND 账", !connSrc286.includes("statBump(") && !connSrc286.includes("scheduleFlush("), "");
+  ok("flush 只负责调度结算", connSrc286.includes("SETTLE.close(this)") && connSrc286.includes("SETTLE.pend(this)"), "");
+  ok("通道证据也搬进结算", !connSrc286.includes("HOOK.traffic") && settleSrc286.includes("HOOK.traffic"), "");
+  ok("采样换算是纯函数模块（不碰 S）", !sampSrc286.includes("core/state") && sampSrc286.includes("export function sampleWeight") && sampSrc286.includes("export function stalledWindow") && sampSrc286.includes("export function kbsOf"), "");
+  eq("权重封顶：额度用完就是 0", W.sampleWeight(W.SC.CONN_W_CAP, 512 * 1024, 1000), 0);
+  ok("权重封顶：折扣在封顶之前生效", Math.abs(W.sampleWeight(W.SC.CONN_W_CAP - 0.1, 512 * 1024, 1000, 0.3) - 0.1) < 1e-6, "");
+  eq("负折扣夹成 0", W.sampleWeight(0, 512 * 1024, 1000, -5), 0);
+  ok("背压窗口判据是一半以上时间", W.stalledWindow(600, 0, 1000) && !W.stalledWindow(500, 0, 1000), "");
+  eq("小样本的吞吐记 0（4 字节 403 页不算速度）", W.kbsOf(4096, 80), 0);
+  ok("过 1MB 才算真实吞吐", Math.abs(W.kbsOf(1048576, 1000) - 1024) < 1e-6, `got=${W.kbsOf(1048576, 1000)}`);
+  ok("结算类是单例可实例化", W.SETTLE instanceof W.ConnSettle, "");
+  ok("连接仍持有自己的采样权重（状态归连接）", connSrc286.includes("this.sampleW += use;") && settleSrc286.includes("takeWeight(bytes: number, dt: number, factor?: number): number;"), "");
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

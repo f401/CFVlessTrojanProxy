@@ -1,17 +1,12 @@
-import { SC } from "../core/const";
-import { HOOK } from "../core/hook";
 import type { Socket } from "cloudflare:sockets";
 import { errMsg } from "../core/util";
-import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
+import { hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
-import { FO } from "../core/firstobs";
-import { LAT } from "../core/latobs";
-import { nsFail, nsLatency, nsOk, nsSpeed, nsStall } from "../nodes/score";
-import { markSeedDirty } from "../px/seed";
+import { nsFail, nsSpeed } from "../nodes/score";
 import { S } from "../core/state";
-import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";
 import { UP_STALL_MS, WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS, closeQuietly, releaseAll, withTimeout } from "../core/util";
-import { relayIpOf } from "../core/http80";
+import { SETTLE } from "./conn-settle";
+import { SAMPLE_MIN_BYTES, sampleWeight, stalledWindow } from "./conn-sample";
 
 
 /** 每收到多少字节触发一次 tick */
@@ -29,6 +24,9 @@ export const TICK_BYTES = 512 * 1024;
  *
  * 改造前每个 64KB chunk 要读 3 次 bufferedAmount、取 1 次时钟；
  * 4MB/s 下就是每秒 192 次跨边界调用。现在降到每秒 8 次。
+ *
+ * 连接结束时的「结算」不在这里：那个流水线要碰六张表（见 `./conn-settle.ts`），
+ * 与本文件的热路径职责完全不同，所以按「连接持有状态、结算只读状态」分工。
  */
 
 export class Connection {
@@ -120,54 +118,97 @@ export class Connection {
 
     try {
       const now = Date.now();
-      // 采样窗口：至少 800ms 才结算一次（tick 可能比这更密）。
-      // 两次结算的间隔从 15 秒降到 5 秒：一次十几秒的大文件下载原来只够结算一个样本，
-      // 带宽估计长期停在中继先验上，tput 模式分不出「这条中继有 2MB/s」还是「只有 200KB/s」。
-      const dt = now - this.sampleAt;
-      if (this.sampleAt && dt >= 800 && now - this.lastEmit >= 5000) {
-        const bytes = this.down - this.sampleDown;
-        if (this.node && bytes >= 65536) {
-          // 窗口里一半以上时间在背压 = 瓶颈在客户端，这个样本不代表节点能力
-          const stallWin = this.stallMs - this.stallMark;
-          const w = this.takeWeight(bytes, dt, stallWin > dt * 0.5 ? 0.3 : 1);
-          if (w > 0) {
-            this.lastEmit = now;
-            nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
-            cnt("tput");
-          }
-        }
-        this.sampleAt = now;
-        this.sampleDown = this.down;
-        this.stallMark = this.stallMs;
-      }
-      // 站点级吞吐：长连接（看视频）每 60 秒补一个窗口，别等连接结束
-      if (this.node && this.host) {
-        if (!this.siteAt) {
-          this.siteAt = now;
-          this.siteDown = this.down;
-        } else if (now - this.siteAt >= 60000) {
-          const sb = this.down - this.siteDown;
-          const sdt = now - this.siteAt;
-          if (sb >= 262144) {
-            hostNodeMark(this.host, this.node, { bps: Math.round((sb * 1000) / sdt), bytes: sb });
-            this.siteEmitted++;
-          }
-          this.siteAt = now;
-          this.siteDown = this.down;
-        }
-      }
+      // 两级采样：节点级（决定分数）与站点级（决定「这个站点走哪个节点快」）
+      this.sampleWindow(now);
+      this.siteWindow(now);
+      // 第一次 tick 只建立窗口起点，不产生样本（否则第一段速率会把建连耗时算进去）
       if (!this.sampleAt) {
         this.sampleAt = now;
         this.sampleDown = this.down;
         this.stallMark = this.stallMs;
       }
 
+      // 先把这段时间的字节结算给 PEND，再看客户端收不收得动
       this.flush(false);
       return await this.backpressure(ws);
     } catch (e) {
       logErr("tick: " + errMsg(e), this.node || "");
       return true; // 统计出错绝不影响数据面
     }
+  }
+
+  /**
+   * 功能：节点级吞吐采样（一个窗口最多每 5 秒产生一条样本）。
+   * @param {number} now 当前毫秒时间
+   * @returns {void}
+   */
+  private sampleWindow(now: number): void {
+    // 采样窗口：至少 800ms 才结算一次（tick 可能比这更密）。
+    // 两次结算的间隔从 15 秒降到 5 秒：一次十几秒的大文件下载原来只够结算一个样本，
+    // 带宽估计长期停在中继先验上，tput 模式分不出「这条中继有 2MB/s」还是「只有 200KB/s」。
+    const dt = now - this.sampleAt;
+    if (!this.sampleAt || dt < 800 || now - this.lastEmit < 5000) return;
+    const bytes = this.down - this.sampleDown;
+    if (this.node && bytes >= SAMPLE_MIN_BYTES) {
+      // 窗口里一半以上时间在背压 = 瓶颈在客户端，这个样本不代表节点能力
+      const w = this.takeWeight(bytes, dt, stalledWindow(this.stallMs, this.stallMark, dt) ? 0.3 : 1);
+      if (w > 0) {
+        this.lastEmit = now;
+        this.emitSpeed(bytes, dt, w);
+      }
+    }
+    this.sampleAt = now;
+    this.sampleDown = this.down;
+    this.stallMark = this.stallMs;
+  }
+
+  /**
+   * 功能：站点级吞吐采样（长连接每 60 秒补一个窗口，别等连接结束）。
+   * @param {number} now 当前毫秒时间
+   * @returns {void}
+   */
+  private siteWindow(now: number): void {
+    if (!this.node || !this.host) return;
+    // 直连连接没有「站点 × 节点」可言，第一次进窗口只记起点
+    if (!this.siteAt) {
+      this.siteAt = now;
+      this.siteDown = this.down;
+      return;
+    }
+    // 60 秒一个窗口：长连接（看视频）不必等到结束才有第一个站点级样本
+    if (now - this.siteAt < 60000) return;
+    const sb = this.down - this.siteDown;
+    const sdt = now - this.siteAt;
+    // 256KB 以下不报：小响应用「一生平均」算出的速率会反向排序（D5）
+    if (sb >= 262144) {
+      this.emitSite(sb, sdt);
+      this.siteEmitted++;
+    }
+    this.siteAt = now;
+    this.siteDown = this.down;
+  }
+
+  /**
+   * 功能：把节点吞吐样本交给评分层。
+   * @param {number} bytes 窗口内下行字节
+   * @param {number} dt 窗口时长（毫秒）
+   * @param {number} w 本次贡献的直方图权重
+   * @returns {void}
+   */
+  private emitSpeed(bytes: number, dt: number, w: number): void {
+    // 权重必须先过 `takeWeight` 的封顶逻辑，否则慢节点的 e10 会被短窗口刷偏
+    nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
+    cnt("tput");
+  }
+
+  /**
+   * 功能：把站点级吞吐交给站点画像。
+   * @param {number} bytes 窗口内下行字节
+   * @param {number} dt 窗口时长（毫秒）
+   * @returns {void}
+   */
+  private emitSite(bytes: number, dt: number): void {
+    hostNodeMark(this.host, this.node, { bps: Math.round((bytes * 1000) / dt), bytes });
   }
 
   /** 客户端收不动时暂停读上游；超时或爆缓冲则主动断 */
@@ -245,11 +286,7 @@ export class Connection {
   syncInflight(): void {
     const k = this.node;
     if (k === this.inflightKey) return;
-    if (this.inflightKey) {
-      const n = (S.inflight.get(this.inflightKey) || 1) - 1;
-      if (n > 0) S.inflight.set(this.inflightKey, n);
-      else S.inflight.delete(this.inflightKey);
-    }
+    if (this.inflightKey) dropInflight(this.inflightKey);
     this.inflightKey = k || "";
     if (k) S.inflight.set(k, (S.inflight.get(k) || 0) + 1);
   }
@@ -260,156 +297,35 @@ export class Connection {
    */
   clearInflight(): void {
     if (!this.inflightKey) return;
-    const n = (S.inflight.get(this.inflightKey) || 1) - 1;
-    if (n > 0) S.inflight.set(this.inflightKey, n);
-    else S.inflight.delete(this.inflightKey);
+    dropInflight(this.inflightKey);
     this.inflightKey = "";
   }
 
   /**
    * 本次窗口应贡献多少直方图权重。
    * 512KB / 1s 是"一个标准样本"；短窗口或小样本按比例降权，单连接累计封顶。
+   * 换算规则在 `./conn-sample.ts` 的 `sampleWeight`，这里只负责把结果记进 `sampleW`。
    */
   takeWeight(bytes: number, dt: number, factor = 1): number {
-    const room = SC.CONN_W_CAP - this.sampleW;
-    if (room <= 0) return 0;
-    const w = Math.min(1, bytes / (512 * 1024)) * Math.min(1, dt / 1000);
-    // 折扣因子（背压窗口 ×0.3）必须在封顶之前生效：
-    // 否则一条「客户端是瓶颈」的连接会按满权重吃掉 CONN_W_CAP，
-    // 报出去的却只有 0.3 倍 —— 它一共只贡献了 cap 的 30%，随后再也报不出样本。
-    const use = Math.min(room, w * Math.max(0, Math.min(1, factor)));
+    const use = sampleWeight(this.sampleW, bytes, dt, factor);
     this.sampleW += use;
     return use;
   }
 
-  /** 把"尚未上报"的字节推给 PEND；closing=true 时补一个收尾样本 */
+  /**
+   * 功能：把「尚未上报」的字节推给 PEND，并在关连接时触发一次结算。
+   * @param {boolean} closing 是否是关连接的最后一次 flush（补收尾样本）
+   * @returns {void}
+   */
   flush(closing?: boolean): void {
-    if (closing) this.clearInflight();
-    if (!this.id) return;
-
-    // 收尾逻辑必须在"零字节"提前返回之前：
-    // 鉴权成功但一个字节都没传的连接（探测、被客户端立刻取消）也要计入
-    // node/direct 与种子刷新，否则计数和信誉表会漏掉这一整类连接。
     if (closing) {
-      const now = Date.now();
-      const dt = now - this.sampleAt;
-      const bytes = this.down - this.sampleDown;
-      // 快速节点（10MB 在 300ms 内传完，>33MB/s）以前永远进不了直方图：
-      // dt>=300ms 的闸门把它们全挡了，e10 只能停在 51 秒先验上。
-      // 字节够多（≥1MB）时不再要求 300ms —— 1MB 已经过了慢启动。
-      if (
-        this.node &&
-        this.sampleAt &&
-        dt >= 50 &&
-        (dt >= 300 || bytes >= 1048576) &&
-        bytes >= 32768 &&
-        now - this.lastEmit >= 5000
-      ) {
-        const stallWin = this.stallMs - this.stallMark;
-        const w = this.takeWeight(bytes, dt, stallWin > dt * 0.5 ? 0.3 : 1);
-        if (w > 0) {
-          nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
-          cnt("tput");
-        }
-      }
-      // 分母必须是"所有连接的总时长"：pStall = (stallMs + 50) / (runMs + 1000)。
-      // 原来只在"这条连接卡过"时才累加 runMs，等于把分母缩成"卡过的那几条连接的时长"：
-      // 一条 5 秒连接卡 2 秒 → pStall 0.34（真实占比 0.001），单次卡顿白送 800+ ms 分，
-      // 还会踩中 pStall>0.25 的 +400 重罚档，节点一晚上翻不了身。
-      if (this.node) {
-        nsStall(this.node, this.stallMs, Math.max(1000, now - this.startedAt));
-      }
-      // 连接观测按节点聚合（n/ok/p50/p95）：40 条原始记录只能盖住 40 个节点，
-      // 聚合后同样载重能覆盖全池（2000 个节点也就 400 条聚合记录）。
-      if (this.node || this.host) {
-        const ck = this.node || "direct";
-        let g = S.cagg.get(ck);
-        if (!g) {
-          g = { n: 0, ok: 0, dn: 0, v: [] };
-          if (S.cagg.size >= 400) {
-            let worst = "";
-            let wn = Infinity;
-            for (const [k2, g2] of S.cagg) if (g2.n < wn) { wn = g2.n; worst = k2; }
-            if (worst) S.cagg.delete(worst);
-          }
-          S.cagg.set(ck, g);
-        }
-        g.n += 1;
-        if (!this.failed) g.ok += 1;
-        g.dn += this.down;
-        const ms = Math.round(this.ttfb);
-        if (ms > 0) {
-          g.v.push(ms);
-          if (g.v.length > 64) g.v.shift();
-        }
-      }
-      if (!this.counted) {
-        this.counted = 1;
-        cnt(this.node ? "node" : "direct");
-        // 前 3 条用户连接的质量：低流量客户端几乎每条请求都落冷 isolate，这是唯一能看到的「第一眼」
-        FO.note(this.down);
-        // 延迟观测：成功口径是「拿到内容」，不是 2xx（业务 4xx 也是内容）
-        LAT.note(this.down > 64, Date.now() - this.startedAt);
-        // 真实流量的"成功"样本：可用性(pFail/availOf)、面板成功率全靠它。
-        // 早先只有失败才记账（nsFail），成功只走 SEL.resetFail()，而那里
-        // 第一行就是 `if (!S.pxFailSeen) return` —— 健康节点永远 n=0，
-        // 面板显示"一个连接都没有"，可用性门槛也永远不触发。
-        if (this.node && !this.failed && this.down > 0) nsOk(this.node, 0, 0);
-        // 「站点 × 中继」实测：同一中继对不同站点快慢可能差一个数量级（出口地区/中转路径不同），
-        // 记下这次的首字节与下行速率，供决策层按站点挑中继；只在本 isolate 内，不跨 isolate 共享。
-        if (this.node && this.host && this.down > 0) {
-          const ms = Math.max(1, Date.now() - this.tAttach);
-          const ip = relayIpOf(this.node);
-          const t0 = this.ttfb > 0 ? this.ttfb : ms;
-          // 吞吐只在「真的传了一大段」时才有意义：45KB 的正常首页在 2.5 秒里只有 18KB/s，
-          // 而 4 字节的 403 页在 80 毫秒里也有 46KB/s —— 小样本算出来的速率会反向排序。
-          // 1MB 以上才算「过了慢启动」；其余样本 kbs 记 0（只保留首字节），由代价函数特殊处理。
-          const xfer = Math.max(1, ms - t0);
-          const kbs = this.down >= 1048576 ? (this.down / 1024) * 1000 / xfer : 0;
-          HOOK.relPerf?.(this.host, ip, t0, kbs);
-          // 只有真正拉到 ≥40KB 才算一次可用的吞吐样本：4 字节 403 页算出的"速度"是假的（文档 D5）
-          if (this.down >= 40960) HOOK.capNote?.(ip, Math.round((this.down / 1024) * 1000 / Math.max(1, Date.now() - this.startedAt)));
-          // 「站点 × 中继」成功率（v8 §5 的 ps）不在这里写：判定层要的是「同一窗口里有 2xx 对照」，
-          // 只有 src/route/judge.ts 的判定出口知道这件事，它自己调 PS.note。
-          // 这里只交出三样原料：首字节（relPerf）、容量（capNote）、完整响应字节数（traffic）。
-        }
-        // 通道证据：交给决策层（弱证据只可能把 unknown 提成 ok；判死只有 probe 能下）
-        if (this.host && HOOK.traffic) {
-          HOOK.traffic({ cf: this.cf, host: this.host, via: this.via as "node" | "direct" | "v6", node: this.node || "", down: this.down, ok: !this.failed && this.down > 0, life: Date.now() - this.startedAt, up: this.up, at: Date.now() });
-        }
-        // 真实首字节回流：探活只能证明连得上，转发快不快只有这条路径知道
-        if (this.node && this.ttfb > 0) nsLatency(this.node, this.ttfb);
-        if (this.host) {
-          if (this.node) {
-            const life = this.tAttach ? Math.max(1, Date.now() - this.tAttach) : 0;
-            const siteBps =
-              !this.siteEmitted && life > 500 && this.down >= 512 * 1024 ? Math.round((this.down * 1000) / life) : 0;
-            hostNodeMark(this.host, this.node, {
-              ok: !this.failed && this.down > 0 ? 1 : 0,
-              bad: this.failed ? 1 : 0,
-              bytes: this.down,
-              ttfb: this.ttfb,
-              bps: siteBps,
-            });
-            if (this.directFail) hostDirectMark(this.host, false);
-          } else {
-            hostDirectMark(this.host, !this.failed && this.down > 0);
-          }
-        }
-        markSeedDirty(this.env);
-      }
+      this.clearInflight();
+      // 收尾逻辑必须在"零字节"提前返回之前：鉴权成功但一个字节都没传的连接
+      // （探测、被客户端立刻取消）也要计入 node/direct 与种子刷新，否则计数和信誉表会漏掉这一整类连接。
+      if (this.id) SETTLE.close(this);
     }
-
-    const du = this.up - this.reportedUp;
-    const dd = this.down - this.reportedDown;
-    if (du <= 0 && dd <= 0) return;
-
-    const via = this.via === "node" || this.via === "v6" ? this.via : "direct";
-    S.funnel[via] = (S.funnel[via] || 0) + du + dd;
-    statBump(this.id, du, dd, false);
-    this.reportedUp = this.up;
-    this.reportedDown = this.down;
-    scheduleFlush(this.env, S.pendBytes >= PEND_FLUSH_BYTES ? 0 : undefined);
+    if (!this.id) return;
+    SETTLE.pend(this);
   }
 
   /** 释放持有的 socket / 写锁 */
@@ -418,3 +334,13 @@ export class Connection {
   }
 }
 
+/**
+ * 功能：把某个节点的在途计数减一（到 0 就删键，避免表里堆满零值）。
+ * @param {string} key 节点键
+ * @returns {void}
+ */
+function dropInflight(key: string): void {
+  const n = (S.inflight.get(key) || 1) - 1;
+  if (n > 0) S.inflight.set(key, n);
+  else S.inflight.delete(key);
+}

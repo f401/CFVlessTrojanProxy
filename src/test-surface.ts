@@ -35,6 +35,8 @@ export { SEL } from "./px/selector";
 export { dwellOf } from "./px/selector";
 export { SEEDS } from "./px/seed";
 export { Connection } from "./proxy/connection";
+export { CAGG_MAX, ConnSettle, SETTLE, type SettleView } from "./proxy/conn-settle";
+export { SAMPLE_MIN_BYTES, SAMPLE_STD_BYTES, SITE_MIN_BYTES, TRANSFER_ENOUGH, kbsOf, sampleWeight, stalledWindow } from "./proxy/conn-sample";
 export {
   nsGet,
   nsSpeed,

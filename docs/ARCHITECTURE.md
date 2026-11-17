@@ -15,6 +15,7 @@ px/       pool poolgen poolsrc rawprobe geo failpolicy seed selector pickpath ro
           const regions              共享常量 / 地区列表（打破 pool 互引）
 proxy/    protocol dial session     数据面：协议、拨号、会话
           fallback tunnel connection
+          conn-settle conn-sample   连接结束时的结算流水线 / 纯采样换算（权重、卡顿窗口、KB/s）
           ws-in                      客户端→上游字节流（8MB 上行队列上限）
 views/    sub* panel* html          纯渲染：sub-common/singbox/links + panel/admin/stats
 edge/     respond types auth        响应与安全头、请求上下文、管理会话
@@ -255,6 +256,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `LatObs` | `src/core/latobs.ts` | 首字节 / 总耗时 / 抖动三类窗口统计器 |
 | `FirstObs` | `src/core/firstobs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
 | `Attacher` | `src/proxy/attacher.ts` | 上游挂载与补救链：中转再试一条 → IPv6 兜底 → proxyip → 放弃 |
+| `ConnSettle`（`SETTLE`） | `src/proxy/conn-settle.ts` | 一条连接结束时的结算流水线：收尾采样 → pStall 占比 → 节点观测聚合 → 首眼观测（含站点画像与通道证据）→ PEND 记账；只读 `SettleView`，状态仍归 `Connection` |
 | `DebugMeterProbes` | `src/routes/debug-meter.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
 | `DebugTables` | `src/routes/debug-tables.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：只读表、不拨号、不改状态 |
 | `DebugNets` | `src/routes/debug-nets.ts` | 会对外拨号的诊断分支（bench/diag/probe/http/tfb/tf/host）：每条都消耗 `connect()` 名额或子请求 |
