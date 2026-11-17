@@ -8883,10 +8883,10 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("起搏不 await", !pickSrc.includes("await seedAlive("));
 
   // 画像段与偏好段的边界仍然成立（同一文件里靠「谁调用谁」分，而不是靠目录分）
-  ok("画像段负责抽样与溢出", pickSrc.includes("pickThom(") && pickSrc.includes("private spill(") && pickSrc.includes("private leastBad("));
+  ok("画像段负责抽样与溢出", pickSrc.includes("new ThompsonPicker(") && pickSrc.includes("private spill(") && pickSrc.includes("private leastBad("));
   ok("偏好段七个入口齐备", ["vetoed(", "byPrefer(", "nonCfFirst(", "byNonCf(", "rescan(", "chanOpen(", "byChan("].every((f) => pickSrc.includes(f)));
   ok("偏好段的站点否决需要 host 参数", pickSrc.includes("vetoed(host: string, key: string)") && pickSrc.includes("byNonCf(host: string"));
-  ok("偏好段不自己抽样", !pickSrc.slice(pickSrc.indexOf("export class PathPrefs")).includes("pickThom("));
+  ok("偏好段不自己抽样", !pickSrc.slice(pickSrc.indexOf("export class PathPrefs")).includes("ThompsonPicker"));
 
   // 行为面：三个单例都在，且「没有站点上下文时不否决任何通道」
   ok("三个单例就位", W.SITE instanceof W.SitePick && W.PATHS instanceof W.PathPrefs && W.PICK instanceof W.PickPath);
@@ -10121,6 +10121,72 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("[328] KV 读失败时 ok 为假", aFail.ok, false);
   W.S.usersCache = { v: null, t: 0 };
   W.S.usersSig = "";
+}
+
+// ── 329 单层抽样的七个前置量与「算臂 / 挑臂」分成方法 ──
+{
+  const tsSrc = fs.readFileSync("src/px/ts.ts", "utf8").replace(/\r\n/g, "\n");
+  const pickSrc2 = fs.readFileSync("src/px/pickpath.ts", "utf8").replace(/\r\n/g, "\n");
+  /**
+   * 功能：取某个方法体（从签名到同缩进的收尾）。
+   * @param sig 签名片段
+   * @returns 方法体文本（取不到返回空串）
+   */
+  const bodyOf = (sig) => {
+    const i = tsSrc.indexOf(sig);
+    if (i < 0) return "";
+    const j = tsSrc.indexOf("\n  }\n", i);
+    return j < 0 ? "" : tsSrc.slice(i, j);
+  };
+  ok("[329] 抽样器是一个导出类", /export class ThompsonPicker\b/.test(tsSrc));
+  ok("[329] 旧的入口函数已退场", !/export function pickThom\(/.test(tsSrc));
+  for (const m of ["poolLen", "widthOf", "betaOf", "bytesOf", "cutOf", "topBpsOf", "spreadOf", "costOf", "arms", "pickOf", "pick"]) {
+    ok(`[329] 抽样器有 ${m}()`, new RegExp(`\\n  (private )?(public )?${m}\\(`).test(tsSrc));
+  }
+  // 七个前置量各自留在自己的方法里：调参时不用通读一条长函数
+  ok("[329] 池子大小的分母仍是存活表", bodyOf("private poolLen(").includes("const nPool = S.alive.size ||"));
+  ok("[329] 抽样宽度按模式分档", bodyOf("private widthOf(").includes("SC.TS_K_LAT") && bodyOf("private widthOf(").includes("SC.TS_K_SMALL"));
+  ok("[329] 乐观面系数只在这里算", bodyOf("private betaOf(").includes("SC.TS_BETA") && tsSrc.split("SC.TS_BETA").length - 1 === 1);
+  ok("[329] 探活剪枝线自成方法", bodyOf("private cutOf(").includes("SC.TS_CUT_R") && bodyOf("private cutOf(").includes("SC.TS_CUT_MS"));
+  ok("[329] 池内最快带宽只扫前若干名", bodyOf("private topBpsOf(").includes("SC.PRIOR_BPS") && bodyOf("private topBpsOf(").includes("this.poolWidth"));
+  ok("[329] σ 与代价各自成方法", bodyOf("private spreadOf(").includes("sdFail") && bodyOf("private costOf(").includes("gauss()"));
+  ok("[329] 算臂与挑臂分离", bodyOf("private arms(").includes("scoreParts(") && !bodyOf("private arms(").includes("SC.TS_BAND"));
+  ok("[329] 剪枝与兜底都在挑臂里", bodyOf("private pickOf(").includes("SC.TS_BAND") && bodyOf("private pickOf(").includes("if (!best)"));
+  ok("[329] pick 只编排", bodyOf("pick(") !== "" && bodyOf("pick(").split("\n").length <= 8);
+  ok("[329] 调用点直接用类", pickSrc2.includes("new ThompsonPicker(") && !pickSrc2.includes("pickThom"));
+
+  // 行为面：没有候选时给空串，有候选时给出候选里的键，同一个种子结果稳定
+  const keepAlive329 = new Map(W.S.alive);
+  const keepStat329 = new Map(W.S.nstat);
+  const keepRand329 = Math.random;
+  try {
+    W.S.alive.clear();
+    W.S.nstat.clear();
+    W.CANDS.reset();
+    eq("[329] 没有候选时返回空串", new W.ThompsonPicker("lat", 0).pick(), "");
+    for (const k of ["a329.example:443", "b329.example:443", "c329.example:443"]) {
+      W.S.alive.set(k, { h: k.slice(0, k.lastIndexOf(":")), p: 443, cc: "", ms: 120 });
+    }
+    W.CANDS.reset();
+    const keys = new Set(W.CANDS.list("lat").map((x) => x.k));
+    ok("[329] 候选表已建好", keys.size >= 3, String(keys.size));
+    const one = new W.ThompsonPicker("lat", 0).pick();
+    ok("[329] 抽到的是候选里的键", keys.has(one), one);
+    // 打桩随机数：同一状态两次抽样必须给出同一个键（否则「同一请求内的候选顺序」都不稳定）
+    Math.random = () => 0.5;
+    const r1 = new W.ThompsonPicker("lat", 0).pick();
+    const r2 = new W.ThompsonPicker("lat", 0).pick();
+    eq("[329] 同一状态同一种子结果一致", r1, r2);
+    // 吞吐模式同样能给出候选（这里的判据是「不返回空串」，两侧参数不同）
+    ok("[329] 吞吐模式也能抽出候选", keys.has(new W.ThompsonPicker("tput", 16 * 1048576).pick()));
+  } finally {
+    Math.random = keepRand329;
+    W.S.alive.clear();
+    for (const [k, v] of keepAlive329) W.S.alive.set(k, v);
+    W.S.nstat.clear();
+    for (const [k, v] of keepStat329) W.S.nstat.set(k, v);
+    W.CANDS.reset();
+  }
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

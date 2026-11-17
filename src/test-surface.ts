@@ -51,6 +51,7 @@ export { SC } from "./core/const";
 export { SEL } from "./px/selector";
 export { dwellOf } from "./px/selector";
 export { PICK, PickPath } from "./px/pickpath";
+export { ThompsonPicker } from "./px/ts";
 export { SITE, SitePick } from "./px/pickpath";
 export { PATHS, PathPrefs } from "./px/pickpath";
 export { SEEDS } from "./px/seed";

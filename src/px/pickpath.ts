@@ -12,7 +12,7 @@ import { shadowRate } from "../core/util";
 import { hostKey, HOSTS } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { costOf, isBlack, isFrozen, usable, STATS, CANDS } from "../nodes/score";
-import { pickThom } from "./ts";
+import { ThompsonPicker } from "./ts";
 import { relayIpOf } from "../core/http80";
 import { HOOK } from "../core/hook";
 import { isCfIp } from "../core/net";
@@ -155,7 +155,7 @@ export class SitePick {
     }
 
     // ③ 选路：单层抽样器（完整分数 ± 不确定性，两种模式共用同一套）
-    const pick = pickThom(m, (st && st.targetBytes) || 0);
+    const pick = new ThompsonPicker(m, (st && st.targetBytes) || 0).pick();
     if (pick) {
       let chosen = pick;
       // 负载感知：抽中的节点在途多时，换到分数接近、在途更少的候选
