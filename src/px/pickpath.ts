@@ -37,7 +37,6 @@ export interface PickState {
 // 候选池准备：冷 isolate 里内存池是空的（新机房 / 刚回收），而候选池早就由别的机房提交进了 KV。
 // 这一步只做「让池子能用」，不参与挑谁 —— 挑在 pick-site / pick-pref / pickpath 三处。
 
-
 /**
  * 功能：按需把候选池拉起来，并保证存活表至少被起搏过一次。
  * 所有等待都有上限：这里任何一秒都是用户等首字节的秒数。
@@ -71,7 +70,6 @@ export async function ensureReady(env: Env): Promise<void> {
 // 站点画像这一层：这个站历史上哪条最好、要不要给没试过的节点一次机会、以及抽到之后怎么避开在途过多的那条。
 // 「候选池准备」（pick-ready）、「通道/入口偏好」（pick-pref）与「地区硬要求」（pickpath）都不在这里。
 
-
 /**
  * 按站点画像挑一个候选：站点样本优先，其次冷启动影子，最后交给单层抽样器。
  * 收成类是为了让每一步能被单独观察（站点偏好 / 影子 / 抽样 / 粘滞），状态全在 `S` 里。
@@ -79,9 +77,8 @@ export async function ensureReady(env: Env): Promise<void> {
 export class SitePick {
   /**
    * 功能：选一个节点。
-   *   ① 先看「这个站」的历史：有样本就按站点分选（hostRank）
-   *   ② 冷启动（这个站试过的节点 <3）：按影子预算去试一个没试过的
-   *   ③ 都没有 → 单层抽样器（分数 ± 不确定性，两种模式共用）
+   *   ① 站点画像（`byProfile`）② 冷启动影子（`byShadow`）③ 单层抽样 + 负载溢出（`bySample`）
+   *   ④ 兜底：粘滞游标 + 负载溢出 ⑤ 全池都冷却/冻结时返回「最不坏」的那条（不会是空串）
    * @param {object} env Worker 环境
    * @param {'lat'|'tput'} mode 选路模式
    * @param {object|null} st 连接状态（会写 st.node / st.hostTrial）
@@ -89,92 +86,129 @@ export class SitePick {
    */
   pick(env: Env, mode: Mode, st: PickState | null): string {
     const m = mode === "lat" ? "lat" : "tput";
-    const now = Date.now();
-    let cur = S.curs[m];
-    // 游标可能是上一代候选池里的节点：池子刷新后 alive 里已经没有它了。
-    // 以前会一直把连接拨到这个死地址，直到 cron 的 maybeSwitch 才发现。
-    // 游标只做面板/健康展示：真正走谁由 ③ 的单层抽样器决定。
-    if (!cur || !S.alive.has(cur) || isBlack(cur) || isFrozen(cur)) {
-      cur = CANDS.best(m);
-      S.curs[m] = cur;
-    }
+    // 游标先对齐这一代候选池：它只做面板/健康展示，但④⑤两步的兜底要用它
+    const cur = this.syncCursor(m);
     if (!cur) cnt("noCand");
     const host = st && st.host ? String(st.host) : "";
     if (st) st.hostTrial = false;
-
     // 画像按「域名族」存（api.x.com 与 pbs.twimg.com 共用 x.com），读写必须用同一个键
     const fam = host ? hostKey(host) : "";
+    // ① 站点画像：命中就当场返回 —— 它比全局分数更懂这个站
     if (host && fam) {
-      const hm = S.hostNode.get(fam);
-      const tried = hm ? hm.size : 0;
-
-      // ① 有站点样本 → 按站点分选。
-      //    少于 3 个节点有样本时排序没有比较意义（门槛在下面也要求 sampled>=3），
-      //    直接跳过：省掉一次遍历全部节点的 hostRank 构建。
-      if (tried >= 3) {
-        const rank = HOSTS.rank(host, m);
-        if (rank.length) {
-          const best = rank[0].k;
-          const bs = hm!.get(best);
-          // 至少 3 个节点有样本、且首选样本不超过 2 小时，才敢用站点偏好覆盖全局
-          let sampled = 0;
-          for (const s of hm!.values()) if (s.n > 0) sampled++;
-          const fresh = now - (bs ? bs.at || 0 : 0) <= 2 * 3600e3;
-          if (bs && bs.n > 0 && sampled >= 3 && fresh) {
-            // 稳定期留 2% 给次优节点，保持样本新鲜（不然一次侥幸定终身）。
-            // 但次优和首选差太多时不换：那不是「保持新鲜」，是主动跳坑。
-            const second = rank[1];
-            if (second && second.v <= rank[0].v * 1.3 + 100 && !(st && st.retried) && Math.random() < 0.02) {
-              if (st) st.node = second.k;
-              return second.k;
-            }
-            if (st) st.node = best;
-            return best;
-          }
-        }
-      }
+      const prof = this.byProfile(host, fam, m, Date.now(), st);
+      if (prof) return prof;
     }
-
-    // ② 冷启动：这个站还没攒够节点样本时，用影子流量补几条（只为站点画像，不参与选路）
-    //    抽样器本身就带探索（样本少 ⇒ 乐观面大 ⇒ 自然被抽），这里只解决「新域名前几条连接
-    //    全打同一个节点、画像建不起来」的问题，所以跟的是同一个 pxShadow 预算。
-    const base = shadowRate(env);
-    if (cur && base > 0 && !(st && st.retried) && host && fam && Math.random() < base) {
-      const hm = S.hostNode.get(fam);
-      if (!hm || hm.size < 3) {
-        const t0 = HOSTS.untried(host, m);
-        if (t0) {
-          STATS.nsGet(t0).lastTry = Date.now();
-          if (st) {
-            st.hostTrial = true;
-            st.node = t0;
-          }
-          return t0;
-        }
-      }
+    // ② 冷启动影子：只为把画像建起来，不参与选路
+    if (host && fam) {
+      const shadow = this.byShadow(env, cur, host, fam, m, st);
+      if (shadow) return shadow;
     }
-
-    // ③ 选路：单层抽样器（完整分数 ± 不确定性，两种模式共用同一套）
-    const pick = new ThompsonPicker(m, (st && st.targetBytes) || 0).pick();
-    if (pick) {
-      let chosen = pick;
-      // 负载感知：抽中的节点在途多时，换到分数接近、在途更少的候选
-      const alt = this.spill(chosen, m);
-      if (alt) chosen = alt;
-      if (st) st.node = chosen;
-      return chosen;
-    }
+    // ③ 单层抽样 + 负载溢出
+    const sampled = this.bySample(m, st);
+    if (sampled) return sampled;
     // ④ 兜底：粘滞游标 + 负载溢出
-    const spill = cur ? this.spill(cur, m) : "";
-    if (spill) cur = spill;
-    if (st) st.node = cur;
-    if (cur) return cur;
-    // ⑤ 全池都在冷却/冻结时的兜底：返回「最早能恢复、且代价最低」的那个，
-    //    不能返回空串——空串会让 session 直接放弃这条连接（cnt("dead")），
-    //    哪怕池子里还有一堆节点只是暂时被罚。宁可试一次再失败，也不要凭空判死。
+    const back = cur ? this.spill(cur, m) || cur : "";
+    if (back) {
+      if (st) st.node = back;
+      return back;
+    }
+    // ⑤ 返回「最早能恢复、代价最低」的那条：不能给空串，否则 session 直接判死（cnt("dead")），
+    //    而池子里可能还有只是暂时被罚的节点 —— 宁可试一次再失败，也不要凭空判死。
     const last = this.leastBad(m);
     if (st) st.node = last;
     return last;
+  }
+
+  /**
+   * 功能：把游标对齐到这一代候选池 —— 池子换代之后不要把连接拨到已经消失的地址。
+   * @param {'lat'|'tput'} mode 选路模式
+   * @returns {string} 可用的游标键；池子里一条都没有时返回空串
+   */
+  private syncCursor(mode: Mode): string {
+    let cur = S.curs[mode];
+    // 游标可能是上一代候选池里的节点（池子刷新后 alive 里已没有它）：以前会一直把连接拨到
+    // 这个死地址，直到 cron 的 maybeSwitch 才发现。它只做面板展示，真正走谁由③决定。
+    if (!cur || !S.alive.has(cur) || isBlack(cur) || isFrozen(cur)) {
+      cur = CANDS.best(mode);
+      S.curs[mode] = cur;
+    }
+    return cur;
+  }
+
+  /**
+   * 功能：按站点画像挑一条 —— 至少 3 个节点有样本、且首选样本不超过 2 小时才敢覆盖全局。
+   * @param {string} host 目标站点（原始写法，画像查询用）
+   * @param {string} fam 站点族键（`hostKey(host)`，读写 `S.hostNode` 用）
+   * @param {'lat'|'tput'} mode 选路模式
+   * @param {number} now 当前时间
+   * @param {object|null} st 连接状态（会写 st.node）
+   * @returns {string} 挑中的候选键；画像不够用时返回空串（交回调用方继续往下走）
+   */
+  private byProfile(host: string, fam: string, mode: Mode, now: number, st: PickState | null): string {
+    const hm = S.hostNode.get(fam);
+    const tried = hm ? hm.size : 0;
+    // 少于 3 个节点有样本时排序没有比较意义（下面也要求 sampled>=3），
+    // 直接跳过：省掉一次遍历全部节点的 hostRank 构建。
+    if (tried < 3) return "";
+    const rank = HOSTS.rank(host, mode);
+    if (!rank.length) return "";
+    const best = rank[0].k;
+    const bs = hm!.get(best);
+    // 至少 3 个节点有样本、且首选样本不超过 2 小时，才敢用站点偏好覆盖全局
+    let sampled = 0;
+    for (const s of hm!.values()) if (s.n > 0) sampled++;
+    const fresh = now - (bs ? bs.at || 0 : 0) <= 2 * 3600e3;
+    if (!bs || bs.n <= 0 || sampled < 3 || !fresh) return "";
+    // 稳定期留 2% 给次优节点保持样本新鲜；但差太多不换 —— 那不是「保鲜」，是主动跳坑。
+    const second = rank[1];
+    if (second && second.v <= rank[0].v * 1.3 + 100 && !(st && st.retried) && Math.random() < 0.02) {
+      if (st) st.node = second.k;
+      return second.k;
+    }
+    if (st) st.node = best;
+    return best;
+  }
+
+  /**
+   * 功能：冷启动影子 —— 这个站还没攒够节点样本时，按影子预算试一个没试过的节点。
+   * @param {object} env Worker 环境
+   * @param {string} cur 当前游标（没有候选时不投影子，省得白试一条）
+   * @param {string} host 目标站点
+   * @param {string} fam 站点族键
+   * @param {'lat'|'tput'} mode 选路模式
+   * @param {object|null} st 连接状态（会写 st.node / st.hostTrial）
+   * @returns {string} 试的那条候选键；不在影子档期、或画像已够、或没有未试过的节点时返回空串
+   */
+  private byShadow(env: Env, cur: string, host: string, fam: string, mode: Mode, st: PickState | null): string {
+    const base = shadowRate(env);
+    // ①②的随机数消耗顺序必须固定：影子这一步排在站点画像之后、抽样之前
+    if (!(cur && base > 0 && !(st && st.retried) && Math.random() < base)) return "";
+    const hm = S.hostNode.get(fam);
+    if (hm && hm.size >= 3) return "";
+    const t0 = HOSTS.untried(host, mode);
+    if (!t0) return "";
+    // 记下试过的时间：`HOSTS.untried` 下次就会跳过它，影子预算因此能轮到别的节点
+    STATS.nsGet(t0).lastTry = Date.now();
+    if (st) {
+      st.hostTrial = true;
+      st.node = t0;
+    }
+    return t0;
+  }
+
+  /**
+   * 功能：单层抽样（完整分数 ± 不确定性）并按在途数做负载溢出。
+   * @param {'lat'|'tput'} mode 选路模式
+   * @param {object|null} st 连接状态（读 st.targetBytes，写 st.node）
+   * @returns {string} 选中的候选键；抽样器没有候选时返回空串
+   */
+  private bySample(mode: Mode, st: PickState | null): string {
+    const pick = new ThompsonPicker(mode, (st && st.targetBytes) || 0).pick();
+    if (!pick) return "";
+    // 负载感知：抽中的节点在途多时，换到分数接近、在途更少的候选
+    const chosen = this.spill(pick, mode) || pick;
+    if (st) st.node = chosen;
+    return chosen;
   }
 
   /**

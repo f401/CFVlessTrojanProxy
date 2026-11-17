@@ -10189,6 +10189,91 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   }
 }
 
+/* ---------- 330. 挑路的五段各成一个方法（7.330） ---------- */
+{
+  const src330 = fs.readFileSync("src/px/pickpath.ts", "utf8").replace(/\r\n/g, "\n");
+  const body330 = (sig) => {
+    const i = src330.indexOf(sig);
+    if (i < 0) return "";
+    const j = src330.indexOf("\n  }\n", i);
+    return j < 0 ? src330.slice(i) : src330.slice(i, j);
+  };
+  const pick330 = body330("  pick(env: Env");
+  ok(
+    "[330] pick 只做编排（五段各一个委托）",
+    pick330.includes("this.syncCursor(") &&
+      pick330.includes("this.byProfile(") &&
+      pick330.includes("this.byShadow(") &&
+      pick330.includes("this.bySample(") &&
+      pick330.includes("this.leastBad("),
+  );
+  ok(
+    "[330] pick 自己不做画像/影子/抽样",
+    !pick330.includes("HOSTS.rank(") &&
+      !pick330.includes("shadowRate(") &&
+      !pick330.includes("new ThompsonPicker("),
+  );
+  ok("[330] pick 缩到 40 行以内（原来 89 行）", pick330.split("\n").length <= 40, String(pick330.split("\n").length));
+  const cursor330 = body330("  private syncCursor(");
+  ok(
+    "[330] 游标自愈的三条判据还在",
+    cursor330.includes("S.alive.has(cur)") &&
+      cursor330.includes("isBlack(cur)") &&
+      cursor330.includes("isFrozen(cur)") &&
+      cursor330.includes("CANDS.best(mode)"),
+  );
+  const prof330 = body330("  private byProfile(");
+  ok(
+    "[330] 站点画像：样本门槛 + 2% 次优 + 差距上限",
+    prof330.includes("HOSTS.rank(host, mode)") &&
+      prof330.includes("Math.random() < 0.02") &&
+      prof330.includes("1.3 + 100"),
+  );
+  ok("[330] 站点画像不去碰影子与抽样器", !prof330.includes("shadowRate(") && !prof330.includes("ThompsonPicker"));
+  const sh330 = body330("  private byShadow(");
+  ok(
+    "[330] 影子：预算 + 未试节点 + 记账",
+    sh330.includes("shadowRate(env)") &&
+      sh330.includes("HOSTS.untried(host, mode)") &&
+      sh330.includes("STATS.nsGet(t0).lastTry"),
+  );
+  ok("[330] 画像够 3 个节点就不投影子", sh330.includes("hm.size >= 3"));
+  const smp330 = body330("  private bySample(");
+  ok(
+    "[330] 抽样：构造抽样器 + 负载溢出",
+    smp330.includes("new ThompsonPicker(mode,") && smp330.includes("this.spill(pick, mode)"),
+  );
+  ok(
+    "[330] 每个委托在 pick 里只出现一次",
+    pick330.split("this.byProfile(").length - 1 === 1 && pick330.split("this.bySample(").length - 1 === 1,
+  );
+
+  // 行为面：站点画像命中时 hostTrial 必须复位（它只标记「影子试探」）
+  const keepAlive330 = [...W.S.alive.entries()];
+  const keepStat330 = [...W.S.nstat.entries()];
+  try {
+    reset();
+    node("fast330:443", { tcp: 50, okW: 10 });
+    node("slow330:443", { tcp: 400, okW: 10 });
+    for (let i = 0; i < 3; i++) {
+      W.hostNodeMark("site330.test", "fast330:443", { ok: true, bad: false, bytes: 1000, ttfb: 60 });
+      W.hostNodeMark("site330.test", "slow330:443", { ok: true, bad: false, bytes: 1000, ttfb: 500 });
+    }
+    const stP330 = { host: "site330.test", hostTrial: true };
+    eq("[330] 画像命中就按站点选", W.SEL.pick({ pxShadow: 0 }, "tput", stP330), "fast330:443");
+    eq("[330] 画像命中不算试探（复位）", stP330.hostTrial, false);
+    const stN330 = {};
+    const one330 = W.SEL.pick({ pxShadow: 0 }, "tput", stN330);
+    ok("[330] 没站点时交给抽样器", ["fast330:443", "slow330:443"].includes(one330), one330);
+  } finally {
+    W.S.alive.clear();
+    for (const [k, v] of keepAlive330) W.S.alive.set(k, v);
+    W.S.nstat.clear();
+    for (const [k, v] of keepStat330) W.S.nstat.set(k, v);
+    W.CANDS.reset();
+  }
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
