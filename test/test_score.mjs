@@ -9646,6 +9646,93 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("[321] 手动/自动标签按绑定判断", d321.mode, "manual");
 }
 
+// ═══ 第 322 组：拨号器把「判定 / 中转 / 直连」拆成三段 ═══
+{
+  const dial322 = fs.readFileSync("src/proxy/dialer.ts", "utf8").replace(/\r\n/g, "\n");
+  // 按方法签名切块：从 `\n  private async x(` 到下一个方法定义之前（方法是顶层缩进两格）
+  const part322 = (name) => {
+    const a1 = dial322.indexOf("\n  private async " + name + "(");
+    const a2 = dial322.indexOf("\n  async " + name + "(");
+    const start = a1 >= 0 ? a1 : a2;
+    if (start < 0) return "";
+    const rest = dial322.slice(start + 1);
+    const heads = [...rest.matchAll(/^  (?:private )?(?:async )?[a-zA-Z_]\w*\(/gm)]
+      .map((m) => m.index)
+      .filter((i) => i > 0);
+    return rest.slice(0, heads.length ? heads[0] : rest.length);
+  };
+  const open322 = part322("open");
+  const cls322 = part322("classify");
+  const via322 = part322("viaRelay");
+  const dir322 = part322("direct");
+  ok(
+    "[322] 入口只做分派：判定 → 中转 → 直连",
+    open322.includes("this.classify(o)") &&
+      open322.includes("this.viaRelay(o, route.cfHost)") &&
+      open322.includes("this.direct(host, port, route.cfHost)"),
+    "open",
+  );
+  ok(
+    "[322] 入口不再自己选路或解析候选",
+    !open322.includes("SEL.current(") && !open322.includes("parseProxyIp(") && !open322.includes("isCfHost("),
+    "open",
+  );
+  eq("[322] 入口短到一眼看完（≤20 行）", open322.split("\n").filter((l) => l.trim()).length <= 20, true);
+  ok(
+    "[322] 判定段负责 CF 托管识别、事实预热与连接事实",
+    cls322.includes("isCfHost(host)") && cls322.includes("refreshCfHttp(host") && cls322.includes("conn.cf = cfHost") && cls322.includes("HOOK.vtLoad("),
+    "classify",
+  );
+  ok(
+    "[322] 判定段不碰候选池",
+    !cls322.includes("SEL.current(") && !cls322.includes("parseProxyIp(") && !cls322.includes("connect({"),
+    "classify",
+  );
+  ok(
+    "[322] 中转段负责逐条候选、名额与冷却",
+    via322.includes("for (let guard = 0;") &&
+      via322.includes("parseProxyIp(") &&
+      via322.includes("SEL.current(env, mode, conn, host, cfHost, tried)") &&
+      via322.includes("tries += 1;") &&
+      via322.includes("nsFail(key)"),
+    "viaRelay",
+  );
+  ok(
+    "[322] 直连段先按 A 记录再退普通拨号，且不碰候选池",
+    dir322.includes("dial4(host, port)") && dir322.includes("dial(host, port)") && !dir322.includes("SEL.current("),
+    "direct",
+  );
+  ok(
+    "[322] 两条直连都走有限等待",
+    (dir322.match(/this\.guarded\(/g) || []).length === 2 && dial322.includes("private async guarded("),
+    "direct",
+  );
+  ok(
+    "[322] 五段按执行顺序排列",
+    dial322.indexOf("async open(") < dial322.indexOf("private async classify(") &&
+      dial322.indexOf("private async classify(") < dial322.indexOf("private async viaRelay(") &&
+      dial322.indexOf("private async viaRelay(") < dial322.indexOf("private async direct(") &&
+      dial322.indexOf("private async direct(") < dial322.indexOf("private async guarded("),
+    "dialer",
+  );
+  ok(
+    "[322] 五个方法都挂在类上",
+    typeof W.DIALER.open === "function" &&
+      typeof W.DIALER.classify === "function" &&
+      typeof W.DIALER.viaRelay === "function" &&
+      typeof W.DIALER.direct === "function" &&
+      typeof W.DIALER.guarded === "function",
+    "DIALER",
+  );
+  eq("[322] 有限等待直通结果", await W.DIALER.guarded(Promise.resolve(null), "g322.test"), null);
+  let threw322 = false;
+  try {
+    await W.DIALER.guarded(Promise.reject(new Error("g322")), "g322.test");
+  } catch {
+    threw322 = true;
+  }
+  eq("[322] 有限等待把失败原样抛出", threw322, true);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

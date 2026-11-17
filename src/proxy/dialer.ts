@@ -29,18 +29,50 @@ export interface DialOpts {
 }
 
 /**
+ * 一次拨号前的判定结果。
+ * 这两个值都是 `Classify` 那一段的产物：`cfHost` 回答「目标是不是 CF 托管」，
+ * `wantPx` 回答「这次要不要绕中继」，下游只读不改。
+ */
+interface Route {
+  cfHost: boolean;
+  wantPx: boolean;
+}
+
+/**
  * 出站拨号器（P5 第一刀）：把 handleUpgrade 里那一大段「判难直连 → 选中继 → 退 IPv4 → 退直连」
  * 收成一个对象。session 只负责解析首包，拨号策略全在这里。
+ *
+ * 三段各管一件事，代价从高到低：`classify`（可能要一次 DoH + 一次事实加载，最多 200ms）
+ * → `viaRelay`（每条候选一次 `connect()`，每次最多 2.5 秒）→ `direct`（一次 `dial4`、一次 `dial`）。
  */
 export class Dialer {
   /**
    * 打开到目标的出站连接；失败抛错（由调用方决定是否回落到中继/断开）。
    * 返回值非空即成功，`conn.node/via/pxTries` 已在内部写好。
+   * @param o 目标、模式与调试开关（`?px=` / `?rx=`）
+   * @returns 已连上的 socket
    */
   async open(o: DialOpts): Promise<Socket> {
-    const { env, request, conn, mode, host, port, pxForce } = o;
+    const { request, host, port } = o;
+    const route = await this.classify(o);
     let sock: Socket | null = null;
+    if (pxDecision(request, host, route.cfHost, route.wantPx, SC.POLICY, o.mode)) {
+      sock = await this.viaRelay(o, route.cfHost);
+    }
+    // 中转不可用或没走中转：CF 托管目标优先按 A 记录拨号（X 会直接拒 IPv6 出口）
+    if (!sock) sock = await this.direct(host, port, route.cfHost);
+    if (!sock) throw new Error("dial returned null");
+    return sock;
+  }
 
+  /**
+   * 功能：判定这次拨号的前提（目标是否 CF 托管、要不要绕中继），并写好连接上的事实。
+   * 这一段会做 I/O（DoH 判 CF 托管、冷 isolate 读一次事实），所以只在 `open` 开头调用一次。
+   * @param o 目标与模式
+   * @returns 判定结果（`cfHost` 与 `wantPx`）
+   */
+  private async classify(o: DialOpts): Promise<Route> {
+    const { env, conn, host, pxForce } = o;
     // 难直连目标（如 x.com）：判据 = 名单 / 6h 学习 / CF 网段 / ?px=1，?px=0 一律直连
     // 顺序：中继优先（直连多半撞自家边缘），退 IPv4 拨号，再退普通直连
     const learned = (S.needPx.get(host) || 0) > Date.now();
@@ -87,79 +119,95 @@ export class Dialer {
     const wantPx =
       pxForce > 0 ||
       (pxForce === 0 && !!env.proxyip && (learned || onList || relWin));
+    return { cfHost, wantPx };
+  }
 
-    if (pxDecision(request, host, cfHost, wantPx, SC.POLICY, mode)) {
-      // ?rx= 钉住中继（只给诊断脚本用）：跳过选择器直接用它，用来给每条中继量吞吐。
-      // 最多试两条：公共中继里有一类是「TCP 能连、但一直不回字节」或「回自己的证书」，
-      // 单次尝试失败就退回直连，而 CF 托管目标直连大概率 4 字节 403 —— 等于白丢这次请求。
-      // 第二个候选必须**换一条**：选择器的确定性路径（站点偏好 / 非 CF 优先）在同一秒内
-      // 两次调用返回的是同一条，而 nsFail 的惩罚不足以让它掉出第一 —— 所以把试过的键传下去。
-      const tried = new Set<string>();
-      // 钉住的 ?rx= 只试一次：它本来就是「我就要这一条」的诊断语义
-      const maxTries = conn.forceRelayIp ? 1 : 2;
-      // 名额的语义是「真的拨了几次」。以前用循环下标当名额，于是下面那个
-      // 「跳过 CF 边缘中继」的 continue 也会吃掉一次 —— 候选里排着 CF 边缘时，
-      // 「最多试两条」实际只试了一条，剩下那条能用的中继根本没被拨过。
-      let tries = 0;
-      for (let guard = 0; guard < maxTries + 4 && tries < maxTries && !sock; guard++) {
-        const p = parseProxyIp(conn.forceRelayIp || (await SEL.current(env, mode, conn, host, cfHost, tried)));
-        if (!p) break;
-        // 非法候选（内网地址 / 策略禁止的端口）只是**这一条**不能用：跳过它继续找下一条。
-        // 以前这里是一个 break —— 池子里混进一条 10.x 的 proxyip（公开源里很常见，
-        // takePoolLine 只校验八位组范围、不排除保留地址）就让整条重试链提前结束，
-        // 请求退回直连；对 CF 托管目标那就是一次 4 字节 403。
-        if (checkTarget(p.host, p.port)) {
-          cnt("badRelay");
-          continue;
-        }
-        const key = p.host + ":" + p.port;
-        // 没有别的候选了（选择器回空或回同一条）：不要再花 2.5 秒试同一条
-        if (tried.has(key)) break;
-        tried.add(key);
-        // 池子里的「优选 IP」本身就是 CF 边缘：拿它中转到 CF 托管目标，等于从同一边缘再撞一次。
-        if (cfHost && isCfIp(p.host)) {
-          // 只计数：这里每个 CF 托管站点的请求都可能命中一次，
-          // 写进错误环会把真正的故障挤掉（7.84 删「每条成功连接都写 logErr」就是同一个原因）
-          cnt("skipCfRelay");
-          continue;
-        }
-        tries += 1;
-        const pk = Promise.resolve(connect({ hostname: p.host, port: p.port }));
-        try {
-          // 拨号必须有上限：connect() 自己没有超时，挂死的中继会把整个请求拖到客户端放弃为止。
-          sock = await withTimeout(pk, CONNECT_MS);
-          conn.node = key;
-          conn.via = "node";
-          conn.retried = true;
-          conn.pxTries = tries;
-          cnt("pxf");
-          // 连上了：把这条中继的「连不上」计数清零（复活只可能由真实连接触发）
-          HOOK.deadNote?.(p.host, true);
-          break;
-        } catch {
-          sock = null;
-          // 超时之后 connect 仍可能迟到成功：必须把它关掉，否则免费计划 6 个并发 connect 名额
-          // 会被「已经超时、但真的连上了」的连接慢慢吃掉（现象是后面所有请求都失败）。
-          void pk.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 本来就没连上 */ });
-          STATS.nsFail(key); // 中转本身连不上：冷却它，下一条换个候选试
-          // 连接层事实（v8 §3 的 dead）：没有任何 HTTP 状态行，与业务 403 物理上不可混淆
-          HOOK.deadNote?.(p.host, false);
-        }
+  /**
+   * 功能：按候选池逐条试中继，最多拨 `maxTries` 次（`?rx=` 钉住时只拨一次）。
+   * @param o 目标与模式
+   * @param cfHost 目标是 CF 托管（此时跳过「优选 IP」这类边缘中继）
+   * @returns 连上的 socket；全部候选都失败时返回 null
+   */
+  private async viaRelay(o: DialOpts, cfHost: boolean): Promise<Socket | null> {
+    const { env, conn, mode, host } = o;
+    let sock: Socket | null = null;
+    // ?rx= 钉住中继（只给诊断脚本用）：跳过选择器直接用它，用来给每条中继量吞吐。
+    // 最多试两条：公共中继里有一类是「TCP 能连、但一直不回字节」或「回自己的证书」，
+    // 单次尝试失败就退回直连，而 CF 托管目标直连大概率 4 字节 403 —— 等于白丢这次请求。
+    // 第二个候选必须**换一条**：选择器的确定性路径（站点偏好 / 非 CF 优先）在同一秒内
+    // 两次调用返回的是同一条，而 nsFail 的惩罚不足以让它掉出第一 —— 所以把试过的键传下去。
+    const tried = new Set<string>();
+    // 钉住的 ?rx= 只试一次：它本来就是「我就要这一条」的诊断语义
+    const maxTries = conn.forceRelayIp ? 1 : 2;
+    // 名额的语义是「真的拨了几次」。以前用循环下标当名额，于是下面那个
+    // 「跳过 CF 边缘中继」的 continue 也会吃掉一次 —— 候选里排着 CF 边缘时，
+    // 「最多试两条」实际只试了一条，剩下那条能用的中继根本没被拨过。
+    let tries = 0;
+    for (let guard = 0; guard < maxTries + 4 && tries < maxTries && !sock; guard++) {
+      const p = parseProxyIp(conn.forceRelayIp || (await SEL.current(env, mode, conn, host, cfHost, tried)));
+      if (!p) break;
+      // 非法候选（内网地址 / 策略禁止的端口）只是**这一条**不能用：跳过它继续找下一条。
+      // 以前这里是一个 break —— 池子里混进一条 10.x 的 proxyip（公开源里很常见，
+      // takePoolLine 只校验八位组范围、不排除保留地址）就让整条重试链提前结束，
+      // 请求退回直连；对 CF 托管目标那就是一次 4 字节 403。
+      if (checkTarget(p.host, p.port)) {
+        cnt("badRelay");
+        continue;
+      }
+      const key = p.host + ":" + p.port;
+      // 没有别的候选了（选择器回空或回同一条）：不要再花 2.5 秒试同一条
+      if (tried.has(key)) break;
+      tried.add(key);
+      // 池子里的「优选 IP」本身就是 CF 边缘：拿它中转到 CF 托管目标，等于从同一边缘再撞一次。
+      if (cfHost && isCfIp(p.host)) {
+        // 只计数：这里每个 CF 托管站点的请求都可能命中一次，
+        // 写进错误环会把真正的故障挤掉（7.84 删「每条成功连接都写 logErr」就是同一个原因）
+        cnt("skipCfRelay");
+        continue;
+      }
+      tries += 1;
+      const pk = Promise.resolve(connect({ hostname: p.host, port: p.port }));
+      try {
+        // 拨号必须有上限：connect() 自己没有超时，挂死的中继会把整个请求拖到客户端放弃为止。
+        sock = await withTimeout(pk, CONNECT_MS);
+        conn.node = key;
+        conn.via = "node";
+        conn.retried = true;
+        conn.pxTries = tries;
+        cnt("pxf");
+        // 连上了：把这条中继的「连不上」计数清零（复活只可能由真实连接触发）
+        HOOK.deadNote?.(p.host, true);
+        break;
+      } catch {
+        sock = null;
+        // 超时之后 connect 仍可能迟到成功：必须把它关掉，否则免费计划 6 个并发 connect 名额
+        // 会被「已经超时、但真的连上了」的连接慢慢吃掉（现象是后面所有请求都失败）。
+        void pk.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 本来就没连上 */ });
+        STATS.nsFail(key); // 中转本身连不上：冷却它，下一条换个候选试
+        // 连接层事实（v8 §3 的 dead）：没有任何 HTTP 状态行，与业务 403 物理上不可混淆
+        HOOK.deadNote?.(p.host, false);
       }
     }
+    return sock;
+  }
 
-    // 中转不可用或没走中转：CF 托管目标优先按 A 记录拨号（X 会直接拒 IPv6 出口）。
-    if (!sock) {
-      if (cfHost && !isV6Literal(host)) {
-        sock = await this.guarded(dial4(host, port), host);
-        if (sock) {
-          cnt("px4");
-          logErr(`ipv4 first ${host}`, host);
-        }
+  /**
+   * 功能：直连目标（CF 托管目标先按 A 记录拨 IPv4，再退普通拨号）。
+   * @param host 目标域名
+   * @param port 目标端口
+   * @param cfHost 目标是 CF 托管（此时 `X` 会拒 IPv6 出口，所以先试 IPv4）
+   * @returns 连上的 socket；两条都失败时返回 null
+   */
+  private async direct(host: string, port: number, cfHost: boolean): Promise<Socket | null> {
+    let sock: Socket | null = null;
+    if (cfHost && !isV6Literal(host)) {
+      sock = await this.guarded(dial4(host, port), host);
+      if (sock) {
+        cnt("px4");
+        logErr(`ipv4 first ${host}`, host);
       }
-      if (!sock) sock = await this.guarded(dial(host, port), host);
     }
-    if (!sock) throw new Error("dial returned null");
+    if (!sock) sock = await this.guarded(dial(host, port), host);
     return sock;
   }
 
@@ -188,4 +236,3 @@ export class Dialer {
 
 /** 进程内唯一实例 */
 export const DIALER = new Dialer();
-
