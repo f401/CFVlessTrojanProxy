@@ -102,6 +102,8 @@ export {
   diagVerdict,
   hostScore,
   hostKey,
+  HN_MAX_HOSTS,
+  HN_MAX_NODES,
   errKind,
   errCount,
   errHist,

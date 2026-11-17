@@ -252,7 +252,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `TunnelFetchTransport` | `src/core/transport.ts` | 用 `tunnelfetch`（userland TLS 1.3）探测，能把 TCP 落到中继上 —— 唯一能回答「这条中继到目标行不行」的实现 |
 | `GatewayFetchTransport` | `src/core/transport.ts` | 用运行时自带 `fetch` 探测，只能直连；留着做「同一目标、两条腿」的对照，与上一条并排看才能分清「目标拒绝这个出口族」与「中继不可用」 |
 | `BoundedMap` | `src/core/table.ts` | 有界「键 → 行」表（容量 + 寿命 + 淘汰顺序）；`RelPerfTable` 与 `TfbBook` 继承的淘汰规则就这一份，7.251 前四处各写一遍，于是出现过「上限判在插入之前」那种偏差 |
-| `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps）；`siteKey`/`hostKey`/`hostScore` 与四个薄包装同在此文件 |
+| `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps）；`markNode()` 只按「取行 `entryOf()` → 过期减半 `decay()` → 计数 `count()` → 采样 `measure()` → 打时间」编排，两张表的上限各自一个方法（`evictHost()` 按族内最近更新淘汰、`evictNode()` 按行内时间淘汰）；`siteKey`/`hostKey`/`hostScore` 与同名薄包装同在此文件 |
 | `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |
 | 预算分配（自由函数 `planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核）：判定额度这一项在 7.149 随 `round.ts` 一起删掉，现在只有 `adm` 与 `cap` |
 | `FactMerger` | `src/store/factmerge.ts` | 把 DO 车身里的五类事实并进本地表：每张表一个私有方法（族号、历史最好、判死行、`|` 键、容量淘汰各不相同），`merge()` 只负责分派 |

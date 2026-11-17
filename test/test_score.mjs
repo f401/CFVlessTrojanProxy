@@ -11240,6 +11240,136 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   W.BLK.clear();
 }
 
+// ---------- 第 341 组：站点画像的记账按失败代价拆成七段（v7.341） ----------
+{
+  const g = 341;
+  const met = fs.readFileSync("src/nodes/metrics.ts", "utf8").replace(/\r\n/g, "\n");
+  // 取一个方法的完整源码：签名行到「两格缩进的右括号」为止（方法体内的分行语句至少四格）
+  const bodyOf = (sig) => {
+    const i = met.indexOf(sig);
+    if (i < 0) return "";
+    const j = met.indexOf("\n  }\n", i);
+    return j > i ? met.slice(i, j) : "";
+  };
+  const mk = bodyOf("  markNode(");
+  ok(
+    `[${g}] markNode 只按顺序委托七个方法`,
+    ["this.entryOf(", "this.decay(", "this.count(", "this.measure(", "s.at = now;"].every((x) => mk.includes(x))
+  );
+  // 编排层再出现表操作或上限常量，就意味着有人又把某一段塞回来了
+  ok(
+    `[${g}] markNode 不再自己动表与上限`,
+    mk.length > 0 && !mk.includes("S.hostNode") && !mk.includes("S.hostRankCache") && !mk.includes("HN_MAX_")
+  );
+  eq(`[${g}] markNode 只取一次时钟`, mk.split("Date.now()").length - 1, 1);
+  ok(`[${g}] markNode 不超过 12 行`, mk.length > 0 && mk.split("\n").length <= 12);
+  eq(
+    `[${g}] 七个私有方法齐备`,
+    ["entryOf", "famMap", "evictHost", "evictNode", "decay", "count", "measure"].every((x) => met.includes("  private " + x + "(")),
+    true
+  );
+  const entry = bodyOf("  private entryOf(");
+  ok(
+    `[${g}] entryOf 取族表并压节点上限`,
+    entry.includes("this.famMap(") && entry.includes("this.evictNode(m)") && entry.includes("{ n: 0, ok: 0, bad: 0, bytes: 0, ttfb: 0, at: 0 }")
+  );
+  const famMap = bodyOf("  private famMap(");
+  ok(
+    `[${g}] famMap 缺族先腾位置再建`,
+    famMap.includes("S.hostNode.get(fam)") && famMap.includes("this.evictHost(") && famMap.includes("S.hostNode.set(fam, fresh)")
+  );
+  const eh = bodyOf("  private evictHost(");
+  ok(
+    `[${g}] evictHost 按族内最近更新淘汰`,
+    eh.includes("S.hostNode.size < HN_MAX_HOSTS") && eh.includes("for (const s of v.values()) if (s.at > last) last = s.at;") && eh.includes("S.hostNode.delete(oldKey)")
+  );
+  const en = bodyOf("  private evictNode(");
+  ok(`[${g}] evictNode 按行内时间淘汰`, en.includes("m.size < HN_MAX_NODES") && en.includes("m.delete(oldKey)"));
+  const dc = bodyOf("  private decay(");
+  ok(
+    `[${g}] decay 只削过期坏样本并重算 n`,
+    dc.includes("6 * 3600e3") && dc.includes("s.bad *= 0.5;") && dc.includes("s.n = s.ok + s.bad;")
+  );
+  const ct = bodyOf("  private count(");
+  ok(
+    `[${g}] count 只认真样本并作废两个模式`,
+    ct.includes("const isConn = o.ok !== undefined || o.bad !== undefined;") &&
+      ct.includes('fam + "|lat"') &&
+      ct.includes('fam + "|tput"')
+  );
+  const ms = bodyOf("  private measure(");
+  ok(
+    `[${g}] measure 记字节与两条滑动平均`,
+    ms.includes("Math.round(s.ttfb * 0.6 + ttfb * 0.4)") &&
+      ms.includes("Math.round(s.bps * 0.6 + bps * 0.4)") &&
+      ms.includes("s.bpsAt = now;") &&
+      !ms.includes("Date.now()")
+  );
+  // 顺序本身就是语义：先取行 → 再减半 → 再计数 → 最后并采样
+  eq(
+    `[${g}] 五段按「取行 → 减半 → 计数 → 采样 → 打时间」排列`,
+    ["  markNode(", "  private entryOf(", "  private famMap(", "  private decay(", "  private count(", "  private measure("].map((x) => met.indexOf(x)),
+    [...["  markNode(", "  private entryOf(", "  private famMap(", "  private decay(", "  private count(", "  private measure("].map((x) => met.indexOf(x))].sort((a, b) => a - b)
+  );
+
+  // 行为：记账口径逐条与改前一致
+  const H341 = "a341.example.com";
+  const K341 = "n341.example.com:443";
+  W.S.hostNode.clear();
+  W.S.hostRankCache.clear();
+  const fam341 = W.hostKey(H341);
+  W.HOSTS.markNode(H341, K341, { ok: 1, bytes: 100, ttfb: 200 });
+  const row341 = W.S.hostNode.get(fam341).get(K341);
+  eq(`[${g}] 成功样本记进 n/ok`, [row341.n, row341.ok, row341.bad], [1, 1, 0]);
+  eq(`[${g}] 字节与首字节都记下`, [row341.bytes, row341.ttfb], [100, 200]);
+  ok(`[${g}] 最后更新时间已写入`, row341.at > 0);
+  // 只带带宽的调用是中途采样：不能算一次成败
+  W.HOSTS.markNode(H341, K341, { bps: 500 });
+  eq(`[${g}] 只有带宽的采样不增加成败计数`, row341.n, 1);
+  eq(`[${g}] 带宽样本单独记账`, [row341.bps, row341.bpsN], [500, 1]);
+  W.HOSTS.markNode(H341, K341, { ok: 1, ttfb: 400, bps: 1000 });
+  eq(`[${g}] 首字节按 0.6/0.4 并入`, row341.ttfb, 280);
+  eq(`[${g}] 带宽按 0.6/0.4 并入`, row341.bps, 700);
+  // 6 小时没更新过的坏样本减半：站点封禁不是判决书
+  row341.bad = 4;
+  row341.ok = 1;
+  row341.n = 5;
+  row341.at = Date.now() - 7 * 3600e3;
+  W.HOSTS.markNode(H341, K341, { bytes: 1 });
+  eq(`[${g}] 过期坏样本减半且按 ok+bad 重算 n`, [row341.bad, row341.n], [2, 3]);
+  // 缓存作废：只有真样本才作废排行，中途采样不作废
+  W.S.hostRankCache.set(fam341 + "|lat", { v: [], t: 0 });
+  W.S.hostRankCache.set(fam341 + "|tput", { v: [], t: 0 });
+  W.HOSTS.markNode(H341, K341, { bps: 900 });
+  eq(`[${g}] 中途采样不作废站点排行`, W.S.hostRankCache.size, 2);
+  W.HOSTS.markNode(H341, K341, { bad: 1 });
+  eq(`[${g}] 真样本作废两个模式的排行`, W.S.hostRankCache.size, 0);
+
+  // 两张表的上限：一族最多 12 个节点、最多 120 个族
+  const t341 = Date.now() - 3600e3;
+  W.S.hostNode.clear();
+  const capMap341 = new Map();
+  W.S.hostNode.set(fam341, capMap341);
+  for (let i = 0; i < W.HN_MAX_NODES; i++) {
+    capMap341.set("cap" + i + ":443", { n: 0, ok: 0, bad: 0, bytes: 0, ttfb: 0, at: t341 + i });
+  }
+  W.HOSTS.markNode(H341, "new341.example.com:443", { ok: 1 });
+  eq(`[${g}] 一族最多 HN_MAX_NODES 个节点`, capMap341.size, W.HN_MAX_NODES);
+  ok(`[${g}] 淘汰族内最久未更新的那条`, !capMap341.has("cap0:443") && capMap341.has("new341.example.com:443"));
+  W.S.hostNode.clear();
+  for (let i = 0; i < W.HN_MAX_HOSTS; i++) {
+    // 用 IP 字面量当族键：`hostKey` 对 IP 原样返回，避免同一可注册域被折叠成一族
+    const one = new Map();
+    one.set("x:443", { n: 0, ok: 0, bad: 0, bytes: 0, ttfb: 0, at: t341 + i });
+    W.S.hostNode.set("10.0." + Math.floor(i / 256) + "." + (i % 256), one);
+  }
+  W.HOSTS.markNode("brand341.example.com", "x:443", { ok: 1 });
+  eq(`[${g}] 站点族最多 HN_MAX_HOSTS 个`, W.S.hostNode.size, W.HN_MAX_HOSTS);
+  ok(`[${g}] 淘汰最近没更新过的那一族`, !W.S.hostNode.has("10.0.0.0"));
+  W.S.hostNode.clear();
+  W.S.hostRankCache.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

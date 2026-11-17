@@ -181,68 +181,134 @@ export class HostProfile {
     if (!host || !node) return;
     const fam = hostKey(host);
     if (!fam) return;
-    let m = S.hostNode.get(fam);
-    if (!m) {
-      if (S.hostNode.size >= HN_MAX_HOSTS) {
-        // 淘汰最久没更新过的域名（120 条，线性扫可接受）
-        let oldK = "",
-          oldT = Infinity;
-        for (const [k, v] of S.hostNode) {
-          let t = 0;
-          for (const s of v.values()) if (s.at > t) t = s.at;
-          if (t < oldT) {
-            oldT = t;
-            oldK = k;
-          }
-        }
-        if (oldK) S.hostNode.delete(oldK);
+    // 一次调用只取一次时钟：下面的「过期减半」与「最后更新时间」必须同一个时刻
+    const now = Date.now();
+    const s = this.entryOf(fam, node);
+    this.decay(s, now);
+    this.count(s, fam, o);
+    this.measure(s, o, now);
+    s.at = now;
+  }
+
+  /**
+   * 功能：取（站点族, 节点）的统计行，缺行就补齐（两张表各自压上限）。
+   * @param fam 站点族
+   * @param node 节点 key
+   * @returns 可写的统计行（就地修改即生效，行在 `S.hostNode` 里）
+   */
+  private entryOf(fam: string, node: string): HNStat {
+    const m = this.famMap(fam);
+    const hit = m.get(node);
+    if (hit) return hit;
+    this.evictNode(m);
+    const fresh: HNStat = { n: 0, ok: 0, bad: 0, bytes: 0, ttfb: 0, at: 0 };
+    m.set(node, fresh);
+    return fresh;
+  }
+
+  /**
+   * 功能：取站点族的节点表，缺族就先腾位置再建。
+   * @param fam 站点族
+   * @returns 该族的节点表（就地修改即生效）
+   */
+  private famMap(fam: string): Map<string, HNStat> {
+    const hit = S.hostNode.get(fam);
+    if (hit) return hit;
+    this.evictHost();
+    const fresh = new Map<string, HNStat>();
+    S.hostNode.set(fam, fresh);
+    return fresh;
+  }
+
+  /**
+   * 功能：站点族满 `HN_MAX_HOSTS` 时淘汰「最近一次更新最旧」的那一族。
+   * @returns 无
+   */
+  private evictHost(): void {
+    // 键来自客户端请求的目标站点名，不设上限会被历史站点撑爆内存（120 条线性扫可接受）
+    if (S.hostNode.size < HN_MAX_HOSTS) return;
+    let oldKey = "";
+    let oldAt = Infinity;
+    for (const [k, v] of S.hostNode) {
+      // 一族里任何一台节点更新过，这一族就算「最近活跃过」
+      let last = 0;
+      for (const s of v.values()) if (s.at > last) last = s.at;
+      if (last < oldAt) {
+        oldAt = last;
+        oldKey = k;
       }
-      m = new Map<string, HNStat>();
-      S.hostNode.set(fam, m);
     }
-    let s = m.get(node);
-    if (!s) {
-      if (m.size >= HN_MAX_NODES) {
-        let oldN = "",
-          oldT = Infinity;
-        for (const [k, v] of m)
-          if (v.at < oldT) {
-            oldT = v.at;
-            oldN = k;
-          }
-        if (oldN) m.delete(oldN);
+    if (oldKey) S.hostNode.delete(oldKey);
+  }
+
+  /**
+   * 功能：一族满 `HN_MAX_NODES` 个节点时淘汰最久未更新的那条。
+   * @param m 该族的节点表
+   * @returns 无
+   */
+  private evictNode(m: Map<string, HNStat>): void {
+    if (m.size < HN_MAX_NODES) return;
+    let oldKey = "";
+    let oldAt = Infinity;
+    for (const [k, v] of m) {
+      if (v.at < oldAt) {
+        oldAt = v.at;
+        oldKey = k;
       }
-      s = { n: 0, ok: 0, bad: 0, bytes: 0, ttfb: 0, at: 0 };
-      m.set(node, s);
     }
-    // 站点封禁是"临时事实"而不是判决书：6 小时没再更新过的坏样本减半。
-    // 以前 bad 只增不减，一个站偶尔封过一次，这条 (站,节点) 记录就被永久钉在下面，
-    // 而节点全局分早就恢复了 —— 站点排行却再也不会给它机会。
-    if (s.bad > 0 && s.at && Date.now() - s.at > 6 * 3600e3) {
-      s.bad *= 0.5;
-      s.n = s.ok + s.bad;
-    }
-    // 只带 bps 的调用是"中途采样"，0 字节 0 失败的收尾也不是有效站点样本
+    if (oldKey) m.delete(oldKey);
+  }
+
+  /**
+   * 功能：6 小时没再更新过的坏样本减半（站点封禁是「临时事实」而不是判决书）。
+   * @param s 统计行
+   * @param now 本次调用的时刻
+   * @returns 无
+   */
+  private decay(s: HNStat, now: number): void {
+    // 以前 bad 只增不减：一个站偶尔封过一次，这条记录就被永久钉在下面，
+    // 而节点全局分早就恢复了 —— 站点排行却再也不会给它机会
+    if (!(s.bad > 0) || !s.at || now - s.at <= 6 * 3600e3) return;
+    s.bad *= 0.5;
+    s.n = s.ok + s.bad;
+  }
+
+  /**
+   * 功能：累加成败计数，并在拿到真样本时作废两个模式的站点排行缓存。
+   * @param s 统计行
+   * @param fam 站点族（缓存键前缀）
+   * @param o 本次结果
+   * @returns 无
+   */
+  private count(s: HNStat, fam: string, o: Partial<HNStat>): void {
+    // 只带 bps 的调用是「中途采样」，0 字节 0 失败的收尾也不是有效站点样本
     const isConn = o.ok !== undefined || o.bad !== undefined;
-    if (isConn && (o.ok || o.bad)) {
-      s.n += 1;
-      if (o.ok) s.ok += 1;
-      if (o.bad) s.bad += 1;
-      // 缓存失效（两个模式各一份）。中途 bps 采样不失效：
-      // 一次视频播放每 60 秒就刷一次，排行 30 秒本来也会过期。
-      S.hostRankCache.delete(fam + "|lat");
-      S.hostRankCache.delete(fam + "|tput");
-    }
+    if (!isConn || !(o.ok || o.bad)) return;
+    s.n += 1;
+    if (o.ok) s.ok += 1;
+    if (o.bad) s.bad += 1;
+    // 中途 bps 采样不失效：一次视频播放每 60 秒就刷一次，排行 30 秒本来也会过期
+    S.hostRankCache.delete(fam + "|lat");
+    S.hostRankCache.delete(fam + "|tput");
+  }
+
+  /**
+   * 功能：累加字节，并把首字节与带宽按 0.6/0.4 的指数滑动平均并入。
+   * @param s 统计行
+   * @param o 本次结果
+   * @param now 本次调用的时刻（带宽样本时间）
+   * @returns 无
+   */
+  private measure(s: HNStat, o: Partial<HNStat>, now: number): void {
     s.bytes += o.bytes || 0;
     const ttfb = o.ttfb || 0;
     if (ttfb > 0) s.ttfb = s.ttfb ? Math.round(s.ttfb * 0.6 + ttfb * 0.4) : Math.round(ttfb);
     const bps = o.bps || 0;
-    if (bps > 0) {
-      s.bps = s.bps ? Math.round(s.bps * 0.6 + bps * 0.4) : bps;
-      s.bpsN = (s.bpsN || 0) + 1;
-      s.bpsAt = Date.now();
-    }
-    s.at = Date.now();
+    if (bps <= 0) return;
+    s.bps = s.bps ? Math.round(s.bps * 0.6 + bps * 0.4) : bps;
+    s.bpsN = (s.bpsN || 0) + 1;
+    // 带宽样本有 TTL：`hostScore` 的 tput 分支要看 `bpsAt` 决定还敢不敢用这个数
+    s.bpsAt = now;
   }
 
   /**
