@@ -103,7 +103,10 @@ fail += cntFail;
 // 但调试端点仍在 POST 它们 —— `Meter.fetch` 的兜底分支是 `return this.json()`（200 + 整份计量表），
 // 于是 `?draw=` / `?dbt=` 一直"返回成功"，看起来还能用。这类"调用方还在、实现方已删"的死链
 // 只能靠静态比对发现（行为测试根本不会去点这些诊断端点）。
-const meterSrc = fs.readFileSync("src/store/meter.ts", "utf8");
+// 端点的实现方现在分布在 meter.ts 与 meter-diagnostics.ts 两处（7.273 把诊断端点搬走后），
+// 扫一份会把搬过去的那些判成「端点不存在」—— 这里按文件名通配一起扫。
+const meterFiles = fs.readdirSync("src/store").filter((n) => /^meter.*\.ts$/.test(n)).map((n) => "src/store/" + n);
+const meterSrc = meterFiles.map((p) => fs.readFileSync(p, "utf8")).join("\n");
 const served = new Set([...meterSrc.matchAll(/endsWith\("\/([A-Za-z0-9]+)"\)/g)].map((m) => m[1]));
 // `/get` 是**故意**走兜底：`Meter.fetch` 的契约就是「其他路径返回当前值」（见它的 JSDoc），
 // `meterGet` 靠这条读计量表。除它以外的未实现路径都算死链。

@@ -7804,5 +7804,28 @@ ok("补救链改用 SOCKET_DIALER", fbSrc272.includes("SOCKET_DIALER.open(") && 
 const rgSrc272 = fs.readFileSync("src/proxy/region.ts", "utf8");
 ok("地区分流改用 SOCKET_DIALER", rgSrc272.includes("SOCKET_DIALER.open(") && !rgSrc272.includes("Promise.resolve(connect("));
 ok("地区分流的两条候选都走同一个拨号器", rgSrc272.split("SOCKET_DIALER.open(").length - 1 === 2);
+// ===== 273. 诊断端点从 Meter.handle 的 if 链搬进 MeterDiagnostics =====
+// 它们不落盘、不碰账目；混在账目分支里会让「哪些端点会写 DO」这件事看不出来。
+ok("诊断分派器存在", typeof W.MeterDiagnostics === "function" && W.METER_DIAGNOSTICS instanceof W.MeterDiagnostics);
+const mdSrc273 = fs.readFileSync("src/store/meter-diagnostics.ts", "utf8");
+ok("每个诊断端点一个方法", ["stagedSnapshot", "timerProbe", "iterationProbe", "cryptoBurnProbe", "jsBurnProbe", "cryptoApiProbe", "relayBatchProbe", "relayProbe"].every((n) => mdSrc273.includes(n)));
+ok("分派只认这八个端点", (mdSrc273.match(/pathname\.endsWith\(/g) || []).length === 8);
+ok("只有 /stage 读 storage", (mdSrc273.match(/state\.storage/g) || []).length === 1);
+const meterSrc273 = fs.readFileSync("src/store/meter.ts", "utf8");
+const meterCode273 = meterSrc273.split(/\r?\n/).filter((line) => !line.trim().startsWith("//")).join("\n");
+ok("meter.ts 不再自己实现诊断端点", !meterCode273.includes(".endsWith(\"/burnjs\")") && !meterCode273.includes("\"pstage\"") && !meterCode273.includes(".endsWith(\"/crypto\")"));
+ok("meter.ts 改走 METER_DIAGNOSTICS", meterSrc273.includes("METER_DIAGNOSTICS.run(p, url, this.state)"));
+ok("meter.ts 不再直接 probeTf", !meterSrc273.includes("probeTf"));
+// 行为面：分派器对非诊断端点返回 null，对诊断端点返回 Response
+const fakeState273 = { storage: { get: async () => "probe-ok" }, blockConcurrencyWhile: async () => {} };
+eq("非诊断端点交回 null", await W.METER_DIAGNOSTICS.run("/add", new URL("https://meter/add"), fakeState273), null);
+const stageRes273 = await W.METER_DIAGNOSTICS.run("/stage", new URL("https://meter/stage"), fakeState273);
+ok("/stage 回读到阶段标记", (await stageRes273.json()).stage === "probe-ok");
+const iterRes273 = await W.METER_DIAGNOSTICS.run("/iter", new URL("https://meter/iter?n=1000"), fakeState273);
+const iterBody273 = await iterRes273.json();
+ok("/iter 夹住 n 并真的跑了", iterBody273.n === 1000 && iterBody273.ok === true);
+const cryptoRes273 = await W.METER_DIAGNOSTICS.run("/crypto", new URL("https://meter/crypto"), fakeState273);
+const cryptoBody273 = await cryptoRes273.json();
+ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cryptoBody273.digestLen === 32);
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

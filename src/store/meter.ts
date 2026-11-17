@@ -1,9 +1,9 @@
 import { factsOut } from "./factout";
 import { unseal } from "./index";
 import { applyAdd } from "./meteradd";
-import { probeTf } from "../core/tf";
 import { cnt } from "../core/counter";
 import { readShards, saveState } from "./metershard";
+import { METER_DIAGNOSTICS } from "./meter-diagnostics";
 
 /**
  * 用量账本（Durable Object，全局唯一）：一个用户一个实例，只有它能回答「已用多少字节」。
@@ -229,101 +229,10 @@ export class Meter {
 
     // TLS 探测走 DO：请求路径只有 10ms CPU 预算，DO 有独立且大得多的预算。
     // 一次探测不落盘、不额外写 DO（结果由调用方并入既有批次），不增加 KV 写。
-    if (p.endsWith("/stage")) {
-      const v = await this.state.storage.get("pstage");
-      return Response.json({ stage: v || null });
-    }
-    if (p.endsWith("/tim")) {
-      // 诊断：DO 里 setTimeout 会不会触发（不触发，则所有「计时器竞速」的截止时间都失效）
-      const ms = Math.max(10, Math.min(3000, Number(url.searchParams.get("ms") || 200)));
-      const t0 = Date.now();
-      await new Promise((res) => setTimeout(res, ms));
-      return Response.json({ ok: true, asked: ms, wall: Date.now() - t0 });
-    }
-    if (p.endsWith("/iter")) {
-      // 固定迭代次数的纯 CPU 循环：不依赖 Date.now()（Worker 里同步段内时间冻结）
-      const n = Math.max(1, Math.min(200000000, Number(url.searchParams.get("n") || 1000000)));
-      const t0 = Date.now();
-      let x = 7;
-      for (let i = 0; i < n; i++) x = (x * 31 + 7) % 1000003;
-      return Response.json({ ok: true, n, wall: Date.now() - t0, x });
-    }
-    if (p.endsWith("/burn")) {
-      // 诊断：量 DO 自己的 CPU 预算（用 digest 循环烧 CPU，返回完成了多少次）
-      const ms = Math.max(1, Math.min(5000, Number(url.searchParams.get("ms") || 50)));
-      const t0 = Date.now();
-      let n = 0;
-      const buf = new Uint8Array(256);
-      while (Date.now() - t0 < ms) {
-        await crypto.subtle.digest("SHA-256", buf);
-        n++;
-      }
-      return Response.json({ ok: true, n, ms: Date.now() - t0 });
-    }
-    if (p.endsWith("/burnjs")) {
-      // 同步忙等：完全不碰 crypto，用来区分「CPU 预算不够」与「crypto.subtle 不返回」
-      const ms = Math.max(1, Math.min(5000, Number(url.searchParams.get("ms") || 20)));
-      const t0 = Date.now();
-      let x = 7;
-      let n = 0;
-      while (Date.now() - t0 < ms) {
-        for (let i = 0; i < 1000; i++) x = (x * 31 + 7) % 1000003;
-        n++;
-      }
-      return Response.json({ ok: true, n, ms: Date.now() - t0 });
-    }
-    if (p.endsWith("/crypto")) {
-      // 逐项量：随机数 / 单次 digest / HMAC importKey+sign，任一项挂着就说明该 API 在 DO 里不可用
-      const out: Record<string, number | string> = {};
-      let t = Date.now();
-      try {
-        crypto.getRandomValues(new Uint8Array(32));
-        out.random = Date.now() - t;
-      } catch (e) {
-        out.random = "err " + String(e);
-      }
-      t = Date.now();
-      try {
-        const h = await crypto.subtle.digest("SHA-256", new Uint8Array(64));
-        out.digest = Date.now() - t;
-        out.digestLen = h.byteLength;
-      } catch (e) {
-        out.digest = "err " + String(e);
-      }
-      t = Date.now();
-      try {
-        const k = await crypto.subtle.importKey("raw", new Uint8Array(32), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-        out.importKey = Date.now() - t;
-        t = Date.now();
-        await crypto.subtle.sign("HMAC", k, new Uint8Array(16));
-        out.sign = Date.now() - t;
-      } catch (e) {
-        out.sign = "err " + String(e);
-      }
-      t = Date.now();
-      try {
-        const p1 = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
-        out.genP256 = Date.now() - t;
-        t = Date.now();
-        await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
-        out.genP256b = Date.now() - t;
-        out.hasP1 = p1 ? 1 : 0;
-      } catch (e) {
-        out.genP256 = "err " + String(e);
-      }
-      return Response.json(out);
-    }
-    if (p.endsWith("/tfb")) {
-      const host = url.searchParams.get("h") || "";
-      const list = (url.searchParams.get("r") || "").split(",").filter(Boolean).slice(0, 3);
-      const rows: unknown[] = [];
-      for (const relay of list) rows.push({ relay, ...(await probeTf(host, relay)) });
-      return Response.json({ host, rows, ms: Date.now() });
-    }
-    if (p.endsWith("/tf"))
-      return Response.json(
-        await probeTf(url.searchParams.get("h") || "", url.searchParams.get("r") || "", url.searchParams.get("p") || "/"),
-      );
+    // 只为诊断存在的端点（stage/tim/iter/burn/burnjs/crypto/tfb/tf）整体交给 MeterDiagnostics：
+    // 它们不落盘、不碰账目，挤在这里只会把真正管账的那段埋掉。
+    const diagnostic = await METER_DIAGNOSTICS.run(p, url, this.state);
+    if (diagnostic) return diagnostic;
     if (p.endsWith("/cl")) {
       return Response.json({ cl: this.cl });
     }
