@@ -39,6 +39,23 @@ interface Route {
 }
 
 /**
+ * 一次候选评估的结论：要么可以拨，要么给出跳过原因。
+ * 把「取哪条」与「这条能不能用」分开之后，循环只剩三件事：取候选、处理跳过、拨一次。
+ */
+interface RelayCand {
+  /** 能不能拿去拨 */
+  ok: boolean;
+  /** 跳过原因：`none` = 选择器没给出候选，`bad` = 地址非法，`dup` = 已经试过，`cf` = 边缘中继 */
+  why: "none" | "bad" | "dup" | "cf" | "ok";
+  /** 候选地址（`why === "none"` 时为空串） */
+  host: string;
+  /** 候选端口 */
+  port: number;
+  /** `host:port`，用来记账与防重复 */
+  key: string;
+}
+
+/**
  * 出站拨号器（P5 第一刀）：把 handleUpgrade 里那一大段「判难直连 → 选中继 → 退 IPv4 → 退直连」
  * 收成一个对象。session 只负责解析首包，拨号策略全在这里。
  *
@@ -129,66 +146,92 @@ export class Dialer {
    * @returns 连上的 socket；全部候选都失败时返回 null
    */
   private async viaRelay(o: DialOpts, cfHost: boolean): Promise<Socket | null> {
-    const { env, conn, mode, host } = o;
-    let sock: Socket | null = null;
     // ?rx= 钉住中继（只给诊断脚本用）：跳过选择器直接用它，用来给每条中继量吞吐。
     // 最多试两条：公共中继里有一类是「TCP 能连、但一直不回字节」或「回自己的证书」，
     // 单次尝试失败就退回直连，而 CF 托管目标直连大概率 4 字节 403 —— 等于白丢这次请求。
-    // 第二个候选必须**换一条**：选择器的确定性路径（站点偏好 / 非 CF 优先）在同一秒内
-    // 两次调用返回的是同一条，而 nsFail 的惩罚不足以让它掉出第一 —— 所以把试过的键传下去。
     const tried = new Set<string>();
     // 钉住的 ?rx= 只试一次：它本来就是「我就要这一条」的诊断语义
-    const maxTries = conn.forceRelayIp ? 1 : 2;
-    // 名额的语义是「真的拨了几次」。以前用循环下标当名额，于是下面那个
-    // 「跳过 CF 边缘中继」的 continue 也会吃掉一次 —— 候选里排着 CF 边缘时，
-    // 「最多试两条」实际只试了一条，剩下那条能用的中继根本没被拨过。
+    const maxTries = o.conn.forceRelayIp ? 1 : 2;
+    // 名额的语义是「真的拨了几次」。以前用循环下标当名额，于是「跳过 CF 边缘中继」的
+    // continue 也会吃掉一次 —— 候选里排着 CF 边缘时，「最多试两条」实际只试了一条。
     let tries = 0;
-    for (let guard = 0; guard < maxTries + 4 && tries < maxTries && !sock; guard++) {
-      const p = parseProxyIp(conn.forceRelayIp || (await SEL.current(env, mode, conn, host, cfHost, tried)));
-      if (!p) break;
-      // 非法候选（内网地址 / 策略禁止的端口）只是**这一条**不能用：跳过它继续找下一条。
-      // 以前这里是一个 break —— 池子里混进一条 10.x 的 proxyip（公开源里很常见，
-      // takePoolLine 只校验八位组范围、不排除保留地址）就让整条重试链提前结束，
-      // 请求退回直连；对 CF 托管目标那就是一次 4 字节 403。
-      if (checkTarget(p.host, p.port)) {
-        cnt("badRelay");
-        continue;
-      }
-      const key = p.host + ":" + p.port;
-      // 没有别的候选了（选择器回空或回同一条）：不要再花 2.5 秒试同一条
-      if (tried.has(key)) break;
-      tried.add(key);
-      // 池子里的「优选 IP」本身就是 CF 边缘：拿它中转到 CF 托管目标，等于从同一边缘再撞一次。
-      if (cfHost && isCfIp(p.host)) {
-        // 只计数：这里每个 CF 托管站点的请求都可能命中一次，
-        // 写进错误环会把真正的故障挤掉（7.84 删「每条成功连接都写 logErr」就是同一个原因）
-        cnt("skipCfRelay");
+    // guard 上限比名额多四：跳过（非法 / 重复 / CF 边缘）不花名额，但循环必须有界
+    for (let guard = 0; guard < maxTries + 4 && tries < maxTries; guard++) {
+      const cand = await this.nextCand(o, cfHost, tried);
+      if (cand.why === "none") break;
+      if (!cand.ok) {
+        // 非法候选只是**这一条**不能用：跳过它继续找下一条。以前这里是一个 break ——
+        // 池子里混进一条 10.x 的 proxyip（公开源里很常见，takePoolLine 只校验八位组范围、
+        // 不排除保留地址）就让整条重试链提前结束，请求退回直连；对 CF 托管目标那就是 4 字节 403。
+        if (cand.why === "bad") cnt("badRelay");
+        // 池子里的「优选 IP」本身就是 CF 边缘：拿它中转到 CF 托管目标，等于从同一边缘再撞一次。
+        // 只计数：这里每个 CF 托管站点的请求都可能命中一次，写进错误环会把真正的故障挤掉
+        else if (cand.why === "cf") cnt("skipCfRelay");
+        // 没有别的候选了（选择器回空或回同一条）：不要再花 2.5 秒试同一条
+        else if (cand.why === "dup") break;
         continue;
       }
       tries += 1;
-      const pk = Promise.resolve(connect({ hostname: p.host, port: p.port }));
-      try {
-        // 拨号必须有上限：connect() 自己没有超时，挂死的中继会把整个请求拖到客户端放弃为止。
-        sock = await withTimeout(pk, CONNECT_MS);
-        conn.node = key;
-        conn.via = "node";
-        conn.retried = true;
-        conn.pxTries = tries;
-        cnt("pxf");
-        // 连上了：把这条中继的「连不上」计数清零（复活只可能由真实连接触发）
-        HOOK.deadNote?.(p.host, true);
-        break;
-      } catch {
-        sock = null;
-        // 超时之后 connect 仍可能迟到成功：必须把它关掉，否则免费计划 6 个并发 connect 名额
-        // 会被「已经超时、但真的连上了」的连接慢慢吃掉（现象是后面所有请求都失败）。
-        void pk.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 本来就没连上 */ });
-        STATS.nsFail(key); // 中转本身连不上：冷却它，下一条换个候选试
-        // 连接层事实（v8 §3 的 dead）：没有任何 HTTP 状态行，与业务 403 物理上不可混淆
-        HOOK.deadNote?.(p.host, false);
-      }
+      const sock = await this.attemptRelay(o, cand, tries);
+      if (sock) return sock;
     }
-    return sock;
+    return null;
+  }
+
+  /**
+   * 功能：取下一个候选并判断这一条能不能拨（只判断，不拨）。
+   * @param o 目标与模式
+   * @param cfHost 目标是 CF 托管
+   * @param tried 已经试过的键（原地写入）
+   * @returns 结论；`ok` 为真时 `host`/`port` 就是要拨的地址
+   */
+  private async nextCand(o: DialOpts, cfHost: boolean, tried: Set<string>): Promise<RelayCand> {
+    const raw = o.conn.forceRelayIp || (await SEL.current(o.env, o.mode, o.conn, o.host, cfHost, tried));
+    const p = parseProxyIp(raw);
+    // 选择器给不出候选（池子空、或者所有候选都被排除）：本轮到此为止
+    if (!p) return { ok: false, why: "none", host: "", port: 0, key: "" };
+    // 内网地址 / 策略禁止的端口：这一条不能用，但下一条可能行
+    if (checkTarget(p.host, p.port)) return { ok: false, why: "bad", host: p.host, port: p.port, key: "" };
+    const key = p.host + ":" + p.port;
+    if (tried.has(key)) return { ok: false, why: "dup", host: p.host, port: p.port, key };
+    // 进 `tried` 的时机在「能不能用」之前：边缘中继虽然不拨，但同一条候选不该被反复评估
+    // （以前每次都是同一秒内选择器回同一条，不记下来就会在 guard 里空转四圈）
+    tried.add(key);
+    // 边缘中继中转 CF 托管目标等于同一边缘撞第二次：不花名额，也不算失败
+    if (cfHost && isCfIp(p.host)) return { ok: false, why: "cf", host: p.host, port: p.port, key };
+    return { ok: true, why: "ok", host: p.host, port: p.port, key };
+  }
+
+  /**
+   * 功能：拨一次候选；成功就把这条中继记到连接上，失败就冷却它并关掉迟到成功的 socket。
+   * @param o 目标与模式
+   * @param cand 已判定可拨的候选
+   * @param tries 这是第几次真拨（写进连接，供收尾分派）
+   * @returns 连上的 socket；失败返回 null
+   */
+  private async attemptRelay(o: DialOpts, cand: RelayCand, tries: number): Promise<Socket | null> {
+    const { conn } = o;
+    const pk = Promise.resolve(connect({ hostname: cand.host, port: cand.port }));
+    try {
+      // 拨号必须有上限：connect() 自己没有超时，挂死的中继会把整个请求拖到客户端放弃为止。
+      const sock = await withTimeout(pk, CONNECT_MS);
+      conn.node = cand.key;
+      conn.via = "node";
+      conn.retried = true;
+      conn.pxTries = tries;
+      cnt("pxf");
+      // 连上了：把这条中继的「连不上」计数清零（复活只可能由真实连接触发）
+      HOOK.deadNote?.(cand.host, true);
+      return sock;
+    } catch {
+      // 超时之后 connect 仍可能迟到成功：必须把它关掉，否则免费计划 6 个并发 connect 名额
+      // 会被「已经超时、但真的连上了」的连接慢慢吃掉（现象是后面所有请求都失败）。
+      void pk.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 本来就没连上 */ });
+      STATS.nsFail(cand.key); // 中转本身连不上：冷却它，下一条换个候选试
+      // 连接层事实（v8 §3 的 dead）：没有任何 HTTP 状态行，与业务 403 物理上不可混淆
+      HOOK.deadNote?.(cand.host, false);
+      return null;
+    }
   }
 
   /**

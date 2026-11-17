@@ -3780,9 +3780,10 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
 // 拨号器把试过的键传下去，并且钉住 ?rx= 时只试一次
 {
   const dsrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
-  ok("拨号器把已试过的键传给选择器", dsrc.includes("SEL.current(env, mode, conn, host, cfHost, tried)"));
-  ok("钉住的 ?rx= 只试一次（诊断语义：我就要这一条）", dsrc.includes("const maxTries = conn.forceRelayIp ? 1 : 2;"));
-  ok("同一条不会试第二次", dsrc.includes("if (tried.has(key)) break;"));
+  // 7.343：取候选与「拨一次」拆成两个方法，判据指向各自所在的位置
+  ok("拨号器把已试过的键传给选择器", dsrc.includes("SEL.current(o.env, o.mode, o.conn, o.host, cfHost, tried)"));
+  ok("钉住的 ?rx= 只试一次（诊断语义：我就要这一条）", dsrc.includes("const maxTries = o.conn.forceRelayIp ? 1 : 2;"));
+  ok("同一条不会试第二次", dsrc.includes("if (tried.has(key)) return") && dsrc.includes('cand.why === "dup"'));
 }
 
 {
@@ -6983,11 +6984,11 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 {
   const dsrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
   ok("尝试名额按「真的拨了几次」算，不跟循环下标走",
-    dsrc.includes("for (let guard = 0; guard < maxTries + 4 && tries < maxTries && !sock; guard++) {"), true);
+    dsrc.includes("for (let guard = 0; guard < maxTries + 4 && tries < maxTries; guard++) {"), true);
   ok("计数发生在拨号之前（跳过分支没有 tries += 1）",
-    /tries \+= 1;\s*\r?\n\s*const pk = Promise\.resolve\(connect\(/.test(dsrc), true);
+    /tries \+= 1;\s*\r?\n\s*const sock = await this\.attemptRelay\(/.test(dsrc), true);
   ok("跳过分支只计数、不再写 logErr",
-    /cnt\("skipCfRelay"\);\s*\r?\n\s*continue;/.test(dsrc) && !/logErr\(`skip cf-edge relay/.test(dsrc), true);
+    dsrc.includes('cand.why === "cf") cnt("skipCfRelay")') && !/logErr\(`skip cf-edge relay/.test(dsrc), true);
   ok("st.pxTries 记的是真实尝试次数（不再用下标 +1）",
     dsrc.includes("conn.pxTries = tries;") && !dsrc.includes("conn.pxTries = tries + 1;"), true);
   ok("skipCfRelay 在 cntKeys 里登记", fs.readFileSync("src/core/state.ts", "utf8").includes('"skipCfRelay",'), true);
@@ -9670,6 +9671,9 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   const cls322 = part322("classify");
   const via322 = part322("viaRelay");
   const dir322 = part322("direct");
+  // 7.343：取候选与拨一次各成一个方法，判据分到这两个块里
+  const next322 = part322("nextCand");
+  const att322 = part322("attemptRelay");
   ok(
     "[322] 入口只做分派：判定 → 中转 → 直连",
     open322.includes("this.classify(o)") &&
@@ -9696,11 +9700,26 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok(
     "[322] 中转段负责逐条候选、名额与冷却",
     via322.includes("for (let guard = 0;") &&
-      via322.includes("parseProxyIp(") &&
-      via322.includes("SEL.current(env, mode, conn, host, cfHost, tried)") &&
+      via322.includes("this.nextCand(") &&
       via322.includes("tries += 1;") &&
-      via322.includes("nsFail(key)"),
+      via322.includes("this.attemptRelay(") &&
+      !via322.includes("parseProxyIp("),
     "viaRelay",
+  );
+  ok(
+    "[322] 取候选那一段负责解析、三类跳过与防重复",
+    next322.includes("parseProxyIp(raw)") &&
+      next322.includes("checkTarget(") &&
+      next322.includes("tried.add(key)") &&
+      next322.includes("isCfIp(p.host)"),
+    "nextCand",
+  );
+  ok(
+    "[322] 拨一次那一段负责上限、记账与冷却",
+    att322.includes("withTimeout(pk, CONNECT_MS)") &&
+      att322.includes("STATS.nsFail(cand.key)") &&
+      att322.includes("conn.pxTries = tries;"),
+    "attemptRelay",
   );
   ok(
     "[322] 直连段先按 A 记录再退普通拨号，且不碰候选池",

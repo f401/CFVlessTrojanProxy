@@ -234,7 +234,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `PathPrefs`（`PATHS`） | `src/px/pickpath.ts` | 偏好过滤：判定层否决、入口族偏好（非 CF 出口优先，1.5x+50ms 带内）、站点通道偏好、拨号重试的「排除已试过」重扫；只读不写（单例名是 `PATHS`，`PREFS` 已被入口偏好占用） |
 | `Rotation`（`ROTATION`） | `src/px/rotation.ts` | 什么时候换：最短驻留时间（`dwellOf`）、切走判据、扫描后的观察窗与定时复查 |
 | `FailBook`（`FAILS`） | `src/px/failbook.ts` | 失败怎么记：节点级失败推进快速失败窗口并重算分数，站点级失败只进站点画像；要切走时调 `ROTATION.maybeSwitch` |
-| `Dialer` / `RegionPicker` | `src/proxy/dialer.ts`、`region.ts` | `Dialer.open()` 只分派三段：`classify`（CF 托管识别 + 一次 200ms 的事实预热，决定要不要绕中继）、`viaRelay`（逐条候选串行拨号，名额按真实拨号次数算）、`direct`（CF 托管目标先按 A 记录拨 IPv4）；两条直连都走 `guarded` 的有限等待 |
+| `Dialer` / `RegionPicker` | `src/proxy/dialer.ts`、`region.ts` | `Dialer.open()` 只分派三段：`classify`（CF 托管识别 + 一次 200ms 的事实预热，决定要不要绕中继）、`viaRelay`（循环骨架：`nextCand` 取候选并判四类跳过 —— 解析为空 / 内网地址 / 已试过 / 边缘中继，`attemptRelay` 只拨一次并记账冷却；名额按真实拨号次数算）、`direct`（CF 托管目标先按 A 记录拨 IPv4）；两条直连都走 `guarded` 的有限等待 |
 | `SocketDialer` | `src/proxy/socket-dialer.ts` | 按预算建连，超时后关掉「迟到成功」的 socket（四处手写过的同一条规则，现在只有一份实现） |
 | `MeterDiagnostics` | `src/store/meter-diagnostics.ts` | 计量 DO 的诊断端点（stage/tim/iter/burn/burnjs/crypto/tfb/tf）：每个端点一个方法，不落盘、不碰账目 |
 | `MeterState` | `src/store/meter-state.ts` | 账本本体：五件账本 + 七张事实表 + 代号；`adopt()`/`restore()` 把落盘口径逐项映射到内存字段，`parts()` 反着来，`snapshot()`/`rollback()` 供 `/add` 落盘失败时回滚 |
