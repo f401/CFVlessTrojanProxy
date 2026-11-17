@@ -264,8 +264,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `FirstObs` | `src/core/firstobs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
 | `Attacher` | `src/proxy/attacher.ts` | 上游挂载与补救链：中转再试一条 → IPv6 兜底 → proxyip → 放弃 |
 | `ConnSettle`（`SETTLE`） | `src/proxy/conn-settle.ts` | 一条连接结束时的结算流水线：收尾采样 → pStall 占比 → 节点观测聚合 → 首眼观测（含站点画像与通道证据）→ PEND 记账；只读 `SettleView`，状态仍归 `Connection` |
-| `SampleWindow` | `src/proxy/sample-window.ts` | 一条连接的两个采样窗口边界（节点级 5 秒 / 站点级 60 秒）：**无论能不能出样本都推进起点**，只有真的交出样本才推进 `lastEmit`；背压占比按本连接累计毫秒算 |
-| `ClientFlow` | `src/proxy/client-flow.ts` | 客户端这一侧的流量控制：唯一读 `ws.bufferedAmount` 的地方，也是唯一区分「客户端自己走了」（记 `ccut`）与「真卡死」（记 `stall`）的地方 |
+| `SampleWindow` | `src/proxy/connection.ts` | 一条连接的两个采样窗口边界（节点级 800ms 窗口 / 5 秒出样本间隔 / 站点级 60 秒）：窗口太短或间隔未到都不推进起点，小样本只推进起点不交样本 |
+| `ClientFlow` | `src/proxy/connection.ts` | 客户端这一侧的流量控制：唯一读 `ws.bufferedAmount` 的地方，也是唯一区分「客户端自己走了」（记 `ccut`）与「真卡死」（记 `stall`）的地方 |
 | `DebugMeterProbes` | `src/routes/debug.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
 | `DebugTables` | `src/routes/debug.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：只读表、不拨号、不改状态 |
 | `DebugNets` | `src/routes/debug-nets.ts` | 会对外拨号的诊断分支门面：七个分支在四个组件里，这里只按「只读 → 测速 → 诊断 → 探活 → 抓源 → 钉住 → 明文 HTTP → 判定批 → 真握手 → 回填 → seed → 兜底」的顺序派发（顺序变了，`?diag=x&refill=1` 会先花一次抓源） |

@@ -1,16 +1,208 @@
 import type { Socket } from "cloudflare:sockets";
-import { errMsg } from "../core/util";
+import { errMsg, UP_STALL_MS, closeQuietly, releaseAll, withTimeout, WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS } from "../core/util";
 import { hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { STATS } from "../nodes/score";
 import { S } from "../core/state";
-import { UP_STALL_MS, closeQuietly, releaseAll, withTimeout } from "../core/util";
 import { SETTLE } from "./conn-settle";
-import { ClientFlow } from "./client-flow";
-import { SampleWindow } from "./sample-window";
-import { sampleWeight } from "./conn-sample";
+import { sampleWeight, SAMPLE_MIN_BYTES, SITE_MIN_BYTES, stalledWindow } from "./conn-sample";
 
+// ---- 并入自 sample-window.ts ----
+/** 节点级采样窗口的最小长度：tick 可能比这更密（每次 tick 都结算会把短窗口算成低带宽） */
+export const NODE_WIN_MS = 800;
 
+/** 节点级样本的最小间隔：一次十几秒的大下载只够交 5 秒一个样本，再密就是同一段流量重复计分 */
+export const NODE_EMIT_GAP_MS = 5000;
+
+/** 站点级窗口的长度：长连接（看视频）不必等到结束才有第一个站点级样本 */
+export const SITE_WIN_MS = 60000;
+
+/** 一个可以交给评分层的节点级窗口 */
+export interface NodeWindow {
+  /** 窗口内下行字节 */
+  bytes: number;
+  /** 窗口时长（毫秒） */
+  elapsedMs: number;
+}
+
+/** 一个可以交给站点画像的站点级窗口 */
+export interface SiteWindow {
+  /** 窗口内下行字节 */
+  bytes: number;
+  /** 窗口时长（毫秒） */
+  elapsedMs: number;
+}
+
+/**
+ * 一条连接上的两个采样窗口（节点级 5 秒 / 站点级 60 秒）。
+ *
+ * 为什么单独成类：窗口边界是「上一次结算的时刻与字节数」这一对状态，一共七个字段，
+ * 全都只在采样路径上读写。放在 `Connection` 里时，它们与热路径的 `down`/`up` 混在一起，
+ * 读代码的人分不清「哪个字段每 chunk 变、哪个每 5 秒变」。
+ *
+ * 三条纪律（挪动窗口时最容易踩的）：
+ * 1) 窗口边界**无论能不能出样本都要推进**，否则短窗口会把下一次的 dt 越拖越长；
+ * 2) 只有真的交出一个样本才推进 `lastEmit`（否则「样本太短」会被算成「刚采过」，
+ *    高带宽连接反而被自己的短窗口饿死）；
+ * 3) 背压占比用**本连接累计**的背压毫秒来算，不是窗口内的增量（`stallMark` 就是那条基线）。
+ */
+export class SampleWindow {
+  /** 节点级：上一次结算的时刻（0 = 还没建立窗口起点） */
+  at = 0;
+  /** 节点级：上一次结算时的累计下行字节 */
+  down = 0;
+  /** 节点级：上一次真的交出样本的时刻（用来压「5 秒一个样本」的间隔） */
+  lastEmit = 0;
+  /** 节点级：上一次结算时的累计背压毫秒（算窗口内背压占比的基线） */
+  stallMark = 0;
+  /** 站点级：上一次结算的时刻 */
+  siteAt = 0;
+  /** 站点级：上一次结算时的累计下行字节 */
+  siteDown = 0;
+  /** 站点级：已经写出过几次样本（写过就别再用「一生平均」覆盖） */
+  siteEmitted = 0;
+
+  /**
+   * 功能：建立窗口起点（第一次 tick 专用）。
+   * @param {number} now 当前毫秒时间
+   * @param {number} total 当前累计下行字节
+   * @param {number} stallMs 当前累计背压毫秒
+   * @returns {void}
+   */
+  begin(now: number, total: number, stallMs: number): void {
+    // 第一次 tick 只记起点：否则第一段速率会把建连耗时一起算进分母
+    this.at = now;
+    this.down = total;
+    this.stallMark = stallMs;
+  }
+
+  /**
+   * 功能：推进节点级窗口，够格就交出样本。
+   * @param {number} now 当前毫秒时间
+   * @param {number} total 当前累计下行字节
+   * @param {number} stallMs 当前累计背压毫秒
+   * @returns {NodeWindow | null} 样本；窗口太短或样本太小返回 null
+   */
+  node(now: number, total: number, stallMs: number): NodeWindow | null {
+    const dt = now - this.at;
+    // 没有起点、窗口短于 800ms、或距上次出样本不足 5 秒：三种情况都直接跳过，边界不动
+    if (!this.at || dt < NODE_WIN_MS || now - this.lastEmit < NODE_EMIT_GAP_MS) return null;
+    const bytes = total - this.down;
+    // 小样本不构成带宽证据：少于 64KB 的窗口会被建连耗时主导，交给连接是「噪声当样本」
+    const out = bytes >= SAMPLE_MIN_BYTES ? { bytes, elapsedMs: dt } : null;
+    // 边界无条件推进（纪律 1）：这次没出样本，下次的 dt 也必须是干净的
+    this.at = now;
+    this.down = total;
+    this.stallMark = stallMs;
+    return out;
+  }
+
+  /**
+   * 功能：记下「刚才那个样本真的交出去了」，用于压住采样间隔。
+   * @param {number} now 交出样本的时刻
+   * @returns {void}
+   */
+  emitted(now: number): void {
+    // 只有真的交给评分层才算采过（纪律 2）：算出来权重为 0 的样本不该占用间隔
+    this.lastEmit = now;
+  }
+
+  /**
+   * 功能：推进站点级窗口，够格就交出样本。
+   * @param {number} now 当前毫秒时间
+   * @param {number} total 当前累计下行字节
+   * @returns {SiteWindow | null} 样本；没到 60 秒或样本太小时返回 null
+   */
+  site(now: number, total: number): SiteWindow | null {
+    // 第一次进窗口只记起点：站点级要的是「这一段」而不是「这一生」
+    if (!this.siteAt) {
+      this.siteAt = now;
+      this.siteDown = total;
+      return null;
+    }
+    if (now - this.siteAt < SITE_WIN_MS) return null;
+    const bytes = total - this.siteDown;
+    const dt = now - this.siteAt;
+    // 256KB 以下不报：小响应用「一生平均」算出的速率会反向排序（D5，7.83 的同一口径）
+    const out = bytes >= SITE_MIN_BYTES ? { bytes, elapsedMs: dt } : null;
+    if (out) this.siteEmitted++;
+    this.siteAt = now;
+    this.siteDown = total;
+    return out;
+  }
+
+  /**
+   * 功能：判断这个节点窗口里是不是有一半以上时间卡在背压（瓶颈在客户端）。
+   * @param {number} dt 窗口时长（毫秒）
+   * @param {number} stallMs 当前累计背压毫秒
+   * @returns {boolean} 真表示「这段速率不代表节点能力」
+   */
+  stalled(dt: number, stallMs: number): boolean {
+    // 用累计背压差值除以窗口长度：单看「这辈子卡过多久」会让老连接的每个窗口都被降权
+    return stalledWindow(stallMs, this.stallMark, dt);
+  }
+}
+
+// ---- 并入自 client-flow.ts ----
+/** 背压检查的轮询间隔：10ms 是「感知得到客户端在读」与「不空转烧 CPU」的折中 */
+export const FLOW_TICK_MS = 10;
+
+/**
+ * 客户端这一侧的流量控制：客户端收不动时暂停读上游，超时或爆缓冲则主动断开。
+ *
+ * 为什么单独成类：这段逻辑是**唯一**读 `ws.bufferedAmount` 的地方，也是唯一拿
+ * 「客户端断连」与「节点卡死」做区分的地方 —— 两类原因必须记不同的计数器
+ * （`ccut` vs `stall`），否则面板的可用性会被客户端切网/关标签页拉低（7.124 的同族缺陷）。
+ * 把它埋在 `Connection` 的热路径旁边时，这两条计数的差别读不出来。
+ *
+ * 状态只有一项：本连接累计的背压毫秒。它同时喂给结算（`pStall`）和采样（折扣因子）。
+ */
+export class ClientFlow {
+  /** 本连接累计的背压毫秒（只累加「真的卡住了」的时间，正常的缓冲不算） */
+  stallMs = 0;
+
+  /**
+   * 功能：检查客户端缓冲区；必要时等它排空，等不到就断开这条连接。
+   * @param {WebSocketLike} ws 客户端连接
+   * @param {Socket | null} sock 上游 socket（判定卡死后要一起关掉）
+   * @returns {Promise<boolean>} 真表示可以继续读上游，假表示这条连接应当中止
+   */
+  async gate(ws: WebSocketLike, sock: Socket | null): Promise<boolean> {
+    const buffered = ws.bufferedAmount || 0;
+    // 缓冲在阈值内：直接放行，这条热路径不该有任何等待
+    if (buffered <= WS_BUFFER_LIMIT) return true;
+
+    const t0 = Date.now();
+    // 超限之后不立刻断：客户端可能只是瞬时抖动，给它 60 秒的恢复窗口
+    const deadline = t0 + WS_STALL_MS;
+    while ((ws.bufferedAmount || 0) > WS_BUFFER_LIMIT) {
+      if (ws.readyState !== WS_OPEN) {
+        // 「客户端自己走了」不是节点断流：必须记 ccut。记成 cut 会把切网/关标签算到节点头上
+        cnt("ccut");
+        closeQuietly(sock);
+        return false;
+      }
+      if ((ws.bufferedAmount || 0) > WS_MAX_BUFFER || Date.now() > deadline) {
+        // 缓冲涨到 16MB 上限或等满 60 秒：判定真卡死，主动断，别让一个连接拖住整个 isolate
+        cnt("stall");
+        this.stallMs += Date.now() - t0;
+        try {
+          ws.close(1011, "stall");
+        } catch (e) {
+          /* 已经关了就不必再关一次 */
+        }
+        closeQuietly(sock);
+        return false;
+      }
+      await new Promise((r) => setTimeout(r, FLOW_TICK_MS));
+    }
+    // 排空了：这段时间仍然算「背压时间」，它要进 pStall 的分母（客户端慢是真的慢）
+    this.stallMs += Date.now() - t0;
+    return true;
+  }
+}
+
+// ---- 门面（对外导出面保持不变） ----
 /** 每收到多少字节触发一次 tick */
 export const TICK_BYTES = 512 * 1024;
 

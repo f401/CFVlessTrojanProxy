@@ -8784,35 +8784,47 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
 
 /* ---------- 295. 连接把「采样窗口」与「客户端背压」拆成两个类 ---------- */
 {
-  const winSrc = fs.readFileSync("src/proxy/sample-window.ts", "utf8");
-  const flowSrc = fs.readFileSync("src/proxy/client-flow.ts", "utf8");
   const connSrc = fs.readFileSync("src/proxy/connection.ts", "utf8");
+  // 7.310 起窗口与背压两类住进 connection.ts：取同一个文件的切片当各自的「源码」。
+  const winSrc = connSrc;
+  const flowSrc = connSrc;
+  /** 取某个类自己的源码段（到下一个顶层 export class 为止）。 */
+  const classBody = (name) => {
+    const from = connSrc.indexOf(`export class ${name} {`);
+    if (from < 0) return "";
+    const rest = connSrc.slice(from + 1);
+    const at = rest.indexOf("\nexport class ");
+    return at < 0 ? connSrc.slice(from) : rest.slice(0, at);
+  };
 
-  ok("sample-window 里有 SampleWindow 类", /export class SampleWindow \{/.test(winSrc));
-  ok("client-flow 里有 ClientFlow 类", /export class ClientFlow \{/.test(flowSrc));
+  ok("connection.ts 里有 SampleWindow 类", /export class SampleWindow \{/.test(winSrc));
+  ok("connection.ts 里有 ClientFlow 类", /export class ClientFlow \{/.test(flowSrc));
+  const connBody = classBody("Connection");
   ok(
     "连接通过组合持有两个对象（不再自己声明采样字段）",
-    connSrc.includes("readonly win = new SampleWindow();") &&
-      connSrc.includes("readonly flow = new ClientFlow();") &&
-      !/^  sampleAt = 0;$/m.test(connSrc) &&
-      !/^  stallMs = 0;$/m.test(connSrc),
+    connBody.includes("readonly win = new SampleWindow();") &&
+      connBody.includes("readonly flow = new ClientFlow();") &&
+      !/^  sampleAt = 0;$/m.test(connBody) &&
+      !/^  stallMs = 0;$/m.test(connBody),
     "win/flow 组合或字段残留不符",
   );
   ok("连接把采样字段暴露成只读 getter", /get sampleAt\(\): number \{/.test(connSrc) && /get siteEmitted\(\): number \{/.test(connSrc));
   ok("连接的背压只剩一行委托", connSrc.includes("return this.flow.gate(ws, this.sock);"));
-  // 只看代码行：注释里提到 bufferedAmount 是在解释「谁负责读它」，不算还在读缓冲
-  const connCode = connSrc
-    .split(/\r?\n/)
-    .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
-    .join("\n");
-  ok("缓冲读写只在 client-flow 里（连接不再直接比 bufferedAmount）", !connCode.includes("bufferedAmount"));
+  // 7.310 把 ClientFlow 并进 connection.ts，所以改成按类切片：buffer 只在 ClientFlow 里读，
+  // 连接本体（Connection 类体到 ConnSample 之前）不该出现 bufferedAmount。
+  const connLines = connSrc.split(/\r?\n/);
+  const clsStart = connLines.findIndex((l) => l.includes("export class Connection {"));
+  const flowStart = connLines.findIndex((l) => l.includes("export class ClientFlow {"));
+  const connCode = connLines.slice(clsStart, flowStart).join("\n");
+  ok("缓冲读写只在 ClientFlow 类里（连接本体不再直接比 bufferedAmount）", !connCode.includes("bufferedAmount"));
   ok(
     "采样权重仍归连接（结算要用 sampleW）",
     connSrc.includes("this.sampleW += use;") && winSrc.includes("emitted(now: number): void"),
   );
   ok("节点级窗口的最短长度与出样本间隔各是一处常量", winSrc.includes("export const NODE_WIN_MS = 800;") && winSrc.includes("export const NODE_EMIT_GAP_MS = 5000;"));
   ok("站点级窗口 60 秒也是常量", winSrc.includes("export const SITE_WIN_MS = 60000;"));
-  ok("窗口类不碰连接、不碰全局状态", !winSrc.includes("S.") && !winSrc.includes("cnt("));
+  const winBody = classBody("SampleWindow");
+  ok("窗口类不碰连接、不碰全局状态", winBody.length > 200 && !winBody.includes("S.") && !winBody.includes("cnt("));
 
   // 行为面：用显式时间戳跑，避免依赖真实时钟
   const sw = new W.SampleWindow();
@@ -9137,6 +9149,35 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     W.TABLES instanceof W.DebugTables && W.ACTIONS instanceof W.DebugActions && W.METER_PROBES instanceof W.DebugMeterProbes);
   ok(`[${g}] 注册表仍能取到两个实现`,
     W.TRANSPORTS.names().length === 2 && Boolean(W.TRANSPORTS.get("gateway")) && Boolean(W.TRANSPORTS.get("tunnelfetch")));
+}
+
+/* ---------- 310. 连接的采样窗口与背压两类住进 connection.ts ---------- */
+{
+  const src = fs.readFileSync("src/proxy/connection.ts", "utf8");
+  ok("sample-window.ts 已不存在", !fs.existsSync("src/proxy/sample-window.ts"));
+  ok("client-flow.ts 已不存在", !fs.existsSync("src/proxy/client-flow.ts"));
+  ok("三个类同住 connection.ts",
+    /export class Connection \{/.test(src) &&
+      /export class SampleWindow \{/.test(src) &&
+      /export class ClientFlow \{/.test(src));
+  ok("connection.ts 仍在 560 行上限内", src.split(/\r?\n/).length <= 560, String(src.split(/\r?\n/).length));
+  ok("窗口常量仍是模块级常量",
+    src.includes("export const NODE_WIN_MS = 800;") &&
+      src.includes("export const NODE_EMIT_GAP_MS = 5000;") &&
+      src.includes("export const SITE_WIN_MS = 60000;") &&
+      src.includes("export const FLOW_TICK_MS = 10;"));
+  ok("连接仍通过组合持有两个对象",
+    src.includes("readonly win = new SampleWindow();") &&
+      src.includes("readonly flow = new ClientFlow();"));
+  ok("两个类都仍然导得出来",
+    typeof W.SampleWindow === "function" && typeof W.ClientFlow === "function");
+  const win = new W.SampleWindow();
+  // 起点不能是 0：`node()` 用 `!this.at` 判「没有起点」，0 会被当成没建立窗口。
+  win.begin(10000, 0, 0);
+  eq("窗口短于 800ms 不出样本", win.node(10500, 900000, 0), null);
+  // 窗口太短时边界不动，出样本间隔从 lastEmit=0 起算 5 秒 —— 两条都满足才出样本。
+  const w = win.node(20000, 307200, 0);
+  ok("10 秒 300KB 出样本", Boolean(w) && w.bytes === 307200 && w.elapsedMs === 10000, JSON.stringify(w));
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
