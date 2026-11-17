@@ -1,10 +1,22 @@
 // 测试专用出口：只在 dist/_test.js 里存在，生产包不含此文件
-export { sha224Bytes, toHex, VERSION, shadowRate, secretPwd, eachLimit, withTimeout } from "./core/util";
-export { toU8, uuidFromBytes } from "./core/bytes";
-export { WS_MAX_BUFFER } from "./core/ws";
-export { P_T, P_V } from "./core/proto-names";
-export { SHADOW_DEFAULT } from "./core/env-parse";
-export { errMsg } from "./core/errors";
+// `core/util.ts` 在 7.299 合回单个文件：字节编解码、SHA-224、WS 常量、三个超时预算、
+// 并发闸、环境解析、协议名与错误文本都还在原处，只是不再各占一个文件。
+export {
+  P_T,
+  P_V,
+  SHADOW_DEFAULT,
+  VERSION,
+  WS_MAX_BUFFER,
+  eachLimit,
+  errMsg,
+  secretPwd,
+  sha224Bytes,
+  shadowRate,
+  toHex,
+  toU8,
+  uuidFromBytes,
+  withTimeout,
+} from "./core/util";
 export { trimAged, dropExpired } from "./core/hostmem";
 export { aesKey, b64d, b64e, seal, unseal } from "./store/crypto";
 export { factsOut, freshTop } from "./store/factout";
@@ -151,8 +163,8 @@ export { STORE, Store } from "./store/store";
 export { VT, VerdictTable } from "./route/verdict";
 export { JUDGE, Judge } from "./route/judge";
 export { POLICY, Policy } from "./route/policy";
-export { decideCf } from "./route/policy-cf";
-export { rankOf } from "./route/policy-rank";
+export { decideCf } from "./route/policy";
+export { rankOf } from "./route/policy";
 export { PolicyWiring, WIRING } from "./route/policy-wiring";
 export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, tfBlockOk, tfRemember, pickFresh } from "./route/tfb";

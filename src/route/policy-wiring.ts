@@ -17,7 +17,30 @@ import { capNote } from "./capfacts";
 import { FACTS } from "./factsstore";
 import type { FactsDelta } from "./factsstore";
 import { FACT_ALL, factOnce } from "./factflags";
-import type { Choice, Ctx } from "./policy-ctx";
+import type { Chan } from "./channel";
+
+/**
+ * 决策上下文：一次决策需要的全部外部输入（都是已算好的事实，不含 IO）。
+ * 这个端口类型住在装配层，是为了让 `policy.ts` 单向依赖它 ——
+ * 反过来（策略声明类型、装配层引用）会让两个文件互相 import。
+ */
+export interface Ctx {
+  host: string;
+  cfHost: boolean; // 目标托管在 CF 上
+  clientV6: boolean; // 客户端出口是 IPv6（cf-connecting-ip）
+  relays: string[]; // 池里可用中继的 IP
+  legacyWantsRelay: boolean; // 现状：session 的 wantPx
+  /** 传输模式（`tput` / `lat`）；缺省按吞吐模式，测试可省略 */
+  mode?: string;
+  /** 启用的事实集合；缺省视为全开（测试与旧调用点不必改） */
+  facts?: ReadonlySet<string>;
+}
+
+/** 决策结果：选中的通道与一句可读理由（理由会进日志与影子统计）。 */
+export interface Choice {
+  chan: Chan;
+  why: string;
+}
 
 /**
  * 装配层需要策略提供的四个能力（结构化接口，避免与 `policy.ts` 相互 import）。

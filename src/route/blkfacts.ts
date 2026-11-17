@@ -1,3 +1,152 @@
+import { cnt } from "../core/counter";
+import { BLK_TTL } from "./commitfact";
+
+// ---- 并入自 blk-types.ts ----
+// `blk` 事实的形状与刻度：三条独立确认门槛 + 上报行格式。
+//
+// 单独成文件的原因：这些数字每一个都对应线上事故里的一个具体教训（批数不够会把业务 403 误判成
+// 单 IP 封锁、间隔太短等于重复掷骰子、静默表无上限会被客户端带来的站点名灌满），
+// 而读代码的人经常只想确认「现在到底要几批」，不该在 300 行的状态机里翻。
+
+/** 需要几批独立确认 */
+export const BLK_BATCH = 3;
+/** 每批至少几次 tiny 观测 */
+export const BLK_MIN = 3;
+/** 两批之间的最小间隔（60 秒） */
+export const BLK_GAP = 60000;
+/** 命中后的代价倍数（只折价，不排除） */
+export const BLK_PEN = 6;
+/** 表上限 */
+export const BLK_MAX = 1024;
+/** 站点级自愈：同一站点被写满这么多行（且 ≥75% 候选）就整体清空并静默 30 分钟 */
+export const BLK_SWEEP_MIN = 3;
+/** 静默时长 */
+export const BLK_MUTE = 30 * 60000;
+/** 静默表的容量上限：键是客户端带来的站点名，30 分钟 TTL 内可以灌任意多条（v7.230） */
+export const BLK_MUTE_MAX = 256;
+
+/** 累计中的一批 */
+export interface Batch {
+  /** 当前这一批里已经看到的 tiny 次数 */
+  n: number;
+  /** 当前这一批的开始时间 */
+  at: number;
+  /** 已经确认完成的批数 */
+  done: number;
+  /** 上一批完成的时间（用于强制两批之间 ≥ BLK_GAP） */
+  last: number;
+}
+
+/** 已确认的封锁行 */
+export interface Row {
+  /** 确认时的批数（= BLK_BATCH） */
+  n: number;
+  /** 最后一批的时间 */
+  at: number;
+}
+
+/** 上报行 */
+export interface BlkWire {
+  /** `host|relay` */
+  k: string;
+  /** 批数 */
+  n: number;
+  /** 时间 */
+  at: number;
+}
+
+// ---- 并入自 blk-outbox.ts ----
+// `blk` 事实的上报队列：谁清、谁不清，是这张表唯一会永久丢证据的地方。
+//
+// 单独成文件的理由（两条都是线上事故）：
+// - v7.143：`ack()` 一次清空全部 pending，而 `delta()` 每批最多交 60 行 ⇒ 被上限挤掉的行
+//   既没发出去、也不再重发，证据永久丢失；
+// - v7.221：静音期内的站点不该再收别处的事实，否则自愈结论会被当场撤销（那条判据在
+//   `BlkFacts.load`，不在这里，但同属「pending / mute 的语义」）。
+// 所以「只有 ack() 才清 pending，且只清真正发出去的那批」这条纪律，现在只在一个文件里成立。
+
+
+/** 每批最多交出多少行（DO 的 `/add` 一次最多合并这么多键） */
+export const BLK_DELTA_MAX = 60;
+
+/**
+ * 功能：封锁事实的待上报队列。
+ *
+ * 两张表的分工：`pending` 是「还没被 DO 收下的证据」，`sent` 是「这一批已经交出去的行」。
+ * 只有 `ack()` 能清 `pending`，而且只清 `sent` 里那批 —— 这是 7.143 的修法。
+ */
+export class BlkOutbox {
+  /** 还没被确认的证据（键 → 行） */
+  private pending = new Map<string, Row>();
+  /** 这一批真正发出去的行（键 → 发出时的 at）：ack 只清它们，见 ack() 的注释 */
+  private sent = new Map<string, number>();
+
+  /**
+   * 功能：登记一条新证据（下一轮 `delta()` 会带走它）。
+   * @param key 事实键 `host|relay`
+   * @param row 证据行
+   * @returns {void}
+   */
+  push(key: string, row: Row): void {
+    this.pending.set(key, row);
+  }
+
+  /**
+   * 功能：丢掉某个键的待发证据（站点级自愈时用）。
+   * @param key 事实键
+   * @returns {void}
+   */
+  drop(key: string): void {
+    this.pending.delete(key);
+  }
+
+  /**
+   * 功能：导出待上报增量。
+   * @returns {BlkWire[]} 最多 `BLK_DELTA_MAX` 行；交出的行同时记进 `sent`
+   */
+  delta(): BlkWire[] {
+    const out: BlkWire[] = [];
+    for (const [k, r] of this.pending) {
+      out.push({ k, n: r.n, at: r.at });
+      this.sent.set(k, r.at);
+      if (out.length >= BLK_DELTA_MAX) break;
+    }
+    return out;
+  }
+
+  /**
+   * 功能：上报成功 —— 只清这一批真正发出去的行。
+   * @returns {void}
+   */
+  ack(): void {
+    // 只清这一批真正发出去的行：delta() 有上限（本表最多 60 行），一次清空全部 pending 会让
+    // 超出上限的行既没发出去、也不再重发 —— 证据就这样永久丢了（v7.143 修）。
+    // 只在值没变新时才清：delta 与 ack 之间可能又记了一条更新的观测，那条还没发过。
+    for (const [k, at] of this.sent) {
+      const cur = this.pending.get(k);
+      if (cur && cur.at <= at) this.pending.delete(k);
+    }
+    this.sent.clear();
+  }
+
+  /**
+   * 功能：上报失败 —— 什么都不清（重发 = 重试，幂等靠 `at`）。
+   * @returns {void}
+   */
+  nack(): void {
+    // 保留 pending：上报失败时下一轮 delta() 会把同一批原样再给一次（重发 = 重试，幂等靠 at）。
+    // 清掉它就等于「这条证据从此不会送到 DO」—— 与 v8 §3 的 pending 语义相反（只有 ack 才清）。
+    this.sent.clear();
+  }
+
+  /** 功能：清空两张表（单测用）。@returns {void} */
+  clear(): void {
+    this.pending.clear();
+    this.sent.clear();
+  }
+}
+
+// ---- 门面（对外导出面保持不变） ----
 // 「这个站点在这个出口上被单 IP 封锁」事实（v8 §3 的 `blk`）。
 //
 // 这是全套事实里最危险的一张表：它是唯一会让「少发请求」的事实，所以门槛必须由**结构**决定，
@@ -10,26 +159,10 @@
 // 而它的**后果**被设计成软的：`blk` 只把代价乘 6（`BLK_PEN`），永不把候选移出。
 // 理由写在 v8.md §15 的 I1：业务 403 也一定带状态行、也可能是小响应，只有让「判错」的代价
 // 只是「顺序变差」而不是「发不出去」，才可能满足「业务 403 绝对不会被误伤」。
-import { cnt } from "../core/counter";
-import { BLK_TTL } from "./commitfact";
 
-import { BlkOutbox } from "./blk-outbox";
-import {
-  BLK_BATCH,
-  BLK_GAP,
-  BLK_MAX,
-  BLK_MIN,
-  BLK_MUTE,
-  BLK_MUTE_MAX,
-  BLK_PEN,
-  BLK_SWEEP_MIN,
-} from "./blk-types";
-import type { Batch, BlkWire, Row } from "./blk-types";
 
 // 形状与刻度搬到了 blk-types.ts、上报队列搬到了 blk-outbox.ts（7.293）：
 // 这里只剩状态机本体（批确认、反向证据、自愈、容量淘汰）。导出面一字未改。
-export * from "./blk-types";
-export { BLK_DELTA_MAX, BlkOutbox } from "./blk-outbox";
 
 /**
  * 功能：单 IP 封锁事实表。键是 `站点|出口 IP`（不是站点级，也不是通配）。

@@ -78,17 +78,13 @@ const verdictAll = () =>
     .map((f) => fs.readFileSync(f, "utf8"))
     .join("\n");
 /** 功能：把「站点 × 中继」成功率事实的五个文件合成一段文本（源码锁读它）。 */
-const psAll = () =>
-  ["src/route/psfacts.ts", "src/route/ps-types.ts", "src/route/ps-prior.ts", "src/route/ps-outbox.ts", "src/route/ps-table.ts"]
-    .map((f) => fs.readFileSync(f, "utf8")).join("\n");
+const psAll = () => fs.readFileSync("src/route/psfacts.ts", "utf8");
 /** 功能：把一轮池子维护的编排层与三个执行器的源码合并成一段文本（源码锁读它）。 */
 const scanAll = () =>
   ["src/px/scan.ts", "src/px/scan-probe.ts", "src/px/scan-alive.ts", "src/px/scan-house.ts", "src/px/probe-batch.ts"]
     .map((f) => fs.readFileSync(f, "utf8")).join("\n");
 /** 功能：把决策本体、候选排序与 CF 分支树三份源码合并成一段文本（源码锁读它）。 */
-const policyAll = () =>
-  ["src/route/policy.ts", "src/route/policy-rank.ts", "src/route/policy-cf.ts"]
-    .map((f) => fs.readFileSync(f, "utf8")).join("\n");
+const policyAll = () => fs.readFileSync("src/route/policy.ts", "utf8");
 
 /** 功能：把挑路的源码合并成一段文本，源码锁读它（四个类现在同在一个文件里）。 */
 const pickAll = () => fs.readFileSync("src/px/pickpath.ts", "utf8");
@@ -3705,7 +3701,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   eq("DO 里当前均值跟着新观测", Number(prow.q), 40);
   eq("DO 里的历史最好只升不降", Number(prow.top), 200);
   // 源码锁：增量必须把 top 放进线格式
-  ok("增量带 top（源码）", fs.readFileSync("src/route/ps-outbox.ts", "utf8").includes("top: r.top ?? r.q"));
+  ok("增量带 top（源码）", fs.readFileSync("src/route/psfacts.ts", "utf8").includes("top: r.top ?? r.q"));
 }
 // 154. DO 必须把判定表的状态一起存下来：只存到期时间的话，dead（硬排除）读回来变成 blocked（软降权）
 {
@@ -4230,7 +4226,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   ok("限流表自己仍然有界", W.RL_MEM.size <= 501);
 
   // 3) shadowRate 的说明不再自称「显示 10 实际 0」
-  const uSrc = fs.readFileSync("src/core/env-parse.ts", "utf8");
+  const uSrc = fs.readFileSync("src/core/util.ts", "utf8");
   ok("shadowRate 文档不再举「显示 10 实际 0」这个错例", !uSrc.includes("实际 0"));
 
   // 4) RTT 表有 5 列，"暂无数据" 必须跨 5 列
@@ -5340,7 +5336,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   const missing = [...readFields.keys()].filter((n) => !declaredFields.has(n));
   eq("src 里读到的 env 字段都在 Env 里声明", missing.join(","), "");
   // 旧绑定名兼容（trojan）必须仍然生效：靠显式转型，而不是把索引签名加回来
-  const utilSrc = fs.readFileSync("src/core/env-parse.ts", "utf8");
+  const utilSrc = fs.readFileSync("src/core/util.ts", "utf8");
   ok("旧绑定名走显式转型而不是索引签名", utilSrc.includes("(env as unknown as Record<string, unknown>)[P_T]"));
   eq("旧名仍能读到密码", W.secretPwd({ trojan: "legacy-pw" }), "legacy-pw");
   eq("新名优先于旧名", W.secretPwd({ pwd: "  x  ", trojan: "b" }), "x");
@@ -5450,7 +5446,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
 }
 // ---- 211: 数据面上游写必须有上限（黑洞中继接了连接却不读，write 永不返回） ----
 console.log("");
-const srcUtil211 = fs.readFileSync("src/core/timeouts.ts", "utf8");
+const srcUtil211 = fs.readFileSync("src/core/util.ts", "utf8");
 const srcState211 = fs.readFileSync("src/core/state.ts", "utf8");
 const srcConn211 = fs.readFileSync("src/proxy/connection.ts", "utf8");
 const srcSess211 = fs.readFileSync("src/proxy/session.ts", "utf8");
@@ -5610,7 +5606,7 @@ try {
 /* ===== 第 214 组：SC 里的僵尸常量（有人声明、注释描述了一个不存在的机制、没人读） ===== */
 {
   const constSrc = fs.readFileSync("src/core/const.ts", "utf8");
-  const utilSrc = fs.readFileSync("src/core/env-parse.ts", "utf8");
+  const utilSrc = fs.readFileSync("src/core/util.ts", "utf8");
   const pxSrc = fs.readFileSync("src/px/const.ts", "utf8");
   const deadSrc = fs.readFileSync("tools/check-dead.mjs", "utf8");
   // 源码锁：两个常量本身不存在了（否则注释会继续描述「seed 先验保质期」「探索上限」）
@@ -6277,7 +6273,7 @@ ok("索引下限夹到 0（p 很小时不能取负）", pendSrc.includes("Math.m
 
 /* ---------- 第 231 组：静默表的容量（v7.230 D187） ---------- */
 {
-  const blkSrc = ["src/route/blkfacts.ts", "src/route/blk-types.ts"].map((f) => fs.readFileSync(f, "utf8")).join("\n");
+  const blkSrc = fs.readFileSync("src/route/blkfacts.ts", "utf8");
   const m = blkSrc.match(/export const BLK_MUTE_MAX = (\d+);/);
   const cap = m ? Number(m[1]) : 0;
   ok("静默表有独立上限", cap >= 64 && cap <= 4096, String(cap));
@@ -6318,14 +6314,14 @@ ok("索引下限夹到 0（p 很小时不能取负）", pendSrc.includes("Math.m
     }
     return a;
   };
-  const utilSrc = fs.readFileSync("src/core/timeouts.ts", "utf8");
+  const utilSrc = fs.readFileSync("src/core/util.ts", "utf8");
   ok("CONNECT_MS 有唯一真源", /export const CONNECT_MS = 2500;/.test(utilSrc), "");
   ok("注释点明 SC.STALL 不是一回事", utilSrc.includes("SC.STALL = 2500") , "");
   let stray = 0;
   let used = 0;
   const where231 = [];
   for (const p of walk("src")) {
-    if (p.endsWith("core/const.ts") || p.endsWith("core/util.ts") || p.endsWith("core/timeouts.ts")) continue;
+    if (p.endsWith("core/const.ts") || p.endsWith("core/util.ts")) continue;
     const t = fs.readFileSync(p, "utf8");
     const n2500 = (t.match(/\b2500\b/g) || []).length;
     stray += n2500;
@@ -7841,7 +7837,7 @@ ok("首包上限确实比数据面短", W.FIRST_UP_MS < W.UP_STALL_MS);
   ok("attacher 给首包传了上限", sa270.includes("conn.upWrite(payload, FIRST_UP_MS)"), "attacher");
   ok("attacher 导入了 FIRST_UP_MS", /import \{[^}]*FIRST_UP_MS[^}]*\} from "\.\.\/core\/util"/.test(sa270), "import");
   ok("首包不再用默认上限", sa270.includes("conn.upWrite(payload);") === false, "default");
-  const su270 = fs.readFileSync("src/core/timeouts.ts", "utf8");
+  const su270 = fs.readFileSync("src/core/util.ts", "utf8");
   ok("常量在 timeouts.ts 里且只有一处", su270.split("export const FIRST_UP_MS").length - 1 === 1, "util"); }
 
 ﻿// 第 271 组：探测传输层（7.271 起 probeTf 不再写死 tunnelfetch）
@@ -8457,11 +8453,13 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
 console.log("\n[285] 策略本体与 HOOK 装配拆成两层");
 {
   const fsx = fs;
-  const ctxSrc = fsx.readFileSync("src/route/policy-ctx.ts", "utf8");
+  const ctxSrc = fsx.readFileSync("src/route/policy-wiring.ts", "utf8");
   const wireSrc = fsx.readFileSync("src/route/policy-wiring.ts", "utf8");
   const polSrc285 = fsx.readFileSync("src/route/policy.ts", "utf8");
-  ok("类型层只有类型与常量（不碰 HOOK/S）", !ctxSrc.includes("HOOK.") && !ctxSrc.includes("from \"../core/state\""));
-  ok("类型层导出 Ctx/Choice/FULL_ON/HOST_MEM_MAX", ctxSrc.includes("export interface Ctx") && ctxSrc.includes("export interface Choice") && ctxSrc.includes("export const FULL_ON") && ctxSrc.includes("export const HOST_MEM_MAX"));
+  // 7.299 起 Ctx/Choice 这两个端口类型住在装配层（策略单向依赖它，反向会成环）；
+  // 两个常量仍留在策略本体里。
+  ok("端口类型住在装配层", ctxSrc.includes("export interface Ctx") && ctxSrc.includes("export interface Choice"));
+  ok("常量仍在策略本体", polSrc285.includes("export const FULL_ON") && polSrc285.includes("export const HOST_MEM_MAX"));
   ok("装配层用结构化接口收参数", wireSrc.includes("install(policy: PolicySource): void {") && wireSrc.includes("export interface PolicySource"));
   ok("装配层注册点 ≥ 18", (wireSrc.match(/HOOK\.[a-zA-Z]+ =/g) || []).length >= 18);
   ok("装配层不含决策算法（没有 pin 表）", !wireSrc.includes("private pin") && !wireSrc.includes("HOST_MEM_MAX"));
@@ -8568,35 +8566,22 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
 
 // 第 289 组：「站点 × 中继」成功率事实按「形状 / 先验 / 待发队列 / 表本体 / 门面」拆开（7.289）
 {
-  const facSrc = fs.readFileSync("src/route/psfacts.ts", "utf8");
-  const typeSrc = fs.readFileSync("src/route/ps-types.ts", "utf8");
-  const priorSrc = fs.readFileSync("src/route/ps-prior.ts", "utf8");
-  const boxSrc = fs.readFileSync("src/route/ps-outbox.ts", "utf8");
-  const tableSrc = fs.readFileSync("src/route/ps-table.ts", "utf8");
-  ok("门面不再定义表本体", !facSrc.includes("class PsFacts {"));
-  ok("门面转出类型与四个模块",
-    facSrc.includes('export * from "./ps-types"') && facSrc.includes('export { psPrior } from "./ps-prior"') &&
-      facSrc.includes('from "./ps-outbox"') && facSrc.includes('export { PsFacts } from "./ps-table"'), "");
-  ok("门面只留一个单例", (facSrc.match(/export const PS = new PsFacts\(\);/g) || []).length === 1);
-  ok("五个薄包装还在门面上",
-    ["psNote", "psOk", "psBest", "psFactor", "psSnap"].every((n) => facSrc.includes(`export function ${n}(`)), "");
-  // 形状与刻度：只有类型、常量与一个刻度换算，不碰 EG 也不定义类
-  ok("形状层只有类型与刻度", !/\bclass \b/.test(typeSrc) && !typeSrc.includes("EG.") && typeSrc.includes("export const PS_TTL = FACT_TTL.ps;"));
-  ok("形状层有 toQ", /export function toQ\(p: number\): number/.test(typeSrc));
-  // 先验层是唯一允许「没量过先给个数」的地方
-  ok("先验层只答一个问题",
-    priorSrc.includes("export function psPrior(") && priorSrc.includes('from "./egfacts"') && !/\bclass \b/.test(priorSrc), "");
-  ok("先验层不碰表本体", !priorSrc.includes("PsRow") && !priorSrc.includes("PS_TTL"));
-  // 待发队列：pending/sent 的纪律与批次上限都在这里，不认 TTL
-  ok("待发队列是独立的类", boxSrc.includes("export class PsOutbox") && boxSrc.includes("export const PS_BATCH = 60;"));
-  ok("待发队列四个入口齐备",
-    ["push(", "delta(", "ack(", "nack("].every((n) => boxSrc.includes(`  ${n}`)), "");
-  ok("待发队列不管寿命", !boxSrc.includes("PS_TTL"));
-  // 表本体：认 TTL、认先验，但不再自己维护 pending/sent
+  const psSrc = fs.readFileSync("src/route/psfacts.ts", "utf8");
+  ok("四个旧文件都不再单独存在",
+    ["ps-types.ts", "ps-prior.ts", "ps-outbox.ts", "ps-table.ts"].every((f) => !fs.existsSync("src/route/" + f)), "");
+  ok("形状、先验、队列、表本体现在同在一个文件",
+    psSrc.includes("export class PsFacts") && psSrc.includes("export class PsOutbox") &&
+      psSrc.includes("export function psPrior(") && psSrc.includes("export const PS_TTL = FACT_TTL.ps;"), "");
+  ok("只留一个单例", (psSrc.match(/export const PS = new PsFacts\(\);/g) || []).length === 1);
+  ok("五个薄包装还在",
+    ["psNote", "psOk", "psBest", "psFactor", "psSnap"].every((n) => psSrc.includes(`export function ${n}(`)), "");
+  ok("待发队列带批次上限", psSrc.includes("export const PS_BATCH = 60;"), "");
+  // 队列类同在一个文件里，所以「有没有自己记账」要看 PsFacts 的类体，而不是整个文件。
+  const psBody = psSrc.slice(psSrc.indexOf("export class PsFacts"));
   ok("表本体持有队列而不是自己记账",
-    tableSrc.includes("private outbox = new PsOutbox();") && !tableSrc.includes("private pending") && !tableSrc.includes("private sent"), "");
-  ok("表本体用 TTL 判过期", tableSrc.includes("now - r.at > PS_TTL"));
-  ok("表本体不定义 PsWire 形状（避免第二份真源）", !tableSrc.includes("export interface PsWire"));
+    psBody.includes("private outbox = new PsOutbox();") && !psBody.includes("private pending") && !psBody.includes("private sent"), "");
+  ok("表本体用 TTL 判过期", psSrc.includes("now - r.at > PS_TTL"));
+  ok("PsWire 形状只声明一次", (psSrc.match(/export interface PsWire \{/g) || []).length === 1);
   // 行为面：门面转发仍然指向真实实现
   ok("单例仍是 PsFacts", W.PS instanceof W.PsFacts);
   ok("批次上限对外可见", W.PS_BATCH === 60);
@@ -8617,40 +8602,27 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
 // ---------------------------------------------------------------------------
 {
   const utilSrc290 = fs.readFileSync("src/core/util.ts", "utf8");
-  const utilLines290 = utilSrc290.split(/\r?\n/).filter((l) => l.trim().length > 0).length;
-  ok("门面只剩再导出：非空行不超过 20 行", utilLines290 <= 20, String(utilLines290));
-  eq("门面里只有一个 export const（VERSION）", (utilSrc290.match(/^export const /gm) || []).length, 1);
-  ok("门面已经不再定义函数", !/^export (async )?function /m.test(utilSrc290));
-  // 八块全部由门面直接转出（util → sha224 → bytes 是链不是环）
-  eq("门面按八块转出", (utilSrc290.match(/^export \* from "\.\//gm) || []).length, 8);
-  ok("门面不再出现具体实现", !utilSrc290.includes("function timeoutSignal") && !utilSrc290.includes("TextEncoder("));
-
-  // sha224 只需要 toU8，所以它 import bytes、由门面直接转出：
-  // util → sha224 → bytes 是链，不会形成文件级环。
-  const shaSrc290 = fs.readFileSync("src/core/sha224.ts", "utf8");
-  ok("sha224 只从 bytes 借 toU8", shaSrc290.includes('import { toU8 } from "./bytes";'));
-  ok("bytes 不反过来转出 sha224（否则成环）", !fs.readFileSync("src/core/bytes.ts", "utf8").includes('from "./sha224"'));
-
-  const files290 = {
-    "src/core/bytes.ts": ["export function toU8", "export function toHex", "export function uuidFromBytes"],
-    "src/core/sha224.ts": ["export function sha224Bytes", "export const SHA_K"],
-    "src/core/ws.ts": ["export const WS_OPEN", "export const WS_MAX_BUFFER", "export function safeSend", "export function closeQuietly"],
-    "src/core/timeouts.ts": ["export const CONNECT_MS = 2500", "export const UP_STALL_MS = 30000", "export const FIRST_UP_MS = 8000", "export async function withTimeout"],
-    "src/core/concurrency.ts": ["export async function eachLimit"],
-    "src/core/env-parse.ts": ["export const SHADOW_DEFAULT", "export function shadowRate", "export const secretPwd"],
-    "src/core/proto-names.ts": ["export const P_V", "export const P_T"],
-    "src/core/errors.ts": ["export function errMsg"],
-  };
+  // 7.299 起这八块合回单个文件（用户要求减少文件数）：不再有门面与非门面之分。
+  ok("八个旧文件都不再单独存在",
+    ["bytes", "sha224", "ws", "timeouts", "concurrency", "env-parse", "proto-names", "errors"]
+      .every((f) => !fs.existsSync("src/core/" + f + ".ts")), "");
+  ok("不再靠再导出拼门面", !/^export \* from "\.\//m.test(utilSrc290));
+  const wants290 = [
+    "export function toU8", "export function toHex", "export function uuidFromBytes",
+    "export function sha224Bytes", "export const SHA_K",
+    "export const WS_OPEN", "export const WS_MAX_BUFFER", "export function safeSend", "export function closeQuietly",
+    "export const CONNECT_MS = 2500", "export const UP_STALL_MS = 30000", "export const FIRST_UP_MS = 8000", "export async function withTimeout",
+    "export async function eachLimit",
+    "export const SHADOW_DEFAULT", "export function shadowRate", "export const secretPwd",
+    "export const P_V", "export const P_T",
+    "export function errMsg",
+  ];
   let miss290 = 0;
-  let cls290 = 0;
-  for (const [f, wants] of Object.entries(files290)) {
-    const src = fs.readFileSync(f, "utf8");
-    for (const w of wants) if (!src.includes(w)) { miss290 += 1; ok(f + " 缺少 " + w, false); }
-    // 这一层全是纯函数与常量（状态在 S 里），按约定不该配类
-    if (/^export class /m.test(src)) cls290 += 1;
-  }
-  eq("八块的关键符号都在各自文件里", miss290, 0);
-  eq("这一层不定义任何类", cls290, 0);
+  for (const w of wants290) if (!utilSrc290.includes(w)) { miss290 += 1; ok("util.ts 缺少 " + w, false); }
+  eq("八块的关键符号都在 util.ts 里", miss290, 0);
+  // 这一层全是纯函数与常量（状态在 S 里），按约定不该配类
+  eq("这一层不定义任何类", /^export class /m.test(utilSrc290), false);
+  eq("版本常量仍在这一个文件里", (utilSrc290.match(/^export const VERSION = /gm) || []).length, 1);
 
   // 行为面：门面导出的东西必须真的可用（拆分前它们都从 util 出来）
   eq("toHex(toU8(\"A\"))", W.toHex(W.toU8("A")), "41");
@@ -8700,22 +8672,24 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
 //
 {
   const polSrc = fs.readFileSync("src/route/policy.ts", "utf8");
-  const rankSrc = fs.readFileSync("src/route/policy-rank.ts", "utf8");
-  const cfSrc = fs.readFileSync("src/route/policy-cf.ts", "utf8");
+  // 7.299 起候选层与 CF 分支树也住在 policy.ts 里（只在内存形状上，仍各是一段职责）。
+  ok("三个旧文件都不再单独存在",
+    ["policy-ctx.ts", "policy-rank.ts", "policy-cf.ts"].every((f) => !fs.existsSync("src/route/" + f)), "");
   eq("决策本体只留裁决顺序", (polSrc.match(/^  [a-zA-Z]\w*\(/gm) || []).length > 5, true);
-  ok("决策本体不再自己算排序键", !polSrc.includes("const scoreOf =") && !polSrc.includes("const negOf ="));
-  ok("决策本体不再自己做比例兜底与自愈", !polSrc.includes("blockedRatio") && !polSrc.includes("vClearHost("));
-  ok("决策本体不再自己扫事实表", !polSrc.includes("BLK.sweep(") && !polSrc.includes("isDead(") && !polSrc.includes("relSnap("));
+  // 合回一个文件之后，判据从「不在这个文件」换成「decide 不自己干这三件事」：
+  // 它只拿 rankOf 的视图、只把 CF 分支交给 decideCf。
+  ok("decide 只拿候选视图，不自己算排序键", polSrc.slice(polSrc.indexOf("  decide(c: Ctx): Choice {"), polSrc.indexOf("  shadow(")).indexOf("scoreOf") === -1, "");
+  ok("三段职责各自有边界", polSrc.includes("export function rankOf(c: Ctx): Ranked {") && polSrc.includes("export function decideCf(c: Ctx, r: Ranked, src: PinSource): Choice | null {") && polSrc.includes("export class Policy implements PinSource"), "");
   ok("决策本体调 rankOf", polSrc.includes("const r = rankOf(c);"));
   ok("决策本体把 CF 分支树交出去", polSrc.includes("const cf = decideCf(c, r, this);"));
-  eq("决策本体已缩到 250 行以内", polSrc.split("\n").length <= 250, true);
-  ok("候选层导出视图与入口", rankSrc.includes("export interface Ranked") && rankSrc.includes("export function rankOf(c: Ctx): Ranked {"));
-  ok("候选层保留比例兜底", rankSrc.includes("blockedRatio > 0.75 && usable.length < 2"));
-  ok("候选层保留自愈", rankSrc.includes("vClearHost(c.host)") && rankSrc.includes("BLK.sweep(c.host, c.relays)"));
-  ok("候选层自己排序", rankSrc.includes("const ranked = usable") && !rankSrc.includes("DIRECT"));
-  ok("CF 分支树只认 CF 目标", cfSrc.includes("if (!c.cfHost) return null;"));
-  ok("CF 分支树不改排序", !cfSrc.includes("relCostMode(") && !cfSrc.includes("psBest(") && !cfSrc.includes(".sort("));
-  ok("CF 分支树用结构化接口借状态", cfSrc.includes("export interface PinSource") && cfSrc.includes("pinFor(host: string, list: string[]): string;"));
+  eq("policy.ts 仍在单文件上限内", polSrc.split("\n").length <= 560, true);
+  ok("候选层导出视图与入口", polSrc.includes("export interface Ranked") && polSrc.includes("export function rankOf(c: Ctx): Ranked {"));
+  ok("候选层保留比例兜底", polSrc.includes("blockedRatio > 0.75 && usable.length < 2"));
+  ok("候选层保留自愈", polSrc.includes("vClearHost(c.host)") && polSrc.includes("BLK.sweep(c.host, c.relays)"));
+  ok("候选层自己排序", polSrc.includes("const ranked = usable"));
+  ok("CF 分支树只认 CF 目标", polSrc.includes("if (!c.cfHost) return null;"));
+  ok("CF 分支树带 PinSource", polSrc.includes("export interface PinSource") && polSrc.includes("pinFor(host: string, list: string[]): string;"));
+  ok("策略把钉住与轮换暴露给分支树", polSrc.includes("nextRotation(limit: number): number"));
   ok("策略本体声明自己可当 PinSource", polSrc.includes("export class Policy implements PinSource"));
   eq("轮换游标按条数取模", [W.POLICY.nextRotation(3), W.POLICY.nextRotation(3), W.POLICY.nextRotation(3), W.POLICY.nextRotation(3)], [0, 1, 2, 0]);
   W.vClear();
@@ -8736,14 +8710,17 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
 }
 /* ---------- 第 293 组：封锁事实的形状、上报队列与状态机分家（v7.293） ---------- */
 {
-  const typeSrc = fs.readFileSync("src/route/blk-types.ts", "utf8");
   const factsSrc = fs.readFileSync("src/route/blkfacts.ts", "utf8");
-  const outSrc = fs.readFileSync("src/route/blk-outbox.ts", "utf8");
-  ok("形状层只放常量与类型", typeSrc.includes("export const BLK_BATCH = 3;") && typeSrc.includes("export interface BlkWire {") && !typeSrc.includes("class "), "");
-  ok("状态机不再自己声明队列", !factsSrc.includes("private pend =") && !factsSrc.includes("private sent =") && factsSrc.includes("private outbox = new BlkOutbox();"), "");
-  ok("状态机转出形状与队列", factsSrc.includes('export * from "./blk-types";') && factsSrc.includes('export { BLK_DELTA_MAX, BlkOutbox } from "./blk-outbox";'), "");
-  ok("队列层带每批上限", outSrc.includes("export const BLK_DELTA_MAX = 60;") && outSrc.includes("if (out.length >= BLK_DELTA_MAX) break;"), "");
-  ok("只有 ack 与自愈入口能删待发", (outSrc.match(/this\.pending\.delete\(/g) || []).length === 2 && !/nack\(\): void \{[\s\S]{0,220}pending\.clear/.test(outSrc), "");
+  ok("两个旧文件都不再单独存在",
+    ["blk-types.ts", "blk-outbox.ts"].every((f) => !fs.existsSync("src/route/" + f)), "");
+  ok("形状、队列、状态机同在一个文件",
+    factsSrc.includes("export const BLK_BATCH = 3;") && factsSrc.includes("export interface BlkWire {") &&
+      factsSrc.includes("export class BlkOutbox") && factsSrc.includes("export class BlkFacts"), "");
+  // 队列类同在一个文件里：判「有没有自己记账」要看 BlkFacts 的类体。
+  const blkBody = factsSrc.slice(factsSrc.indexOf("export class BlkFacts"));
+  ok("状态机不再自己声明队列", !blkBody.includes("private pend =") && !blkBody.includes("private sent =") && blkBody.includes("private outbox = new BlkOutbox();"), "");
+  ok("队列层带每批上限", factsSrc.includes("export const BLK_DELTA_MAX = 60;") && factsSrc.includes("if (out.length >= BLK_DELTA_MAX) break;"), "");
+  ok("只有 ack 与自愈入口能删待发", (factsSrc.match(/this\.pending\.delete\(/g) || []).length === 2 && !/nack\(\): void \{[\s\S]{0,220}pending\.clear/.test(factsSrc), "");
   const box = new W.BlkOutbox();
   for (let i = 0; i < 70; i++) box.push("k" + i, { n: 3, at: 1000 + i });
   const first = box.delta();
