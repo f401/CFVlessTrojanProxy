@@ -153,7 +153,7 @@ export { DEAD, DEAD_N, deadNote, isDead } from "./route/deadfacts";
 export { FO, FirstObs, FO_GRAY, FO_LIMIT, FO_PAGE } from "./core/firstobs";
 export { LAT, LatObs } from "./core/latobs";
 export { DNS, DnsFacts, DNS_TTL } from "./route/dnsfacts";
-export { BLK, BLK_BATCH, BLK_GAP, BLK_MIN, BLK_PEN, blkPen } from "./route/blkfacts";
+export { BLK, BLK_BATCH, BLK_DELTA_MAX, BLK_GAP, BLK_MIN, BLK_PEN, BlkOutbox, blkPen } from "./route/blkfacts";
 export { FACT_TTL, PAGE_ABS, mergeAt, mergeBlk } from "./core/facts";
 export { mergeFacts } from "./store/factmerge";
 export type { FactTables } from "./store/factmerge";

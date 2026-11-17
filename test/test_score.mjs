@@ -6257,7 +6257,7 @@ ok("索引下限夹到 0（p 很小时不能取负）", pendSrc.includes("Math.m
 
 /* ---------- 第 231 组：静默表的容量（v7.230 D187） ---------- */
 {
-  const blkSrc = fs.readFileSync("src/route/blkfacts.ts", "utf8");
+  const blkSrc = ["src/route/blkfacts.ts", "src/route/blk-types.ts"].map((f) => fs.readFileSync(f, "utf8")).join("\n");
   const m = blkSrc.match(/export const BLK_MUTE_MAX = (\d+);/);
   const cap = m ? Number(m[1]) : 0;
   ok("静默表有独立上限", cap >= 64 && cap <= 4096, String(cap));
@@ -8729,6 +8729,38 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   eq("非 CF 目标时 CF 分支树返回 null", W.decideCf({ host: "plain292.test", cfHost: false, clientV6: false, relays: [], legacyWantsRelay: false }, rk, W.POLICY), null);
   W.vClear();
 }
+/* ---------- 第 293 组：封锁事实的形状、上报队列与状态机分家（v7.293） ---------- */
+{
+  const typeSrc = fs.readFileSync("src/route/blk-types.ts", "utf8");
+  const factsSrc = fs.readFileSync("src/route/blkfacts.ts", "utf8");
+  const outSrc = fs.readFileSync("src/route/blk-outbox.ts", "utf8");
+  ok("形状层只放常量与类型", typeSrc.includes("export const BLK_BATCH = 3;") && typeSrc.includes("export interface BlkWire {") && !typeSrc.includes("class "), "");
+  ok("状态机不再自己声明队列", !factsSrc.includes("private pend =") && !factsSrc.includes("private sent =") && factsSrc.includes("private outbox = new BlkOutbox();"), "");
+  ok("状态机转出形状与队列", factsSrc.includes('export * from "./blk-types";') && factsSrc.includes('export { BLK_DELTA_MAX, BlkOutbox } from "./blk-outbox";'), "");
+  ok("队列层带每批上限", outSrc.includes("export const BLK_DELTA_MAX = 60;") && outSrc.includes("if (out.length >= BLK_DELTA_MAX) break;"), "");
+  ok("只有 ack 与自愈入口能删待发", (outSrc.match(/this\.pending\.delete\(/g) || []).length === 2 && !/nack\(\): void \{[\s\S]{0,220}pending\.clear/.test(outSrc), "");
+  const box = new W.BlkOutbox();
+  for (let i = 0; i < 70; i++) box.push("k" + i, { n: 3, at: 1000 + i });
+  const first = box.delta();
+  eq("每批只交 60 行", first.length, 60);
+  eq("上限常量可见", W.BLK_DELTA_MAX, 60);
+  box.ack();
+  const second = box.delta();
+  eq("被上限挤掉的 10 行还在队列里", second.length, 10);
+  box.nack();
+  eq("nack 之后同一批原样重发", box.delta().length, 10);
+  const box2 = new W.BlkOutbox();
+  box2.push("a|1.1.1.1", { n: 3, at: 5 });
+  box2.drop("a|1.1.1.1");
+  eq("drop 之后不再重发", box2.delta().length, 0);
+  const box3 = new W.BlkOutbox();
+  box3.push("b|1.1.1.1", { n: 3, at: 7 });
+  box3.delta();
+  box3.push("b|1.1.1.1", { n: 3, at: 9 });
+  box3.ack();
+  eq("ack 只清发出时那一版，新观测留着", box3.delta().map((r) => r.at), [9]);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

@@ -13,51 +13,23 @@
 import { cnt } from "../core/counter";
 import { BLK_TTL } from "./commitfact";
 
-/** 需要几批独立确认 */
-export const BLK_BATCH = 3;
-/** 每批至少几次 tiny 观测 */
-export const BLK_MIN = 3;
-/** 两批之间的最小间隔（60 秒） */
-export const BLK_GAP = 60000;
-/** 命中后的代价倍数（只折价，不排除） */
-export const BLK_PEN = 6;
-/** 表上限 */
-export const BLK_MAX = 1024;
-/** 站点级自愈：同一站点被写满这么多行（且 ≥75% 候选）就整体清空并静默 30 分钟 */
-export const BLK_SWEEP_MIN = 3;
-/** 静默时长 */
-export const BLK_MUTE = 30 * 60000;
-/** 静默表的容量上限：键是客户端带来的站点名，30 分钟 TTL 内可以灌任意多条（v7.230） */
-export const BLK_MUTE_MAX = 256;
+import { BlkOutbox } from "./blk-outbox";
+import {
+  BLK_BATCH,
+  BLK_GAP,
+  BLK_MAX,
+  BLK_MIN,
+  BLK_MUTE,
+  BLK_MUTE_MAX,
+  BLK_PEN,
+  BLK_SWEEP_MIN,
+} from "./blk-types";
+import type { Batch, BlkWire, Row } from "./blk-types";
 
-/** 累计中的一批 */
-interface Batch {
-  /** 当前这一批里已经看到的 tiny 次数 */
-  n: number;
-  /** 当前这一批的开始时间 */
-  at: number;
-  /** 已经确认完成的批数 */
-  done: number;
-  /** 上一批完成的时间（用于强制两批之间 ≥ BLK_GAP） */
-  last: number;
-}
-/** 已确认的封锁行 */
-interface Row {
-  /** 确认时的批数（= BLK_BATCH） */
-  n: number;
-  /** 最后一批的时间 */
-  at: number;
-}
-
-/** 上报行 */
-export interface BlkWire {
-  /** `host|relay` */
-  k: string;
-  /** 批数 */
-  n: number;
-  /** 时间 */
-  at: number;
-}
+// 形状与刻度搬到了 blk-types.ts、上报队列搬到了 blk-outbox.ts（7.293）：
+// 这里只剩状态机本体（批确认、反向证据、自愈、容量淘汰）。导出面一字未改。
+export * from "./blk-types";
+export { BLK_DELTA_MAX, BlkOutbox } from "./blk-outbox";
 
 /**
  * 功能：单 IP 封锁事实表。键是 `站点|出口 IP`（不是站点级，也不是通配）。
@@ -65,9 +37,8 @@ export interface BlkWire {
 export class BlkFacts {
   private rows = new Map<string, Row>();
   private batch = new Map<string, Batch>();
-  private pend = new Map<string, Row>();
-  // 这一批真正发出去的行（键 → 发出时的 at）：ack 只清它们，见 ack() 的注释
-  private sent = new Map<string, number>();
+  // 待发队列（pending / sent 的纪律）在 blk-outbox.ts：只有 ack 才清，且只清真的发出去的那批
+  private outbox = new BlkOutbox();
   private mute = new Map<string, number>();
 
   /**
@@ -116,7 +87,7 @@ export class BlkFacts {
     this.batch.delete(k);
     const row: Row = { n: BLK_BATCH, at: o.at };
     this.rows.set(k, row);
-    this.pend.set(k, row);
+    this.outbox.push(k, row);
     cnt("blkWrote");
     if (this.rows.size > BLK_MAX) this.drop(o.at);
     return true;
@@ -132,7 +103,7 @@ export class BlkFacts {
     this.batch.delete(k);
     // 这个出口刚刚给出整页 ⇒ 之前的封锁结论不成立，连已确认的行一起清掉
     if (this.rows.delete(k)) cnt("blkContra");
-    this.pend.delete(k);
+    this.outbox.drop(k);
   }
 
   /**
@@ -209,7 +180,7 @@ export class BlkFacts {
     for (const ip of cands) {
       const k = host + "|" + ip;
       this.rows.delete(k);
-      this.pend.delete(k);
+      this.outbox.drop(k);
       this.batch.delete(k);
     }
     this.mute.set(host, now + BLK_MUTE);
@@ -220,36 +191,21 @@ export class BlkFacts {
   }
 
   /**
-   * 功能：导出待上报增量。
+   * 功能：导出待上报增量（队列纪律见 `blk-outbox.ts`）。
    * @returns {BlkWire[]} 最多 60 行
    */
   delta(): BlkWire[] {
-    const out: BlkWire[] = [];
-    for (const [k, r] of this.pend) {
-      out.push({ k, n: r.n, at: r.at });
-      this.sent.set(k, r.at);
-      if (out.length >= 60) break;
-    }
-    return out;
+    return this.outbox.delta();
   }
 
   /** 功能：上报成功。@returns {void} */
   ack(): void {
-    // 只清这一批真正发出去的行：delta() 有上限（本表最多 60 行），一次清空全部 pending 会让
-    // 超出上限的行既没发出去、也不再重发 —— 证据就这样永久丢了（v7.143 修）。
-    // 只在值没变新时才清：delta 与 ack 之间可能又记了一条更新的观测，那条还没发过。
-    for (const [k, at] of this.sent) {
-      const cur = this.pend.get(k);
-      if (cur && cur.at <= at) this.pend.delete(k);
-    }
-    this.sent.clear();
+    this.outbox.ack();
   }
 
   /** 功能：上报失败（丢弃待发，事实保留）。@returns {void} */
   nack(): void {
-    this.sent.clear();
-    // 保留 pending：上报失败时下一轮 delta() 会把同一批原样再给一次（重发 = 重试，幂等靠 at）。
-    // 清掉它就等于「这条证据从此不会送到 DO」—— 与 v8 §3 的 pending 语义相反（只有 ack 才清）。
+    this.outbox.nack();
   }
 
   /**
@@ -298,8 +254,7 @@ export class BlkFacts {
   clear(): void {
     this.rows.clear();
     this.batch.clear();
-    this.pend.clear();
-    this.sent.clear();
+    this.outbox.clear();
     this.mute.clear();
   }
 

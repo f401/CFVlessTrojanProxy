@@ -253,6 +253,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `PsFacts`（`PS`） | `src/route/ps-table.ts` | 站点 × 中继「能不能过」成功率表（45 分钟半衰期）；`psfacts.ts` 只做单例与五个薄包装 |
 | `PsOutbox` | `src/route/ps-outbox.ts` | 成功率事实的待上报队列：只有 `ack()` 才清 pending（7.143 曾一次清空 ⇒ 证据永久丢）；`delta()` 上限 60 行，超出的留到下一轮 |
 | `BlkFacts`（`BLK`） | `src/route/blkfacts.ts` | 单 IP 封锁事实（键为站点 + 出口 IP、三批确认、只乘 6 倍代价、站点级自愈） |
+| `BlkOutbox` | `src/route/blk-outbox.ts` | 封锁事实的待上报队列：只有 `ack()` 才清 pending，且只清这一批真的发出去的行（7.143 曾一次清空、超出 60 行上限的证据永久丢） |
 | `DeadFacts` | `src/route/deadfacts.ts` | 中继「连不上」事实（唯一允许把候选挪到队尾的事实） |
 | `CapFacts` | `src/route/capfacts.ts` | 吞吐容量表（相对池内中位数的容量比，带噪声门） |
 | `FactShadow` | `src/route/factshadow.ts` | 事实写入决策器的影子统计（% 形，不参与决策） |
