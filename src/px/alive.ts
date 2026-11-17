@@ -4,7 +4,7 @@
 import { SC } from "../core/const";
 import { S } from "../core/state";
 import { splitRelay } from "../core/http80";
-import { candsFor } from "../nodes/score";
+import { CANDS } from "../nodes/score";
 import { geoLabel } from "./probe";
 import { BUCKET_DEF, SEEDS } from "./seed";
 import { MODES } from "./const";
@@ -241,7 +241,7 @@ export async function pxGet(env: Env) {
   if (!S.alive.size) ALIVE.seedCold();
   for (const m of MODES) {
     if (!S.curs[m]) {
-      const c = candsFor(m);
+      const c = CANDS.list(m);
       if (c.length) S.curs[m] = c[0].k;
     }
   }

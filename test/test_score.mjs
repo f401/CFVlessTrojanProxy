@@ -113,7 +113,7 @@ const reset = () => {
   S.lastSwitch = { lat: 0, tput: 0 };
   S.switchHits = { lat: [], tput: [] };
   // 模拟「新 isolate」：排行表也一起清（生产里池子换代同样会清）
-  S.rankCache = { t: 0, at: {}, v: {}, step: {} };
+  W.CANDS.reset();
 };
 const node = (k, patch = {}) => {
   const i = k.lastIndexOf(":");
@@ -266,7 +266,7 @@ reset();
 node("u:443", { okW: 2, failW: 8, tcp: 50 });
 eq(
   "长期低可用被排除",
-  W.candsFor("lat").some((x) => x.k === "u:443"),
+  W.CANDS.list("lat").some((x) => x.k === "u:443"),
   false,
 );
 
@@ -274,7 +274,7 @@ reset();
 node("small:443", { okW: 0, failW: 1, tcp: 50 });
 ok(
   "小样本失败只软惩罚，不出局",
-  W.candsFor("lat").some((x) => x.k === "small:443"),
+  W.CANDS.list("lat").some((x) => x.k === "small:443"),
   true,
 );
 
@@ -283,7 +283,7 @@ node("e:443", { trafficOkW: 0, eCloseP: 6, tcp: 50 });
 eq("中转后大量空关闭 → 可疑", W.emptyCloseSuspect("e:443"), true);
 eq(
   "可疑节点被排除",
-  W.candsFor("lat").some((x) => x.k === "e:443"),
+  W.CANDS.list("lat").some((x) => x.k === "e:443"),
   false,
 );
 // 空关闭计数必须跟着半衰期衰减，否则老账永远赖着，节点一旦攒够 5 次就被永久排除
@@ -309,8 +309,8 @@ eq(
   const deAlt = await W.SEL.region({}, "DE", "lat", "de1:443");
   eq("地区避开指定节点", deAlt && deAlt.h + ":" + deAlt.p, "de2:443");
   eq("地区无节点返回 null", await W.SEL.region({}, "JP", "lat"), null);
-  eq("nextNode 按国家过滤", W.nextNode("lat", "", "US"), "us1:443");
-  eq("nextNode 避开后无同国节点", W.nextNode("lat", "us1:443", "US"), "");
+  eq("nextNode 按国家过滤", W.CANDS.next("lat", "", "US"), "us1:443");
+  eq("nextNode 避开后无同国节点", W.CANDS.next("lat", "us1:443", "US"), "");
   W.STATS.nsFail("de1:443");
   const deCold = await W.SEL.region({}, "DE", "lat");
   eq("地区跳过冷却节点", deCold && deCold.h + ":" + deCold.p, "de2:443");
@@ -844,32 +844,32 @@ eq("没有标记站点试探", stF.hostTrial === true, false);
 reset();
 node("c1:443", { tcp: 50 });
 node("c2:443", { tcp: 60 });
-W.candsFor("lat");
+W.CANDS.list("lat");
 eq("候选数被记录（观测用）", W.S.candN, 2);
 
 /* ---------- 12. 排行缓存 / 站点中途采样 / latN ---------- */
 reset();
 for (let i = 0; i < 30; i++) node(`m${i}:443`, { tcp: 50 + i, okW: 10 });
-const c30 = W.candsFor("lat");
+const c30 = W.CANDS.list("lat");
 eq("30 个候选全部返回", c30.length, 30);
-ok("大规模下启用了排行缓存", W.S.rankCache.t > 0);
+ok("大规模下启用了排行缓存", (W.CANDS.cache.at.lat || 0) > 0);
 // 排行缓存按模式各算各的：曾经两模式共用 t，tput 重算会给 lat 续命（实际有效期 40 s）
 W.STATS.invalidateRank();
-eq("缓存起点：30 个候选", W.candsFor("lat").length, 30);
-W.S.rankCache.t = Date.now(); // 全局戳是新的……
-W.S.rankCache.at = { lat: Date.now() - 25000, tput: Date.now() }; // ……但 lat 那条是 25 秒前算的
+eq("缓存起点：30 个候选", W.CANDS.list("lat").length, 30);
+W.CANDS.cache.t = Date.now(); // 全局戳是新的……
+W.CANDS.cache.at = { lat: Date.now() - 25000, tput: Date.now() }; // ……但 lat 那条是 25 秒前算的
 node("pm-new:443", { tcp: 90, okW: 10 });
-eq("lat 缓存过期就重算（不被 tput 续命）", W.candsFor("lat").length, 31);
-W.S.rankCache.at = { lat: Date.now(), tput: Date.now() - 25000 };
+eq("lat 缓存过期就重算（不被 tput 续命）", W.CANDS.list("lat").length, 31);
+W.CANDS.cache.at = { lat: Date.now(), tput: Date.now() - 25000 };
 node("pm-new2:443", { tcp: 91, okW: 10 });
-eq("lat 缓存新鲜就复用（不白算）", W.candsFor("lat").length, 31);
+eq("lat 缓存新鲜就复用（不白算）", W.CANDS.list("lat").length, 31);
 
 // 线上 alive 实测就是 18 个：低于 CAND_CACHE_MIN(24)，排行全程现算
 reset();
 for (let i = 0; i < 18; i++) node(`n18-${i}:443`, { tcp: 60 + i, okW: 10 });
 W.STATS.invalidateRank();
-eq("18 个候选全部返回", W.candsFor("lat").length, 18);
-eq("18 个节点（线上实测值）不启用排行缓存", W.S.rankCache.t, 0);
+eq("18 个候选全部返回", W.CANDS.list("lat").length, 18);
+eq("18 个节点（线上实测值）不启用排行缓存", W.CANDS.cache.at.lat || 0, 0);
 
 /* 探活失败要分原因：err 可能是地区/线路，notTls/noCf 是节点事实 */
 W.S.probeWhy = {};
@@ -899,7 +899,7 @@ ok("lat：探活高估被真实样本纠正", W.scoreParts("shy2:443", "lat").la
 W.STATS.nsGet(c30[0].k).blackUntil = Date.now() + 60000;
 eq(
   "缓存之外仍会过滤黑名单",
-  W.candsFor("lat").some((x) => x.k === c30[0].k),
+  W.CANDS.list("lat").some((x) => x.k === c30[0].k),
   false,
 );
 
@@ -973,9 +973,9 @@ reset();
   W.STATS.nsSiteFail("sitefail:443");
   ok("站点失败只加 0.2 全局权重", Math.abs(s.failW - beforeFail - 0.2) < 1e-9, String(s.failW));
   eq("站点失败不进冷却阶梯", s.blackUntil, beforeBlack);
-  W.S.rankCache.t = 12345;
+  W.CANDS.cache.t = 12345;
   W.STATS.nsSiteFail("sitefail:443");
-  eq("站点失败不再清空全局排行缓存", W.S.rankCache.t, 12345);
+  eq("站点失败不再清空全局排行缓存", W.CANDS.cache.t, 12345);
 }
 
 reset();
@@ -1421,7 +1421,7 @@ node("rde1:443", { tcp: 60, tls: 10, okW: 5, failW: 0, trafficOkW: 5, eCloseP: 6
 node("rde2:443", { tcp: 180, tls: 20, okW: 20, failW: 1, trafficOkW: 20, eCloseP: 0 });
 S.alive.get("rde1:443").cc = "DE";
 S.alive.get("rde2:443").cc = "DE";
-eq("可疑节点进不了全局候选", W.candsFor("lat").some((x) => x.k === "rde1:443"), false);
+eq("可疑节点进不了全局候选", W.CANDS.list("lat").some((x) => x.k === "rde1:443"), false);
 const rOk = await W.SEL.region({}, "DE", "lat");
 eq("地区选路跳过可疑节点", rOk && rOk.h + ":" + rOk.p, "rde2:443");
 W.STATS.nsFail("rde2:443"); // 冷却 → 硬排除
@@ -1639,14 +1639,14 @@ ok("聚合后的下行字节累加", cl.length === 1 && cl[0].dn === 4096, cl.le
 reset();
 for (let i = 0; i < 1300; i++) node(`b${i}:443`, { tcp: 50 + i, okW: 10 });
 W.STATS.invalidateRank();
-const br1 = W.candsFor("lat");
+const br1 = W.CANDS.list("lat");
 ok("大池分片：首片就能给出候选", br1.length > 0 && br1.length <= 128, String(br1.length));
-eq("大池分片：每片只推进 128 个", W.S.rankCache.step.lat.pos, 128);
+eq("大池分片：每片只推进 128 个", W.CANDS.cache.step.lat.pos, 128);
 ok("大池分片：首片只覆盖前 128 个", !br1.some((r) => r.k === "b200:443"), String(br1.length));
-for (let i = 0; i < 12 && W.S.rankCache.step.lat; i++) W.candsFor("lat");
-eq("大池分片：一轮算完清掉进度", W.S.rankCache.step.lat, undefined);
-eq("大池分片：一轮之后全局最优在榜首", W.candsFor("lat")[0].k, "b0:443");
-ok("大池分片：表里仍有 CAND_KEEP 名", W.candsFor("lat").length >= 224, String(W.candsFor("lat").length));
+for (let i = 0; i < 12 && W.CANDS.cache.step.lat; i++) W.CANDS.list("lat");
+eq("大池分片：一轮算完清掉进度", W.CANDS.cache.step.lat, undefined);
+eq("大池分片：一轮之后全局最优在榜首", W.CANDS.list("lat")[0].k, "b0:443");
+ok("大池分片：表里仍有 CAND_KEEP 名", W.CANDS.list("lat").length >= 224, String(W.CANDS.list("lat").length));
   /* ---------- 29. 强制中转名单（CF 托管站点首连就走 proxyip） ---------- */
   const eDef = {};
   ok("未配置名单 = 空（改由 CF 托管识别决定）", W.pxHostList(eDef).length === 0 && W.isPxHost(eDef, "x.com") === false);
@@ -5525,11 +5525,11 @@ try {
   }
   W.S.candN = 0;
   W.STATS.invalidateRank();
-  W.candsFor("lat");
+  W.CANDS.list("lat");
   eq("切片中途不写 candN（旧代码会把 128 当池子大小）", W.S.candN, 0);
   let calls212 = 1;
   while (W.S.candN === 0 && calls212 < 40) {
-    W.candsFor("lat");
+    W.CANDS.list("lat");
     calls212++;
   }
   eq("扫完整轮才写 candN", W.S.candN, N212);
@@ -5550,12 +5550,12 @@ try {
   const g213keys = ["10.213.0.1:443", "10.213.0.2:443", "10.213.0.3:443"];
   const g213host = "h213.test";
   const oldAlive = W.S.alive;
-  const oldRank = W.S.rankCache;
+  const oldRank = W.CANDS.cache;
   const setup213 = () => {
     W.S.alive = new Map();
     for (const k of g213keys) W.S.alive.set(k, { h: k.slice(0, k.lastIndexOf(":")), p: 443, cc: "HK" });
     W.S.hostNode.delete(g213host);
-    W.S.rankCache = { t: 0, at: {}, v: {}, step: {} };
+    W.CANDS.cache = { t: 0, at: {}, v: {}, step: {} };
   };
   setup213();
   const a213 = W.HOSTS.untried(g213host, "lat");
@@ -5572,10 +5572,10 @@ try {
   ok("全都在窗口内时退回一条，不能返回空串", Boolean(c213), c213);
   W.S.alive = new Map([[g213keys[0], { h: "10.213.0.1", p: 443, cc: "HK" }]]);
   W.S.hostNode.delete(g213host);
-  W.S.rankCache = { t: 0, at: {}, v: {}, step: {} };
+  W.CANDS.cache = { t: 0, at: {}, v: {}, step: {} };
   eq("只有一条候选时在同一条上再试", W.HOSTS.untried(g213host, "lat"), g213keys[0]);
   W.S.alive = oldAlive;
-  W.S.rankCache = oldRank;
+  W.CANDS.cache = oldRank;
 
   const stSrc = statAll();
   const stCode = stSrc.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\/\/.*$/, "")).join("\n");
@@ -8561,16 +8561,16 @@ console.log("\n[287] 判定表只有一个文件：类型、表本体、单例�
   // 代价层是纯计算：两个入口 + 一个分解类型
   ok("代价层只有两个函数", (src.match(/^export function (scoreParts|costOf)\(/gm) || []).length === 2, "");
   // 候选表层把 CAND_* 收成私有常量（外部不该知道 224/64/128 这些数）
-  ok("候选表层四个入口齐备",
-    ["export function rankedCands", "export function candsFor", "export function nextNode", "export function bestFor"]
-      .every((n) => src.includes(n)), "");
+  ok("候选表层是类且四个入口齐备",
+    ["ranked", "list", "next", "best"].every((n) => typeof W.CANDS[n] === "function"),
+    "");
   ok("候选表常量不再导出", !/export const CAND_/.test(src), "");
-  ok("这一层不定义类", !/^export class /m.test(src), "");
+  ok("候选表是类（缓存与分片游标是它的字段）", /^export class CandidateBoard /m.test(src), "");
   // 行为面：门面转发仍然指向真实实现
   ok("scoreParts 仍能算分解", typeof W.scoreParts("g288:443", "lat").score === "number", "");
   W.S.alive.set("g288:443", { h: "g288", p: 443, cc: "", ms: 120 });
-  ok("candsFor 仍看得到存活表", W.candsFor("lat").some((r) => r.k === "g288:443"), "");
-  ok("bestFor 返回存活表里的键", typeof W.bestFor("lat") === "string" && W.bestFor("lat").length > 0, W.bestFor("lat"));
+  ok("候选表仍看得到存活表", W.CANDS.list("lat").some((r) => r.k === "g288:443"), "");
+  ok("bestFor 返回存活表里的键", typeof W.CANDS.best("lat") === "string" && W.CANDS.best("lat").length > 0, W.CANDS.best("lat"));
   ok("usable 认可用", W.usable("g288:443") === true, "");
   W.freezeNode("g288:443");
   ok("冻结后立即不可用", W.usable("g288:443") === false && W.isFrozen("g288:443") === true, "");
@@ -9361,6 +9361,43 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("规格表是只读声明", dbg.includes("readonly specs: readonly ProbeSpec[]"), "");
   eq("组合根是唯一实例", W.DEBUG === W.DEBUG, true);
   ok("源码文件数仍在预算内", fs.readdirSync("src", { recursive: true }).filter((f) => String(f).endsWith(".ts")).length <= 113, "");
+}
+
+// 第 315 组：候选表成为一个对象（缓存与分片游标不再是 S 上的全局变量）
+{
+  const scoreSrc315 = fs.readFileSync("src/nodes/score.ts", "utf8");
+  const statSrc315 = fs.readFileSync("src/nodes/stat.ts", "utf8");
+  ok("四个入口不再是模块函数", !/^export function (rankedCands|candsFor|nextNode|bestFor)\(/m.test(scoreSrc315), "");
+  ok("候选表是类且带单例", /^export class CandidateBoard /m.test(scoreSrc315) && /^export const CANDS = new CandidateBoard\(\);/m.test(scoreSrc315), "");
+  ok("缓存与分片游标是它的字段", /readonly cache: RankCache = \{ gen: 0, at: \{\}, v: \{\}, step: \{\} \};/.test(scoreSrc315), "");
+  ok("作废走代际号（stat.ts 不必反向 import）", /S\.rankGen \+= 1;/.test(statSrc315), "");
+  ok("S 上不再有排行缓存对象", !("rankCache" in W.S), "");
+  eq("代际号是数字", typeof W.S.rankGen, "number");
+  eq("四个方法都在实例上", ["ranked", "list", "next", "best"].every((n) => typeof W.CANDS[n] === "function"), true);
+  // 行为面：作废只清时间戳，排行与分片进度留着（失败密集时不退化成半张表）
+  W.S.alive.clear();
+  W.S.nstat.clear();
+  W.CANDS.reset();
+  W.S.alive.set("c315a:443", { h: "c315a", p: 443, cc: "US", ms: 80 });
+  W.S.alive.set("c315b:443", { h: "c315b", p: 443, cc: "JP", ms: 200 });
+  for (let i = 0; i < 30; i++) {
+    W.S.alive.set("fill" + i + ":443", { h: "fill" + i, p: 443, cc: "US", ms: 90 + i });
+  }
+  const first = W.CANDS.list("lat");
+  ok("候选表给出排行", first.length > 0, String(first.length));
+  const stamp = W.CANDS.cache.at.lat;
+  ok("排行写了时间戳", typeof stamp === "number" && stamp > 0, String(stamp));
+  W.STATS.invalidateRank();
+  eq("作废后代际号变了", W.S.rankGen > 0, true);
+  W.CANDS.list("lat");
+  ok("作废只换代际号，不清排行", W.CANDS.cache.v.lat.length > 0, "");
+  W.CANDS.list("lat"); // 惰性自清 + 重算一行
+  eq("自清后代际号对齐", W.CANDS.cache.gen, W.S.rankGen);
+  eq("next 跳过指定节点", W.CANDS.next("lat", "c315a:443") === "c315a:443", false);
+  eq("next 能按国家码限定", W.CANDS.next("lat", "", "JP").endsWith(":443"), true);
+  eq("best 给第一名", typeof W.CANDS.best("lat"), "string");
+  W.CANDS.reset();
+  eq("reset 清空缓存", W.CANDS.cache.at.lat || 0, 0);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

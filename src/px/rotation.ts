@@ -5,7 +5,7 @@ import { SC } from "../core/const";
 import { logErr } from "../nodes/metrics";
 import { MODES } from "./const";
 import { cnt } from "../core/counter";
-import { candsFor, isBlack, isFrozen, scoreParts } from "../nodes/score";
+import { isBlack, isFrozen, scoreParts, CANDS } from "../nodes/score";
 import { S } from "../core/state";
 
 /**
@@ -30,7 +30,7 @@ export class Rotation {
     const m = mode === "lat" ? "lat" : "tput";
     const now = Date.now();
     const cur = S.curs[m];
-    const cands = candsFor(m);
+    const cands = CANDS.list(m);
     if (!cands.length) return false;
     const best = cands[0];
     if (!cur) {
@@ -90,7 +90,7 @@ export class Rotation {
     if (!last) return;
     if (Date.now() - last < h * 3600000) return;
     for (const m of MODES) {
-      const cands = candsFor(m);
+      const cands = CANDS.list(m);
       if (cands.length < 2) continue;
       const bs = cands[0].v;
       const pair = cands.filter((x) => x.v <= bs * 1.3).slice(0, 2);

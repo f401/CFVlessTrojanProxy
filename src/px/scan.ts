@@ -1,6 +1,6 @@
 import { S } from "../core/state";
 import { logErr } from "../nodes/metrics";
-import { STATS, candsFor, isBlack, isFrozen } from "../nodes/score";
+import { STATS, isBlack, isFrozen, CANDS } from "../nodes/score";
 import { PROBE_COOL, pxGet, bumpProbeBad, noteProbe, ALIVE, ALIVE_MAX } from "./alive";
 import { POOL_TTL_MS, refillPool, probeSni, chunks, probeProxy } from "./probe";
 import { commitPool, ensurePool } from "./poolgen";
@@ -173,7 +173,7 @@ export class ScanAlive {
    */
   keys(): string[] {
     const cur = S.curs.tput || S.curs.lat || "";
-    const top3 = candsFor("tput")
+    const top3 = CANDS.list("tput")
       .map((x) => x.k)
       .filter((k) => k !== cur)
       .slice(0, 3);

@@ -204,167 +204,236 @@ export function costOf(k: string, mode: Mode, now = Date.now()): number {
   return scoreParts(k, mode, now).score;
 }
 
-// ---- 并入自 score-cands.ts ----
-/* 候选表：把「谁能进候选、按什么顺序」这一件事单独放一层。
+// ---- 候选表（CandidateBoard） ----
+/* 候选表：把「谁能进候选、按什么顺序」这一件事收成一个对象。
    排行缓存只冻结排序，不冻结「能不能用」——这一条是 7.37 用 22 条失败单测换来的：
-   曾经把 `usable()` 的结果一起缓存，节点被判死后缓存还在把它推荐出去。 */
+   曾经把 `usable()` 的结果一起缓存，节点被判死后缓存还在把它推荐出去。
 
-const CAND_TTL = 20000;      // 排行缓存寿命（按模式各记各的时间）
-const CAND_CACHE_MIN = 24;   // 候选少的时候不必缓存（重算也就几十 µs）
-const CAND_KEEP = 224;       // 排行榜只留前 N 名（抽样只看前 64 + 64 个样本不足的）
-const CAND_EXTRA = 64;       // 额外兜一批样本不足的节点，否则新节点永远进不了抽样池
-const CAND_SLICE = 128;      // 分片重建：每次最多给多少个节点打分（2000 候选一次算完要 4 ms）
-const CAND_SLICE_MIN = 1200; // 池子大于这个数才分片：800 个候选整算 1.6 ms 还吃得下，2000 个就要 4 ms
+   为什么是类而不是四个模块函数：`ranked`/`list`/`next`/`best` 共用同一份排行缓存与
+   同一份分片游标（大池一次算不完，靠每次挑选顺带推进一片），这两样东西没有第二个
+   消费者，也不该躺在 `S` 里当第七十一个全局变量。
+   作废走 `S.rankGen` 代际号：统计表改了节点状态就 +1，本对象下次排行时发现代际变了
+   就地自清——这样 `nodes/stat.ts` 不必反过来 import 本文件（那是文件级循环）。 */
 
-/**
- * 功能：一次算完的排行（小池与「大池冷启动」走这条路）。
- *
- * 只保留前 CAND_KEEP 名 + 最多 CAND_EXTRA 个样本不足的节点：前者决定「谁最快」，
- * 后者保证新节点也有机会进抽样池（否则它们永远拿不到样本，也就永远进不了排行）。
- * @param m 模式
- * @param now 当前时间戳
- * @returns 按代价升序的候选行
- */
-function buildCands(m: Mode, now: number): RankRow[] {
-  const top: RankRow[] = [];
-  let usableN = 0;
-  for (const k of S.alive.keys()) {
-    if (!usable(k)) continue;
-    usableN++;
-    const v = costOf(k, m);
-    if (top.length < CAND_KEEP || v < top[top.length - 1].v) {
-      let lo = 0;
-      let hi = top.length;
-      while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        // 相等时插在后面：保持插入顺序（同价节点按 alive 顺序，结果可复现）
-        if (top[mid].v <= v) lo = mid + 1;
-        else hi = mid;
-      }
-      top.splice(lo, 0, { k, v });
-      if (top.length > CAND_KEEP) top.pop();
-    }
-  }
-  const seen = new Set(top.map((r) => r.k));
-  let extra = 0;
-  for (const k of S.alive.keys()) {
-    if (extra >= CAND_EXTRA) break;
-    if (seen.has(k) || !usable(k)) continue;
-    const s = S.nstat.get(k);
-    if (s && s.okW + s.failW >= SC.N_EFF_MIN) continue;
-    top.push({ k, v: costOf(k, m) });
-    seen.add(k);
-    extra++;
-  }
-  S.candN = usableN;
-  // 小池不写缓存：否则一次 2 节点的小算例会把后面 30 节点的算例喂成旧表
-  if (S.alive.size >= CAND_CACHE_MIN) {
-    const c = S.rankCache;
-    S.rankCache = { ...c, t: now, at: { ...c.at, [m]: now }, v: { ...c.v, [m]: top } };
-  }
-  return top;
+/** 排行缓存：`gen` 是写入时的代际号，与 `S.rankGen` 不等即时间戳作废 */
+interface RankCache {
+  gen: number;
+  at: Partial<Record<Mode, number>>;
+  v: Partial<Record<Mode, RankRow[]>>;
+  step: Partial<Record<Mode, RankCursor>>;
+}
+
+/** 分片重建的游标：大池一次算不完，用每次挑选顺带推进一片 */
+interface RankCursor {
+  keys: string[];
+  pos: number;
+  top: RankRow[];
+  extra: RankRow[];
+  ok: number;
 }
 
 /**
- * 功能：候选排行（按代价升序）。大池分片重建：每次调用只给 CAND_SLICE 个节点打分，
- * 边算边维护有界的前 CAND_KEEP 名（不做事后排序），2000 候选不再有 4 ms 的重建尖峰。
- * @param mode 模式
- * @returns 按代价升序的候选行（分片中途返回的是半程结果或上一轮缓存）
+ * 功能：候选表 —— 排行、过滤、挑下一个、取最优，缓存与分片进度由自己持有。
  */
-export function rankedCands(mode: Mode): RankRow[] {
-  const m: Mode = mode === "tput" ? "tput" : "lat";
-  const now = Date.now();
-  const c = S.rankCache;
-  // 小池不进缓存：测试与冷启动都要看到当前真实列表
-  const cached = S.alive.size >= CAND_CACHE_MIN ? c.v[m] : undefined;
-  if (cached && c.t && now - (c.at[m] || 0) < CAND_TTL) return cached;
-  if (S.alive.size < CAND_CACHE_MIN || S.alive.size < CAND_SLICE_MIN) return buildCands(m, now);
-  const steps = c.step || (c.step = {});
-  let st = steps[m];
-  if (!st) {
-    st = { keys: [...S.alive.keys()], pos: 0, top: [], extra: [], ok: 0 };
-    c.step[m] = st;
+export class CandidateBoard {
+  /** 排行缓存寿命（按模式各记各的时间） */
+  private static readonly TTL = 20000;
+  /** 候选少的时候不必缓存（重算也就几十 µs） */
+  private static readonly CACHE_MIN = 24;
+  /** 排行榜只留前 N 名（抽样只看前 64 + 64 个样本不足的） */
+  private static readonly KEEP = 224;
+  /** 额外兜一批样本不足的节点，否则新节点永远进不了抽样池 */
+  private static readonly EXTRA = 64;
+  /** 分片重建：每次最多给多少个节点打分（2000 候选一次算完要 4 ms） */
+  private static readonly SLICE = 128;
+  /** 池子大于这个数才分片：800 个候选整算 1.6 ms 还吃得下，2000 个就要 4 ms */
+  private static readonly SLICE_MIN = 1200;
+
+  /** 排行缓存与分片游标（对象身份不变，测试与调用点可以直接看） */
+  readonly cache: RankCache = { gen: 0, at: {}, v: {}, step: {} };
+
+  /** 功能：清空缓存与分片进度（分片中途换池子、测试之间复位用）。 */
+  reset(): void {
+    const c = this.cache;
+    c.gen = S.rankGen;
+    c.at = {};
+    c.v = {};
+    c.step = {};
   }
-  const end = Math.min(st.keys.length, st.pos + CAND_SLICE);
-  for (let i = st.pos; i < end; i++) {
-    const k = st.keys[i];
-    if (!usable(k)) continue;
-    st.ok++;
-    const v = costOf(k, m);
-    if (st.top.length < CAND_KEEP || v < st.top[st.top.length - 1].v) {
-      let lo = 0;
-      let hi = st.top.length;
-      while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        // 相等时插在后面：保持插入顺序（同价节点按 alive 顺序，结果可复现）
-        if (st.top[mid].v <= v) lo = mid + 1;
-        else hi = mid;
+
+  /**
+   * 功能：候选排行（按代价升序）。大池分片重建：每次调用只给 128 个节点打分，
+   * 边算边维护有界的前 224 名（不做事后排序），2000 候选不再有 4 ms 的重建尖峰。
+   * @param mode 模式
+   * @returns 按代价升序的候选行（分片中途返回的是半程结果或上一轮缓存）
+   */
+  ranked(mode: Mode): RankRow[] {
+    const m: Mode = mode === "tput" ? "tput" : "lat";
+    this.sync();
+    const now = Date.now();
+    const c = this.cache;
+    // 小池不进缓存：测试与冷启动都要看到当前真实列表
+    const cached = S.alive.size >= CandidateBoard.CACHE_MIN ? c.v[m] : undefined;
+    if (cached && now - (c.at[m] || 0) < CandidateBoard.TTL) return cached;
+    if (S.alive.size < CandidateBoard.CACHE_MIN || S.alive.size < CandidateBoard.SLICE_MIN) {
+      return this.build(m, now);
+    }
+    let st = c.step[m];
+    if (!st) {
+      st = { keys: [...S.alive.keys()], pos: 0, top: [], extra: [], ok: 0 };
+      c.step[m] = st;
+    }
+    const end = Math.min(st.keys.length, st.pos + CandidateBoard.SLICE);
+    for (let i = st.pos; i < end; i++) {
+      const k = st.keys[i];
+      if (!usable(k)) continue;
+      st.ok++;
+      const v = costOf(k, m);
+      if (st.top.length < CandidateBoard.KEEP || v < st.top[st.top.length - 1].v) {
+        this.insert(st.top, { k, v });
+      } else if (st.extra.length < CandidateBoard.EXTRA) {
+        const s = S.nstat.get(k);
+        if (!(s && s.okW + s.failW >= SC.N_EFF_MIN)) st.extra.push({ k, v });
       }
-      st.top.splice(lo, 0, { k, v });
-      if (st.top.length > CAND_KEEP) st.top.pop();
-    } else if (st.extra.length < CAND_EXTRA) {
+    }
+    st.pos = end;
+    // 只有整轮扫完才写 S.candN：切片中途的 st.ok 只是「扫过这一段」里的可用数，
+    // 被抽样器当成池子大小会让抽样宽度与 β 在同一个池子里来回跳（7.211）
+    if (st.pos >= st.keys.length) S.candN = st.ok;
+    if (st.pos < st.keys.length) {
+      // 半程不重发表格（省掉每次挑选一次 concat）；只有冷启动时才把半程结果先用起来
+      if (cached) return cached;
+      c.v[m] = st.top;
+      return st.top;
+    }
+    const rows = st.extra.length ? st.top.concat(st.extra) : st.top;
+    delete c.step[m];
+    this.stamp(m, now);
+    c.v[m] = rows;
+    return rows;
+  }
+
+  /**
+   * 功能：候选列表（已按黑名单/冻结过滤，按代价升序）。
+   *
+   * 缓存只冻结排序、不冻结「能不能用」：每一行都在这里重新过一遍 `alive`/`isBlack`/`isFrozen`。
+   * @param mode 模式
+   * @returns 过滤后的候选行
+   */
+  list(mode: Mode): RankRow[] {
+    const out: RankRow[] = [];
+    for (const r of this.ranked(mode)) {
+      if (S.alive.has(r.k) && !isBlack(r.k) && !isFrozen(r.k)) out.push(r);
+    }
+    return out;
+  }
+
+  /**
+   * 功能：下一个候选（可跳过 `avoid`，可限定国家码）。
+   * @param mode 模式
+   * @param avoid 要跳过的节点键（通常是刚失败的那条）
+   * @param cc 限定国家码（大小写不敏感，空值表示不限定）
+   * @returns 节点键，没有可用候选时返回空串
+   */
+  next(mode: Mode, avoid: string, cc?: string | null): string {
+    const want = String(cc || "").toUpperCase();
+    for (const x of this.list(mode)) {
+      if (x.k === avoid) continue;
+      if (want) {
+        const a = S.alive.get(x.k);
+        if (!a || String(a.cc || "").toUpperCase() !== want) continue;
+      }
+      return x.k;
+    }
+    return "";
+  }
+
+  /**
+   * 功能：当前最优（候选表第一名的键）。
+   * @param mode 模式
+   * @returns 节点键，没有候选时返回空串
+   */
+  best(mode: Mode): string {
+    const c = this.list(mode);
+    return c.length ? c[0].k : "";
+  }
+
+  /** 功能：代际号变了就把时间戳作废（排行与分片进度留着，见 `invalidateRank` 的理由）。 */
+  private sync(): void {
+    if (this.cache.gen === S.rankGen) return;
+    this.cache.gen = S.rankGen;
+    this.cache.at = {};
+  }
+
+  /**
+   * 功能：写一个模式的完成时间戳，并同步代际号。
+   * @param m 模式
+   * @param now 完成时刻
+   */
+  private stamp(m: Mode, now: number): void {
+    const c = this.cache;
+    c.gen = S.rankGen;
+    c.at = { ...c.at, [m]: now };
+  }
+
+  /**
+   * 功能：把一行按代价插进有界的有序表（相等时插在后面：保持 alive 顺序，结果可复现）。
+   * @param top 有序表（就地改）
+   * @param row 待插入行
+   */
+  private insert(top: RankRow[], row: RankRow): void {
+    let lo = 0;
+    let hi = top.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (top[mid].v <= row.v) lo = mid + 1;
+      else hi = mid;
+    }
+    top.splice(lo, 0, row);
+    if (top.length > CandidateBoard.KEEP) top.pop();
+  }
+
+  /**
+   * 功能：一次算完的排行（小池与「大池冷启动」走这条路）。
+   *
+   * 只保留前 224 名 + 最多 64 个样本不足的节点：前者决定「谁最快」，
+   * 后者保证新节点也有机会进抽样池（否则它们永远拿不到样本，也就永远进不了排行）。
+   * @param m 模式
+   * @param now 当前时间戳
+   * @returns 按代价升序的候选行
+   */
+  private build(m: Mode, now: number): RankRow[] {
+    const top: RankRow[] = [];
+    let usableN = 0;
+    for (const k of S.alive.keys()) {
+      if (!usable(k)) continue;
+      usableN++;
+      const v = costOf(k, m);
+      if (top.length < CandidateBoard.KEEP || v < top[top.length - 1].v) this.insert(top, { k, v });
+    }
+    const seen = new Set(top.map((r) => r.k));
+    let extra = 0;
+    for (const k of S.alive.keys()) {
+      if (extra >= CandidateBoard.EXTRA) break;
+      if (seen.has(k) || !usable(k)) continue;
       const s = S.nstat.get(k);
-      if (!(s && s.okW + s.failW >= SC.N_EFF_MIN)) st.extra.push({ k, v });
+      if (s && s.okW + s.failW >= SC.N_EFF_MIN) continue;
+      top.push({ k, v: costOf(k, m) });
+      seen.add(k);
+      extra++;
     }
-  }
-  st.pos = end;
-  // 只有整轮扫完才写 S.candN：切片中途的 st.ok 只是「扫过这一段」里的可用数，
-  // 被抽样器当成池子大小会让抽样宽度（kMax 档）与 β 在同一个池子里来回跳（7.211）
-  if (st.pos >= st.keys.length) S.candN = st.ok;
-  if (st.pos < st.keys.length) {
-    // 半程不重发表格（省掉每 pick 一次 concat）；只有冷启动时才把半程结果先用起来
-    if (cached) return cached;
-    S.rankCache = { ...c, v: { ...c.v, [m]: st.top } };
-    return st.top;
-  }
-  const rows = st.extra.length ? st.top.concat(st.extra) : st.top;
-  delete c.step[m];
-  S.rankCache = { ...c, t: now, at: { ...c.at, [m]: now }, v: { ...c.v, [m]: rows } };
-  return rows;
-}
-
-/**
- * 功能：候选列表（已按黑名单/冻结过滤，按代价升序）。
- *
- * 缓存只冻结排序、不冻结「能不能用」：每一行都在这里重新过一遍 `alive`/`isBlack`/`isFrozen`。
- * @param mode 模式
- * @returns 过滤后的候选行
- */
-export function candsFor(mode: Mode): RankRow[] {
-  const out: RankRow[] = [];
-  for (const r of rankedCands(mode)) if (S.alive.has(r.k) && !isBlack(r.k) && !isFrozen(r.k)) out.push(r);
-  return out;
-}
-
-/**
- * 功能：下一个候选（可跳过 `avoid`，可限定国家码）。
- * @param mode 模式
- * @param avoid 要跳过的节点键（通常是刚失败的那条）
- * @param cc 限定国家码（大小写不敏感，空值表示不限定）
- * @returns 节点键，没有可用候选时返回空串
- */
-export function nextNode(mode: Mode, avoid: string, cc?: string | null): string {
-  const want = String(cc || "").toUpperCase();
-  for (const x of candsFor(mode)) {
-    if (x.k === avoid) continue;
-    if (want) {
-      const a = S.alive.get(x.k);
-      if (!a || String(a.cc || "").toUpperCase() !== want) continue;
+    S.candN = usableN;
+    // 小池不写缓存：否则一次 2 节点的小算例会把后面 30 节点的算例喂成旧表
+    if (S.alive.size >= CandidateBoard.CACHE_MIN) {
+      this.stamp(m, now);
+      this.cache.v[m] = top;
     }
-    return x.k;
+    return top;
   }
-  return "";
 }
 
-/**
- * 功能：当前最优（候选表第一名的键）。
- * @param mode 模式
- * @returns 节点键，没有候选时返回空串
- */
-export function bestFor(mode: Mode): string {
-  const c = candsFor(mode);
-  return c.length ? c[0].k : "";
-}
+/** 进程内唯一的候选表 */
+export const CANDS = new CandidateBoard();
 
 // ---- 门面（对外导出面保持不变） ----
 /* 节点评分门面：按「读哪些表、改哪些表」把原来的 371 行拆成三层，本文件只做再导出，

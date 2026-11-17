@@ -1,4 +1,4 @@
-import { nextNode, STATS } from "../nodes/score";
+import { STATS, CANDS } from "../nodes/score";
 import { SOCKET_DIALER } from "./socket-dialer";
 import { logErr } from "../nodes/metrics";
 import { isCfIp } from "../core/net";
@@ -31,7 +31,7 @@ export async function dialAnother(
 ): Promise<Socket | null> {
   let avoid = st.node;
   for (let n = 0; n < ALT_TRIES; n++) {
-    const alt = nextNode(mode, avoid, cc);
+    const alt = CANDS.next(mode, avoid, cc);
     if (!alt || alt === avoid) return null;
     avoid = alt;
     const [host, port] = splitRelay(alt, 443);

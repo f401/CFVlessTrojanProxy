@@ -1,7 +1,7 @@
 import { RTT_MAX, SC } from "../core/const";
 import { S } from "../core/state";
 import { getSnap, kvGetStrict } from "../store/index";
-import { TEN_MB, candsFor, costOf, isBlack, isFrozen } from "./score";
+import { TEN_MB, costOf, isBlack, isFrozen, CANDS } from "./score";
 
 // ---- 并入自 rtt.ts ----
 // 入口 RTT 学习：按用户记「入口标签 → RTT / 机房 / 带宽 / 成败」，供订阅里的入口排序使用。
@@ -299,7 +299,7 @@ export class HostProfile {
     }
     // 只有样本少于 2 个时才把"没试过的节点"按全局分补进来（冷启动用）
     if (out.length < 2) {
-      for (const r of candsFor(mode)) {
+      for (const r of CANDS.list(mode)) {
         if (m && m.has(r.k)) continue;
         out.push({ k: r.k, v: r.v + 300 });
       }
@@ -327,7 +327,7 @@ export class HostProfile {
     // 试探就白做了（这个站只多了一行样本）。lastTry 正是为此写的，7.212 接上。
     const now = Date.now();
     let recent = "";
-    for (const r of candsFor(mode)) {
+    for (const r of CANDS.list(mode)) {
       if (m && m.has(r.k)) continue;
       const s = S.nstat.get(r.k);
       if (s && now - (s.lastTry || 0) < SC.UNTRIED_GAP) {

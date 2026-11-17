@@ -11,7 +11,7 @@ import { S } from "../core/state";
 import { shadowRate } from "../core/util";
 import { hostKey, HOSTS } from "../nodes/metrics";
 import { cnt } from "../core/counter";
-import { bestFor, candsFor, costOf, isBlack, isFrozen, usable, STATS } from "../nodes/score";
+import { costOf, isBlack, isFrozen, usable, STATS, CANDS } from "../nodes/score";
 import { pickThom } from "./ts";
 import { relayIpOf } from "../core/http80";
 import { HOOK } from "../core/hook";
@@ -95,7 +95,7 @@ export class SitePick {
     // 以前会一直把连接拨到这个死地址，直到 cron 的 maybeSwitch 才发现。
     // 游标只做面板/健康展示：真正走谁由 ③ 的单层抽样器决定。
     if (!cur || !S.alive.has(cur) || isBlack(cur) || isFrozen(cur)) {
-      cur = bestFor(m);
+      cur = CANDS.best(m);
       S.curs[m] = cur;
     }
     if (!cur) cnt("noCand");
@@ -190,7 +190,7 @@ export class SitePick {
     let alt = "";
     let bv = Infinity;
     // 只在候选表前 8 条里找：更靠后的候选本来就慢，换过去是「换个人排队」不是「少排队」
-    for (const x of candsFor(mode).slice(0, 8)) {
+    for (const x of CANDS.list(mode).slice(0, 8)) {
       if (x.k === key) continue;
       // 代价超过 1.5 倍就宁可排队：溢出的目的是削峰，不是把流量送给慢节点
       if (x.v > cur * 1.5) continue;
@@ -317,7 +317,7 @@ export class PathPrefs {
     }
     if (!nk) return "";
     // 只有与全局最优可比时才用（1.5 倍 + 50ms 带内），否则优势不足以抵消「量过的那条更快」
-    const top = candsFor(mode)[0];
+    const top = CANDS.list(mode)[0];
     const av = top ? top.v : Infinity;
     return nv <= av * 1.5 + 50 ? nk : "";
   }
@@ -374,7 +374,7 @@ export class PathPrefs {
     let best = "";
     let bv = Infinity;
     // 这里用的是候选表：换通道时仍然要按「代价」挑，而不是随便找一条没被判死的
-    for (const x of candsFor(mode)) {
+    for (const x of CANDS.list(mode)) {
       if (exclude && exclude.has(x.k)) continue;
       if (isBlack(x.k) || isFrozen(x.k)) continue;
       // chanPref ≥ 2 就是「这条中继对这个站已被实测判死（403/不可达）」

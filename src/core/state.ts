@@ -55,15 +55,10 @@ export class AppState {
   funnel: Record<string, number> = { direct: 0, node: 0, v6: 0 };
   candN = 0; // 最近一次 candsFor 的候选数（观测用）
   inflight: Map<string, number> = new Map(); // 节点在途连接数（负载均衡用）
-  // 候选排行缓存：只在大规模（alive≥24）时启用，各模式各自 20 秒
-  // t 是全局作废戳（0 = 作废），at[m] 是该模式真正写入的时间
-  rankCache: {
-    t: number;
-    at: Record<string, number>;
-    v: Record<string, RankRow[]>;
-    // 分片重建：大池一次算不完，用每次 pick 顺带推进一片，期间继续用上一版排行
-    step: Record<string, { keys: string[]; pos: number; top: RankRow[]; extra: RankRow[]; ok: number }>;
-  } = { t: 0, at: {}, v: {}, step: {} };
+  // 候选排行的作废代数：谁发现「排序前提变了」就 +1，候选表（`CANDS`）自己比对代数决定是否重算。
+  // 之所以放一个整数而不是那张缓存对象：缓存是候选表自己的状态（7.315 起搬进 `CandidateBoard`），
+  // 这里只留「上一次作废是第几代」这一条能与它对齐的最小信息。
+  rankGen = 0;
 
   // —— 日计数 ——
   cntKeys = [

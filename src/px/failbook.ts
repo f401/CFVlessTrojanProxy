@@ -4,7 +4,7 @@
 import { SC } from "../core/const";
 import { logErr } from "../nodes/metrics";
 import { pxPolicy } from "./probe";
-import { bestFor, freezeNode, isBlack, isFrozen, STATS } from "../nodes/score";
+import { freezeNode, isBlack, isFrozen, STATS, CANDS } from "../nodes/score";
 import { S } from "../core/state";
 import { ROTATION } from "./rotation";
 
@@ -53,7 +53,7 @@ export class FailBook {
     // 回滚不成（prev 已坏 / 超出 ROLL_WIN）就重排第一：bestFor 会跳过黑名单与冻结，
     // 失败的节点交给 nsFail 的退避阶梯，不是在这里硬判死
     if (k === S.curs[m]) {
-      const b = bestFor(m);
+      const b = CANDS.best(m);
       if (b && b !== k) {
         S.prev[m] = k;
         S.curs[m] = b;

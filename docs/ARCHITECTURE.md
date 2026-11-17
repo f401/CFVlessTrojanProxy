@@ -210,6 +210,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | 类 | 文件 | 独占的可变状态 |
 | --- | --- | --- |
 | `NodeStatsTable` | `src/nodes/stat.ts` | STATS 单例与 `NodeStatsTable` 的读写入口（类型/派生/观测同在一个文件） |
+| `CandidateBoard`（`CANDS`） | `src/nodes/score.ts` | 候选表：排行（20 秒缓存 + 大池分片重建）、过滤、挑下一个、取最优；缓存与分片游标是它自己的字段，作废靠 `S.rankGen` 代际号（这样 `nodes/stat.ts` 不必反向 import 本文件） |
 | `stat-view` | `src/nodes/stat.ts` | 派生视图（`effView`/`pFailOf`/`availOf` 等纯函数，同文件） |
 | `stat-observe` | `src/nodes/stat.ts` | 九类观测写入（`nsOk`/`nsFail`/`nsLatency`…，同文件） |
 | `Store` / `Seal` | `src/store/store.ts`、`crypto.ts` | KV 写入节流、AES 密钥缓存 |

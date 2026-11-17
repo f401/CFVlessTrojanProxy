@@ -1,6 +1,6 @@
 import { SC } from "../core/const";
 import { S } from "../core/state";
-import { candsFor, scoreParts } from "../nodes/score";
+import { scoreParts, CANDS } from "../nodes/score";
 
 
 /** 标准正态（Box-Muller）；不用 while，避免 Math.random 被打桩成 0 时死循环 */
@@ -18,7 +18,7 @@ function gauss(): number {
  */
 export function pickThom(mode: Mode, bytes = 0): string {
   const now = Date.now();
-  const list = candsFor(mode);
+  const list = CANDS.list(mode);
   const ks: string[] = [], vs: number[] = [], low: boolean[] = [];
   let minScore = Infinity, extra = 0;
   // 候选越多，单个"没测过"的节点越不该抢流量：池子里有 800 个候选时，
