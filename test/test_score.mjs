@@ -9869,6 +9869,55 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   const badHost = await W.DIAGONE.diag(pctx, new URL("https://x.test/u/debug?diag=bad_host!"));
   eq("[325] 站点名形状不对时直接报错", (await badHost.json()).ok, false);
 }
+  // ═══ 第 326 组：Attacher 的五段各有边界（7.326）═══
+  {
+    const attSrc = fs.readFileSync("src/proxy/attacher.ts", "utf8").replace(/\r\n/g, "\n");
+    const bodyOf = (name) => {
+      const m = attSrc.match(new RegExp("\\n  (private )?(async )?" + name + "\\("));
+      if (!m) return "";
+      const from = m.index + 1;
+      const stop = attSrc.indexOf("\n  }\n", from);
+      return stop < 0 ? "" : attSrc.slice(from, stop);
+    };
+    const runBody = bodyOf("run");
+    const closeBody = bodyOf("onClose");
+    const viaBody = bodyOf("viaRelayFailed");
+    const dirBody = bodyOf("directEmpty");
+    const v6Body = bodyOf("tryV6");
+    const pxBody = bodyOf("tryProxyip");
+
+    ok("[326] 五段细节各自成方法",
+      ["onClose", "viaRelayFailed", "directEmpty", "tryV6", "tryProxyip"].every((n) => new RegExp("\\n  private async " + n + "\\(").test(attSrc)));
+    ok("[326] run 只做装配（≤30 行）",
+      runBody.split("\n").length <= 30 && runBody.includes("releaseAll(conn)") && runBody.includes("pipeBack("));
+    ok("[326] run 不再自己记账 / 挑中继 / 拨号",
+      !runBody.includes("cnt(") && !runBody.includes("STATS.") && !runBody.includes("parseProxyIp(") &&
+        !runBody.includes("dialAnother(") && !runBody.includes("SOCKET_DIALER.open("));
+    ok("[326] run 把收尾整个交给 onClose",
+      (runBody.match(/this\.onClose\(o, gotData\)/g) || []).length === 1);
+    ok("[326] onClose 只做分派（客户端在场 → 有数据 → 中转 → 直连）",
+      closeBody.includes("WS_OPEN") && closeBody.includes("SEL.resetFail(") &&
+        closeBody.includes("this.viaRelayFailed(o)") && closeBody.includes("this.directEmpty(o)"));
+    ok("[326] onClose 不记账、不拨号",
+      !closeBody.includes("cnt(") && !closeBody.includes("SOCKET_DIALER.open(") && !closeBody.includes("STATS."));
+    ok("[326] 中转失败段自带记账与「只换一条」",
+      viaBody.includes('cnt("eCloseP")') && (viaBody.match(/dialAnother\(/g) || []).length === 1 &&
+        viaBody.includes('cnt(region ? "rgFail" : "dead")') && viaBody.includes("await SEL.softFail("));
+    ok("[326] 直连空关闭先试 IPv6 再试 proxyip",
+      dirBody.includes("conn.directFail = true") && dirBody.includes("await this.tryV6(o)) return;") &&
+        dirBody.includes("await this.tryProxyip(o);"));
+    ok("[326] IPv6 兜底一次一连接、地区钉住时禁用",
+      v6Body.includes("conn.triedV6") && v6Body.includes("!env.cfIpv6") && v6Body.includes("isV6Literal(host)") &&
+        v6Body.includes("SOCKET_DIALER.open(expandV6(v6), port)"));
+    ok("[326] proxyip 兜底只剩一份挑中继与一处上限",
+      (pxBody.match(/parseProxyIp\(/g) || []).length === 1 && pxBody.includes("trimAged(S.needPx, SC.PX_MAX);") &&
+        pxBody.includes("STATS.nsFail("));
+    eq("[326] 五段都挂在同一个实例上",
+      ["onClose", "viaRelayFailed", "directEmpty", "tryV6", "tryProxyip"].every((n) => typeof W.ATTACHER[n] === "function"), true);
+    ok("[326] 关闭客户端仍只有一个出口（endClient）",
+      (attSrc.match(/\.close\(/g) || []).length === 1);
+  }
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
