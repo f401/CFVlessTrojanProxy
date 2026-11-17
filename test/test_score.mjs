@@ -1967,8 +1967,8 @@ W.HEALTH.merge([{ i: "2.2.2.2", o: 0, b: 0, d: 3 }]);
 ok("merge 进来的零字节中继被算成快死", W.HEALTH.score("2.2.2.2") < 0.3, W.HEALTH.score("2.2.2.2"));
 eq("merge 的行不再重复上报", W.HEALTH.delta().filter((x) => x.i === "2.2.2.2").length, 0);
 W.HEALTH.clear();
-eq("Store 门面能给出主 uuid（小写、取第一个）", W.STORE.primary({ uuid: "AA,BB" }), "aa");
-ok("Store 门面暴露观测快照", Array.isArray(W.STORE.conns(5)), "conns");
+eq("主 uuid 由待上报账本给出（小写、取第一个）", W.PEND.id({ uuid: "AA,BB" }), "aa");
+ok("观测快照由待上报账本给出", Array.isArray(W.PEND.clSnap(5)), "conns");
 // ═══ 第 47 组：Pool 类化（P4）═══
 ok("Pool 是类实例，抓取/探活/准入都在它身上", typeof W.POOL === "object" && typeof W.POOL.cronScan === "function", "POOL");
 ok("Pool 提供准入巡检", typeof W.POOL.ensurePool === "function" && typeof W.POOL.commitPool === "function", "ensure/commit");
@@ -3144,16 +3144,16 @@ eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
   S.pend.clear();
   S.meterCache.clear();
   S.stats.clear();
-  W.STORE.addUsage(id, 100, 200, true);
+  W.PEND.add(id, 100, 200, true);
   const before = await W.readStats(envS, id);
   eq("flush 前：还没上报的增量直接算进读数", [before.up, before.down], [100, 200]);
-  await W.STORE.flush(envS, true);
+  await W.PEND.flush(envS, true);
   eq("flush 后：待上报账本已清空", S.pend.has(id), false);
   const after = await W.readStats(envS, id);
   eq("flush 后读数不倒退", [after.up, after.down], [100, 200]);
   // 这两条守的是「同一个数不要有两个真源」：旧的 60 秒读缓存被它自己的失效点架死了
   eq("统计读缓存已删除（不再有 60 秒陈旧窗口）", S.statCache, undefined);
-  eq("门面不再暴露 statsCached", W.STORE.statsCached, undefined);
+  eq("store 门面已退场（7.357 删掉 Store/STORE）", W.STORE, undefined);
   // 「要不要先推增量」只认路由表：装配根里那份硬编码子路径列表已删（v7.135）
   eq("路由表是 stats 的唯一真源：订阅要推增量", W.ROUTES.needsStats("cl"), true);
   eq("调试路由不推增量", W.ROUTES.needsStats("debug"), false);
@@ -3227,7 +3227,7 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
 /** 第 97 组（v7.142）：门面不再提供「永远不写」的快照入口 + 管理面板的子请求预算 */
 {
   // usageSnapWrite 需要用户表：门面只给 env 时 list=[] 会立刻 return，永远不写却返回 resolved
-  eq("门面不再暴露 usageSnapWrite（模块函数要求用户表）", W.STORE.usageSnapWrite, undefined);
+  ok("usageSnapWrite 只以模块函数形式存在（要求用户表）", typeof W.usageSnapWrite === "function" && W.STORE === undefined, "门面又回来了");
   // 管理面板每人一次 DO 往返：免费计划一次调用 50 个子请求，必须留出固定开销的余量
   eq("管理面板一次最多读 32 人的用量", W.SC.ADMIN_STATS_MAX, 32);
   eq("超出预算的人数会被计数（而不是静默显示 0）", "admStatsSkip" in W.cntView(), true);
@@ -5241,7 +5241,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   });
   let thrown = false;
   try {
-    await W.STORE.snap(bad.env);
+    await W.getSnap(bad.env);
   } catch (e) {
     thrown = true;
   }
@@ -5251,15 +5251,15 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
 
   // KV 恢复：同一个 isolate 里不带 fresh 也必须能读到（旧代码会拿缓存糊弄 5 分钟）
   const good = mkKv(async () => null);
-  const doc = await W.STORE.snap(good.env);
+  const doc = await W.getSnap(good.env);
   eq("KV 恢复后立刻能读到快照", typeof doc, "object");
   eq("KV 恢复后真的重新打了一次", good.calls(), 1);
 
   // 键不存在是「还没有快照」，这种情况可以缓存（否则每次订阅都打一次 KV）
   W.S.snapCache = { v: null, t: 0 };
   const miss = mkKv(async () => null);
-  const m1 = await W.STORE.snap(miss.env);
-  const m2 = await W.STORE.snap(miss.env);
+  const m1 = await W.getSnap(miss.env);
+  const m2 = await W.getSnap(miss.env);
   eq("没有快照键时缓存空表", m1 === m2, true);
   eq("没有快照键时只打一次 KV", miss.calls(), 1);
 
@@ -11884,6 +11884,35 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   ok("[356] 窗口里不再有 ROTATION 单例", W.ROTATION === undefined, typeof W.ROTATION);
 }
 
+// ═══ 第 357 组：store 门面退场 ═══
+{
+  const walk357 = (dir) => {
+    const out = [];
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = dir + "/" + e.name;
+      if (e.isDirectory()) out.push(...walk357(p));
+      else if (e.name.endsWith(".ts")) out.push(p);
+    }
+    return out;
+  };
+  const src357 = walk357("src").map((f) => fs.readFileSync(f, "utf8")).join("\n");
+  // 结构：门面文件与它的两个符号都不该再存在
+  ok("[357] store 门面文件已删除", !fs.existsSync("src/store/store.ts"), "文件还在");
+  eq("[357] 全仓不再有 STORE 单例", src357.split("export const STORE =").length - 1, 0);
+  eq("[357] 全仓不再有 Store 类", src357.split("export class Store {").length - 1, 0);
+  eq("[357] barrel 不再转出门面", fs.readFileSync("src/store/index.ts", "utf8").split("./store\"").length - 1, 0);
+  ok("[357] 测试窗口不再导出 STORE", !/(^|[^A-Za-z0-9_])STORE([^A-Za-z0-9_]|$)/.test(fs.readFileSync("src/test-surface.ts", "utf8")), "窗口里还有 STORE");
+  eq("[357] 生产侧没有 STORE. 调用点", src357.split("STORE.").length - 1, 0);
+  // 行为：能力还在，只是挂在账本对象与模块函数上
+  ok("[357] 窗口里没有门面了", W.STORE === undefined && W.Store === undefined, "门面还在");
+  eq("[357] 主 uuid 仍由账本给出", W.PEND.id({ uuid: "AA,BB" }), "aa");
+  ok("[357] 观测快照仍可取", Array.isArray(W.PEND.clSnap(3)), "clSnap");
+  ok(
+    "[357] 快照与统计仍是模块函数",
+    ["getSnap", "flushSnap", "readStats", "nodeSnapGet", "usageSnapWrite", "kvGetStrict"].every((n) => typeof W[n] === "function"),
+    "模块函数缺了"
+  );
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

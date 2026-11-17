@@ -214,7 +214,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `ScoreModel` | `src/nodes/score.ts` | 一次评分的过程对象（活一次、不跨请求）：构造时取好条目 / 存活项 / 窗口当量，延迟 / 吞吐 / 风险 / 闸门各成一个方法，`parts()` 合成总分；`scoreParts()` 只是 `new ScoreModel(...).parts()` 的一行包装 |
 | `stat-view` | `src/nodes/stat.ts` | 派生视图（`effView`/`pFailOf`/`availOf` 等纯函数，同文件） |
 | `stat-observe` | `src/nodes/stat.ts` | 九类观测写入（`nsOk`/`nsFail`/`nsLatency`…，同文件） |
-| `Store` / `Seal` | `src/store/store.ts`、`crypto.ts` | KV 写入节流、AES 密钥缓存 |
+| 密钥封装与解封（自由函数 `seal` / `unseal`） | `src/store/crypto.ts` | KV 里的值统一加密后落盘，派生密钥按 kek 指纹缓存。这里原本还有 `Store`/`STORE` 门面，7.357 已整体删除：16 个方法全是薄委托，`src/` 里一个调用点都没有（生产侧一直直接调 `PEND`、`flushSnap`、`readStats` 这些真实入口），留着只会让人以为上层还要经过它 |
 | 快照读写（自由函数 `flushSnap` / `writeSnap` / `getSnap` / `usageSnapWrite`） | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存（无跨请求状态要独占，所以没有类）；`writeSnap` 只做编排，读快照 / 全局闸门 / 建骨架 / 合并用量 / 合并延迟 / 落盘各成一个函数；`usageSnapWrite` 同样只编排：读旧值 / 轮转切批 / 逐用户合并 / 搬旧值 / 落盘各成一个函数 |
 | `PendingLedger`（`PEND`） | `src/store/pend.ts` | 待上报账本与 flush 定时器：`flush` 只编排（摘批 → 拼体 → 发 → 确认或退回 → 退避），搭车增量由 `PendCarry` 记账（`owner`/`sync`/`rows`） |
 | `Pool` | `src/px/pool.ts` | 门面：`nsOf`/`pxSet`/`flushPx` 与 `Pool` 的九个委托方法；存活表与探活冷却在 `alive.ts`，一轮维护在 `scan.ts`，代际提交在 `poolgen.ts` |
