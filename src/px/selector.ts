@@ -4,12 +4,12 @@
 
 import { PICK } from "./pickpath";
 import { ROTATION } from "./rotation";
-import { FAILS } from "./failbook";
+import { FailBook } from "./failbook";
 import type { PickState } from "./pickpath";
 
 export { PICK } from "./pickpath";
 export { ROTATION, dwellOf } from "./rotation";
-export { FAILS, FailBook } from "./failbook";
+export { FailBook } from "./failbook";
 export type { PickState } from "./pickpath";
 
 /**
@@ -17,6 +17,11 @@ export type { PickState } from "./pickpath";
  * 每个方法都委托给各自的执行器，返回值就是被委托函数的返回值 —— 不要在这里另做裁剪。
  */
 export class Selector {
+  /**
+   * 失败记账器：罚多重、什么时候清、连带要不要换节点都封在 `FailBook` 里。
+   * 7.347 前它是模块级 `FAILS`，读门面时看不出谁在用它、用了几次。
+   */
+  private readonly fails = new FailBook();
   /** 按国家挑一个节点（地区硬要求：调用方不得回落到直连/全球） */
   async region(env: Env, cc: string | null, mode: Mode = "tput", avoid = "") {
     // 实现见 PickPath.region：这个类只做委托。
@@ -51,25 +56,25 @@ export class Selector {
    */
   onFail(_env: Env, mode: Mode, k: string, trial: boolean) {
     // 实现见 FailBook.onFail：这个类只做委托。
-    return FAILS.onFail(_env, mode, k, trial);
+    return this.fails.onFail(_env, mode, k, trial);
   }
 
   /** 只记一次全局失败，不动游标也不冻结（站点级试探失败用） */
   async softFail(k: string) {
     // 实现见 FailBook.softFail：这个类只做委托。
-    return FAILS.softFail(k);
+    return this.fails.softFail(k);
   }
 
   /** 记一次失败；连续到阈值就换节点。兼容旧调用。 */
   async bumpFail(env: Env, mode: Mode, k: string, trial: boolean, kind: "node" | "site" = "node") {
     // 实现见 FailBook.bumpFail：这个类只做委托。
-    return FAILS.bumpFail(env, mode, k, trial, kind);
+    return this.fails.bumpFail(env, mode, k, trial, kind);
   }
 
   /** 链路健康：清零计数。成功样本由 Connection.flush 在收尾时统一记一次。 */
   async resetFail(_env: Env, _k: string) {
     // 实现见 FailBook.resetFail：这个类只做委托。
-    return FAILS.resetFail(_env, _k);
+    return this.fails.resetFail(_env, _k);
   }
 
   /**

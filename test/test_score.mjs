@@ -8310,10 +8310,11 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   // 结构：三个类各自带单例，门面只剩委托
   ok("pickpath 有 PickPath 与 PICK", pickSrc.includes("export class PickPath {") && pickSrc.includes("export const PICK = new PickPath();"), "");
   ok("rotation 有 Rotation 与 ROTATION", rotSrc.includes("export class Rotation {") && rotSrc.includes("export const ROTATION = new Rotation();"), "");
-  ok("failbook 有 FailBook 与 FAILS", failSrc.includes("export class FailBook {") && failSrc.includes("export const FAILS = new FailBook();"), "");
+  // 7.347：模块级 `FAILS` 收进 `Selector` 门面 —— 类还在、单例没了、门面自己持有
+  ok("failbook 有 FailBook 而模块级 FAILS 已消失", failSrc.includes("export class FailBook {") && !failSrc.includes("export const FAILS = new FailBook();") && facadeSrc.includes("private readonly fails = new FailBook();"), "");
   eq("门面里 PICK 的委托有 3 处", facadeSrc.split("return PICK.").length - 1, 3);
   eq("门面里 ROTATION 的委托有 3 处", facadeSrc.split("return ROTATION.").length - 1, 3);
-  eq("门面里 FAILS 的委托有 4 处", facadeSrc.split("return FAILS.").length - 1, 4);
+  eq("门面里失败记账的委托有 4 处", facadeSrc.split("return this.fails.").length - 1, 4);
   // 门面不得再留算法：这些调用各自只在唯一一个执行器里出现
   ok("门面不再挑样本", !facadeSrc.includes("pickThom("), "");
   ok("门面不再列候选", !facadeSrc.includes("candsFor("), "");
@@ -11579,6 +11580,25 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     eq("[346] 两个会话的挑选器互不相同", ps346.regionPicker === ps346b.regionPicker, false);
     eq("[346] 实例上没有 open 之外的多余状态", typeof ps346.regionPicker.open, "function");
   }
+/* ---------- 第 347 组：失败记账器收进选择门面（v7.347） ---------- */
+{
+  const selSrc347 = fs.readFileSync("src/px/selector.ts", "utf8");
+  const failSrc347 = fs.readFileSync("src/px/failbook.ts", "utf8");
+  ok("模块级 FAILS 消失（failbook 不再自建单例）", !failSrc347.includes("export const FAILS = new FailBook();"), failSrc347.length);
+  ok("门面按类 import 记账器", selSrc347.includes('import { FailBook } from "./failbook";'), selSrc347.length);
+  ok("门面自己持有记账器", selSrc347.includes("private readonly fails = new FailBook();"), selSrc347.length);
+  ok("四处委托都走字段", ["onFail", "softFail", "bumpFail", "resetFail"].every((n) => selSrc347.split("return this.fails." + n + "(").length - 1 === 1), selSrc347.length);
+  ok("门面里不再出现裸 FAILS.", !selSrc347.includes("FAILS."), selSrc347.length);
+  ok("门面再导出只剩类", selSrc347.includes('export { FailBook } from "./failbook";'), selSrc347.length);
+  ok("换节点器仍是模块级单例（failbook 依赖它，不能双向持有）", fs.readFileSync("src/px/rotation.ts", "utf8").includes("export const ROTATION = new Rotation();") && failSrc347.includes("ROTATION.maybeSwitch("), "");
+  ok("门面实例仍是 SEL", W.SEL instanceof W.Selector, typeof W.SEL);
+  ok("记账器挂在门面上", W.SEL.fails instanceof W.FailBook, typeof W.SEL.fails);
+  ok("两个门面各持一份", new W.Selector().fails !== new W.Selector().fails, "shared");
+  W.S.pxFailMem = 0;
+  await W.SEL.softFail("n347.test:443");
+  eq("softFail 仍只轻记、不动主游标计数", W.S.pxFailMem, 0);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
