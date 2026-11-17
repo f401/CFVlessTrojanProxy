@@ -10881,6 +10881,108 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   }
 }
 
+// ---- 第 335 组：评分过程成为 ScoreModel（一次评分一个对象，四项各成方法） ----
+{
+  const raw335 = fs.readFileSync("src/nodes/score.ts", "utf8").replace(/\r\n/g, "\n");
+  const cls335 = raw335.slice(raw335.indexOf("export class ScoreModel"), raw335.indexOf("export function scoreParts("));
+  const call335 = raw335.indexOf("export function scoreParts(");
+  const entry335 = raw335.slice(call335, raw335.indexOf("\n}\n", call335));
+  const t335 = Date.now();
+  const k335 = "g335:443";
+  const k335b = "g335b:443";
+  const k335c = "g335c:443";
+  const k335d = "g335d:443";
+
+  // 结构：类、五个方法、以及「入口只做委托」
+  ok("第335组·评分过程是导出类", typeof W.ScoreModel === "function");
+  ok(
+    "第335组·入口只剩一行委托",
+    entry335.includes("return new ScoreModel(k, mode, now, withGate, bytes).parts();") &&
+      !entry335.includes("effView(") &&
+      !entry335.includes("pcts(") &&
+      entry335.split("\n").length <= 5,
+  );
+  ["latencyTerm", "throughputTerm", "riskTerm", "gateOf", "parts"].forEach((mn) => {
+    ok("第335组·类上有" + mn, cls335.includes(mn + "("));
+  });
+  ok(
+    "第335组·延迟项守住真实样本与截断",
+    cls335.includes("SC.PROBE_W") &&
+      cls335.includes("SC.REAL_W") &&
+      cls335.includes("1.4826") &&
+      cls335.includes("probeL + 1500"),
+  );
+  ok(
+    "第335组·吞吐项守住分位容量与先验",
+    cls335.includes("pcts(s).cap") &&
+      cls335.includes("SC.PRIOR_BPS") &&
+      cls335.includes("SC.SAMPLE_TTL") &&
+      cls335.includes("e10Local"),
+  );
+  ok(
+    "第335组·风险项三种概率都来自同层",
+    cls335.includes("pFailOf(") && cls335.includes("pFailFast(") && cls335.includes("pStallOf("),
+  );
+  ok(
+    "第335组·闸门四个标签齐备",
+    ["not-alive", "black", "frozen", "low-avail"].every((g) => cls335.includes('"' + g + '"')),
+  );
+  ok(
+    "第335组·合成时才用闸门与失败定价",
+    cls335.includes("this.gateOf()") && cls335.includes("SC.FAIL_SCALE") && cls335.includes("SC.JIT_W"),
+  );
+  ok(
+    "第335组·字段名语义化且不再用短成员名",
+    cls335.includes("private readonly scoringMode: Mode;") &&
+      cls335.includes("private readonly evaluatedAt: number;") &&
+      cls335.includes("private readonly targetBytes: number;") &&
+      cls335.includes("private readonly aliveEntry:") &&
+      cls335.includes("private readonly window:") &&
+      !/this\.(m|s|a|e)\b/.test(cls335),
+  );
+  ok("第335组·入口签名没变（调用点零改动）", /export function scoreParts\(\s*k: string,\s*mode: Mode,/.test(raw335));
+
+  // 行为：包装与直连类完全一致
+  const packed335 = W.scoreParts(k335, "lat", t335);
+  const direct335 = new W.ScoreModel(k335, "lat", t335, false, 0).parts();
+  eq("第335组·包装与直接构造结果一致", JSON.stringify(packed335), JSON.stringify(direct335));
+  eq("第335组·未知模式归一到延迟", W.scoreParts(k335, "weird", t335).mode, "lat");
+  eq("第335组·不计闸门时为空串", packed335.gate, "");
+
+  // 行为：四个闸门标签各走一支
+  W.S.alive.set(k335b, { h: "g335b.test", p: 443, ms: 90 });
+  eq("第335组·活着有证据时闸门 ok", W.scoreParts(k335b, "lat", t335, true).gate, "ok");
+  W.STATS.nsGet(k335b).blackUntil = t335 + 60000;
+  eq("第335组·冷却中判 black", W.scoreParts(k335b, "lat", t335, true).gate, "black");
+  W.STATS.nsGet(k335c).freeUntil = t335 + 60000;
+  W.S.alive.set(k335c, { h: "g335c.test", p: 443, ms: 90 });
+  eq("第335组·冻结判 frozen", W.scoreParts(k335c, "lat", t335, true).gate, "frozen");
+  eq("第335组·不在存活表判 not-alive", W.scoreParts(k335d, "lat", t335, true).gate, "not-alive");
+
+  // 行为：两种模式的取舍不同，但都从同三个字段派生
+  eq("第335组·吞吐模式不算传输时间", W.scoreParts(k335, "tput", t335).xferMs, 0);
+  const wantPrior335 = (W.SC.LAT_BYTES / W.SC.PRIOR_BPS) * 1000;
+  ok(
+    "第335组·没有容量证据时按先验折算传输时间",
+    Math.abs(W.scoreParts(k335, "lat", t335).xferMs - wantPrior335) < 0.01,
+    String(W.scoreParts(k335, "lat", t335).xferMs),
+  );
+  ok(
+    "第335组·目标流量变大则传输时间变长",
+    W.scoreParts(k335, "lat", t335, false, 16 * 1048576).xferMs > packed335.xferMs,
+  );
+  eq("第335组·总分与分解同源", W.costOf(k335, "lat", t335), W.scoreParts(k335, "lat", t335).score);
+  eq(
+    "第335组·同一时刻两次评分一致",
+    JSON.stringify(W.scoreParts(k335, "tput", t335)),
+    JSON.stringify(W.scoreParts(k335, "tput", t335)),
+  );
+
+  [k335, k335b, k335c, k335d].forEach((k) => {
+    W.S.nstat.delete(k);
+    W.S.alive.delete(k);
+  });
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

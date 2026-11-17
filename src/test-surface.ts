@@ -76,6 +76,7 @@ export {
   usable,
   CANDS,
   CandidateBoard,
+  ScoreModel,
 } from "./nodes/score";
 export { nsOf, pxGet, flushPx, noteProbe, bumpProbeBad } from "./px/pool";
 export { POOL, Pool } from "./px/pool";

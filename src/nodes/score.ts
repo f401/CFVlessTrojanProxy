@@ -1,6 +1,7 @@
 import { SC } from "../core/const";
 import { S } from "../core/state";
 import { availOf, effView, TEN_MB, ZERO_STAT, pFailFast, pFailOf, pStallOf, STATS } from "./stat";
+import type { EffView } from "./stat";
 import { pcts } from "../core/hist";
 
 // ---- 并入自 score-health.ts ----
@@ -103,6 +104,189 @@ export interface ScoreParts {
   samples: number; jitMs: number; failMs: number; gate: string;
 }
 
+/** 延迟项：真实首字节与抖动（`jitMs` 是 MAD×1.4826 折出的 σ） */
+export interface LatencyTerm {
+  latencyMs: number; jitMs: number;
+}
+
+/** 吞吐项：容量证据与两种「传完目标流量」的毫秒数（`xferMs` 只在延迟模式有意义） */
+export interface ThroughputTerm {
+  capBps: number; nEff: number; sampleAgeMs: number; confB: number; xferMs: number; e10Ms: number;
+}
+
+/** 风险项：失败综合概率、卡顿占比与样本量 */
+export interface RiskTerm {
+  pFailRisk: number; pStall: number; samples: number;
+}
+
+/**
+ * 功能：一次评分的过程对象 —— 「读哪三张表」与「四项各自怎么算」各成一处。
+ *
+ * 为什么成类：八个量只依赖「这次评分」（键、模式、时间戳、目标流量、闸门开关与三项派生读数），
+ * 而四项判据互相独立 —— 散在一条 75 行函数里时，改一项必须先读另外三项（「失败代价」正是用
+ * 延迟与吞吐的合成值）。对象只活一次评分、不跨请求，没有需要清理的状态。
+ */
+export class ScoreModel {
+  /** 节点键 host:port */
+  private readonly nodeKey: string;
+  /** 已归一的模式（`tput` / `lat`） */
+  private readonly scoringMode: Mode;
+  /** 这次评分的时间戳 */
+  private readonly evaluatedAt: number;
+  /** 是否计入准入闸门（未探活的惩罚） */
+  private readonly gateEnabled: boolean;
+  /** 这次的目标流量（0 表示按模式取缺省） */
+  private readonly targetBytes: number;
+  /** 节点统计条目（没有记录时用零值，省掉后面每处判空） */
+  private readonly stats: NodeStats;
+  /** 存活条目（可能没有：节点刚被裁掉） */
+  private readonly aliveEntry: NodeEntry | undefined;
+  /** 窗口当量视图（原始计数按半衰期折过） */
+  private readonly window: EffView;
+
+  /**
+   * 功能：取好三条派生读数，让后面四项只读这三个字段。
+   * @param k 节点键 host:port
+   * @param mode lat 速率优先 / tput 吞吐优先
+   * @param now 当前时间戳
+   * @param withGate 是否计入准入闸门
+   * @param bytes 本次目标流量
+   */
+  constructor(k: string, mode: Mode, now: number, withGate: boolean, bytes: number) {
+    // 模式归一成两个取值：未知字串一律按延迟优先，免得调用方传错时静默走吞吐公式
+    this.scoringMode = mode === "tput" ? "tput" : "lat";
+    this.nodeKey = k;
+    this.evaluatedAt = now;
+    this.gateEnabled = withGate;
+    this.targetBytes = bytes;
+    this.stats = S.nstat.get(k) || ZERO_STAT;
+    this.aliveEntry = S.alive.get(k);
+    this.window = effView(this.stats, now);
+  }
+
+  /**
+   * 功能：算延迟项与抖动。
+   *
+   * 真实首字节是主信号（每条连接一个样本，权重 ≤ `REAL_W`），探活只留 `PROBE_W` 底仓；
+   * 单条坏连接不该定生死，所以超过「探活 + 1.5 秒」的部分截断。
+   * @returns 首字节当量与抖动
+   */
+  private latencyTerm(): LatencyTerm {
+    const s = this.stats;
+    const a = this.aliveEntry;
+    const e = this.window;
+    // 探活腿：tcp 缺省用存活表毫秒数，再退到固定先验
+    const tcp = s.tcp || (a && a.ms) || SC.P_TCP;
+    const tls = s.tls || SC.P_TLS;
+    // 丢失惩罚：tls 明显大于 2×tcp + 余量时，说明握手在丢包
+    const probeL = tcp + tls * SC.TLS_G + Math.max(0, tls - 2 * tcp - SC.LOSS_SLACK) * SC.LOSS_G;
+    // 真实首字节（`pSum` 是矩的均值，`msLocal` 是更早写法）
+    const realL = s.pSum || s.msLocal || 0;
+    const realC = realL > 0 ? Math.min(realL, probeL + 1500) : 0;
+    const realW = realC > 0 ? Math.min(SC.REAL_W, e.okW) : 0;
+    const Lobs = realW > 0 ? (probeL * SC.PROBE_W + realC * realW) / (SC.PROBE_W + realW) : probeL;
+    // 先验取存活表的实测毫秒数（同 isolate 的探活样本），没有就用固定先验
+    const Lprior = (a && a.ms) || SC.P_TCP + SC.P_TLS * SC.TLS_G;
+    const confL = 1 - Math.exp(-e.latN / 4);
+    // 有真实样本就直接用（Lobs 里已带 PROBE_W 底仓），否则按「探活 + 先验」的置信度混合
+    const latencyMs = realW > 0 ? Lobs : confL * probeL + (1 - confL) * Lprior;
+    // 抖动：对单个离群点平方级敏感，这里按 MAD 再稳一次（样本已 winsorize）
+    const jitMs = realL > 0 ? s.pSumSq * 1.4826 : 0;
+    return { latencyMs, jitMs };
+  }
+
+  /**
+   * 功能：算吞吐项（容量、置信度、两种「传完目标流量」的毫秒数）。
+   *
+   * 吞吐模式用落盘的 p90 容量（分位对等比衰减免疫）；延迟模式用 `capBps`，并让「比先验快」
+   * 的证据按新鲜度贬值 —— 慢证据原样保留，否则一次限速会被永久记住。
+   * @returns 吞吐项
+   */
+  private throughputTerm(): ThroughputTerm {
+    const s = this.stats;
+    const e = this.window;
+    // 容量：tput 模式取 p90，lat 模式取当前容量估计
+    const capBps = this.scoringMode === "tput" ? pcts(s).cap || 0 : s.capBps || 0;
+    // 目标流量可覆盖（交互 64KB / 流媒体 1MB / 批量 16MB）
+    const sz = this.targetBytes > 0 ? this.targetBytes : this.scoringMode === "tput" ? TEN_MB : SC.LAT_BYTES;
+    // 有效样本数按权重平方和折：重复取样不会假装样本很多
+    const nEff = e.sumW2 > 0 ? (e.sumW * e.sumW) / e.sumW2 : 0;
+    const sampleAge = s.lastSampleAt ? this.evaluatedAt - s.lastSampleAt : Infinity;
+    // 四条同时满足才算「真测过吞吐」：样本数、近期字节、新鲜度、非零容量
+    let confB = 0;
+    if (nEff >= SC.N_EFF_MIN && e.recentBytesW >= SC.RECENT_MIN && sampleAge <= SC.SAMPLE_TTL && capBps > 0) {
+      confB = Math.min(1, e.recentBytesW / SC.RECENT_MIN) * (1 - Math.exp(-nEff / 4));
+    }
+    // 无本地吞吐样本时按固定先验（2MB/s）；不接受别的 isolate 的速率
+    const e10Prior = (sz / SC.PRIOR_BPS) * 1000;
+    // 「比先验快」的权重：越接近样本寿命末端越接近 0（实测与先验的混合比例）
+    const bwW = this.scoringMode === "lat" && capBps > 0 && s.lastSampleAt ? Math.max(0, 1 - (this.evaluatedAt - s.lastSampleAt) / SC.SAMPLE_TTL) : 0;
+    const xferPrior = (sz / SC.PRIOR_BPS) * 1000;
+    const xferMeas = capBps > 0 ? (sz / Math.max(8 * 1024, capBps)) * 1000 : 0;
+    // 快证据按新鲜度贬值、慢证据原样保留（非对称衰减的原因见 7.x 的仿真对比）
+    const xferMs = this.scoringMode !== "lat" ? 0
+      : !capBps ? xferPrior : xferMeas <= xferPrior ? bwW * xferMeas + (1 - bwW) * xferPrior : xferMeas;
+    const e10Local = (sz / Math.max(capBps, 8 * 1024)) * 1000;
+    const e10Ms = confB * e10Local + (1 - confB) * e10Prior;
+    return { capBps, nEff, sampleAgeMs: Number.isFinite(sampleAge) ? (sampleAge as number) : -1, confB, xferMs, e10Ms };
+  }
+
+  /**
+   * 功能：算风险项（失败综合概率、卡顿占比、样本数）。
+   *
+   * 两种失败概率取大：慢失败（长窗口均值）与快失败（连续失败）任一成立都不该被选中。
+   * @returns 风险项
+   */
+  private riskTerm(): RiskTerm {
+    const e = this.window;
+    const pFailRisk = Math.max(pFailOf(this.stats, this.evaluatedAt, e), pFailFast(this.stats, this.evaluatedAt));
+    const pStall = pStallOf(this.stats, this.evaluatedAt, e);
+    return { pFailRisk, pStall, samples: e.okW + e.failW };
+  }
+
+  /**
+   * 功能：算准入闸门标签（只在诊断里需要）。
+   * @returns 空串表示不计闸门；否则 `not-alive` / `black` / `frozen` / `low-avail` / `ok`
+   */
+  private gateOf(): string {
+    // 不计闸门时返回空串：调用方只在 `?dd` 这类诊断里要这段说明
+    if (!this.gateEnabled) return "";
+    if (!S.alive.has(this.nodeKey)) return "not-alive";
+    if (isBlack(this.nodeKey)) return "black";
+    if (isFrozen(this.nodeKey)) return "frozen";
+    const e = this.window;
+    return e.okW + e.failW >= 8 && availOf(this.stats, this.evaluatedAt, e) < 0.4 ? "low-avail" : "ok";
+  }
+
+  /**
+   * 功能：合成总分与完整分解。
+   * @returns 代价分解对象（含 score、各项分量与置信度）
+   */
+  parts(): ScoreParts {
+    // 四项各自算完再合成：某一项变大时能直接看出是哪一项
+    const lat = this.latencyTerm();
+    const tp = this.throughputTerm();
+    const risk = this.riskTerm();
+    // 一次失败的代价 ≈ 重试一次（重连 + 重传），按本次目标流量定价：交互 64KB 失败只丢一个 RTT，
+    // 按 5000ms 计会把「快但偶尔失败」的节点永久判死；批量 16MB 要重传，价格自然接近 20s。
+    const baseMs = lat.latencyMs + (this.scoringMode === "tput" ? tp.e10Ms : tp.xferMs);
+    const failMs = SC.FAIL_SCALE > 0 ? Math.min(20000, Math.max(400, SC.FAIL_SCALE * baseMs)) : SC.FAIL;
+    // 吞吐模式只看传输 + 半个首字节；延迟模式还要加抖动
+    let score = this.scoringMode === "tput"
+      ? tp.e10Ms + 0.5 * lat.latencyMs + failMs * risk.pFailRisk + SC.STALL * risk.pStall
+      : lat.latencyMs + tp.xferMs + SC.JIT_W * lat.jitMs + failMs * risk.pFailRisk + SC.STALL * risk.pStall;
+    // 低速惩罚只在「确实测出来」时才加，避免对无数据节点重复处罚
+    if (this.scoringMode === "tput" && tp.confB > 0.25 && tp.capBps > 0 && tp.capBps < 8 * 1024) score += 400;
+    if (risk.pStall > 0.25 && risk.samples >= 5) score += 400;
+    return {
+      mode: this.scoringMode, score, latencyMs: lat.latencyMs, e10Ms: tp.e10Ms, pFailRisk: risk.pFailRisk,
+      pStall: risk.pStall, capBps: tp.capBps, confB: tp.confB, nEff: tp.nEff, latN: this.window.latN,
+      sampleAgeMs: tp.sampleAgeMs, xferMs: tp.xferMs, samples: risk.samples, jitMs: lat.jitMs, failMs,
+      gate: this.gateOf(),
+    };
+  }
+}
+
 /**
  * 功能：算某节点在某模式下的代价分解（延迟项、失败风险、卡顿、吞吐），是选路的唯一评分入口。
  *
@@ -118,79 +302,7 @@ export interface ScoreParts {
  * @returns 代价分解对象（含 score、各项分量与置信度）
  */
 export function scoreParts(k: string, mode: Mode, now = Date.now(), withGate = false, bytes = 0): ScoreParts {
-  const m: Mode = mode === "tput" ? "tput" : "lat";
-  const s = S.nstat.get(k) || ZERO_STAT;
-  const a = S.alive.get(k);
-  const e = effView(s, now);
-
-  // —— 延迟 ——
-  const tcp = s.tcp || (a && a.ms) || SC.P_TCP;
-  const tls = s.tls || SC.P_TLS;
-  const probeL = tcp + tls * SC.TLS_G + Math.max(0, tls - 2 * tcp - SC.LOSS_SLACK) * SC.LOSS_G;
-  // 真实首字节是主信号：每条连接一个样本，按样本数加权（≤REAL_W），探活只留 PROBE_W 底仓
-  const realL = s.pSum || s.msLocal || 0;
-  // 单条坏连接不该定生死：超过探活 1.5 秒的部分截断
-  const realC = realL > 0 ? Math.min(realL, probeL + 1500) : 0;
-  const realW = realC > 0 ? Math.min(SC.REAL_W, e.okW) : 0;
-  const Lobs = realW > 0 ? (probeL * SC.PROBE_W + realC * realW) / (SC.PROBE_W + realW) : probeL;
-  const Lprior = (a && a.ms) || SC.P_TCP + SC.P_TLS * SC.TLS_G;
-  const confL = 1 - Math.exp(-e.latN / 4);
-  // 有真实样本就直接用它（Lobs 里已带 PROBE_W 底仓），否则才按"探活 + 先验"的置信度混合
-  const latencyMs = realW > 0 ? Lobs : confL * probeL + (1 - confL) * Lprior;
-  // 抖动：MAD×1.4826 换算成 σ。方差对单个离群点平方级敏感（样本已 winsorize，这里再稳一次）
-  const jitMs = realL > 0 ? s.pSumSq * 1.4826 : 0;
-
-  // —— 吞吐 ——：lat 模式用落盘的 p90（分位对等比衰减免疫，O(1) 等价）
-  const capBps = m === "tput" ? pcts(s).cap || 0 : s.capBps || 0;
-  // 目标流量 S 可覆盖（交互 64KB / 流媒体 1MB / 批量 16MB）
-  const sz = bytes > 0 ? bytes : m === "tput" ? TEN_MB : SC.LAT_BYTES;
-  const nEff = e.sumW2 > 0 ? (e.sumW * e.sumW) / e.sumW2 : 0;
-  const sampleAge = s.lastSampleAt ? now - s.lastSampleAt : Infinity;
-  let confB = 0;
-  if (nEff >= SC.N_EFF_MIN && e.recentBytesW >= SC.RECENT_MIN && sampleAge <= SC.SAMPLE_TTL && capBps > 0) {
-    confB = Math.min(1, e.recentBytesW / SC.RECENT_MIN) * (1 - Math.exp(-nEff / 4));
-  }
-  // 无本地吞吐样本时按固定先验（2MB/s）；不接受别的 isolate 的速率
-  const e10Prior = (sz / SC.PRIOR_BPS) * 1000;
-  // 延迟模式要算"传完一个典型请求"的时间；比先验快的证据按新鲜度贬值，比先验慢的原样保留
-  const bwW =
-  m === "lat" && capBps > 0 && s.lastSampleAt ? Math.max(0, 1 - (now - s.lastSampleAt) / SC.SAMPLE_TTL) : 0;
-  const xferPrior = (sz / SC.PRIOR_BPS) * 1000;
-  const xferMeas = capBps > 0 ? (sz / Math.max(8 * 1024, capBps)) * 1000 : 0;
-  const xferMs =
-  m !== "lat" ? 0 : !capBps ? xferPrior : xferMeas <= xferPrior ? bwW * xferMeas + (1 - bwW) * xferPrior : xferMeas;
-  const e10Local = (sz / Math.max(capBps, 8 * 1024)) * 1000;
-  const e10Ms = confB * e10Local + (1 - confB) * e10Prior;
-
-  // —— 风险 ——
-  const pFailRisk = Math.max(pFailOf(s, now, e), pFailFast(s, now));
-  const pStall = pStallOf(s, now, e);
-  const N = e.okW + e.failW;
-  // 一次失败的代价 ≈ 重试一次（重连 + 重传），按本次目标流量 S 定价：
-  // 交互 64KB 失败只丢一个 RTT，按 5000ms 计会把"快但偶尔失败"的节点永久判死
-  // （仿真 oracle 用 cost/(1−p) 线性折算，20 节点场景命中率 0%、正常 DE 1.47x 全来自这个差）；
-  // 批量 16MB 失败要重传，价格自然接近 20s。下限 400ms、上限 20s。
-  const baseMs = latencyMs + (m === "tput" ? e10Ms : xferMs);
-  const failMs = SC.FAIL_SCALE > 0 ? Math.min(20000, Math.max(400, SC.FAIL_SCALE * baseMs)) : SC.FAIL;
-  let score = m === "tput"
-  ? e10Ms + 0.5 * latencyMs + failMs * pFailRisk + SC.STALL * pStall
-  : latencyMs + xferMs + SC.JIT_W * jitMs + failMs * pFailRisk + SC.STALL * pStall;
-
-  // 低速惩罚只在"确实测出来"时才加，避免对无数据节点重复处罚
-  if (m === "tput" && confB > 0.25 && capBps > 0 && capBps < 8 * 1024) score += 400;
-  if (pStall > 0.25 && N >= 5) score += 400;
-
-  let gate = "";
-  if (withGate) {
-    gate = !S.alive.has(k) ? "not-alive" : isBlack(k) ? "black" : isFrozen(k) ? "frozen"
-    : (N >= 8 && availOf(s, now, e) < 0.4) ? "low-avail" : "ok";
-  }
-
-  return {
-    mode: m, score, latencyMs, e10Ms, pFailRisk, pStall, capBps, confB,
-    nEff, latN: e.latN, sampleAgeMs: Number.isFinite(sampleAge) ? sampleAge : -1, xferMs,
-    samples: N, jitMs, failMs, gate,
-  };
+  return new ScoreModel(k, mode, now, withGate, bytes).parts();
 }
 
 /**
