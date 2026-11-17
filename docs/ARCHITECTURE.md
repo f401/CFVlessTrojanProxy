@@ -249,6 +249,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps）；`siteKey`/`hostKey`/`hostScore` 与四个薄包装同在此文件 |
 | `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |
 | 预算分配（自由函数 `planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核）：判定额度这一项在 7.149 随 `round.ts` 一起删掉，现在只有 `adm` 与 `cap` |
+| `FactMerger` | `src/store/factmerge.ts` | 把 DO 车身里的五类事实并进本地表：每张表一个私有方法（族号、历史最好、判死行、`|` 键、容量淘汰各不相同），`merge()` 只负责分派 |
 | `FactsStore`（`FACTS`） | `src/route/factsstore.ts` | 会同步事实表的门面：冷启动合并 → 上行增量 → ack/nack 三段生命周期 |
 | `EgFacts`（`EG`） | `src/route/egfacts.ts` | 出口族事实（中继 IP → v4/v6）与 ×40 的族偏置，含 pending/ack |
 | `DnsFacts`（`DNS`） | `src/route/dnsfacts.ts` | 「纯 v4 站点」确证（24 小时）与 v6 出口折价 |

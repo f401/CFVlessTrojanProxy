@@ -6,7 +6,10 @@
  * 想改合并口径的人只需要读这一个文件。
  */
 import { St } from "../core/enums";
-import { mergeFacts } from "./factmerge";
+import { FactMerger } from "./factmerge";
+
+/** 合并规则的唯一使用者：本文件的 `applyAdd`（规则本身在 `factmerge.ts` 的类里） */
+const MERGER = new FactMerger();
 
 /** 合并目标：`Meter` 公开的账本字段（结构化即可，不要求是 `Meter` 实例） */
 export interface AddTarget {
@@ -116,7 +119,7 @@ export function applyAdd(m: AddTarget, d: MeterBody): void {
           for (const k of ks.slice(200)) delete m.vt[k];
         }
       }
-      mergeFacts(m, d);
+MERGER.merge(m, d);
       // 中继存活度搭便车：加性合并（只增不减，避免别的 isolate 的旧数据把本地结论冲掉）
       if (Array.isArray(d.hl) && d.hl.length) {
         const nowHl = Date.now();
