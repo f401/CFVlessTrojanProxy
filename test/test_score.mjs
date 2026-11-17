@@ -3805,7 +3805,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   ok("手动配了节点就按手动入口走（和 Clash 的 manual 一致）", lMan.every((l) => lSrv(l) === "custom.example.com"));
   const lReg = lDec(W.renderLinks({}, lUrl, lId, lHost, {}, ["HK"]));
   ok("地区条目同样钉入口 IP", lReg.length > lAuto.length && /^\d{1,3}(\.\d{1,3}){3}$/.test(lSrv(lReg[lReg.length - 1])));
-  ok("实现里确实读了边缘 IP 表（入口数可调）", fs.readFileSync("src/views/sub-links.ts", "utf8").includes("X_EDGE_IPS.slice(0, edgeCount(url))"));
+  ok("实现里确实读了边缘 IP 表（入口数可调）", fs.readFileSync("src/views/sub-common.ts", "utf8").includes("X_EDGE_IPS.slice(0, edgeCount(url))"));
 }
 {
   // 第 158 组：错误的标签与被打乱的缩进（v7.168）
@@ -4838,7 +4838,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   eq("端口表达式不再依赖 url 守卫", commonCode.includes("Number(url && url.port)"), false);
   ok("端口表达式显式区分有无 url", commonCode.includes("const listen = url ? Number(url.port)"), "端口表达式没改");
   // ⑥ sing-box 的两处 domain_strategy 被脚本打散过缩进（块内 10 空格）
-  const sbLines = fs.readFileSync("src/views/sub-singbox.ts", "utf8").split(/\r?\n/);
+  const sbLines = fs.readFileSync("src/views/sub-common.ts", "utf8").split(/\r?\n/);
   eq("sing-box 没有 4 空格缩进的 domain_strategy", sbLines.filter((l) => /^ {4}domain_strategy:/.test(l)).length, 0);
 }
 // 第 198 组：?p= 协议开关（v8 §7 里写的是 ?p=vless|tj|both，而代码原先只读 ?proto=，且不认 tj / both）
@@ -4931,7 +4931,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   eq("未命中仍落到手动组", Boolean(route200.final) && sbTags200.includes(route200.final), true);
   const tun200 = (sb200.inbounds || []).find((i) => i.type === "tun");
   eq("tun 仍开着 auto_route（所以 private 直连必须显式写）", Boolean(tun200 && tun200.auto_route), true);
-  const src200 = fs.readFileSync("src/views/sub-singbox.ts", "utf8");
+  const src200 = fs.readFileSync("src/views/sub-common.ts", "utf8");
   eq("源码里写了 ip_is_private 直连", src200.includes("ip_is_private: true"), true);
   eq("源码里局域网后缀与 dns_local 配对", src200.includes('server: "dns_local"'), true);
   // 对照：Clash 侧本来就有本地解析与 CN 直连，改 sing-box 时别把两边口径搞反
@@ -9033,6 +9033,34 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("第二次 ack 之后才清空", W.PS.delta().length, 0);
   W.PS.clear();
 }
+// 第 308 组：三种订阅格式并到 sub-common（原来 links / singbox 各自一个文件）
+{
+  const subCommon = fs.readFileSync("src/views/sub-common.ts", "utf8");
+  const subSrc308 = fs.readFileSync("src/views/sub.ts", "utf8");
+  const subviewSrc = fs.readFileSync("src/views/subview.ts", "utf8");
+  const exists = (f) => { try { fs.statSync(f); return true; } catch { return false; } };
+  eq("sub-links.ts 已合并", exists("src/views/sub-links.ts"), false);
+  eq("sub-singbox.ts 已合并", exists("src/views/sub-singbox.ts"), false);
+  ok("links 与 singbox 的渲染函数都在 sub-common 里", subCommon.includes("export function renderLinks(") && subCommon.includes("export function renderSingbox("), "两个渲染函数没进同一个文件");
+  ok("共享 helper 也还在同一个文件里", subCommon.includes("export function edgeCount(") && subCommon.includes("export function pickProtos("), "helper 被拆出去了");
+  ok("合并后的文件仍受 560 行上限约束", subCommon.split(/\r?\n/).length <= 560, "sub-common 超长");
+  eq("sub.ts 从 sub-common 再导出 singbox", subSrc308.includes('export { renderSingbox } from "./sub-common";'), true);
+  eq("sub.ts 从 sub-common 再导出 links", subSrc308.includes('export { renderLinks } from "./sub-common";'), true);
+  eq("subview 从 sub-common 取 singbox", subviewSrc.includes('import { renderSingbox } from "./sub-common";'), true);
+  eq("subview 从 sub-common 取 links", subviewSrc.includes('import { renderLinks } from "./sub-common";'), true);
+
+  // 行为面：三个格式都还能渲染出来，而且和 SUBVIEW 的分发结果逐字相同
+  const env308 = { uuid: "4241b903-8d39-4a17-8f4c-bb33b1630c33", nodes: "", pwd: "tj-308" };
+  const url308 = new URL("https://edge.example.com/4241b903-8d39-4a17-8f4c-bb33b1630c33/sub");
+  const id308 = "4241b903-8d39-4a17-8f4c-bb33b1630c33";
+  const lk = W.renderLinks(env308, url308, id308, "edge.example.com", {}, ["HK"]);
+  const sb = W.renderSingbox(env308, url308, id308, "edge.example.com", {}, ["HK"]);
+  ok("links 仍是 vless:// 链接串", atob(lk).includes("vless://"), "links 输出丢了 vless 头");
+  ok("singbox 仍是可解析 JSON", (() => { try { JSON.parse(sb); return true; } catch { return false; } })(), "singbox 输出不是 JSON");
+  eq("SUBVIEW 的 links 分发就是 renderLinks", W.SUBVIEW.render({ env: env308, url: url308, id: id308, host: "edge.example.com", learned: {}, regions: ["HK"] }, "links"), lk);
+  eq("SUBVIEW 的 singbox 分发就是 renderSingbox", W.SUBVIEW.render({ env: env308, url: url308, id: id308, host: "edge.example.com", learned: {}, regions: ["HK"] }, "singbox"), sb);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

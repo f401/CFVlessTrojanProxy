@@ -19,7 +19,7 @@ proxy/    protocol dial session     数据面：协议、拨号、会话
           fallback tunnel connection
           conn-settle conn-sample   连接结束时的结算流水线 / 纯采样换算（权重、卡顿窗口、KB/s）
           ws-in                      客户端→上游字节流（8MB 上行队列上限）
-views/    sub* panel* html          纯渲染：sub-common/singbox/links + panel/admin/stats
+views/    sub* panel* html          纯渲染：sub-common（clash + singbox + links 三格式同住）+ panel/admin/stats
 edge/     respond types auth        响应与安全头、请求上下文、管理会话
 routes/   health subscription admin   proxyip debug(+tables/nets/actions) tools(barrel)
           logs cron
@@ -278,7 +278,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
 
-自由函数集中在 `src/core/{util,net,hist,quota,hosts,bytes,sha224,timeouts,ws,concurrency,errors,env-parse,proto-names}.ts`、`src/proxy/protocol.ts`、`src/views/{html,sub-links,sub-singbox,sub.ts}`：它们要么是纯计算，要么是字符串渲染，没有状态可装。
+自由函数集中在 `src/core/{util,net,hist,quota,hosts,bytes,sha224,timeouts,ws,concurrency,errors,env-parse,proto-names}.ts`、`src/proxy/protocol.ts`、`src/views/{html,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。
 
 ## 注释约定
 

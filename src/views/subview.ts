@@ -1,5 +1,5 @@
-import { renderLinks } from "./sub-links";
-import { renderSingbox } from "./sub-singbox";
+import { renderLinks } from "./sub-common";
+import { renderSingbox } from "./sub-common";
 import { renderClash } from "./sub";
 
 /** 订阅输出格式：Clash/Mihomo YAML、sing-box JSON、纯链接列表 */

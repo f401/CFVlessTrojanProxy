@@ -3,8 +3,8 @@ import { S } from "../core/state";
 import { splitRelay } from "../core/http80";
 
 export * from "./sub-common";
-export { renderSingbox } from "./sub-singbox";
-export { renderLinks } from "./sub-links";
+export { renderSingbox } from "./sub-common";
+export { renderLinks } from "./sub-common";
 
 /** YAML 双引号字符串：JSON 转义是 YAML 双引号标量的合法子集，引号/反斜杠/换行/制表符一起处理 */
 const yamlStr = (s: string) => JSON.stringify(String(s));

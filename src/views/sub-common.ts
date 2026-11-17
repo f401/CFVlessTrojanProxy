@@ -1,5 +1,207 @@
 import { secretPwd } from "../core/util";
 
+// ---- 并入自 sub-links.ts ----
+/**
+ * 功能：渲染「链接列表」形式的订阅（每行一条 vless/trojan URL）。
+ * @param o 订阅输入（主机、端口、凭据等）
+ * @returns 纯文本
+ */
+export function renderLinks(
+  env: Env,
+  url: URL,
+  id: string,
+  host: string,
+  learned: Record<string, RttEntry> = {},
+  regions: string[] = [],
+  auth?: Auth,
+) {
+  const nodes = orderNodes(loadNodes(env, host), learned);
+  const pass = trojanPasswordOf(env, id, auth);
+  const protos = pickProtos(env, url, Boolean(pass));
+  const lines = [];
+  // 链接格式没有 `ip-version` 之类的开关，钉 IPv4 只能靠把 server 写成 IP 字面量，
+  // 再把 `host=` / `sni=` 指回域名（TLS 与 WS 路由都不变）——这和 Clash 里
+  // `server: <ip> + servername: <域名>` 是同一手法。不钉的话，客户端在双栈网络上
+  // 会把域名解析成 AAAA，CF→CF 把 v6 出口原样透传给目标，直接吃 4 字节 403。
+  const manual = String(env.nodes || "").trim();
+  const noEdge = Boolean(manual) || url.searchParams.get("e") === "0";
+  const edgeIps = noEdge ? [] : X_EDGE_IPS.slice(0, edgeCount(url));
+  // 轮转分配：同一个入口的 443/8443 落到不同边缘 IP 上，用户手动切就有得挑
+  let ei = 0;
+  const pickEdge = (fallback: string) => (edgeIps.length ? String(edgeIps[ei++ % edgeIps.length]) : fallback);
+
+  // 和 Clash / sing-box 对齐：每个入口出两套（吞吐优先 T / 速率优先 L），
+  // 否则明文订阅只有服务端默认模式，客户端根本选不了。
+  for (const mode of ["tput", "lat"]) {
+    const suffix = mode === "lat" ? "L" : "T";
+    for (const proto of protos) {
+      for (const n of nodes) {
+        if (proto === "trojan" && !pass) continue;
+        const q = [
+          "encryption=none",
+          `security=${n.tls ? "tls" : "none"}`,
+          "type=ws",
+          `host=${encodeURIComponent(host)}`,
+          n.tls ? `sni=${encodeURIComponent(host)}` : "",
+          `path=${encodeURIComponent(`${nodePath(n)}&mode=${mode}`)}`,
+          `#${encodeURIComponent(`${proto}-${nodeLabel(n)}-${suffix}`)}`,
+        ]
+          .filter(Boolean)
+          .join("&");
+        const srv = pickEdge(n.host);
+        if (proto === "vless") lines.push(`vless://${id}@${srv}:${n.port}?${q}`);
+        else lines.push(`trojan://${encodeURIComponent(pass)}@${srv}:${n.port}?${q}`);
+      }
+    }
+  }
+  for (const e of regionEntries(regions, host, pass, protos, url)) {
+    const q = [
+      "encryption=none",
+      "security=tls",
+      "type=ws",
+      `host=${encodeURIComponent(host)}`,
+      `sni=${encodeURIComponent(host)}`,
+      `path=${encodeURIComponent(e.path)}`,
+      `#${encodeURIComponent(e.name)}`,
+    ].join("&");
+    const srv = pickEdge(host);
+    if (e.proto === "vless") lines.push(`vless://${id}@${srv}:${e.port}?${q}`);
+    else lines.push(`trojan://${encodeURIComponent(pass)}@${srv}:${e.port}?${q}`);
+  }
+  return btoa(lines.join("\n"));
+}
+
+// ---- 并入自 sub-singbox.ts ----
+/**
+ * 功能：渲染 sing-box 配置（出站 + 分组 + 出站 DNS 策略）。
+ * @param o 订阅输入
+ * @returns JSON 字符串
+ */
+export function renderSingbox(
+  env: Env,
+  url: URL,
+  id: string,
+  host: string,
+  learned: Record<string, RttEntry> = {},
+  regions: string[] = [],
+  auth?: Auth,
+) {
+  const nodes = orderNodes(loadNodes(env, host), learned);
+  const pass = trojanPasswordOf(env, id, auth);
+  const protos = pickProtos(env, url, Boolean(pass));
+  const outs = [];
+  const byMode: Record<string, string[]> = { lat: [], tput: [] };
+  const tags = [];
+  const G_LAT = "\u26a1 \u901f\u7387\u4f18\u5148";
+  const G_TPUT = "\ud83d\ude80 \u541e\u5410\u4f18\u5148";
+  const G_MAN = "\ud83c\udfaf \u624b\u52a8";
+  const G_REG = "\ud83c\udf0d \u5730\u533a";
+  const regNames: string[] = [];
+
+  for (const mode of ["tput", "lat"]) {
+    const suffix = mode === "lat" ? "L" : "T";
+    for (const proto of protos) {
+      for (const n of nodes) {
+        if (proto === "trojan" && !pass) continue;
+        const tag = `${proto}-${nodeLabel(n)}-${suffix}`;
+        tags.push(tag);
+        byMode[mode].push(tag);
+        const o: Record<string, unknown> = {
+          type: proto,
+          tag,
+          server: n.host,
+          server_port: n.port,
+          domain_strategy: "ipv4_only",
+          tls: n.tls ? { enabled: true, server_name: host } : { enabled: false },
+          transport: { type: "ws", path: `${nodePath(n)}&mode=${mode}`, headers: { Host: host } },
+        };
+        if (proto === "vless") o.uuid = id;
+        else o.password = pass;
+        outs.push(o);
+      }
+    }
+  }
+
+  for (const e of regionEntries(regions, host, pass, protos, url)) {
+    tags.push(e.name);
+    regNames.push(e.name);
+    const o: Record<string, unknown> = {
+      type: e.proto,
+      tag: e.name,
+      server: e.server,
+      server_port: e.port,
+          domain_strategy: "ipv4_only",
+      tls: { enabled: true, server_name: host },
+      transport: { type: "ws", path: e.path, headers: { Host: host } },
+    };
+    if (e.proto === "vless") o.uuid = id;
+    else o.password = pass;
+    outs.push(o);
+  }
+
+  const pick = (arr: string[], n: number) => arr.slice(0, Math.max(1, Math.min(n, arr.length)));
+  const groups = [
+    {
+      type: "urltest",
+      tag: G_TPUT,
+      outbounds: pick(byMode.tput, 5),
+      url: "http://www.gstatic.com/generate_204",
+      interval: "5m",
+      tolerance: 30,
+    },
+    ...(regNames.length
+      ? [
+          {
+            type: "selector",
+            tag: G_REG,
+            outbounds: regNames,
+          },
+        ]
+      : []),
+    {
+      type: "urltest",
+      tag: G_LAT,
+      outbounds: pick(byMode.lat, 5),
+      url: "http://www.gstatic.com/generate_204",
+      interval: "5m",
+      tolerance: 30,
+    },
+    {
+      type: "selector",
+      tag: G_MAN,
+      outbounds: [G_TPUT, G_LAT, ...(regNames.length ? [G_REG] : []), ...tags, "direct"],
+    },
+  ];
+
+  return JSON.stringify(
+    {
+      log: { level: "info" },
+      dns: {
+        servers: [
+          { tag: "dns_local", address: "223.5.5.5" },
+          { tag: "dns_remote", address: "https://1.1.1.1/dns-query", detour: G_MAN },
+        ],
+        // 局域网名字用本地解析器：路由器 / NAS / .local 这些名字在公网 DNS 上不存在，
+        // 走 dns_remote（detour G_MAN）不但查不到，还会把内网主机名送到代理出口去
+        rules: [{ domain_suffix: [".lan", ".local", ".home.arpa"], server: "dns_local" }],
+        final: "dns_remote",
+      },
+      inbounds: [{ type: "tun", tag: "tun-in", address: ["172.19.0.1/30"], auto_route: true, strict_route: true }],
+      outbounds: [...groups, ...outs, { type: "direct", tag: "direct" }],
+      // tun + auto_route 会把整机流量接管，private 网段必须显式放直连，否则局域网
+      // （路由管理页、NAS、局域网打印机）都会被送进隧道，再由 CF 出口去连 192.168.x —— 必然失败
+      route: {
+        rules: [{ ip_is_private: true, outbound: "direct" }],
+        final: G_MAN,
+        auto_detect_interface: true,
+      },
+    },
+    null,
+    2,
+  );
+}
+
+// ---- 门面（对外导出面保持不变） ----
 /* sub-common：订阅渲染共用的节点/标签/地区工具 */
 /** ?x=1 用的 CF 边缘入口（钉 IP 是为了拿到不同的落地机房；都是 anycast，同一 IP 也会乱跳）。 */
 export const X_EDGE_IPS = [
@@ -277,4 +479,3 @@ export function regionEntries(regions: string[], host: string, pass: string, pro
   }
   return out;
 }
-
