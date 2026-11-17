@@ -8880,11 +8880,11 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
 
   // 一个文件里要有四个单元：形状 + 三个类 + 一个就绪函数 + 三个单例
   ok("一个文件里四个单元齐备", pickSrc.includes("export interface PickState") && pickSrc.includes("export class PickPath") && pickSrc.includes("export class SitePick") && pickSrc.includes("export class PathPrefs") && pickSrc.includes("export async function ensureReady("));
-  ok("单例都还在（PICK / SITE / PATHS）", pickSrc.includes("export const PICK = new PickPath();") && pickSrc.includes("export const SITE = new SitePick();") && pickSrc.includes("export const PATHS = new PathPrefs();"));
+  ok("只剩一个门面实例，组件由它持有", pickSrc.includes("export const PICK = new PickPath();") && !pickSrc.includes("export const SITE") && !pickSrc.includes("export const PATHS") && pickSrc.includes("readonly site = new SitePick();") && pickSrc.includes("readonly paths = new PathPrefs();"));
   ok("文件头写清为什么合在一起", pickSrc.includes("为什么是一个文件四个类"));
 
   // 编排仍然只做编排：抽样与画像调用只在画像那一段里
-  ok("pick 四行内委托给 SITE", /pick\([^)]*\)[^{]*\{[^}]*return SITE\.pick\(/.test(pickSrc));
+  ok("pick 四行内委托给持有的画像组件", /pick\([^)]*\)[^{]*\{[^}]*return this\.site\.pick\(/.test(pickSrc));
   ok("编排走 ensureReady 而不是自己拉池子", pickSrc.includes("await ensureReady(env);"));
   ok("池子等待有上限", pickSrc.includes("700"));
   ok("起搏不 await", !pickSrc.includes("await seedAlive("));
@@ -8896,9 +8896,9 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("偏好段不自己抽样", !pickSrc.slice(pickSrc.indexOf("export class PathPrefs")).includes("ThompsonPicker"));
 
   // 行为面：三个单例都在，且「没有站点上下文时不否决任何通道」
-  ok("三个单例就位", W.SITE instanceof W.SitePick && W.PATHS instanceof W.PathPrefs && W.PICK instanceof W.PickPath);
-  ok("空站点时一律不否决", W.PATHS.vetoed("", "203.0.113.9:443") === false);
-  ok("空站点时通道判据也放行", W.PATHS.chanOpen("", "203.0.113.9:443") === true);
+  ok("门面持有两个组件，模块级不再有 SITE / PATHS", W.PICK instanceof W.PickPath && W.PICK.site instanceof W.SitePick && W.PICK.paths instanceof W.PathPrefs && W.SITE === undefined && W.PATHS === undefined);
+  ok("空站点时一律不否决", W.PICK.paths.vetoed("", "203.0.113.9:443") === false);
+  ok("空站点时通道判据也放行", W.PICK.paths.chanOpen("", "203.0.113.9:443") === true);
 }
 
 // [301] 薄包装与「只为测试存在的入口」已经收掉：调用点直接调单例
@@ -11526,6 +11526,24 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     (src344.match(/readonly (benchRunner|diagRunner|probeRunner|tfRunner) = new /g) || []).length, 4);
 }
 
+// ---- 第 345 组：pick 家族的三个模块级单例收成一个（门面自己持有 site / paths） ----
+{
+  const pickSrc345 = fs.readFileSync("src/px/pickpath.ts", "utf8");
+
+  // 结构：模块级只剩 PICK 一个实例，两个组件是它的 readonly 字段
+  ok("[345] 模块级不再导出 SITE / PATHS", !pickSrc345.includes("export const SITE") && !pickSrc345.includes("export const PATHS"));
+  ok("[345] 门面仍然导出唯一实例", pickSrc345.includes("export const PICK = new PickPath();"));
+  ok("[345] 两个组件是 readonly 字段", pickSrc345.includes("readonly site = new SitePick();") && pickSrc345.includes("readonly paths = new PathPrefs();"));
+  ok("[345] 全文各只 new 一次", pickSrc345.split("new SitePick(").length - 1 === 1 && pickSrc345.split("new PathPrefs(").length - 1 === 1);
+  ok("[345] 类体里的调用改走字段", !pickSrc345.includes("return SITE.") && !pickSrc345.includes("PATHS.byPrefer") && !pickSrc345.includes("PATHS.rescan") && !pickSrc345.includes("PATHS.byChan") && !pickSrc345.includes("PATHS.chanOpen") && !pickSrc345.includes("PATHS.nonCfFirst"));
+  ok("[345] 委托仍然只有一行", /pick\([^)]*\)[^{]*\{[^}]*return this\.site\.pick\(/.test(pickSrc345));
+
+  // 行为：组件挂得住、判据不变
+  ok("[345] site 是 SitePick 实例", W.PICK.site instanceof W.SitePick);
+  ok("[345] paths 是 PathPrefs 实例", W.PICK.paths instanceof W.PathPrefs);
+  ok("[345] 空站点不否决", W.PICK.paths.vetoed("", "203.0.113.9:443") === false);
+  ok("[345] 空站点通道放行", W.PICK.paths.chanOpen("", "203.0.113.9:443") === true);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

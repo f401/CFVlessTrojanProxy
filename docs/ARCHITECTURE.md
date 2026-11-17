@@ -228,10 +228,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `RawProbe` | `src/px/probe.ts` | 一次原始探测的会话（建连 → 写报文 → 按预算收首段字节）：`open` 负责 sslip.io 回退、`tcpMs`/`elapsedMs` 只在建连时刻上算、`peek` 收够/到点/提前判据三选一退出、`close` 保证迟到连上的 socket 也被关（免费计划全局只有 6 个并发 `connect()`）；两个探测只保留「首段字节怎么判」 |
 | `SeedStore` | `src/px/seed.ts` | 跨 isolate 的种子表（只存名字） |
 | `Selector`（`SEL`） | `src/px/selector.ts` | 门面：十个方法各一行委托给下面三个执行器，不再有算法 |
-| `PickPath`（`PICK`） | `src/px/pickpath.ts` | 编排：地区硬要求（`?rg=`）与 `current` 的偏好顺序；同文件里还有下面两个类（画像与偏好都只在编排的调用栈里存活，拆成三个文件会让「这次为什么换了节点」分散在三处 import） |
-| `SitePick`（`SITE`） | `src/px/pickpath.ts` | 站点画像这一层：`pick` 只做编排，五段各一方法 —— `syncCursor`（游标自愈）、`byProfile`（≥3 条样本、首选不超过 2 小时才覆盖全局）、`byShadow`（冷启动影子）、`bySample`（单层抽样 + 负载溢出）、`leastBad`（全池被罚时的兜底） |
+| `PickPath`（`PICK`） | `src/px/pickpath.ts` | 编排：地区硬要求（`?rg=`）与 `current` 的偏好顺序；同文件里还有下面两个类，7.345 起它们由门面自己持有（`PICK.site` / `PICK.paths`），模块级不再有 `SITE` / `PATHS` 两个单例 —— 画像与偏好都只在编排的调用栈里存活，拆成三个文件会让「这次为什么换了节点」分散在三处 import |
+| `SitePick`（`PICK.site`） | `src/px/pickpath.ts` | 站点画像这一层：`pick` 只做编排，五段各一方法 —— `syncCursor`（游标自愈）、`byProfile`（≥3 条样本、首选不超过 2 小时才覆盖全局）、`byShadow`（冷启动影子）、`bySample`（单层抽样 + 负载溢出）、`leastBad`（全池被罚时的兜底） |
 | `ThompsonPicker` | `src/px/ts.ts` | 单层 Thompson 抽样：构造时一次算清「池子大小 → 抽样宽度 → 乐观面 β → 目标流量 → 探活剪枝线 → 池内最快带宽」，`arms()` 逐候选算 σ 与乐观代价，`pickOf()` 按 `TS_BAND` 剪枝后取代价最小；样本不足的臂豁免剪枝（否则「没测过 → 先验慢 → 被剪掉 → 永远没测过」锁死） |
-| `PathPrefs`（`PATHS`） | `src/px/pickpath.ts` | 偏好过滤：判定层否决、入口族偏好（非 CF 出口优先，1.5x+50ms 带内）、站点通道偏好、拨号重试的「排除已试过」重扫；只读不写（单例名是 `PATHS`，`PREFS` 已被入口偏好占用） |
+| `PathPrefs`（`PICK.paths`） | `src/px/pickpath.ts` | 偏好过滤：判定层否决、入口族偏好（非 CF 出口优先，1.5x+50ms 带内）、站点通道偏好、拨号重试的「排除已试过」重扫；只读不写（7.345 起不再是模块级单例，由 `PICK` 持有；`PREFS` 那个名字仍归入口偏好） |
 | `Rotation`（`ROTATION`） | `src/px/rotation.ts` | 什么时候换：最短驻留时间（`dwellOf`）、切走判据、扫描后的观察窗与定时复查 |
 | `FailBook`（`FAILS`） | `src/px/failbook.ts` | 失败怎么记：节点级失败推进快速失败窗口并重算分数，站点级失败只进站点画像；要切走时调 `ROTATION.maybeSwitch` |
 | `Dialer` / `RegionPicker` | `src/proxy/dialer.ts`、`region.ts` | `Dialer.open()` 只分派三段：`classify`（CF 托管识别 + 一次 200ms 的事实预热，决定要不要绕中继）、`viaRelay`（循环骨架：`nextCand` 取候选并判四类跳过 —— 解析为空 / 内网地址 / 已试过 / 边缘中继，`attemptRelay` 只拨一次并记账冷却；名额按真实拨号次数算）、`direct`（CF 托管目标先按 A 记录拨 IPv4）；两条直连都走 `guarded` 的有限等待 |

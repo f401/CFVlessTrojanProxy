@@ -264,9 +264,6 @@ export class SitePick {
   }
 }
 
-/** 进程内唯一实例 */
-export const SITE = new SitePick();
-
 // ---- 来自 pick-pref.ts ----
 // 「偏好」这一层：判定层的否决（已判封锁的通道别拨）、入口族偏好（非 CF 出口优先）、
 // 站点通道偏好（这条中继对这个站已判死就换一条），以及拨号重试要的「排除已试过的那条」。
@@ -422,9 +419,6 @@ export class PathPrefs {
   }
 }
 
-/** 进程内唯一实例 */
-export const PATHS = new PathPrefs();
-
 // ---- 编排与门面 ----
 // 挑哪一个候选：地区硬要求（?rg=）、正常请求（站点画像 → 抽样 → 偏好），以及「这条连接当时选的是谁」。
 // 三层住在三个文件里：候选池准备在 ./pick-ready，画像与抽样在 ./pick-site，偏好过滤在 ./pick-pref；
@@ -437,6 +431,10 @@ export const PATHS = new PathPrefs();
  * 它自己不写任何统计：画像与抽样在 `SitePick`，偏好过滤在 `PathPrefs`，池子在 `ensureReady`。
  */
 export class PickPath {
+  /** 站点画像与抽样（无自有状态，全部读 `S`；7.345 起由门面持有，不再是模块级单例） */
+  readonly site = new SitePick();
+  /** 偏好过滤（同上：判定否决、族偏好、通道偏好、排除已试过的那条） */
+  readonly paths = new PathPrefs();
   /**
    * 功能：选一个节点（站点画像 → 冷启动影子 → 单层抽样 → 粘滞兜底），委托给 `SitePick`。
    * 保留这个门面是因为 `src/px/selector.ts` 与单测都从 `PICK.pick(...)` 进来。
@@ -446,7 +444,7 @@ export class PickPath {
    * @returns {string} 候选键 `host:port`
    */
   pick(env: Env, mode: Mode, st: PickState | null): string {
-    return SITE.pick(env, mode, st);
+    return this.site.pick(env, mode, st);
   }
 
   /**
@@ -515,7 +513,7 @@ export class PickPath {
     await ensureReady(env);
     // 站点偏好：判定层说「这条中继能过这个站」时才用它，优先于画像与抽样
     if (host) {
-      const hit = PATHS.byPrefer(host, m, cfOnly, exclude);
+      const hit = this.paths.byPrefer(host, m, cfOnly, exclude);
       if (hit) {
         if (st) st.node = hit;
         return hit;
@@ -523,18 +521,18 @@ export class PickPath {
     }
     // 非 CF 出口优先，但只在分数可比时（1.5x + 50ms 带内）：CF 托管站点的
     // 判定依据是出口 IP 族，非 CF 中继才可能改变结果。偏好开关由判定层（Policy）给。
-    if (host && PATHS.nonCfFirst()) {
-      const nk = PATHS.byNonCf(host, m, exclude);
+    if (host && this.paths.nonCfFirst()) {
+      const nk = this.paths.byNonCf(host, m, exclude);
       if (nk) {
         if (st) st.node = nk;
         return nk;
       }
     }
     // 站点画像 → 抽样 → 粘滞兜底（都在 SitePick 里）
-    const first = SITE.pick(env, m, st);
+    const first = this.site.pick(env, m, st);
     // 拨号重试要的是「下一条」：抽到的正好是刚失败的那条时，直接按通用分数重扫一遍
     if (first && exclude && exclude.has(first)) {
-      const bk = PATHS.rescan(host, m, cfOnly, exclude);
+      const bk = this.paths.rescan(host, m, cfOnly, exclude);
       if (bk) {
         if (st) st.node = bk;
         return bk;
@@ -543,8 +541,8 @@ export class PickPath {
     }
     // 站点通道偏好：该通道对当前站点已被实测判死（403/不可达）就换一条没被判死的，
     // 打得通（0）与没测过（1）都不降权 —— 未知不等于坏，否则新中继永远上不了场。
-    if (!first || !host || PATHS.chanOpen(host, first)) return first || "";
-    const best = PATHS.byChan(host, m, exclude);
+    if (!first || !host || this.paths.chanOpen(host, first)) return first || "";
+    const best = this.paths.byChan(host, m, exclude);
     if (best) {
       if (st) st.node = best;
       return best;
