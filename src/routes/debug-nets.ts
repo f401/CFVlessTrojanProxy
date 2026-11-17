@@ -92,6 +92,8 @@ export class DebugBench {
 export const BENCH = new DebugBench();
 
 // ---- 并入自 debug-net-diag.ts ----
+/** 允许诊断的站点名形状（小写字母数字与点、连字符，首尾不能是符号） */
+const HOST_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/;
 /** 诊断路由的上下文：`/debug` 挂在用户前缀下，所以一定带着 `id` */
 type DebugCtx = RouteCtx & { id: string };
 
@@ -106,114 +108,33 @@ export class DebugDiag {
    * @returns 命中时返回诊断结果，否则 `null`
    */
   async diag(c: DebugCtx, url: URL): Promise<Response | null> {
+    // 这个分支只服务 ?diag=：没传就直接让给后面的探针分支
     const { env, id } = c;
-    const diagHost = String(url.searchParams.get("diag") || "")
-      .trim()
-      .toLowerCase();
-    if (!diagHost) return null;
-    if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(diagHost)) {
-      return json({ ok: false, error: "域名格式不对" });
-    }
+    const host = this.hostOf(url);
+    if (!host) return null;
+    if (!HOST_RE.test(host)) return json({ ok: false, error: "域名格式不对" });
     const port = Number(url.searchParams.get("port")) || 443;
     const alive = await aliveList(env);
-    const ccOf: Record<string, string> = {};
-    for (const a of alive) ccOf[a.h + ":" + a.p] = a.cc || "";
-    const fam = hostKey(diagHost);
-    const rows: DiagRow[] = [];
-    const m = S.hostNode.get(fam);
-    if (m) {
-      for (const [node, s] of m) {
-        rows.push({ node, cc: ccOf[node] || "", ...s });
-      }
-    }
-    rows.sort((a, b) => b.n - a.n);
+    const fam = hostKey(host);
+    // 真实样本（本 isolate 学到的）与主动探测（?probe=1）是两份证据，后者只在没样本时兜底
+    const rows = this.sampleRows(alive, fam);
+    const probe = url.searchParams.get("probe") === "1" ? await this.probeTops(alive, host) : null;
+    const picked = this.pickBasis(rows, probe);
     const direct = S.hostDirect.get(fam) || { ok: 0, bad: 0, at: 0 };
-
-    // 主动探测：不信历史样本时，直接拿每个节点试一次
-    // （只验「能不能把这个 SNI 转出去」：probeSni 发完 ClientHello 就等 ServerHello，不完成握手，拿不到应用层状态）
-    let probe: Array<{ node: string; cc: string } & SniProbe> | null = null;
-    if (url.searchParams.get("probe") === "1") {
-      probe = await Promise.all(
-        alive.slice(0, 6).map(async (a) => {
-          // 第三个参数是目标 SNI；超时走 probeSni 自己的默认值（以前把 port 传进去，
-          // 默认 443 会把超时压到 443ms，正常的慢站全被判死）。
-          const r = await probeSni(a.h, a.p, diagHost);
-          return { node: a.h + ":" + a.p, cc: a.cc || "", ...r };
-        }),
-      );
-    }
-
-    // 有真实样本就用真实样本；没有就退化成这一轮探测的结果
-    let basis = rows;
-    let basisLabel = "真实流量";
-    if (!rows.length && probe) {
-      basis = probe.map((p) => ({
-        node: p.node,
-        cc: p.cc,
-        n: 1,
-        ok: p.err ? 0 : 1,
-        bad: p.err ? 1 : 0,
-        bytes: 0,
-        ttfb: p.hs || 0,
-      }));
-      basisLabel = "主动探测";
-    }
-    // 判定：先看 DNS 解析出的 IP 在不在 CF 网段，再用 HTTP 探一次拿真实状态码
-    // （Worker 自己发 HTTPS 请求时看得到状态码；走中继的 WebSocket 隧道是端到端 TLS，看不到状态行——那一路要靠 tfb 在 DO 里用 tunnelfetch 单独建连）
-    const ips = await resolveV4All(diagHost).catch(() => []);
-    const cfHosted = await isCfHost(diagHost).catch(() => false);
-    const live = await httpProbe(diagHost, 4000).catch(() => ({ code: 0, colo: "" }));
-    if (live.code) S.cfHttp.set(diagHost, { code: live.code, colo: live.colo, t: Date.now() });
-    const cfVerdict = {
-      ips,
-      cfHosted,
-      code: live.code,
-      colo: live.colo,
-      cached: cfHttpCode(diagHost),
-      blocked: live.code >= 400,
-    };
-    // 该站点在中继上被判 blocked/dead 的条目（来自判定表，带来源与时间）
-    const relayBlocked: Array<{ node: string; state: number; src: number; left: number }> = [];
-    for (const v of VT.all()) {
-      if (!v.channel.startsWith("r:") || v.state < St.Blocked) continue;
-      relayBlocked.push({
-        node: v.channel.slice(2) + ":443",
-        state: v.state,
-        src: v.src,
-        left: Math.round((v.updatedAt + VT_TTL_MS - Date.now()) / 1000),
-      });
-    }
-    // &do=1：把 DO 里跨 isolate 的那份判定也拉出来看（否则只能看到本 isolate 学到的）
-    let ringBlk: Array<{ node: string; n: number; left: number }> = [];
-    if (url.searchParams.get("do") === "1" && env.METER) {
-      try {
-        // 读的是 blk2 事实（host|relay → { n, at }），不是计量表里那张早已没有生产者的旧封锁表：
-        // 那张表从 7.124 起就没有写者了，诊断会一直显示「DO 里没有封锁」，把空表当成了「没被封锁」。
-        const rr = await doFetch(env, id, "https://meter/vt");
-        const jj = (await rr.json()) as { blk2?: Array<{ k: string; n: number; at: number }> };
-        const now2 = Date.now();
-        for (const r of jj.blk2 || []) {
-          if (!r || !r.k.startsWith(diagHost + "|")) continue;
-          const left = Math.round((r.at + BLK_TTL - now2) / 1000);
-          if (left <= 0) continue;
-          ringBlk.push({ node: r.k.slice(diagHost.length + 1), n: r.n, left });
-        }
-        ringBlk.sort((a, b) => b.left - a.left);
-      } catch (e) {
-        ringBlk = [];
-      }
-    }
-    relayBlocked.sort((a, b) => b.left - a.left);
-    const v = diagVerdict(basis, direct);
+    // 三段证据各自独立取：CF 托管事实（两次外部探测）、本 isolate 判定表、DO 里跨 isolate 的封锁环
+    const cfVerdict = await this.cfFacts(host);
+    const relayBlocked = this.relayBlocked();
+    const ringBlk = await this.doRing(env, id, url, host);
+    const v = diagVerdict(picked.rows, direct);
 
     return json({
-      host: diagHost,
+      host,
       family: fam,
       port,
       kind: v.kind,
       verdict: v.verdict,
       suspect: v.suspect,
-      basis: basisLabel,
+      basis: picked.label,
       direct,
       samples: rows,
       probe,
@@ -223,6 +144,169 @@ export class DebugDiag {
       ringBlk,
       note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿到连接结果；要看真状态码用 cached（本 isolate 直连会话缓存）或 /debug?tfb=",
     });
+  }
+
+  /**
+   * 功能：从查询串取出要诊断的目标站点（去掉首尾空白、统一小写）。
+   * @param url 请求 URL
+   * @returns 站点名；没有传 `?diag=` 时返回空串（调用方据此判定「不是这个分支」）
+   */
+  private hostOf(url: URL): string {
+    return String(url.searchParams.get("diag") || "")
+      .trim()
+      .toLowerCase();
+  }
+
+  /**
+   * 功能：把本 isolate 记在站点画像里的样本展开成诊断行（带上每个节点的国家码）。
+   * @param alive 当前存活表（用来补国家码）
+   * @param fam 站点族键（`hostKey` 的结果）
+   * @returns 按样本数降序的行；一条样本都没有时是空数组
+   */
+  private sampleRows(alive: Array<{ h: string; p: number; cc?: string }>, fam: string): DiagRow[] {
+    const ccOf: Record<string, string> = {};
+    for (const a of alive) ccOf[a.h + ":" + a.p] = a.cc || "";
+    const rows: DiagRow[] = [];
+    const m = S.hostNode.get(fam);
+    if (m) {
+      for (const [node, s] of m) rows.push({ node, cc: ccOf[node] || "", ...s });
+    }
+    rows.sort((a, b) => b.n - a.n);
+    return rows;
+  }
+
+  /**
+   * 功能：不信历史样本时，拿前面几条存活节点各探一次「能不能把这个 SNI 转出去」。
+   *
+   * 只验中转腿：`probeSni` 发完 ClientHello 就等 ServerHello，不完成握手，拿不到应用层状态。
+   * 超时走 `probeSni` 自己的默认值 —— 第三个参数是目标 SNI，以前把 port 传进去，
+   * 默认 443 会把超时压到 443ms，正常的慢站全被判死。
+   * @param alive 当前存活表
+   * @param host 目标站点
+   * @returns 每条节点的探测结果（最多 6 条）
+   */
+  private async probeTops(
+    alive: Array<{ h: string; p: number; cc?: string }>,
+    host: string,
+  ): Promise<Array<{ node: string; cc: string } & SniProbe> | null> {
+    return Promise.all(
+      alive.slice(0, 6).map(async (a) => {
+        const r = await probeSni(a.h, a.p, host);
+        return { node: a.h + ":" + a.p, cc: a.cc || "", ...r };
+      }),
+    );
+  }
+
+  /**
+   * 功能：决定用哪份证据给结论 —— 有真实样本就用真实样本，没有就退化成这一轮主动探测的结果。
+   * @param rows 真实流量样本
+   * @param probe 主动探测结果（没开 `?probe=1` 时是 `null`）
+   * @returns `{ rows, label }`：参与判定的行与它们的来源说明
+   */
+  private pickBasis(
+    rows: DiagRow[],
+    probe: Array<{ node: string; cc: string } & SniProbe> | null,
+  ): { rows: DiagRow[]; label: string } {
+    if (rows.length || !probe) return { rows, label: "真实流量" };
+    return {
+      rows: probe.map((p) => ({
+        node: p.node,
+        cc: p.cc,
+        n: 1,
+        ok: p.err ? 0 : 1,
+        bad: p.err ? 1 : 0,
+        bytes: 0,
+        ttfb: p.hs || 0,
+      })),
+      label: "主动探测",
+    };
+  }
+
+  /**
+   * 功能：取这个站点的「CF 托管 + 真实状态码」事实。
+   *
+   * Worker 自己发 HTTPS 请求时看得到状态码；走中继的 WebSocket 隧道是端到端 TLS，看不到状态行。
+   * 探到的状态码顺手写进本 isolate 的会话缓存（`S.cfHttp`），后续 `cfHttpCode()` 直接用。
+   * @param host 目标站点
+   * @returns 诊断用的四元组：解析出的 IP、是否 CF 托管、状态码与机房、缓存里的值、是否算被拦
+   */
+  private async cfFacts(host: string): Promise<{
+    ips: string[];
+    cfHosted: boolean;
+    code: number;
+    colo: string;
+    cached: number;
+    blocked: boolean;
+  }> {
+    // 三次探测都带兜底：诊断不该因为 DNS 或一次 HTTP 失败就整体 5xx
+    const ips = await resolveV4All(host).catch(() => []);
+    const cfHosted = await isCfHost(host).catch(() => false);
+    const live = await httpProbe(host, 4000).catch(() => ({ code: 0, colo: "" }));
+    if (live.code) S.cfHttp.set(host, { code: live.code, colo: live.colo, t: Date.now() });
+    return {
+      ips,
+      cfHosted,
+      code: live.code,
+      colo: live.colo,
+      cached: cfHttpCode(host),
+      blocked: live.code >= 400,
+    };
+  }
+
+  /**
+   * 功能：列出判定表里「本 isolate 学到」的中继侧封锁条目。
+   * @returns 每个被判 blocked/dead 的中继：通道名、状态、证据来源、剩余封锁秒数
+   */
+  private relayBlocked(): Array<{ node: string; state: number; src: number; left: number }> {
+    const out: Array<{ node: string; state: number; src: number; left: number }> = [];
+    for (const v of VT.all()) {
+      if (!v.channel.startsWith("r:") || v.state < St.Blocked) continue;
+      out.push({
+        node: v.channel.slice(2) + ":443",
+        state: v.state,
+        src: v.src,
+        left: Math.round((v.updatedAt + VT_TTL_MS - Date.now()) / 1000),
+      });
+    }
+    out.sort((a, b) => b.left - a.left);
+    return out;
+  }
+
+  /**
+   * 功能：`&do=1` 时把 DO 里跨 isolate 的那份封锁事实拉出来（否则只能看到本 isolate 学到的）。
+   *
+   * 读的是 `blk2` 事实（`host|relay → { n, at }`），不是计量表里那张从 7.124 起就没有生产者的旧封锁表 ——
+   * 读旧表会一直显示「DO 里没有封锁」，把空表当成了「没被封锁」。
+   * @param env 环境绑定
+   * @param id 用户 id（DO 实例名）
+   * @param url 请求 URL（只用来判 `&do=1`）
+   * @param host 目标站点
+   * @returns 每条中继的批数与剩余秒数，按剩余时间降序；没开 `&do=1` 时是空数组
+   */
+  private async doRing(
+    env: Env,
+    id: string,
+    url: URL,
+    host: string,
+  ): Promise<Array<{ node: string; n: number; left: number }>> {
+    if (url.searchParams.get("do") !== "1" || !env.METER) return [];
+    try {
+      const rr = await doFetch(env, id, "https://meter/vt");
+      const jj = (await rr.json()) as { blk2?: Array<{ k: string; n: number; at: number }> };
+      const now2 = Date.now();
+      const out: Array<{ node: string; n: number; left: number }> = [];
+      for (const r of jj.blk2 || []) {
+        if (!r || !r.k.startsWith(host + "|")) continue;
+        const left = Math.round((r.at + BLK_TTL - now2) / 1000);
+        if (left <= 0) continue;
+        out.push({ node: r.k.slice(host.length + 1), n: r.n, left });
+      }
+      out.sort((a, b) => b.left - a.left);
+      return out;
+    } catch (e) {
+      // 读不到就当「这一轮没有跨 isolate 证据」：诊断不该因为一次 DO 往返失败而整体报错
+      return [];
+    }
   }
 }
 

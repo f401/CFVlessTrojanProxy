@@ -9837,6 +9837,38 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("普通路径用 ?k=", viaFn.includes("/cl?k=pw"), true);
 }
 
+{
+  // ═══ 第 325 组：diag 的六段细节各自成方法（7.325）═══
+  const nets = debugAll();
+  const clsSrc = nets.slice(nets.indexOf("export class DebugDiag {")).replace(/\r\n/g, "\n");
+  const body = (name) => {
+    const re = new RegExp("\\n  (private )?(async )?" + name + "\\(");
+    const m = clsSrc.match(re);
+    if (!m) return "";
+    const head2 = m.index;
+    const lines2 = clsSrc.split("\n");
+    const from = clsSrc.slice(0, head2).split("\n").length - 1;
+    for (let i = from; i < lines2.length; i++) {
+      if (lines2[i] === "  }") return lines2.slice(from, i + 1).join("\n");
+    }
+    return clsSrc.slice(head2);
+  };
+  const dg = body("diag");
+  eq("[325] 六段细节各自成方法", ["hostOf", "sampleRows", "probeTops", "pickBasis", "cfFacts", "relayBlocked", "doRing"].filter((n) => typeof W.DIAGONE[n] === "function").length, 7);
+  ok("[325] diag 只做编排（≤45 行）", dg.split("\n").length <= 45, dg.split("\n").length);
+  eq("[325] diag 里恰好七处 this. 委托", (dg.match(/this\.[a-zA-Z]+\(/g) || []).length, 7);
+  ok("[325] diag 不再自己拨号 / 扫判定表", !dg.includes("probeSni(") && !dg.includes("resolveV4All(") && !dg.includes("VT.all()") && !dg.includes("https://meter/vt"));
+  ok("[325] 取样本走站点画像并按样本数排序", body("sampleRows").includes("S.hostNode.get(fam)") && body("sampleRows").includes(".sort("));
+  ok("[325] 探活只传三个参数（第三个是 SNI，不是 port）", body("probeTops").includes("probeSni(a.h, a.p, host)") && !body("probeTops").includes("a.p, a.p"));
+  ok("[325] 有样本就用样本、没有才用主动探测", body("pickBasis").includes("if (rows.length || !probe)") && clsSrc.includes('label: "主动探测"'));
+  ok("[325] CF 事实带 4 秒上限并写回会话缓存", body("cfFacts").includes("httpProbe(host, 4000)") && body("cfFacts").includes("S.cfHttp.set("));
+  ok("[325] 判定表只列中继通道且算剩余秒数", body("relayBlocked").includes('v.channel.startsWith("r:")') && body("relayBlocked").includes("VT_TTL_MS"));
+  ok("[325] DO 封锁环读 blk2 且只在 &do=1 时读", body("doRing").includes('!== "1"') && body("doRing").includes("https://meter/vt") && body("doRing").includes("blk2"));
+  const pctx = { request: new Request("https://x.test/"), url: new URL("https://x.test/" + "u/debug"), env: {}, id: "u", exec: { waitUntil() {}, passThroughOnException() {} } };
+  eq("[325] 没有 ?diag= 时让给后面的分支", await W.DIAGONE.diag(pctx, new URL("https://x.test/u/debug?probe=1")), null);
+  const badHost = await W.DIAGONE.diag(pctx, new URL("https://x.test/u/debug?diag=bad_host!"));
+  eq("[325] 站点名形状不对时直接报错", (await badHost.json()).ok, false);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

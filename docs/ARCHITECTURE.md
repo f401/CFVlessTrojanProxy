@@ -278,7 +278,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `ProxySession` | `src/proxy/session.ts` | WebSocket 数据面的会话对象：握手 / 首帧解析 / 拨号（地区与补救两条路）/ 收尾各一个方法 |
 | `DebugNets` | `src/routes/debug-nets.ts` | 会对外拨号的诊断分支门面：七个分支在四个组件里，这里只按「只读 → 测速 → 诊断 → 探活 → 抓源 → 钉住 → 明文 HTTP → 判定批 → 真握手 → 回填 → seed → 兜底」的顺序派发（顺序变了，`?diag=x&refill=1` 会先花一次抓源） |
 | `DebugBench` | `src/routes/debug-nets.ts` | 出口测速（花 fetch 子请求，同文件） |
-| `DebugDiag` | `src/routes/debug-nets.ts` | 站点诊断（读样本免费、主动探活占 `connect()`，同文件） |
+| `DebugDiag`（`DIAGONE`） | `src/routes/debug-nets.ts` | 站点诊断：`diag()` 只编排，六段细节各一方法（取样本 / 主动探活 / 证据选择 / CF 事实 / 本 isolate 判定 / DO 封锁环） |
 | `DebugProbe` | `src/routes/debug-nets.ts` | 三个探针：原始 ClientHello / 明文 HTTP / IPv6 可达性（同文件） |
 | `DebugTf` | `src/routes/debug-nets.ts` | 判定批与真握手（子请求 + DO CPU，同文件） |
 | `DebugActions` | `src/routes/debug.ts` | 会改状态的诊断操作（refill/cur/restore/seed）：全部先过 `adminOnly`，都会写 KV 或 DO |
