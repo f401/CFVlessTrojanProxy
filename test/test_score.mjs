@@ -62,6 +62,11 @@ const verdictAll = () =>
 const psAll = () =>
   ["src/route/psfacts.ts", "src/route/ps-types.ts", "src/route/ps-prior.ts", "src/route/ps-outbox.ts", "src/route/ps-table.ts"]
     .map((f) => fs.readFileSync(f, "utf8")).join("\n");
+/** 功能：把一轮池子维护的编排层与三个执行器的源码合并成一段文本（源码锁读它）。 */
+const scanAll = () =>
+  ["src/px/scan.ts", "src/px/scan-probe.ts", "src/px/scan-alive.ts", "src/px/scan-house.ts", "src/px/probe-batch.ts"]
+    .map((f) => fs.readFileSync(f, "utf8")).join("\n");
+
 const eq = (n, a, b) => {
   // want 是 undefined / 函数，或拿到的东西是函数时，序列化比较会两边都变成 undefined，
   // 断言永远为真（v7.150 修的空断言：删掉某函数后，旧锁其实一直没在测）。
@@ -4291,7 +4296,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
 
 /* 175：探活 RTT 不能写进真实首字节的矩；冷却中的源要真的跳过（7.185） */
 {
-  const pSrc = fs.readFileSync("src/px/scan.ts", "utf8");
+  const pSrc = scanAll();
   eq(
     "pool.ts 里没有任何 nsLatency 调用（探活 RTT 不是真实首字节）",
     (pSrc.match(/^\s*nsLatency\(/gm) || []).length,
@@ -6066,7 +6071,7 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   ok("过了 TTL 不再判跳过", W.probeBadSkip(key226(9), t0 + W.SC.PROBE_BAD_TTL + 1) === false);
   PB.clear();
   // 源码锁：清理函数存在、且 cronScan 每轮都调它
-  const poolSrc226 = fs.readFileSync("src/px/scan.ts", "utf8");
+  const poolSrc226 = scanAll();
 const aliveSrc226 = fs.readFileSync("src/px/alive.ts", "utf8");
   ok("cronScan 每轮都扫这张表", poolSrc226.includes("sweepProbeBad();"));
   ok("扫的时候先看 TTL", aliveSrc226.includes("if (now - entry.at > SC.PROBE_BAD_TTL) {"));
@@ -7661,7 +7666,7 @@ eq("拆地址：方括号无端口", W.splitRelay("[2a06:98c0::103]", 443).join(
 
 // 五处调用点都改走同一份实现
 ok("调试探针不再内联拆地址", !debugAll().includes('lastIndexOf(":")') && debugAll().includes("const [ph, pp] = splitRelay(pr, 443);"));
-ok("池子探活不再内联拆地址", !code265("src/px/scan.ts").includes('lastIndexOf(":")') && code265("src/px/scan.ts").includes("splitRelay(k, 443)"));
+ok("池子探活不再内联拆地址", !scanAll().includes('lastIndexOf(":")') && scanAll().includes("splitRelay(key, 443)"));
 ok("名单打包不再内联拆地址", !code265("src/px/seed.ts").includes("k.slice(0, i)") && code265("src/px/seed.ts").includes("splitRelay(k, 443)"));
 ok("订阅渲染不再内联拆地址", !code265("src/views/sub.ts").includes('lastIndexOf(":")') && code265("src/views/sub.ts").includes("const [ip] = splitRelay(k, 443);"));
 
@@ -8192,7 +8197,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
 // ── 279. 一轮池子维护从 pool.ts 拆成 PoolScan + AliveBoard（v7.279）──
 {
   const poolSrc279 = fs.readFileSync("src/px/pool.ts", "utf8");
-  const scanSrc279 = fs.readFileSync("src/px/scan.ts", "utf8");
+  const scanSrc279 = scanAll();
   const aliveSrc279 = fs.readFileSync("src/px/alive.ts", "utf8");
   ok("pool.ts 只剩门面：不再有分并发的那一段", !poolSrc279.includes("for (const seg of chunks"), poolSrc279.length);
   ok("pool.ts 不再摆弄复测队列", !poolSrc279.includes("S.reProbe.splice"), "");
@@ -8206,15 +8211,15 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok(
     "run() 的顺序：复测 → 探新 → 头部 → 其余 → 裁剪 → 国家码 → 统计 → 中转 → 落盘",
     [
-      "await this.retestFlagged(",
-      "await this.probeNew(",
-      "await this.recheckHead(",
-      "await this.refreshRest(",
-      "if (this.pruneAndTrim())",
-      "await ALIVE.fillCountries();",
-      "this.trimStats();",
-      "await this.probeRelays();",
-      "await this.persistSeed();",
+      "await this.alive.retestFlagged();",
+      "new ScanProbe(this.pool, this.adm, this.env).run()",
+      "await this.alive.recheckHead();",
+      "await this.alive.refreshRest();",
+      "if (this.house.prune(this.pool))",
+      "await this.house.countries();",
+      "await this.house.trimStats();",
+      "await this.house.relays();",
+      "await this.house.persistSeed(this.env);",
     ].every((m, i, arr) => i === 0 || scanSrc279.indexOf(arr[i - 1]) < scanSrc279.indexOf(m)),
     "",
   );
@@ -8648,6 +8653,39 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   eq("uuidFromBytes 是 8-4-4-4-12", W.uuidFromBytes(new Uint8Array(16).fill(0xab)).split("-").map((x) => x.length), [8, 4, 4, 4, 12]);
 }
 
+// ---------- 第 291 组：一轮池子维护按「探新 / 复测 / 收尾」拆成三个执行器（7.291） ----------
+{
+  const orche = fs.readFileSync("src/px/scan.ts", "utf8");
+  const batch = fs.readFileSync("src/px/probe-batch.ts", "utf8");
+  const prb = fs.readFileSync("src/px/scan-probe.ts", "utf8");
+  const alv = fs.readFileSync("src/px/scan-alive.ts", "utf8");
+  const hou = fs.readFileSync("src/px/scan-house.ts", "utf8");
+  eq("编排层仍然导出 PoolScan", orche.includes("export class PoolScan"), true);
+  eq("编排层不自己探活", orche.includes("probeProxy(") || orche.includes("probeSni(") || orche.includes("nsProbe("), false);
+  eq("编排层不直接写存活表", orche.includes("S.alive.set("), false);
+  eq("编排层不超过 120 行", orche.split(/\r?\n/).length <= 120, true);
+  eq("探活批处理带上了合并后的候选键", batch.includes("splitRelay(key, 443)"), true);
+  eq("探活批处理按 PROBE_CONC 切段", batch.includes("chunks(keys, SC.PROBE_CONC)"), true);
+  eq("探活结果继承 NodeEntry 形状", batch.includes("export interface ProbeHit extends NodeEntry"), true);
+  eq("新候选执行器独立成类", prb.includes("export class ScanProbe"), true);
+  eq("新候选执行器负责进存活表", prb.includes("S.alive.set(") && prb.includes("nsProbe("), true);
+  eq("新候选执行器不看存活节点失败", prb.includes("nsProbeFail("), false);
+  eq("复测执行器独立成类", alv.includes("export class ScanAlive"), true);
+  eq("复测执行器记探活失败", alv.includes("nsProbeFail("), true);
+  eq("复测执行器不自己切段", alv.includes("splitRelay("), false);
+  eq("复测执行器只管两档入参", alv.includes("probeInto(keys: string[], failCounts: boolean)"), true);
+  eq("收尾执行器独立成类", hou.includes("export class ScanHouse"), true);
+  eq("收尾执行器做裁剪", hou.includes("ALIVE.pruneOverPunished(") && hou.includes("ALIVE.trimToMax("), true);
+  eq("收尾执行器负责国家码", hou.includes("ALIVE.fillCountries()"), true);
+  eq("收尾执行器负责中转实测", hou.includes("HOOK.relayProbe"), true);
+  eq("收尾执行器负责落盘", hou.includes("SEEDS.write("), true);
+  eq("三个执行器都是新导出",
+    typeof W.ScanProbe === "function" && typeof W.ScanAlive === "function" && typeof W.ScanHouse === "function",
+    true);
+  eq("探活批处理可调用", typeof W.probeBatch === "function", true);
+  eq("复测执行器算头部键", Array.isArray(new W.ScanAlive().keys()), true);
+  eq("cronScan 仍是唯一入口", typeof W.cronScan === "function", true);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

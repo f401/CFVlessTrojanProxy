@@ -75,6 +75,10 @@ export {
 export { nsOf, pxGet, flushPx, noteProbe, probeBadSkip, bumpProbeBad, sweepProbeBad } from "./px/pool";
 export { POOL, Pool } from "./px/pool";
 export { ALIVE, ALIVE_MAX, PROBE_COOL, PoolScan, SEED_COLD_N, cronScan, aliveList } from "./px/pool";
+export { ScanAlive } from "./px/scan-alive";
+export { ScanHouse } from "./px/scan-house";
+export { ScanProbe } from "./px/scan-probe";
+export { probeBatch } from "./px/probe-batch";
 export { DIALER, Dialer } from "./proxy/dialer";
 export { SOCKET_DIALER, SocketDialer } from "./proxy/socket-dialer";
 export { METER_DIAGNOSTICS, MeterDiagnostics } from "./store/meter-diagnostics";
