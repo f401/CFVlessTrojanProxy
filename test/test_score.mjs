@@ -4003,8 +4003,8 @@ ok("conns 用 max 合并，快照落后也不回退", mSrc166.includes("Math.max
   W.S.cagg.clear();
 }
 const pSrc167 = fs.readFileSync("src/store/pend.ts", "utf8");
-ok("确认只发生在挂增量的那一批", pSrc167.includes("=== carriedBy"));
-ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).toLowerCase();"));
+ok("确认只发生在挂增量的那一批", pSrc167.includes("=== carry.owner"));
+ok("挂增量时记下是哪一批", pSrc167.includes("carry.owner = String(id).toLowerCase();"));
 // 168) 增量上报的批次上限与轮转
 {
   const pendSrc = fs.readFileSync("src/store/pend.ts", "utf8");
@@ -9917,6 +9917,124 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     ok("[326] 关闭客户端仍只有一个出口（endClient）",
       (attSrc.match(/\.close\(/g) || []).length === 1);
   }
+
+// 327. 待上报账本的 99 行 flush 拆成「摘批 / 拼体 / 发 / 确认 / 退回 / 退避」（v7.327）
+{
+  const pSrc327 = fs.readFileSync("src/store/pend.ts", "utf8").replace(/\r\n/g, "\n");
+  const cls327 = pSrc327.slice(pSrc327.indexOf("export class PendingLedger {"));
+  // 取类体里某个方法/签名的原文：从签名到下一个「整行两格 }」为止
+  const body327 = (sig) => {
+    const at = cls327.indexOf(sig);
+    if (at < 0) return "";
+    const end = cls327.indexOf("\n  }", at);
+    return end < 0 ? "" : cls327.slice(at, end);
+  };
+
+  // 1) 结构：编排层只编排
+  const flushBody = body327("async flush(env: Env");
+  ok("[327] flush 只编排：摘批 → 拼体 → 发 → 确认或退回 → 退避",
+    flushBody.includes("this.take(max)") && flushBody.includes("this.post(env, id,") &&
+    flushBody.includes("this.body(id, d,") && flushBody.includes("this.ack(id, carry)") &&
+    flushBody.includes("this.rollback(id, d,") && flushBody.includes("this.backoff(bad)"));
+  ok("[327] flush 里不再自己发请求", !flushBody.includes("doFetch("));
+  ok("[327] flush 里不再有 carriedBy / attached 这类散落状态",
+    !flushBody.includes("carriedBy") && !flushBody.includes("attached"));
+  ok("[327] flush 拆完不超过 30 行", (flushBody.match(/\n/g) || []).length <= 30);
+
+  const takeBody = body327("private take(max: number)");
+  ok("[327] 摘批：轮转起点 + 只摘这一批 + 重算剩余字节",
+    takeBody.includes("S.pendIdx") && takeBody.includes('cnt("pendSkip"') &&
+    takeBody.includes("S.pend.delete(bid)") && takeBody.includes("S.pendBytes = 0"));
+
+  const buildBody = body327("private body(");
+  ok("[327] 拼体：已经有人挂过就不再挂", buildBody.includes("if (carry.owner || !mine) return body;"));
+  ok("[327] 拼体：连接观测与四类事实都在这里登记",
+    buildBody.includes("body.cl = cl") && buildBody.includes("body.blk2 = fd.blk2") &&
+    buildBody.includes("carry.rows = cl") && buildBody.includes("body.spd = spdSnapshot()"));
+
+  const postBody = body327("private async post(");
+  ok("[327] 发请求只剩一处入口，非 2xx 抛错给调用方回滚",
+    postBody.includes('doFetch(env, id, "https://meter/add"') &&
+    postBody.includes('throw new Error("do " + r.status)'));
+
+  const ackBody = body327("private ack(");
+  ok("[327] 确认只落在挂增量的那一批",
+    ackBody.includes("carry.owner && String(id).toLowerCase() === carry.owner"));
+  ok("[327] 确认：观测按行相减，不清整张表",
+    ackBody.includes("this.clAck(carry.rows)") && !ackBody.includes("S.cagg.clear()"));
+
+  const rollBody = body327("private rollback(");
+  ok("[327] 退回：字节回账本 + 剩余字节回滚 + 计数基线回退 + 增量退回",
+    rollBody.includes("S.pendBytes += ") && rollBody.includes("cntUnsend(cd)") &&
+    rollBody.includes("HOOK.syncNack"));
+
+  const backBody = body327("private backoff(");
+  ok("[327] 退避：失败翻倍最多 60s、成功降回 30s",
+    backBody.includes("Math.min(S.pendMs * 2, 60000)") && backBody.includes("Math.max(30000,"));
+
+  // 2) 行为：真发一遍
+  const mkPendEnv327 = (failFirst) => {
+    const sent = [];
+    const env = {
+      uuid: "main@x.test",
+      METER: {
+        idFromName: (n) => n,
+        get: () => ({
+          fetch: async (u, i) => {
+            sent.push({ url: String(u), body: JSON.parse(i.body) });
+            if (failFirst && sent.length === 1) return new Response("boom", { status: 500 });
+            return Response.json({ ok: 1 });
+          },
+        }),
+      },
+    };
+    return { env, sent };
+  };
+  const resetPend327 = () => {
+    W.S.pend.clear();
+    W.S.pendBytes = 0;
+    W.S.pendIdx = 0;
+    W.S.pendMs = 30000;
+    W.S.pendAt = 0;
+    W.S.tflush = null;
+  };
+
+  resetPend327();
+  W.PEND.add("a@x.test", 100, 200, true);
+  W.PEND.add("main@x.test", 10, 20, true);
+  const A327 = mkPendEnv327(false);
+  await W.PEND.flush(A327.env, true, 8);
+  eq("[327] 两个用户各发一次", A327.sent.length, 2);
+  eq("[327] 发完账本清空", W.S.pend.size, 0);
+  eq("[327] 剩余字节归零", W.S.pendBytes, 0);
+  const carried327 = A327.sent.filter((x) => x.body.c);
+  eq("[327] 计数只挂在一个请求体上", carried327.length, 1);
+  eq("[327] 而且挂在主 uuid 那一批（up=10 的那个用户）", carried327[0].body.up, 10);
+  ok("[327] 同一批还带了节点快照与错误", Array.isArray(carried327[0].body.spd) || typeof carried327[0].body.spd === "object");
+  ok("[327] 成功后间隔降回 30s", W.S.pendMs === 30000);
+
+  resetPend327();
+  W.PEND.add("main@x.test", 50, 70, true);
+  const B327 = mkPendEnv327(true);
+  await W.PEND.flush(B327.env, true, 8);
+  eq("[327] 失败的那批退回账本", (W.S.pend.get("main@x.test") || {}).up, 50);
+  eq("[327] 剩余字节跟着回滚", W.S.pendBytes, 120);
+  eq("[327] 失败后退避翻倍到 60s", W.S.pendMs, 60000);
+
+  resetPend327();
+  W.PEND.add("u1@x", 1, 0, true);
+  W.PEND.add("u2@x", 2, 0, true);
+  W.PEND.add("u3@x", 3, 0, true);
+  const C327 = mkPendEnv327(false);
+  await W.PEND.flush(C327.env, true, 2);
+  eq("[327] 一轮最多带 2 个用户", C327.sent.length, 2);
+  eq("[327] 剩下 1 个留在账本里", W.S.pend.size, 1);
+  eq("[327] 剩下的正是第三个用户", [...W.S.pend.keys()][0], "u3@x");
+  await W.PEND.flush(C327.env, true, 2);
+  eq("[327] 下一轮接着把剩下的发完", C327.sent.length, 3);
+  eq("[327] 第二轮发的是 u3", C327.sent[2].body.up, 3);
+  eq("[327] 两轮之后账本空", W.S.pend.size, 0);
+}
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

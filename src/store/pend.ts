@@ -11,6 +11,22 @@ import { doFetch } from "./meter-client";
 export const PEND_FLUSH_BYTES = 16 * 1024 * 1024; // 大文件传输时别频繁打 DO：DO 调用会吃这条连接的 CPU
 
 /**
+ * 功能：这一轮「搭车增量」的状态（挂在主 uuid 的那个请求体上）。
+ *
+ * 为什么要独立对象：日计数、判定/健康/事实、连接观测三样增量每轮只出现一次，
+ * 确认与退回都必须精确落到「挂着它的那个请求」——其它用户的成功不能再去 ack 一次
+ * （会把连接观测的行重复相减、还会把在途期间新加的待发行一起清掉）。
+ */
+interface PendCarry {
+  /** 挂了增量的用户（小写）；空串表示这一批还没人挂 */
+  owner: string;
+  /** 是否挂了判定 / 健康 / 事实增量（只影响 syncAck / syncNack 要不要调） */
+  sync: boolean;
+  /** 这一批真发出去的连接观测行（成功后按行相减，不是整表清空） */
+  rows: ClRec[];
+}
+
+/**
  * 功能：待上报账本（用户 → 未提交的字节/连接数）与上报节流器。
  *
  * 为什么要攒：每次上报都是一次 DO 调用，逐包上报会把连接的 CPU 烧光；
@@ -83,6 +99,9 @@ export class PendingLedger {
 
   /**
    * 功能：把待上报账本 POST 给 DO。成功才 ack（否则 nack 以便重算），失败回滚流量。
+   *
+   * 这一层只做编排：摘批 → 拼体（顺带搭车）→ 发 → 确认或退回 → 调退避。
+   * 每一步的判据都在各自方法里，本函数不再出现「谁挂了增量」这类条件。
    * @param env 环境变量
    * @param force 忽略节流
    * @param max 本轮最多带几个用户（每人一次 DO 往返；由 `planRound` 按剩余额度分给这里）
@@ -92,20 +111,8 @@ export class PendingLedger {
     if (!env || !env.METER || !S.pend.size) return;
     if (!force && Date.now() - S.pendAt < S.pendMs) return;
     S.pendAt = Date.now();
-    // 一轮最多带 PEND_MAX 个用户：每个用户 1 次 DO 往返，一轮总量不能超 50 子请求额度。
-    // 必须轮转起点：Map 的插入顺序几乎不变，只取前 N 个会让尾部用户长期推不上去
-    // （表现是「用量永远落后」，而失败批次会照常回滚、只把退避翻倍，看不出是截断）。
-    const all = [...S.pend.entries()];
-    const start = all.length ? (S.pendIdx || 0) % all.length : 0;
-    const rotated = all.slice(start).concat(all.slice(0, start));
-    const batch = rotated.slice(0, Math.max(1, Math.min(SC.PEND_MAX, max)));
-    S.pendIdx = all.length ? (start + batch.length) % all.length : 0;
-    if (rotated.length > batch.length) cnt("pendSkip", rotated.length - batch.length);
-    // 只摘掉这一批：在途期间新加的增量留在账本里，下一轮接着发（不是整表清空）
-    for (const [bid] of batch) S.pend.delete(bid);
-    S.pendBytes = 0;
-    for (const [, left] of S.pend) S.pendBytes += left.up + left.down;
-    let bad = 0;
+    const batch = this.take(max);
+    if (!batch.length) return;
     // 快照固定挂在主 uuid 的对象上：挂到"批次第一个"会挂到另一个用户，
     // 结果面板（读主 uuid）永远看不到更新。
     const primary = this.id(env);
@@ -114,78 +121,166 @@ export class PendingLedger {
     const hasPrimary = !primary || batch.some(([bid]) => String(bid).toLowerCase() === primary);
     const cd = hasPrimary ? cntDelta() : {};
     const today = new Date().toISOString().slice(0, 10);
-    let attached = false;
-    // 这一批增量挂在谁的请求体上：只有它成功才 ack、只有它失败才 nack
-    let carriedBy = "";
-    let carried = false; // 这一批是否挂了 vt/hl/cl 增量
-    let carriedCl = false;
-    // 这一批到底发出了哪些观测：成功后按行相减，而不是把整张表清掉（v7.157）
-    let sentCl: ClRec[] = [];
+    const carry: PendCarry = { owner: "", sync: false, rows: [] };
+    let bad = 0;
     await eachLimit(batch, 8, async ([id, d]) => {
       const mine = !primary || String(id).toLowerCase() === primary;
       try {
-        const body: Record<string, unknown> = { ...d };
-        if (!attached && mine) {
-          attached = true;
-          body.c = { ...cd, d: today }; // 只挂一次，避免重复计
-          body.spd = spdSnapshot(); // 节点快照：跨 isolate 可见
-          body.e = S.errs.slice(-8); // 错误也带上去：/logs 才能跨 isolate
-          if (HOOK.vtDelta) {
-            const vt = HOOK.vtDelta();
-            if (vt.length) body.vt = vt;
-            const hl = HOOK.healthDelta ? HOOK.healthDelta() : [];
-            if (hl.length) body.hl = hl;
-          }
-          // 四类事实一次取齐：新增一类只需改 FactsStore，不必在这里加槽位
-          const fd = HOOK.factsDelta ? HOOK.factsDelta() : null;
-          if (fd) {
-            if (fd.blk2 && fd.blk2.length) body.blk2 = fd.blk2;
-            if (fd.dead && fd.dead.length) body.dead = fd.dead;
-            if (fd.ps && fd.ps.length) body.ps = fd.ps;
-            if (fd.eg && fd.eg.length) body.eg = fd.eg;
-            if (fd.dns && fd.dns.length) body.dns = fd.dns;
-          }
-          const cl = this.clSnap(40);
-          if (cl.length) body.cl = cl; // 连接观测（按节点聚合）：同理，离线可标定
-          // 三样增量都只是「登记进请求体」，真正的提交要等 DO 回 200：
-          // 这里以前顺手 S.cagg.clear()，一旦 POST 失败这 40 条观测就永久蒸发。
-          carriedBy = String(id).toLowerCase();
-          carried = true;
-          carriedCl = cl.length > 0;
-          sentCl = cl;
-        }
-        const r = await doFetch(env, id, "https://meter/add", {
-          method: "POST",
-          body: JSON.stringify(body),
-        });
-        if (!r.ok) throw new Error("do " + r.status);
-        // 确认送达：判定/中继增量正式生效，连接观测按行相减
-        // 只有挂了增量（vt/hl/facts/cl）的那一批能确认它们：每条增量只出现在一个请求体里，
-        // 其它用户批次成功时再 ack 一次会把 clSnap 的行重复相减、还会把在途期间新加的待发行一起清掉
-        if (carriedBy && String(id).toLowerCase() === carriedBy) {
-          if (carried && HOOK.syncAck) HOOK.syncAck();
-          if (carriedCl) this.clAck(sentCl);
-        }
-        S.meterCache.delete(id); // 刚推过增量，缓存立即失效，避免读数倒退
-      } catch (e) {
+        await this.post(env, id, this.body(id, d, mine, cd, today, carry));
+        this.ack(id, carry);
+      } catch {
         bad += 1;
-        const cur = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
-        S.pend.set(id, { up: cur.up + d.up, down: cur.down + d.down, conns: cur.conns + d.conns });
-        S.pendBytes += (d.up || 0) + (d.down || 0); // 回滚失败批次：健康页与立即刷新的判断要准
-        if (carriedBy && String(id).toLowerCase() === carriedBy) {
-          if (mine) cntUnsend(cd); // 日计数搭车主批次失败 → 基线退回，下轮重发
-          if (carried && HOOK.syncNack) HOOK.syncNack(); // 判定/中继增量退回，下轮重发
-        }
+        this.rollback(id, d, cd, mine, carry);
       }
     });
-    // 自适应退避：失败了就把间隔翻倍（最多 60s），成功了慢慢降回 30s
-    if (bad) {
-      // 失败批次已经回滚进账本、间隔也翻倍了，但「这一轮一个都没发出去」与「这一轮没人有增量」
-      // 在面板上完全一样。计数是唯一能区分两者的量：它连着涨说明 DO 侧一直没接受上报。
-      cnt("pendFail", bad);
-      S.pendMs = Math.min(S.pendMs * 2, 60000);
+    this.backoff(bad);
+  }
+
+  /**
+   * 功能：从账本里摘出这一轮要发的批次（轮转起点、只摘这一批、重算剩余字节）。
+   *
+   * 为什么必须轮转起点：Map 的插入顺序几乎不变，只取前 N 个会让尾部用户长期推不上去
+   * （表现是「用量永远落后」，而失败批次会照常回滚、只把退避翻倍，看不出是截断）。
+   * @param max 本轮最多带几个用户
+   * @returns 批次（用户 id → 增量）；空数组表示账本里没有可发的
+   */
+  private take(max: number): Array<[string, PendEntry]> {
+    const all = [...S.pend.entries()];
+    if (!all.length) return [];
+    const start = (S.pendIdx || 0) % all.length;
+    const rotated = all.slice(start).concat(all.slice(0, start));
+    // 一轮最多带 PEND_MAX 个用户：每个用户 1 次 DO 往返，一轮总量不能超 50 子请求额度。
+    const batch = rotated.slice(0, Math.max(1, Math.min(SC.PEND_MAX, max)));
+    S.pendIdx = (start + batch.length) % all.length;
+    if (rotated.length > batch.length) cnt("pendSkip", rotated.length - batch.length);
+    // 只摘掉这一批：在途期间新加的增量留在账本里，下一轮接着发（不是整表清空）
+    for (const [bid] of batch) S.pend.delete(bid);
+    S.pendBytes = 0;
+    for (const [, left] of S.pend) S.pendBytes += left.up + left.down;
+    return batch;
+  }
+
+  /**
+   * 功能：拼出一个用户的请求体，并让主 uuid 那一批顺带捎上增量。
+   * @param id 用户 id
+   * @param d 该用户的增量
+   * @param mine 这一批是不是主 uuid（只有主 uuid 才搭车）
+   * @param cd 本轮的计数增量（主 uuid 这批没出现时是空对象）
+   * @param today 今天的日期串
+   * @param carry 搭车状态（写它的字段等于登记「这一批由谁挂了增量」）
+   * @returns 请求体
+   */
+  private body(
+    id: string,
+    d: PendEntry,
+    mine: boolean,
+    cd: Record<string, number>,
+    today: string,
+    carry: PendCarry,
+  ): Record<string, unknown> {
+    const body: Record<string, unknown> = { ...d };
+    // 已经有人挂过就不再挂：增量只出现一次，否则 DO 会把同一份计数重复并入
+    if (carry.owner || !mine) return body;
+    body.c = { ...cd, d: today }; // 只挂一次，避免重复计
+    body.spd = spdSnapshot(); // 节点快照：跨 isolate 可见
+    body.e = S.errs.slice(-8); // 错误也带上去：/logs 才能跨 isolate
+    if (HOOK.vtDelta) {
+      const vt = HOOK.vtDelta();
+      if (vt.length) body.vt = vt;
+      const hl = HOOK.healthDelta ? HOOK.healthDelta() : [];
+      if (hl.length) body.hl = hl;
     }
-    else S.pendMs = Math.max(30000, Math.round(S.pendMs / 2));
+    // 六类事实一次取齐：新增一类只需改 FactsStore，不必在这里加槽位
+    const fd = HOOK.factsDelta ? HOOK.factsDelta() : null;
+    if (fd) {
+      if (fd.blk2 && fd.blk2.length) body.blk2 = fd.blk2;
+      if (fd.dead && fd.dead.length) body.dead = fd.dead;
+      if (fd.ps && fd.ps.length) body.ps = fd.ps;
+      if (fd.eg && fd.eg.length) body.eg = fd.eg;
+      if (fd.dns && fd.dns.length) body.dns = fd.dns;
+    }
+    const cl = this.clSnap(40);
+    if (cl.length) body.cl = cl; // 连接观测（按节点聚合）：同理，离线可标定
+    // 三样增量都只是「登记进请求体」，真正的提交要等 DO 回 200：
+    // 这里以前顺手 S.cagg.clear()，一旦 POST 失败这 40 条观测就永久蒸发。
+    carry.owner = String(id).toLowerCase();
+    carry.sync = true;
+    carry.rows = cl;
+    return body;
+  }
+
+  /**
+   * 功能：把一个用户的增量 POST 给计量 DO。
+   * @param env 环境变量
+   * @param id 用户 id
+   * @param body 请求体
+   * @returns 无；非 2xx 时抛错，由调用方回滚
+   */
+  private async post(env: Env, id: string, body: Record<string, unknown>): Promise<void> {
+    const r = await doFetch(env, id, "https://meter/add", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error("do " + r.status);
+  }
+
+  /**
+   * 功能：确认这一批送达，并顺带确认它挂着的增量。
+   *
+   * 只有挂了增量的那一批能确认它们：每条增量只出现在一个请求体里，其它用户批次成功时
+   * 再 ack 一次会把 clSnap 的行重复相减、还会把在途期间新加的待发行一起清掉。
+   * @param id 刚成功的用户
+   * @param carry 搭车状态（`by` 为空表示这一批没人挂增量）
+   * @returns 无
+   */
+  private ack(id: string, carry: PendCarry): void {
+    if (carry.owner && String(id).toLowerCase() === carry.owner) {
+      if (carry.sync && HOOK.syncAck) HOOK.syncAck();
+      // 按行相减，而不是把整张表清掉（v7.157）：在途期间新加的观测必须留下
+      if (carry.rows.length) this.clAck(carry.rows);
+    }
+    S.meterCache.delete(id); // 刚推过增量，缓存立即失效，避免读数倒退
+  }
+
+  /**
+   * 功能：失败时把这一批的字节退回账本，并按需退回增量。
+   * @param id 失败的用户
+   * @param d 被摘走的增量
+   * @param cd 本轮计数增量
+   * @param mine 是不是主 uuid 这一批
+   * @param carry 搭车状态
+   * @returns 无
+   */
+  private rollback(
+    id: string,
+    d: PendEntry,
+    cd: Record<string, number>,
+    mine: boolean,
+    carry: PendCarry,
+  ): void {
+    const cur = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
+    S.pend.set(id, { up: cur.up + d.up, down: cur.down + d.down, conns: cur.conns + d.conns });
+    S.pendBytes += (d.up || 0) + (d.down || 0); // 回滚失败批次：健康页与立即刷新的判断要准
+    if (carry.owner && String(id).toLowerCase() === carry.owner) {
+      if (mine) cntUnsend(cd); // 日计数搭车主批次失败 → 基线退回，下轮重发
+      if (carry.sync && HOOK.syncNack) HOOK.syncNack(); // 判定/中继增量退回，下轮重发
+    }
+  }
+
+  /**
+   * 功能：按这一轮失败数调上报间隔（失败翻倍，最多 60s；成功慢慢降回 30s）。
+   * @param bad 本轮失败的批次数
+   * @returns 无
+   */
+  private backoff(bad: number): void {
+    if (!bad) {
+      S.pendMs = Math.max(30000, Math.round(S.pendMs / 2));
+      return;
+    }
+    // 失败批次已经回滚进账本、间隔也翻倍了，但「这一轮一个都没发出去」与「这一轮没人有增量」
+    // 在面板上完全一样。计数是唯一能区分两者的量：它连着涨说明 DO 侧一直没接受上报。
+    cnt("pendFail", bad);
+    S.pendMs = Math.min(S.pendMs * 2, 60000);
   }
 
   /**
