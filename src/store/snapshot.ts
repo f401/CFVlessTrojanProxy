@@ -28,7 +28,11 @@ export async function usageSnapGet(env: Env) {
 }
 
 /**
- * 功能：写用量快照。读失败时直接跳过——拿空表覆盖会把别的用户的历史用量抹掉。
+ * 功能：写用量灾备快照。读失败时直接跳过——拿空表覆盖会把别的用户的历史用量抹掉。
+ *
+ * 六步各自失败后果不同：读旧快照（读失败整轮不写）、2 小时闸门（写太勤会吃掉 KV 写额度）、
+ * 轮转切批（决定谁这轮被读到）、逐用户合并（只增不减 + 当日字段只认同一天）、
+ * 尾部搬旧值（没读到的人不能从快照里消失）、落盘（失败要可观察）。
  * @param env 环境变量
  * @param users 用户表（必须传：本地没有"全部用户"的表，不传等于什么都不写 —— v7.142 删掉
  *   门面方法就是因为 `usageSnapWrite(env)` 这个形态永远写不出东西，这里如实写清）
@@ -36,80 +40,151 @@ export async function usageSnapGet(env: Env) {
  * @returns 无
  */
 export async function usageSnapWrite(env: Env, users?: UserRec[], max: number = SC.SNAP_MAX) {
+  // 没有 KV 或没有计量 DO 时这两件事都无处可写，早退比逐用户失败便宜
   if (!env.STATS || !env.METER) return;
-  // 读失败就跳过：拿空表继续写会把别的用户的历史用量覆盖掉
-  let prev: UsageSnap;
-  try {
-    prev = (await kvGetStrict<UsageSnap>(env, USAGE_SNAP_KEY)) || ({ users: {}, ts: 0 } as UsageSnap);
-  } catch (e) {
-    // 读不到就整轮不写（拿空表覆盖会抹掉所有人的历史用量），但这个早退以前完全不可见：
-    // 连着失败的表现就是「用量快照停更」，与「这一轮没人有增量」一模一样
-    cnt("snapReadFail");
-    return;
-  }
+  const prev = await loadPrevUsageSnap(env);
+  // 读失败：整轮不写（拿空表覆盖 = 抹掉所有人的历史用量），这里已经在读取处计数
+  if (!prev) return;
   // 灾备快照，2 小时一次足够（cron 是 30 分钟一轮，别每轮都写一遍）
   if (Date.now() - (prev.ts || 0) < 2 * 3600e3) return;
   const list = users || [];
-  // 读一个用户就是一次 DO 子请求，而一次调用总共只有 50 个（cron 还要花在 refill / restore 上）。
-  // 超出的那批不读，但**必须把上一次快照里的数值原样搬过来** —— 直接跳过会让它们从灾备
-  // 快照里消失，DO 重建之后再也恢复不回来（v7.174 之前就是这样：用户一多，尾部的
-  // meterGet 全部失败，那些人的历史用量永远停在某一天，且没有任何计数）。
+  // 读一个用户就是一次 DO 子请求，一次调用总共只有 50 个（cron 还要花在 refill / restore 上）
   const cap = Math.max(1, Math.min(SC.SNAP_MAX, max));
-  // 每轮从上次的落点往后数 cap 个（用户数 ≤ cap 时不轮转）。
-  // 为什么必须轮转：`loadUsers` 的顺序是稳定的（KV 里按创建序），永远取前 cap 个的话，
-  // 创建得早的那批每轮都被刷新、排在后面的永远停在第一次读到的水位 ——
-  // 7.177 的 `PendingLedger` 尾部饥饿是同一个形状（那里用游标轮转修的）。
-  const start = list.length > cap ? (Number(prev.idx) || 0) % list.length : 0;
+  const { head, tail, next } = rotateWindow(list, cap, Number(prev.idx) || 0);
+  if (tail.length) cnt("snapSkip", tail.length);
+  const today = new Date().toISOString().slice(0, 10);
+  const out: UsageSnap = { ts: Date.now(), users: {}, idx: next };
+  // 并发 8：再高就会让「一次 cron 最多 50 个子请求」被这一件事吃光
+  await eachLimit(head, 8, async (u) => {
+    const row = await mergeOneUsage(env, u, prev, today);
+    if (row) out.users[u.id] = row;
+  });
+  carryUnread(tail, prev, out);
+  await commitUsageSnap(env, out);
+}
+
+/**
+ * 功能：读灾备快照的旧值；读失败时计一次 `snapReadFail` 并返回 null。
+ *
+ * 三个参数都不能省：读不到就整轮不写（拿空表覆盖会抹掉历史用量），而连续失败的表现
+ * 是「用量快照停更」，与「这一轮没人有增量」一模一样 —— 不计数就永远看不出来。
+ * @param env 环境变量
+ * @returns 上一份快照（不存在时给空骨架）；读失败返回 null，调用方必须放弃这轮写
+ */
+async function loadPrevUsageSnap(env: Env): Promise<UsageSnap | null> {
+  try {
+    return (await kvGetStrict<UsageSnap>(env, USAGE_SNAP_KEY)) || ({ users: {}, ts: 0 } as UsageSnap);
+  } catch (e) {
+    cnt("snapReadFail");
+    return null;
+  }
+}
+
+/**
+ * 功能：按游标切出这一轮要读的一批用户，并给出下一轮的游标。
+ *
+ * 为什么必须轮转：`loadUsers` 顺序稳定（KV 里按创建序），永远取前 cap 个的话，
+ * 创建得早的那批每轮都被刷新、排在后面的永远停在第一次读到的水位 ——
+ * 7.177 的 `PendingLedger` 尾部饥饿是同一个形状。
+ * @param list 用户表
+ * @param cap 本轮最多读几个
+ * @param prevIdx 上一轮停下的位置
+ * @returns 本轮要读的头、只搬旧值的尾，以及下一轮的游标
+ */
+function rotateWindow(list: UserRec[], cap: number, prevIdx: number) {
+  // 用户数不超过上限时不用轮转（起点恒 0，尾永远是空）
+  const start = list.length > cap ? prevIdx % list.length : 0;
   const rotated = start ? list.slice(start).concat(list.slice(0, start)) : list;
   const head = rotated.slice(0, cap);
   const tail = rotated.slice(head.length);
-  if (tail.length) cnt("snapSkip", tail.length);
   // 游标推进到本轮之后（走完一圈回到 0），下一轮从这批之后接着读
-  const out: UsageSnap = { ts: Date.now(), users: {}, idx: list.length > cap ? (start + head.length) % list.length : 0 };
-  // 同一个 num 不要每个用户重新建一次闭包
-  const num = (x: unknown) => {
-    const n = Number(x);
-    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  const next = list.length > cap ? (start + head.length) % list.length : 0;
+  return { head, tail, next };
+}
+
+/**
+ * 功能：把任意读数夹成非负整数（用量 / 连接数都只能往前涨）。
+ * @param x 任意读数（DO 返回值、旧快照值都可能缺字段）
+ * @returns 非负整数；非法值一律当 0
+ */
+function safeCount(x: unknown): number {
+  const n = Number(x);
+  // 绝不能用 `|0`：用量经常超过 2^31，位运算会溢出成负数，灾备快照会被写成 0
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/**
+ * 功能：把一个用户的「DO 现值」与「上一份快照」合并成一条灾备行。
+ *
+ * 两条口径都是必须的：① 只增不减 —— DO 被重置（重建脚本）时不能把历史用量写回 0；
+ * ② 当日字段只合并「同一天」的 —— 昨天 23:59 的 `dU` 不能算进今天。
+ * @param env 环境变量
+ * @param u 用户记录
+ * @param prev 上一份快照
+ * @param today 今天（`YYYY-MM-DD`）
+ * @returns 有量才返回行；三档全 0 的用户不进快照，返回 null
+ */
+async function mergeOneUsage(
+  env: Env,
+  u: UserRec,
+  prev: UsageSnap,
+  today: string,
+): Promise<UsageSnap["users"][string] | null> {
+  const v = await meterGet(env, u.id);
+  const old = (prev.users || {})[u.id];
+  const up = Math.max(safeCount(v && v.up), safeCount(old && old.up));
+  const down = Math.max(safeCount(v && v.down), safeCount(old && old.down));
+  const conns = Math.max(safeCount(v && v.conns), safeCount(old && old.conns));
+  // 当日字段只认同一天的：跨天的那份读出来等于 0，宁可少算也不要算进今天
+  const vDay = v && v.d === today ? v : null;
+  const oldDay = old && old.d === today ? old : null;
+  const dU = Math.max(safeCount(vDay && vDay.dU), safeCount(oldDay && oldDay.dU));
+  const dD = Math.max(safeCount(vDay && vDay.dD), safeCount(oldDay && oldDay.dD));
+  // 三档全 0 说明这个人从没跑过流量，进快照只会白占一行
+  if (!up && !down && !conns) return null;
+  return {
+    up,
+    down,
+    conns,
+    first: (v && v.first) || (old && old.first) || 0,
+    d: today,
+    dU,
+    dD,
   };
-  const today = new Date().toISOString().slice(0, 10);
-  await eachLimit(head, 8, async (u) => {
-    const v = await meterGet(env, u.id);
-    const old = (prev.users || {})[u.id];
-    // 只增不减：DO 被重置（重建脚本）时不能把历史快照写回 0。
-    // 这里绝不能用 `|0`：用量经常超过 2^31，位运算会溢出成负数，
-    // 灾备快照会被写成 0（重建 DO 后历史用量就是这么丢的）。
-    const up = Math.max(num(v && v.up), num(old && old.up));
-    const down = Math.max(num(v && v.down), num(old && old.down));
-    const conns = Math.max(num(v && v.conns), num(old && old.conns));
-    // 当日字段只合并"同一天"的：昨天 23:59 的 dU 不能算进今天
-    const vDay = v && v.d === today ? v : null;
-    const oldDay = old && old.d === today ? old : null;
-    const dU = Math.max(num(vDay && vDay.dU), num(oldDay && oldDay.dU));
-    const dD = Math.max(num(vDay && vDay.dD), num(oldDay && oldDay.dD));
-    if (up || down || conns) {
-      out.users[u.id] = {
-        up,
-        down,
-        conns,
-        first: (v && v.first) || (old && old.first) || 0,
-        d: today,
-        dU,
-        dD,
-      };
-    }
-  });
-  // 没读的那批只搬旧值：不给它们编新数字（恢复路径读的也是「上次真的读到的」）
+}
+
+/**
+ * 功能：把这一轮没读到的用户原样搬进新快照。
+ *
+ * 只搬旧值、不给它们编新数字：恢复路径读的是「上次真的读到的」那个数，
+ * 直接跳过会让它们从灾备里消失，DO 重建之后再也恢复不回来。
+ * @param tail 本轮没读到的用户
+ * @param prev 上一份快照
+ * @param out 正在拼的新快照（就地写入）
+ * @returns 无
+ */
+function carryUnread(tail: UserRec[], prev: UsageSnap, out: UsageSnap): void {
   for (const u of tail) {
     const old = (prev.users || {})[u.id];
     if (!old) continue;
     out.users[u.id] = { ...old };
   }
+}
+
+/**
+ * 功能：落盘灾备快照（90 天 TTL；一个人都没有时什么都不写）。
+ *
+ * 失败只计数不抛：额度耗尽/熔断时本来只是「下次再写」，但连续失败与「这一轮没人有增量」
+ * 不可区分 —— 快照停更的表现是重装脚本后用量从 0 起算，事后才发现。
+ * @param env 环境变量
+ * @param out 要写的快照
+ * @returns 无
+ */
+async function commitUsageSnap(env: Env, out: UsageSnap): Promise<void> {
   if (!Object.keys(out.users).length) return;
   try {
     await kvSet(env, USAGE_SNAP_KEY, out, { expirationTtl: 86400 * 90 });
   } catch (e) {
-    // 额度耗尽/熔断时这里本来只是「下次再写」，但连续失败与「这一轮没人有增量」不可区分：
-    // 快照停更的表现是重装脚本后用量从 0 起算，属于事后才发现的损失，所以留一个计数
     cnt("snapWriteFail");
   }
 }

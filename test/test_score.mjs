@@ -10724,6 +10724,163 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("控制页带用量分区", pgBody333.includes("用量"), String(pgBody333.length));
 }
 
+// —— 第 334 组：用量灾备快照的 78 行拆成「读旧值 / 轮转切批 / 逐用户合并 / 搬旧值 / 落盘」——
+{
+  const srcSnap334 = fs.readFileSync("src/store/snapshot.ts", "utf8").replace(/\r\n/g, "\n");
+  /**
+   * 功能：按签名切出一段顶格函数的源码（到下一个顶格收尾的 `}` 为止）。
+   * @param sig 签名行的一部分
+   * @returns 源码片段；找不到返回空串
+   */
+  const body334 = (sig) => {
+    const at = srcSnap334.indexOf(sig);
+    if (at < 0) return "";
+    const rest = srcSnap334.slice(at + sig.length);
+    const end = rest.search(/\n\}\n/);
+    return rest.slice(0, end < 0 ? rest.length : end);
+  };
+
+  const w334 = body334("export async function usageSnapWrite(");
+  ok(
+    "usageSnapWrite 只做编排（读旧值 → 闸门 → 切批 → 逐用户 → 搬旧值 → 落盘）",
+    [
+      "await loadPrevUsageSnap(env)",
+      "if (Date.now() - (prev.ts || 0) < 2 * 3600e3) return;",
+      "rotateWindow(list, cap,",
+      "await eachLimit(head, 8,",
+      "carryUnread(tail, prev, out)",
+      "await commitUsageSnap(env, out)",
+    ].every((x) => w334.includes(x)),
+  );
+  ok("usageSnapWrite 自己不碰 KV、不读 DO", !w334.includes("kvSet(") && !w334.includes("kvGetStrict") && !w334.includes("meterGet("));
+  ok(
+    "usageSnapWrite 收成二十五行以内",
+    w334.split("\n").filter((x) => x.trim()).length <= 25,
+    String(w334.split("\n").filter((x) => x.trim()).length),
+  );
+
+  const prev334 = body334("async function loadPrevUsageSnap(");
+  ok(
+    "读旧快照失败可观察且整轮放弃",
+    prev334.includes("kvGetStrict<UsageSnap>(env, USAGE_SNAP_KEY)") && prev334.includes('cnt("snapReadFail")') && prev334.includes("return null;"),
+  );
+
+  const rot334 = body334("function rotateWindow(");
+  ok(
+    "轮转切片按游标取头尾",
+    rot334.includes("prevIdx % list.length") && rot334.includes("slice(start).concat") && rot334.includes("rotated.slice(head.length)"),
+  );
+
+  const safe334 = body334("function safeCount(");
+  // 判据只看代码：注释里提到 `|0` 是「为什么不能用」，不是「用了」
+  const safeCode334 = safe334.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  ok("计数夹取不用位运算（超 2^31 会溢出成负数）", !/\|\s*0\b/.test(safeCode334) && safeCode334.includes("Number.isFinite(n)"));
+
+  const merge334 = body334("async function mergeOneUsage(");
+  ok(
+    "逐用户合并只增不减、当日字段只认同一天",
+    merge334.includes("Math.max(safeCount(v && v.up), safeCount(old && old.up))") &&
+      merge334.includes("v.d === today") &&
+      merge334.includes("if (!up && !down && !conns) return null;"),
+  );
+  ok("逐用户合并读的是计量 DO", merge334.includes("await meterGet(env, u.id)"));
+
+  const tail334 = body334("function carryUnread(");
+  ok("没读到的用户只搬旧值（不编新数字）", tail334.includes("out.users[u.id] = { ...old };") && !tail334.includes("meterGet("));
+
+  const commit334 = body334("async function commitUsageSnap(");
+  ok(
+    "落盘在无人时不写、失败只计数",
+    commit334.includes("if (!Object.keys(out.users).length) return;") && commit334.includes('cnt("snapWriteFail")') && commit334.includes("expirationTtl"),
+  );
+
+  // 行为面：内存 KV + 计量 DO 桩，把「无 KV / 读失败 / 闸门 / 轮转 / 只增不减 / 跨天」跑一遍
+  const storeU334 = Object.create(null);
+  let putsU334 = 0;
+  let failGetU334 = false;
+  let rowsU334 = {};
+  const envU334 = () => ({
+    STATS: {
+      get: async (k) => {
+        if (failGetU334) throw new Error("kv get down");
+        return k in storeU334 ? storeU334[k] : null;
+      },
+      put: async (k, v) => {
+        storeU334[k] = v;
+        putsU334 += 1;
+      },
+    },
+    METER: { idFromName: (n) => n, get: (id) => ({ fetch: async () => new Response(JSON.stringify(rowsU334[id] || {})) }) },
+  });
+  const cntU334 = (k) => Number(W.cntView()[k]) || 0;
+  const realNowU334 = Date.now;
+  const t0U334 = realNowU334();
+  const todayU334 = new Date(t0U334).toISOString().slice(0, 10);
+  const usersU334 = [{ id: "u1" }, { id: "u2" }, { id: "u3" }];
+
+  try {
+    // ① 没有 KV 或没有计量 DO：直接返回，一次写都不发
+    await W.usageSnapWrite({}, usersU334);
+    eq("没有 KV/DO 时不写", putsU334, 0);
+
+    // ② 读旧快照失败：整轮不写，并计一次 snapReadFail
+    failGetU334 = true;
+    const beforeReadU334 = cntU334("snapReadFail");
+    await W.usageSnapWrite(envU334(), usersU334, 2);
+    eq("读失败整轮不写", putsU334, 0);
+    eq("读失败计一次 snapReadFail", cntU334("snapReadFail") - beforeReadU334, 1);
+    failGetU334 = false;
+
+    // ③ 首次写：只读前两个，尾部不进快照，游标推进到 2
+    Date.now = () => t0U334;
+    W.S.meterCache.clear();
+    rowsU334 = {
+      u1: { up: 100, down: 10, conns: 2, first: 1000, d: todayU334, dU: 5, dD: 6 },
+      u2: { up: 50, down: 5, conns: 1, first: 2000, d: todayU334, dU: 1, dD: 1 },
+      u3: { up: 7, down: 0, conns: 1, first: 3000, d: todayU334, dU: 3, dD: 0 },
+    };
+    const beforeSkipU334 = cntU334("snapSkip");
+    await W.usageSnapWrite(envU334(), usersU334, 2);
+    eq("一轮写一次", putsU334, 1);
+    eq("没读到的那个计一次 snapSkip", cntU334("snapSkip") - beforeSkipU334, 1);
+    const snap1U334 = await W.kvGetStrict(envU334(), "usage:snap");
+    eq("只读了两个用户", Object.keys(snap1U334.users).sort().join(","), "u1,u2");
+    eq("游标推进到 2", snap1U334.idx, 2);
+    eq("首轮记下真实用量", snap1U334.users.u1.up, 100);
+
+    // ④ 2 小时闸门：紧接着再调一次不写
+    W.S.meterCache.clear();
+    await W.usageSnapWrite(envU334(), usersU334, 2);
+    eq("两小时内不再写", putsU334, 1);
+
+    // ⑤ 三小时后再写：从游标 2 起读（u3,u1），尾部 u2 只搬旧值
+    Date.now = () => t0U334 + 3 * 3600e3;
+    W.S.meterCache.clear();
+    rowsU334 = {
+      u1: { up: 5, down: 1, conns: 1, first: 1000, d: "2000-01-01", dU: 999, dD: 999 },
+      u2: { up: 999, down: 999, conns: 9, first: 1, d: todayU334, dU: 99, dD: 99 },
+      u3: { up: 70, down: 3, conns: 2, first: 3000, d: todayU334, dU: 8, dD: 2 },
+    };
+    const todayAfterU334 = new Date(t0U334 + 3 * 3600e3).toISOString().slice(0, 10);
+    await W.usageSnapWrite(envU334(), usersU334, 2);
+    const snap2U334 = await W.kvGetStrict(envU334(), "usage:snap");
+    eq("第二轮再写一次", putsU334, 2);
+    eq("第二轮读的是游标之后的两个", Object.keys(snap2U334.users).sort().join(","), "u1,u2,u3");
+    eq("只增不减：DO 变小也不回写更小的值", snap2U334.users.u1.up, 100);
+    ok(
+      "跨天的当日量不合并进今天",
+      todayAfterU334 === todayU334 ? true : snap2U334.users.u1.dU === 5,
+      todayAfterU334 + " / dU=" + String(snap2U334.users.u1.dU),
+    );
+    eq("尾部用户的旧值原样搬过来（DO 现值不算数）", snap2U334.users.u2.up, 50);
+    eq("新读到的用户用现值", snap2U334.users.u3.up, 70);
+    eq("第二轮游标绕回 1", snap2U334.idx, 1);
+  } finally {
+    Date.now = realNowU334;
+    W.S.meterCache.clear();
+  }
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
