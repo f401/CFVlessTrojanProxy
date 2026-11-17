@@ -5,7 +5,9 @@
 ## 1 分层
 
 ```
-core/     const util net state quota 无业务依赖：常量 / 工具 / 目标校验 /
+core/     const env-parse net state quota 无业务依赖：常量 / 配置解析 / 目标校验 /
+          bytes sha224 timeouts     字节编解码 / SHA-224 / 超时预算（util 只做门面）
+          ws concurrency errors     WS 发送与释放 / 有限并发 / 错误文本 / 协议名拼装
           counter hist node-snapshot 日计数 / 直方图分位 / 节点快照
 store/    index kv crypto         适配器：KV / 加密 / 快照 / 计量 / Meter DO
           snapshot pend stats
@@ -183,7 +185,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 - 目录依赖方向不变：`core ← 业务域 ← routes ← index`；跨层接缝必须登记在 `check-arch.js` 的 `ALLOW` 表。
 - 响应头只有 `edge/respond.ts` 一个来源：静态页用 `CSP_STATIC`（无 script-src），管理页用默认
   `SEC_HEADERS`；不要再在路由里手写 `content-type` / CSP。
-- 运行参数只有 `core/util.shadowRate` 一个来源：选择器、控制页、`/proxyip` 必须同值，
+- 运行参数只有 `core/env-parse.shadowRate` 一个来源：选择器、控制页、`/proxyip` 必须同值，
   未设置时默认 5%，显式 `0` 表示关闭探索。
 - 出站目标只走 `checkTarget`：IPv6 必须拆成 8 个 16 位分组后按数值判断，
   不能靠字符串前缀（`0:0:0:0:0:0:0:1`、`::7f00:1` 这类写法能绕过前缀匹配）。
@@ -265,7 +267,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
 
-自由函数集中在 `src/core/{util,net,hist,quota,hosts}.ts`、`src/proxy/protocol.ts`、`src/views/{html,sub-links,sub-singbox,sub.ts}`：它们要么是纯计算，要么是字符串渲染，没有状态可装。
+自由函数集中在 `src/core/{util,net,hist,quota,hosts,bytes,sha224,timeouts,ws,concurrency,errors,env-parse,proto-names}.ts`、`src/proxy/protocol.ts`、`src/views/{html,sub-links,sub-singbox,sub.ts}`：它们要么是纯计算，要么是字符串渲染，没有状态可装。
 
 ## 注释约定
 

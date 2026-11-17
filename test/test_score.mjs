@@ -4201,7 +4201,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   ok("限流表自己仍然有界", W.RL_MEM.size <= 501);
 
   // 3) shadowRate 的说明不再自称「显示 10 实际 0」
-  const uSrc = fs.readFileSync("src/core/util.ts", "utf8");
+  const uSrc = fs.readFileSync("src/core/env-parse.ts", "utf8");
   ok("shadowRate 文档不再举「显示 10 实际 0」这个错例", !uSrc.includes("实际 0"));
 
   // 4) RTT 表有 5 列，"暂无数据" 必须跨 5 列
@@ -5311,7 +5311,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   const missing = [...readFields.keys()].filter((n) => !declaredFields.has(n));
   eq("src 里读到的 env 字段都在 Env 里声明", missing.join(","), "");
   // 旧绑定名兼容（trojan）必须仍然生效：靠显式转型，而不是把索引签名加回来
-  const utilSrc = fs.readFileSync("src/core/util.ts", "utf8");
+  const utilSrc = fs.readFileSync("src/core/env-parse.ts", "utf8");
   ok("旧绑定名走显式转型而不是索引签名", utilSrc.includes("(env as unknown as Record<string, unknown>)[P_T]"));
   eq("旧名仍能读到密码", W.secretPwd({ trojan: "legacy-pw" }), "legacy-pw");
   eq("新名优先于旧名", W.secretPwd({ pwd: "  x  ", trojan: "b" }), "x");
@@ -5421,7 +5421,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
 }
 // ---- 211: 数据面上游写必须有上限（黑洞中继接了连接却不读，write 永不返回） ----
 console.log("");
-const srcUtil211 = fs.readFileSync("src/core/util.ts", "utf8");
+const srcUtil211 = fs.readFileSync("src/core/timeouts.ts", "utf8");
 const srcState211 = fs.readFileSync("src/core/state.ts", "utf8");
 const srcConn211 = fs.readFileSync("src/proxy/connection.ts", "utf8");
 const srcSess211 = fs.readFileSync("src/proxy/session.ts", "utf8");
@@ -5581,7 +5581,7 @@ try {
 /* ===== 第 214 组：SC 里的僵尸常量（有人声明、注释描述了一个不存在的机制、没人读） ===== */
 {
   const constSrc = fs.readFileSync("src/core/const.ts", "utf8");
-  const utilSrc = fs.readFileSync("src/core/util.ts", "utf8");
+  const utilSrc = fs.readFileSync("src/core/env-parse.ts", "utf8");
   const pxSrc = fs.readFileSync("src/px/const.ts", "utf8");
   const deadSrc = fs.readFileSync("tools/check-dead.mjs", "utf8");
   // 源码锁：两个常量本身不存在了（否则注释会继续描述「seed 先验保质期」「探索上限」）
@@ -6289,14 +6289,14 @@ ok("索引下限夹到 0（p 很小时不能取负）", pendSrc.includes("Math.m
     }
     return a;
   };
-  const utilSrc = fs.readFileSync("src/core/util.ts", "utf8");
+  const utilSrc = fs.readFileSync("src/core/timeouts.ts", "utf8");
   ok("CONNECT_MS 有唯一真源", /export const CONNECT_MS = 2500;/.test(utilSrc), "");
   ok("注释点明 SC.STALL 不是一回事", utilSrc.includes("SC.STALL = 2500") , "");
   let stray = 0;
   let used = 0;
   const where231 = [];
   for (const p of walk("src")) {
-    if (p.endsWith("core/const.ts") || p.endsWith("core/util.ts")) continue;
+    if (p.endsWith("core/const.ts") || p.endsWith("core/util.ts") || p.endsWith("core/timeouts.ts")) continue;
     const t = fs.readFileSync(p, "utf8");
     const n2500 = (t.match(/\b2500\b/g) || []).length;
     stray += n2500;
@@ -7810,8 +7810,8 @@ ok("首包上限确实比数据面短", W.FIRST_UP_MS < W.UP_STALL_MS);
   ok("attacher 给首包传了上限", sa270.includes("conn.upWrite(payload, FIRST_UP_MS)"), "attacher");
   ok("attacher 导入了 FIRST_UP_MS", /import \{[^}]*FIRST_UP_MS[^}]*\} from "\.\.\/core\/util"/.test(sa270), "import");
   ok("首包不再用默认上限", sa270.includes("conn.upWrite(payload);") === false, "default");
-  const su270 = fs.readFileSync("src/core/util.ts", "utf8");
-  ok("常量在 util 里且只有一处", su270.split("export const FIRST_UP_MS").length - 1 === 1, "util"); }
+  const su270 = fs.readFileSync("src/core/timeouts.ts", "utf8");
+  ok("常量在 timeouts.ts 里且只有一处", su270.split("export const FIRST_UP_MS").length - 1 === 1, "util"); }
 
 ﻿// 第 271 组：探测传输层（7.271 起 probeTf 不再写死 tunnelfetch）
 {
@@ -8598,5 +8598,56 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   W.PS.clear();
 }
 
+// ---------------------------------------------------------------------------
+// 第 290 组：core/util.ts（339 行杂物抽屉）拆成八个按用途命名的文件
+// ---------------------------------------------------------------------------
+{
+  const utilSrc290 = fs.readFileSync("src/core/util.ts", "utf8");
+  const utilLines290 = utilSrc290.split(/\r?\n/).filter((l) => l.trim().length > 0).length;
+  ok("门面只剩再导出：非空行不超过 20 行", utilLines290 <= 20, String(utilLines290));
+  eq("门面里只有一个 export const（VERSION）", (utilSrc290.match(/^export const /gm) || []).length, 1);
+  ok("门面已经不再定义函数", !/^export (async )?function /m.test(utilSrc290));
+  // 八块全部由门面直接转出（util → sha224 → bytes 是链不是环）
+  eq("门面按八块转出", (utilSrc290.match(/^export \* from "\.\//gm) || []).length, 8);
+  ok("门面不再出现具体实现", !utilSrc290.includes("function timeoutSignal") && !utilSrc290.includes("TextEncoder("));
+
+  // sha224 只需要 toU8，所以它 import bytes、由门面直接转出：
+  // util → sha224 → bytes 是链，不会形成文件级环。
+  const shaSrc290 = fs.readFileSync("src/core/sha224.ts", "utf8");
+  ok("sha224 只从 bytes 借 toU8", shaSrc290.includes('import { toU8 } from "./bytes";'));
+  ok("bytes 不反过来转出 sha224（否则成环）", !fs.readFileSync("src/core/bytes.ts", "utf8").includes('from "./sha224"'));
+
+  const files290 = {
+    "src/core/bytes.ts": ["export function toU8", "export function toHex", "export function uuidFromBytes"],
+    "src/core/sha224.ts": ["export function sha224Bytes", "export const SHA_K"],
+    "src/core/ws.ts": ["export const WS_OPEN", "export const WS_MAX_BUFFER", "export function safeSend", "export function closeQuietly"],
+    "src/core/timeouts.ts": ["export const CONNECT_MS = 2500", "export const UP_STALL_MS = 30000", "export const FIRST_UP_MS = 8000", "export async function withTimeout"],
+    "src/core/concurrency.ts": ["export async function eachLimit"],
+    "src/core/env-parse.ts": ["export const SHADOW_DEFAULT", "export function shadowRate", "export const secretPwd"],
+    "src/core/proto-names.ts": ["export const P_V", "export const P_T"],
+    "src/core/errors.ts": ["export function errMsg"],
+  };
+  let miss290 = 0;
+  let cls290 = 0;
+  for (const [f, wants] of Object.entries(files290)) {
+    const src = fs.readFileSync(f, "utf8");
+    for (const w of wants) if (!src.includes(w)) { miss290 += 1; ok(f + " 缺少 " + w, false); }
+    // 这一层全是纯函数与常量（状态在 S 里），按约定不该配类
+    if (/^export class /m.test(src)) cls290 += 1;
+  }
+  eq("八块的关键符号都在各自文件里", miss290, 0);
+  eq("这一层不定义任何类", cls290, 0);
+
+  // 行为面：门面导出的东西必须真的可用（拆分前它们都从 util 出来）
+  eq("toHex(toU8(\"A\"))", W.toHex(W.toU8("A")), "41");
+  eq("sha224Bytes 输出 28 字节", W.sha224Bytes(new Uint8Array(0)).length, 28);
+  eq("errMsg 截断", W.errMsg("hello", 2), "he");
+  eq("WS_MAX_BUFFER 搬到 ws.ts 后仍可达", W.WS_MAX_BUFFER, 16 * 1024 * 1024);
+  eq("协议名仍在 proto-names.ts", [W.P_V.length, W.P_T.length], [5, 6]);
+  eq("SHADOW_DEFAULT 仍是 5%", W.SHADOW_DEFAULT, 0.05);
+  eq("uuidFromBytes 是 8-4-4-4-12", W.uuidFromBytes(new Uint8Array(16).fill(0xab)).split("-").map((x) => x.length), [8, 4, 4, 4, 12]);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
+

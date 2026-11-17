@@ -1,5 +1,10 @@
 // 测试专用出口：只在 dist/_test.js 里存在，生产包不含此文件
 export { sha224Bytes, toHex, VERSION, shadowRate, secretPwd, eachLimit, withTimeout } from "./core/util";
+export { toU8, uuidFromBytes } from "./core/bytes";
+export { WS_MAX_BUFFER } from "./core/ws";
+export { P_T, P_V } from "./core/proto-names";
+export { SHADOW_DEFAULT } from "./core/env-parse";
+export { errMsg } from "./core/errors";
 export { trimAged, dropExpired } from "./core/hostmem";
 export { aesKey, b64d, b64e, seal, unseal } from "./store/crypto";
 export { factsOut, freshTop } from "./store/factout";
