@@ -5517,7 +5517,7 @@ try {
   ok("节点统计里不再有 eCloseD（只写不读）", !stCode.includes("eCloseD"));
   ok("影子试探的窗口常量进了 SC", fs.readFileSync("src/core/const.ts", "utf8").includes("UNTRIED_GAP: 20000"));
   ok("untried 会读 lastTry", fs.readFileSync("src/nodes/metrics.ts", "utf8").includes("SC.UNTRIED_GAP"));
-  ok("selector 仍在返回前记 lastTry", fs.readFileSync("src/px/selector.ts", "utf8").includes("nsGet(t0).lastTry = Date.now();"));
+  ok("selector 仍在返回前记 lastTry", fs.readFileSync("src/px/pickpath.ts", "utf8").includes("nsGet(t0).lastTry = Date.now();"));
   ok("直连空关闭的全局计数保留", fs.readFileSync("src/proxy/attacher.ts", "utf8").includes('cnt("eCloseD")'));
   ok("类型里也没有 eCloseD", !fs.readFileSync("types/app.d.ts", "utf8").includes("eCloseD"));
   const k213 = "10.213.9.9:443";
@@ -7205,7 +7205,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 
 // ── 253) 改名必须两端同名（本轮自伤一次，锁住它） ──
 {
-  const sel253 = fs.readFileSync("src/px/selector.ts", "utf8");
+  const sel253 = fs.readFileSync("src/px/pickpath.ts", "utf8");
   const con253 = fs.readFileSync("src/proxy/connection.ts", "utf8");
   ok("选路读的是 targetBytes", sel253.includes("(st && st.targetBytes) || 0"), "");
   ok("连接上确实有 targetBytes", con253.includes("targetBytes = 0;"), "");
@@ -7403,7 +7403,7 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   eq("ipOf 与 relayIpOf 同源（方括号）", ipOf("[2a06:98c0::103]:443"), relayIpOf("[2a06:98c0::103]:443"));
   eq("ipOf 无冒号不吃字符", ipOf("1.2.3.4"), "1.2.3.4");
   // 源码锁：选路里不能再有本地那份 slice(0, lastIndexOf(":")) 解析
-  const selSrc = fs.readFileSync("src/px/selector.ts", "utf8");
+  const selSrc = fs.readFileSync("src/px/pickpath.ts", "utf8");
   ok("selector 不再自写 IP 解析", !selSrc.includes('k.slice(0, k.lastIndexOf(":"))'));
   ok("selector 用 relayIpOf", selSrc.includes("cp(relayIpOf(first), host)") && selSrc.includes("cp(relayIpOf(x.k), host)"));
   const rhSrc = fs.readFileSync("src/route/relay-health.ts", "utf8");
@@ -8211,6 +8211,42 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   eq("裁剪保住池子里的那条（哪怕它更慢）", W.S.alive.has("in279.test:443"), true);
   eq("裁剪返回「动过表」", trimmed, true);
   eq("池子够小就不动", W.ALIVE.trimToMax([{ h: "in279.test", p: 443 }], 8), false);
+}
+
+// ──────────────────────────────── 第 280 组：选择器一分为三（挑谁 / 什么时候换 / 失败怎么记）────────────────────────────────
+{
+  const facadeSrc = fs.readFileSync("src/px/selector.ts", "utf8");
+  const pickSrc = fs.readFileSync("src/px/pickpath.ts", "utf8");
+  const rotSrc = fs.readFileSync("src/px/rotation.ts", "utf8");
+  const failSrc = fs.readFileSync("src/px/failbook.ts", "utf8");
+  // 结构：三个类各自带单例，门面只剩委托
+  ok("pickpath 有 PickPath 与 PICK", pickSrc.includes("export class PickPath {") && pickSrc.includes("export const PICK = new PickPath();"), "");
+  ok("rotation 有 Rotation 与 ROTATION", rotSrc.includes("export class Rotation {") && rotSrc.includes("export const ROTATION = new Rotation();"), "");
+  ok("failbook 有 FailBook 与 FAILS", failSrc.includes("export class FailBook {") && failSrc.includes("export const FAILS = new FailBook();"), "");
+  eq("门面里 PICK 的委托有 3 处", facadeSrc.split("return PICK.").length - 1, 3);
+  eq("门面里 ROTATION 的委托有 3 处", facadeSrc.split("return ROTATION.").length - 1, 3);
+  eq("门面里 FAILS 的委托有 4 处", facadeSrc.split("return FAILS.").length - 1, 4);
+  // 门面不得再留算法：这些调用各自只在唯一一个执行器里出现
+  ok("门面不再挑样本", !facadeSrc.includes("pickThom("), "");
+  ok("门面不再列候选", !facadeSrc.includes("candsFor("), "");
+  ok("门面不再自写 IP 解析", !facadeSrc.includes("relayIpOf("), "");
+  ok("门面不再动游标", !facadeSrc.includes("S.curs"), "");
+  ok("门面不再记样本", !facadeSrc.includes("nsGet("), "");
+  // 职责边界：换节点只由 Rotation 判，FailBook 调它而不是自己判
+  ok("failbook 用 ROTATION.maybeSwitch", failSrc.includes("ROTATION.maybeSwitch("), "");
+  ok("failbook 不再 this.maybeSwitch", !failSrc.includes("this.maybeSwitch("), "");
+  ok("pickpath 不判换节点", !pickSrc.includes("this.maybeSwitch(") && !pickSrc.includes("ROTATION.maybeSwitch("), "");
+  ok("rotation 不含记失败的入口", !rotSrc.includes("async bumpFail(") && !rotSrc.includes("async onFail("), "");
+  // dwellOf 跟着「什么时候换」走，但仍由门面再导出（调用点与测试零改动）
+  ok("dwellOf 在 rotation", rotSrc.includes("export function dwellOf("), "");
+  ok("门面再导出 dwellOf", facadeSrc.includes('export { ROTATION, dwellOf } from "./rotation";'), "");
+  // 行为：门面十个方法都还在，且默认驻留时间照旧
+  const ten = ["region", "pick", "maybeSwitch", "onFail", "softFail", "bumpFail", "resetFail", "current", "afterScan", "sched"];
+  eq("门面十个方法都在", ten.filter((m) => typeof W.SEL[m] === "function").length, 10);
+  eq("lat 模式默认驻留 10 分钟", W.dwellOf({}, "lat"), W.SC.DWELL);
+  eq("tput 模式默认驻留 20 分钟", W.dwellOf({}, "tput"), W.SC.DWELL_TPUT);
+  eq("非正数覆盖回落默认", W.dwellOf({ pxDwellMin: "0" }, "lat"), W.SC.DWELL);
+  eq("正数覆盖按分钟换算", W.dwellOf({ pxDwellMin: "3" }, "lat"), 3 * 60000);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

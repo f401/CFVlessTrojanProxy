@@ -11,7 +11,7 @@ store/    index kv crypto         适配器：KV / 加密 / 快照 / 计量 / Me
           snapshot pend stats
           meter-client meter
 nodes/    stat score metrics       节点域：统计原语、评分与候选表、画像与看板行
-px/       pool poolgen probe seed selector 中转域：候选池、探活、信誉表、选择器
+px/       pool poolgen probe seed selector pickpath rotation failbook 中转域：候选池、探活、信誉表、选择器
           const regions              共享常量 / 地区列表（打破 pool 互引）
 proxy/    protocol dial session     数据面：协议、拨号、会话
           fallback tunnel connection
@@ -217,7 +217,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `PoolScan` | `src/px/scan.ts` | 一轮池子维护的执行器：准入复测 → 探新候选 → 头部复测 → 其余 alive 环切刷新 → 存活表裁剪 → 国家码 → 统计表裁剪 → 中转实测 → 落盘；每段一个方法，`run()` 只写顺序 |
 | `SourceHealth`（`SOURCES`） | `src/px/probe.ts` | 池子源健康度（连续失败降权、1 小时冷却、不删源） |
 | `SeedStore` | `src/px/seed.ts` | 跨 isolate 的种子表（只存名字） |
-| `Selector` | `src/px/selector.ts` | 站点偏好 + 单层抽样入口 |
+| `Selector`（`SEL`） | `src/px/selector.ts` | 门面：十个方法各一行委托给下面三个执行器，不再有算法 |
+| `PickPath`（`PICK`） | `src/px/pickpath.ts` | 挑谁：地区硬要求（`?rg=`）、站点偏好 → 单层抽样 → 游标兜底、以及「这条连接当时选的是谁」（`current`） |
+| `Rotation`（`ROTATION`） | `src/px/rotation.ts` | 什么时候换：最短驻留时间（`dwellOf`）、切走判据、扫描后的观察窗与定时复查 |
+| `FailBook`（`FAILS`） | `src/px/failbook.ts` | 失败怎么记：节点级失败推进快速失败窗口并重算分数，站点级失败只进站点画像；要切走时调 `ROTATION.maybeSwitch` |
 | `Dialer` / `RegionPicker` | `src/proxy/dialer.ts`、`region.ts` | 中继串行拨号、地区选择 |
 | `SocketDialer` | `src/proxy/socket-dialer.ts` | 按预算建连，超时后关掉「迟到成功」的 socket（四处手写过的同一条规则，现在只有一份实现） |
 | `MeterDiagnostics` | `src/store/meter-diagnostics.ts` | 计量 DO 的诊断端点（stage/tim/iter/burn/burnjs/crypto/tfb/tf）：每个端点一个方法，不落盘、不碰账目 |
