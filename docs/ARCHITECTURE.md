@@ -241,7 +241,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `MeterEndpoints` | `src/store/meter.ts` | 计量 DO 的端点实现：`/add`、`/seed`、`/set` 三个会改账本的（各自处理回滚）与 `/cl`/`/hl`/`/vt`/`/cnt` 四个只读的；`Meter` 只留串行化、落盘与生命周期 |
 | `VerdictTable`（`VT`） | `src/route/verdict.ts` | 判定表（站点 × 通道）：状态机、TTL/上限、弱证据不得冲掉强证据、通配目标拒写；公开类型与 `VT_TTL_MS` 同住这一个文件，调用方直接用 `VT.set(...)`/`VT.bad(...)`（7.300 删掉了十二个同名转发函数） |
 | `Judge`（`JUDGE`） | `src/route/judge.ts` | 判定出口：`onTraffic` 只做编排（事实 → 整页 → 小响应 → 封锁），四段各一方法；正/负记忆与封锁结论都在同一处 |
-| `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级：三张按站点的内存表（`pin`/`rot`/`seq`）+ 排序链 `neg → pos → score → vAt` |
+| `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级：三张按站点的内存表（`pin`/`rot`/`seq`）+ 排序链 `neg → pos → score → vAt`；CF 托管目标的分支树按代价四段各自成函数（`cfV6Choice` → `cfColdChoice` → `cfEgressChoice` → `cfEgChoice`），`decideCf` 只编排 |
 | `PolicyWiring`（`WIRING`） | `src/route/policy-wiring.ts` | 把策略接到 HOOK 的二十个槽位（漏注册不会有门禁报错，7.123 的 `HOOK.facts` 就是这样失效的） |
 | `RelayHealth`（`HEALTH`） | `src/route/relay-health.ts` | 中继健康表（sent/pending 语义） |
 | `RelayLedger` | `src/route/relay-ledger.ts` | 中继健康表的两张账本（已同步快照 + 待确认行）：`forget()` 是唯一删除入口，`counts()` 暴露规模以发现表外键 |

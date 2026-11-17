@@ -10983,6 +10983,92 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     W.S.alive.delete(k);
   });
 }
+/* ---------- 第 336 组：CF 分支树按代价四段各自成函数（v7.336） ---------- */
+// 原来一条 70 行函数里排着四段判据：v6 客户端（零证据）、冷启动采样与钉住（写表）、
+// 分类与状态码收口（零成本）、事实层兜底（读另一张表）。它们的代价差两个数量级，
+// 却共用同一串局部变量，读代码时无法确认「这一行属于哪一段」。
+{
+  const g = "336";
+  const polSrc = fs.readFileSync("src/route/policy.ts", "utf8");
+  // 取函数体：从签名行到下一个顶格的 `}`，先归一换行，免得 CRLF 切不到末尾
+  const norm = polSrc.replace(/\r\n/g, "\n");
+  const body = (sig) => {
+    const head = norm.indexOf(sig);
+    if (head < 0) return "";
+    const tail = norm.indexOf("\n}\n", head);
+    return norm.slice(head, tail < 0 ? norm.length : tail);
+  };
+
+  ok(
+    `[${g}] 四段各自成函数、编排仍是导出函数`,
+    ["function cfV6Choice(", "function cfColdChoice(", "function cfEgressChoice(", "function cfEgChoice(", "export function decideCf("].every((x) => polSrc.includes(x)),
+    ""
+  );
+  const dec = body("export function decideCf(");
+  eq(
+    `[${g}] decideCf 只编排：四个委托都在、自己不扫表`,
+    [dec.includes("cfV6Choice(c, r)"), dec.includes("cfColdChoice(c, r, src, code)"), dec.includes("cfEgressChoice(r, code)"), dec.includes("cfEgChoice()"), !dec.includes("RELPERF.snap("), !dec.includes("EG.v4List("), !dec.includes("VT.at(")],
+    [true, true, true, true, true, true, true]
+  );
+  eq(`[${g}] decideCf 不超过 20 行`, dec.split("\n").length <= 20, true);
+  const v6 = body("function cfV6Choice(");
+  eq(
+    `[${g}] v6 段只认客户端地址族与候选分类`,
+    [v6.includes("if (!c.clientV6) return null;"), v6.includes("nonCf.length ? nonCf : stick.length ? stick : usable"), !v6.includes("cfHttpCode(")],
+    [true, true, true]
+  );
+  const cold = body("function cfColdChoice(");
+  eq(
+    `[${g}] 冷启动段带齐四件：冷站判据 / 样本表 / 轮换 / 钉住`,
+    [cold.includes("VT.at(c.host,"), cold.includes("JUDGE.posOn(c.host,"), cold.includes("RELPERF.snap(c.host)"), cold.includes("src.nextRotation("), cold.includes("src.pinFor(")],
+    [true, true, true, true, true]
+  );
+  const egr = body("function cfEgressChoice(");
+  eq(
+    `[${g}] 收口段四条判据齐备且互斥`,
+    [egr.includes('why: "cf-noncf"'), egr.includes("code === 403"), egr.includes("code === 200 && !stick.length"), egr.includes('why: "cf-any"')],
+    [true, true, true, true]
+  );
+  const egp = body("function cfEgChoice(");
+  eq(`[${g}] 事实层兜底不挑被判死的`, [egp.includes("EG.v4List()"), egp.includes("DEAD.isDead(")], [true, true]);
+  eq(
+    `[${g}] 四段按代价递增排、编排放最后`,
+    ["function cfV6Choice(", "function cfColdChoice(", "function cfEgressChoice(", "function cfEgChoice(", "export function decideCf("].map((x) => norm.indexOf(x)).every((v, i, arr) => i === 0 || v > arr[i - 1]),
+    true
+  );
+  // 热路径纪律：站点×中继那张表每轮只扫一遍（7.188 之前这个分支扫三遍，每遍还要排序）
+  eq(`[${g}] 热路径那张实测表只扫一遍`, (norm.match(/RELPERF\.snap\(/g) || []).length, 1);
+
+  // 行为面：直接喂 Ranked 视图，逐段验证「谁先返回」
+  const blank = { usable: [], blocked: [], ranked: [], stick: [], nonCf: [], okOnes: [] };
+  const ctxOf = (over) => ({ host: "cf336.test", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: true, mode: "tput", ...over });
+  W.VT.clear();
+  W.EG.clear();
+  W.DEAD.clear();
+  W.S.cfHttp.clear();
+  const v6none = W.decideCf(ctxOf({ clientV6: true }), blank, W.POLICY);
+  eq(`[${g}] v6 客户端没候选时直连并标 v6-cf-none`, [v6none.why, v6none.chan.kind], ["v6-cf-none", "d"]);
+  const v6ok = W.decideCf(ctxOf({ clientV6: true }), { ...blank, nonCf: ["1.1.1.1", "203.0.113.9"], stick: ["1.1.1.1", "203.0.113.9"], okOnes: ["203.0.113.9"] }, W.POLICY);
+  eq(`[${g}] v6 段优先挑「送回过整页」的那条`, [v6ok.why, v6ok.chan.ip], ["v6-cf", "203.0.113.9"]);
+  eq(`[${g}] 全空时返回 null（交给上层判死）`, W.decideCf(ctxOf({}), blank, W.POLICY), null);
+  const warm = { ...blank, usable: ["45.136.117.194"], ranked: ["45.136.117.194"], stick: ["45.136.117.194"] };
+  eq(`[${g}] 没有任何证据时先走冷启动钉住`, W.decideCf(ctxOf({}), warm, W.POLICY).why, "cold-pin");
+  W.VT.setState("cf336.test", "r:45.136.117.194", 1, 1);
+  eq(`[${g}] 有本站点证据后交给收口段`, W.decideCf(ctxOf({}), warm, W.POLICY).why, "cf-any");
+  W.S.cfHttp.set("cf336.test", { code: 403, colo: "", t: Date.now() });
+  eq(`[${g}] 本出口 403 时改走已知可用的中继`, W.decideCf(ctxOf({}), warm, W.POLICY).why, "http403");
+  W.S.cfHttp.set("cf336.test", { code: 200, colo: "", t: Date.now() });
+  const http200 = W.decideCf(ctxOf({}), blank, W.POLICY);
+  eq(`[${g}] 200 且没有中继候选时才直连`, [http200.why, http200.chan.kind], ["http200", "d"]);
+  W.VT.setState("noncf336.test", "r:203.0.113.9", 1, 1);
+  const nonCfWin = W.decideCf(ctxOf({ host: "noncf336.test" }), { ...blank, usable: ["203.0.113.9"], ranked: ["203.0.113.9"], stick: ["203.0.113.9"], nonCf: ["203.0.113.9"] }, W.POLICY);
+  eq(`[${g}] 冷启动之后非 CF 主机优先`, [nonCfWin.why, nonCfWin.chan.ip], ["cf-noncf", "203.0.113.9"]);
+  W.VT.clear();
+  W.EG.clear();
+  W.DEAD.clear();
+  W.S.cfHttp.clear();
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
