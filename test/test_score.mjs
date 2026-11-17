@@ -8774,20 +8774,22 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   ok("五个类都在同一个文件里",
     ["export class DebugNets", "export class DebugBench", "export class DebugDiag", "export class DebugProbe", "export class DebugTf"]
       .every((n) => src.includes(n)), "");
-  // 四个单例里 NETS 搬进了组合根，其余三个（测速/探活/真握手）仍在本文件，服务内部复用
-  ok("NETS 已搬进组合根，其余三个仍在 debug-nets.ts",
-    !src.includes("const NETS = new DebugNets();") &&
-      ["const BENCH = new DebugBench();", "const DIAGONE = new DebugDiag();", "const PROBES = new DebugProbe();", "const TFPROBES = new DebugTf();"]
-        .every((n) => src.includes(n)), "");
+  // 7.344：四个组件不再是模块级单例，改由 DebugNets 自己持有（少四个全局）
+  ok("模块级单例已经清零", ["export const BENCH =", "export const DIAGONE =", "export const PROBES =", "export const TFPROBES ="]
+    .every((n) => !src.includes(n)), "");
+  ok("门面自己持有四个组件",
+    ["readonly benchRunner = new DebugBench();", "readonly diagRunner = new DebugDiag();",
+      "readonly probeRunner = new DebugProbe();", "readonly tfRunner = new DebugTf();"]
+      .every((n) => src.includes(n)), "");
   ok("上下文类型只声明一次", (src.match(/type DebugCtx = /g) || []).length === 1, "");
   // 只有两个类要管理员：改动状态的那两个分支（判定批与真握手不写状态，但会花 DO 的 CPU）
   ok("需要管理员的入口都过了 adminOnly", (src.match(/await adminOnly\(c\)/g) || []).length >= 2, "");
-  ok("门面七行全是委托", (src.match(/return (BENCH|DIAGONE|PROBES|TFPROBES)\./g) || []).length === 7, String((src.match(/return (BENCH|DIAGONE|PROBES|TFPROBES)\./g) || []).length));
+  ok("门面七行全是委托", (src.match(/return this\.(benchRunner|diagRunner|probeRunner|tfRunner)\./g) || []).length === 7, String((src.match(/return this\.(benchRunner|diagRunner|probeRunner|tfRunner)\./g) || []).length));
   // 行为面：无参数时测速与原始探活都返回 null（不拨号、不花钱）
   const u0 = new URL("https://x.test/debug");
-  eq("测速缺参返回 null", await W.BENCH.bench(u0), null);
-  eq("原始探活缺参返回 null", await W.PROBES.rawProbe(u0), null);
-  ok("单例可判定", W.DEBUG.nets instanceof W.DebugNets && W.BENCH instanceof W.DebugBench, "");
+  eq("测速缺参返回 null", await W.DEBUG.nets.benchRunner.bench(u0), null);
+  eq("原始探活缺参返回 null", await W.DEBUG.nets.probeRunner.rawProbe(u0), null);
+  ok("组件仍是自己的类", W.DEBUG.nets instanceof W.DebugNets && W.DEBUG.nets.benchRunner instanceof W.DebugBench, "");
 }
 
 
@@ -9877,7 +9879,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     return clsSrc.slice(head2);
   };
   const dg = body("diag");
-  eq("[325] 六段细节各自成方法", ["hostOf", "sampleRows", "probeTops", "pickBasis", "cfFacts", "relayBlocked", "doRing"].filter((n) => typeof W.DIAGONE[n] === "function").length, 7);
+  eq("[325] 六段细节各自成方法", ["hostOf", "sampleRows", "probeTops", "pickBasis", "cfFacts", "relayBlocked", "doRing"].filter((n) => typeof W.DEBUG.nets.diagRunner[n] === "function").length, 7);
   ok("[325] diag 只做编排（≤45 行）", dg.split("\n").length <= 45, dg.split("\n").length);
   eq("[325] diag 里恰好七处 this. 委托", (dg.match(/this\.[a-zA-Z]+\(/g) || []).length, 7);
   ok("[325] diag 不再自己拨号 / 扫判定表", !dg.includes("probeSni(") && !dg.includes("resolveV4All(") && !dg.includes("VT.all()") && !dg.includes("https://meter/vt"));
@@ -9888,8 +9890,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("[325] 判定表只列中继通道且算剩余秒数", body("relayBlocked").includes('v.channel.startsWith("r:")') && body("relayBlocked").includes("VT_TTL_MS"));
   ok("[325] DO 封锁环读 blk2 且只在 &do=1 时读", body("doRing").includes('!== "1"') && body("doRing").includes("https://meter/vt") && body("doRing").includes("blk2"));
   const pctx = { request: new Request("https://x.test/"), url: new URL("https://x.test/" + "u/debug"), env: {}, id: "u", exec: { waitUntil() {}, passThroughOnException() {} } };
-  eq("[325] 没有 ?diag= 时让给后面的分支", await W.DIAGONE.diag(pctx, new URL("https://x.test/u/debug?probe=1")), null);
-  const badHost = await W.DIAGONE.diag(pctx, new URL("https://x.test/u/debug?diag=bad_host!"));
+  eq("[325] 没有 ?diag= 时让给后面的分支", await W.DEBUG.nets.diagRunner.diag(pctx, new URL("https://x.test/u/debug?probe=1")), null);
+  const badHost = await W.DEBUG.nets.diagRunner.diag(pctx, new URL("https://x.test/u/debug?diag=bad_host!"));
   eq("[325] 站点名形状不对时直接报错", (await badHost.json()).ok, false);
 }
   // ═══ 第 326 组：Attacher 的五段各有边界（7.326）═══
@@ -11499,6 +11501,29 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     eq("[342] 坏早期数据只是被丢掉", text342((await r.read()).value), "ok342");
     r.releaseLock();
   }
+}
+
+
+/* ---------- 344. 诊断组件的四个模块级单例改由门面持有 ---------- */
+{
+  const src344 = fs.readFileSync("src/routes/debug-nets.ts", "utf8");
+  const surf344 = fs.readFileSync("src/test-surface.ts", "utf8");
+  // 全局变量清零：四个 `export const X = new …` 都不在了
+  eq("四个模块级单例已删除", /^export const (BENCH|DIAGONE|PROBES|TFPROBES) = new /m.test(src344), false);
+  ok("门面持有四个组件",
+    W.DEBUG.nets.benchRunner instanceof W.DebugBench &&
+      W.DEBUG.nets.diagRunner instanceof W.DebugDiag &&
+      W.DEBUG.nets.probeRunner instanceof W.DebugProbe &&
+      W.DEBUG.nets.tfRunner instanceof W.DebugTf,
+    "");
+  ok("测试窗口不再导出这四个名字", ["BENCH", "DIAGONE", "PROBES", "TFPROBES"].every((n) => !new RegExp("^ {" + 2 + "}" + n + ",$", "m").test(surf344)), "");
+  // 行为面：门面仍然只是转发（缺参时两个分支都返回 null，不拨号）
+  const u344 = new URL("https://x.test/u/debug");
+  eq("测速仍然只转发", await W.DEBUG.nets.bench(u344), null);
+  eq("原始探活仍然只转发", await W.DEBUG.nets.rawProbe(u344), null);
+  // 每个组件只被实例化一次（构造在类字段上，不是每次调用新建）
+  eq("四个组件各自只实例化一次",
+    (src344.match(/readonly (benchRunner|diagRunner|probeRunner|tfRunner) = new /g) || []).length, 4);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

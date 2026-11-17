@@ -119,15 +119,11 @@ export { AdminView, admin } from "./routes/admin";
 export { SubscriptionRoutes, subscription } from "./routes/subscription";
 export { debug, DEBUG, DebugActions, DebugMeterProbes, DebugTables, DebugSuite } from "./routes/debug";
 export {
-  BENCH,
-  DIAGONE,
   DebugBench,
   DebugDiag,
   DebugNets,
   DebugProbe,
   DebugTf,
-  PROBES,
-  TFPROBES,
 } from "./routes/debug-nets";
 export { renderStatsHtml } from "./views/panel";
 export { PanelView, renderHtml } from "./views/panel";

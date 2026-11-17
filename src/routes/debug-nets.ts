@@ -88,8 +88,6 @@ export class DebugBench {
   }
 }
 
-/** DebugBench 的单例（无状态，可安全共享） */
-export const BENCH = new DebugBench();
 
 // ---- 并入自 debug-net-diag.ts ----
 /** 允许诊断的站点名形状（小写字母数字与点、连字符，首尾不能是符号） */
@@ -310,8 +308,6 @@ export class DebugDiag {
   }
 }
 
-/** DebugDiag 的单例（无状态，可安全共享） */
-export const DIAGONE = new DebugDiag();
 
 // ---- 并入自 debug-net-probe.ts ----
 
@@ -401,8 +397,6 @@ export class DebugProbe {
   }
 }
 
-/** DebugProbe 的单例（无状态，可安全共享） */
-export const PROBES = new DebugProbe();
 
 // ---- 并入自 debug-net-tf.ts ----
 
@@ -445,8 +439,6 @@ export class DebugTf {
   }
 }
 
-/** DebugTf 的单例（无状态，可安全共享） */
-export const TFPROBES = new DebugTf();
 
 // ---- 门面（对外导出面保持不变） ----
 // 会对外拨号的诊断分支门面：七个分支按「花什么预算」分成四个组件。
@@ -467,13 +459,21 @@ export const TFPROBES = new DebugTf();
  * `?diag=x&refill=1` 这种组合会先花掉一次抓源再回答只读问题。
  */
 export class DebugNets {
+  /** 出口测速（花一次子请求） */
+  readonly benchRunner = new DebugBench();
+  /** 站点诊断（读样本免费，可选主动探活占 `connect()` 名额） */
+  readonly diagRunner = new DebugDiag();
+  /** 原始探活与明文 HTTP（都占 `connect()` 名额） */
+  readonly probeRunner = new DebugProbe();
+  /** 判定批与单次真握手（花子请求并吃 DO CPU） */
+  readonly tfRunner = new DebugTf();
   /**
    * 出口测速（花一次子请求）。
    * @param url 请求 URL（`?bench=<url>&bytes=<n>`）
    * @returns 命中时返回测速结果，否则 `null`
    */
   async bench(url: URL): Promise<Response | null> {
-    return BENCH.bench(url);
+    return this.benchRunner.bench(url);
   }
 
   /**
@@ -483,7 +483,7 @@ export class DebugNets {
    * @returns 命中时返回诊断结果，否则 `null`
    */
   async diag(c: DebugCtx, url: URL): Promise<Response | null> {
-    return DIAGONE.diag(c, url);
+    return this.diagRunner.diag(c, url);
   }
 
   /**
@@ -492,7 +492,7 @@ export class DebugNets {
    * @returns 命中时返回探活结果，否则 `null`
    */
   async rawProbe(url: URL): Promise<Response | null> {
-    return PROBES.rawProbe(url);
+    return this.probeRunner.rawProbe(url);
   }
 
   /**
@@ -502,7 +502,7 @@ export class DebugNets {
    * @returns 命中时返回探测结果，否则 `null`
    */
   async http(c: DebugCtx, url: URL): Promise<Response | null> {
-    return PROBES.http(c, url);
+    return this.probeRunner.http(c, url);
   }
 
   /**
@@ -512,7 +512,7 @@ export class DebugNets {
    * @returns 命中时返回判定批结果，否则 `null`
    */
   async tfb(c: DebugCtx, url: URL): Promise<Response | null> {
-    return TFPROBES.tfb(c, url);
+    return this.tfRunner.tfb(c, url);
   }
 
   /**
@@ -522,7 +522,7 @@ export class DebugNets {
    * @returns 命中时返回 DO 的原始应答，否则 `null`
    */
   async tf(c: DebugCtx, url: URL): Promise<Response | null> {
-    return TFPROBES.tf(c, url);
+    return this.tfRunner.tf(c, url);
   }
 
   /**
@@ -531,7 +531,7 @@ export class DebugNets {
    * @returns 解析与建连结果
    */
   async host(url: URL): Promise<Response> {
-    return PROBES.host(url);
+    return this.probeRunner.host(url);
   }
 }
 

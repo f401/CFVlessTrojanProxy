@@ -282,7 +282,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `ProxySession` | `src/proxy/session.ts` | WebSocket 数据面的会话对象：握手 / 首帧解析 / 拨号（地区与补救两条路）/ 收尾各一个方法 |
 | `UploadStream` | `src/proxy/ws-in.ts` | 客户端 → 上游的上行字节流：积压计数、超限关连接（1013）、正常关闭与异常各自收尾；`wsToStream()` 只是 `new UploadStream(ws, early).stream` |
 | `UserIndex` | `src/proxy/protocol.ts` | 用户表装配器：env（`uuid`/`uuids`、`trojan` 单密码与 `user:pass` 多密码）与 KV 托管用户合成一张表，维护「启用 id 集合」与「密码摘要 → 稳定 owner」；托管记录最后写，因此能覆盖 env 的启用状态 |
-| `DebugNets` | `src/routes/debug-nets.ts` | 会对外拨号的诊断分支门面：七个分支在四个组件里，这里只按「只读 → 测速 → 诊断 → 探活 → 抓源 → 钉住 → 明文 HTTP → 判定批 → 真握手 → 回填 → seed → 兜底」的顺序派发（顺序变了，`?diag=x&refill=1` 会先花一次抓源） |
+| `DebugNets` | `src/routes/debug-nets.ts` | 会对外拨号的诊断分支门面：七个分支在四个组件里，这里只按「只读 → 测速 → 诊断 → 探活 → 抓源 → 钉住 → 明文 HTTP → 判定批 → 真握手 → 回填 → seed → 兜底」然后按顺序派发（顺序变了，`?diag=x&refill=1` 会先花一次抓源）。7.344 起四个组件（`benchRunner`/`diagRunner`/`probeRunner`/`tfRunner`）由它自己持有，不再是模块级单例 |
 | `DebugBench` | `src/routes/debug-nets.ts` | 出口测速（花 fetch 子请求，同文件） |
 | `DebugDiag`（`DIAGONE`） | `src/routes/debug-nets.ts` | 站点诊断：`diag()` 只编排，六段细节各一方法（取样本 / 主动探活 / 证据选择 / CF 事实 / 本 isolate 判定 / DO 封锁环） |
 | `DebugProbe` | `src/routes/debug-nets.ts` | 三个探针：原始 ClientHello / 明文 HTTP / IPv6 可达性（同文件） |
