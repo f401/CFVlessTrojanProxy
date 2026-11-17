@@ -179,5 +179,3 @@ export class MeterDiagnostics {
   }
 }
 
-/** 进程内共用的诊断分派器（无状态，安全共享） */
-export const METER_DIAGNOSTICS = new MeterDiagnostics();

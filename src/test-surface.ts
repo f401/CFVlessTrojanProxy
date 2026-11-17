@@ -26,6 +26,7 @@ export { trimAged, dropExpired } from "./core/hostmem";
 export { aesKey, b64d, b64e, seal, unseal } from "./store/crypto";
 export { factsOut, freshTop } from "./store/factout";
 export { MeterState } from "./store/meter-state";
+export { MeterEndpoints } from "./store/meter";
 export { detectProtocol, parseVLESS, parseTrojan, loadUsers, normAtyp, readAddr, UserIndex } from "./proxy/protocol";
 export { DOH_ENDPOINTS, checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
 export { isPxHost, pxHostList } from "./core/hosts";
@@ -90,7 +91,7 @@ export { ScanAlive, ScanHouse, ScanProbe, probeBatch, probeOne } from "./px/scan
 export type { ProbeHit } from "./px/scan";
 export { DIALER, Dialer } from "./proxy/dialer";
 export { SOCKET_DIALER, SocketDialer } from "./proxy/socket-dialer";
-export { METER_DIAGNOSTICS, MeterDiagnostics } from "./store/meter-diagnostics";
+export { MeterDiagnostics } from "./store/meter-diagnostics";
 export { ATTACHER, Attacher } from "./proxy/attacher";
 export { RegionPicker } from "./proxy/region";
 export { cnt, cntDelta, cntUnsend, cntView } from "./core/counter";

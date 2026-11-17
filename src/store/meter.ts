@@ -2,7 +2,7 @@ import { factsOut } from "./factout";
 import { unseal } from "./index";
 import { MeterAdd } from "./meteradd";
 import { cnt } from "../core/counter";
-import { METER_DIAGNOSTICS } from "./meter-diagnostics";
+import { MeterDiagnostics } from "./meter-diagnostics";
 import { readShards, saveState } from "./metershard";
 import { MeterState } from "./meter-state";
 
@@ -151,6 +151,13 @@ export class Meter {
 export class MeterEndpoints {
   /** `/add` 的合并器：八段口径各一个方法（见 `src/store/meteradd.ts`） */
   private readonly adder = new MeterAdd();
+  /**
+   * 诊断端点分派器（stage/tim/iter/burn/burnjs/crypto/tfb/tf）。
+   *
+   * 无状态，本来是个模块级单例；7.352 起由端点对象自己持有 —— 它分派的是「这个 DO 的
+   * 诊断端点」，和 `adder`、`ledger` 一样属于本对象，读代码时不必再跳到模块尾部找实例。
+   */
+  private readonly diagnostics = new MeterDiagnostics();
 
   /**
    * 构造：只保存账本、DO 状态与落盘回调，不做 I/O。
@@ -179,7 +186,7 @@ export class MeterEndpoints {
     // 只读诊断端点（stage/tim/iter/burn/burnjs/crypto/tfb/tf）整体交给 MeterDiagnostics：
     // 它们不落盘、不碰账目，挤在这里只会把真正管账的那段埋掉。
     // 它们也不消费请求体，所以放在读账本之前不影响 `/seed`、`/set` 的 body。
-    const diagnostic = await METER_DIAGNOSTICS.run(p, url, this.state);
+    const diagnostic = await this.diagnostics.run(p, url, this.state);
     if (diagnostic) return diagnostic;
 
     const read = this.read(p);

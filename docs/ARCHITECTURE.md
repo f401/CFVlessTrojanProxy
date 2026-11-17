@@ -236,10 +236,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `FailBook`（`SEL.fails`） | `src/px/failbook.ts` | 失败怎么记：节点级失败推进快速失败窗口并重算分数，站点级失败只进站点画像；要切走时调 `ROTATION.maybeSwitch`（换节点器仍是模块级单例，避免与门面双向持有） |
 | `Dialer` / `RegionPicker` | `src/proxy/dialer.ts`、`region.ts` | `Dialer.open()` 只分派三段：`classify`（CF 托管识别 + 一次 200ms 的事实预热，决定要不要绕中继）、`viaRelay`（循环骨架：`nextCand` 取候选并判四类跳过 —— 解析为空 / 内网地址 / 已试过 / 边缘中继，`attemptRelay` 只拨一次并记账冷却；名额按真实拨号次数算）、`direct`（CF 托管目标先按 A 记录拨 IPv4）；两条直连都走 `guarded` 的有限等待 |
 | `SocketDialer` | `src/proxy/socket-dialer.ts` | 按预算建连，超时后关掉「迟到成功」的 socket（四处手写过的同一条规则，现在只有一份实现） |
-| `MeterDiagnostics` | `src/store/meter-diagnostics.ts` | 计量 DO 的诊断端点（stage/tim/iter/burn/burnjs/crypto/tfb/tf）：每个端点一个方法，不落盘、不碰账目 |
+| `MeterDiagnostics`（`MeterEndpoints.diagnostics`） | `src/store/meter-diagnostics.ts` | 计量 DO 的诊断端点（stage/tim/iter/burn/burnjs/crypto/tfb/tf）：每个端点一个方法，不落盘、不碰账目；无状态，7.352 起由端点对象自己持有，模块级 `METER_DIAGNOSTICS` 已撤 |
 | `MeterState` | `src/store/meter-state.ts` | 账本本体：五件账本 + 七张事实表 + 代号；`adopt()`/`restore()` 把落盘口径逐项映射到内存字段，`parts()` 反着来，`snapshot()`/`rollback()` 供 `/add` 落盘失败时回滚 |
 | `MeterAdd` | `src/store/meteradd.ts` | `/add` 的合并器：日计数、错误环、连接观测、判定表、六张事实表、中继存活度、节点快照、用量各一个私有方法，`apply()` 只负责顺序；`FactMerger` 是它的私有成员，不再需要模块级单例 |
-| `MeterEndpoints` | `src/store/meter.ts` | 计量 DO 的端点实现：`/add`、`/seed`、`/set` 三个会改账本的（各自处理回滚）与 `/cl`/`/hl`/`/vt`/`/cnt` 四个只读的；`Meter` 只留串行化、落盘与生命周期 |
+| `MeterEndpoints` | `src/store/meter.ts` | 计量 DO 的端点实现：`/add`、`/seed`、`/set` 三个会改账本的（各自处理回滚）与 `/cl`/`/hl`/`/vt`/`/cnt` 四个只读的；诊断端点由它自己持有的 `diagnostics` 分派；`Meter` 只留串行化、落盘与生命周期 |
 | `VerdictTable`（`VT`） | `src/route/verdict.ts` | 判定表（站点 × 通道）：状态机、TTL/上限、弱证据不得冲掉强证据、通配目标拒写；公开类型与 `VT_TTL_MS` 同住这一个文件，调用方直接用 `VT.set(...)`/`VT.bad(...)`（7.300 删掉了十二个同名转发函数） |
 | `Judge`（`JUDGE`） | `src/route/judge.ts` | 判定出口：`onTraffic` 只做编排（事实 → 整页 → 小响应 → 封锁），四段各一方法；正/负记忆与封锁结论都在同一处 |
 | `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级：三张按站点的内存表（`pin`/`rot`/`seq`）+ 排序链 `neg → pos → score → vAt`；CF 托管目标的分支树按代价四段各自成函数（`cfV6Choice` → `cfColdChoice` → `cfEgressChoice` → `cfEgChoice`），`decideCf` 只编排；7.351 起自己持有装配器 `wiring` |
