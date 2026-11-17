@@ -63,83 +63,125 @@ export const SHA_H224 = new Uint32Array([
 export const rotr = (x: number, n: number) => ((x >>> n) | (x << (32 - n))) >>> 0;
 
 /**
- * 计算 SHA-224 摘要（纯 JS 实现，用于 Trojan 密码校验）。
- * @param {Uint8Array} data 待摘要数据
- * @returns {Uint8Array} 28 字节摘要
+ * 功能：SHA-224 的补位——末尾追加 1 字节 0x80 与 8 字节大端比特长度，总长补齐到 64 的倍数。
+ *
+ * 为什么单独成一步：补位只取决于**输入长度**，与 64 字消息表、压缩轮函数完全无关；
+ * 三步混在一条函数里时，想验证「长度换算有没有溢出」必须构造一份完整摘要再看结果。
+ * 比特长度按两个 32 位字写（`len * 8` 超过 2^32 时必须进位到高字）。
+ * @param {Uint8Array} data8 原始消息
+ * @returns {Uint8Array} 补位后的消息（长度是 64 的整数倍）
  */
-export function sha224Bytes(data: Uint8Array | ArrayBuffer) {
-  const data8 = toU8(data);
+export function sha224Pad(data8: Uint8Array): Uint8Array {
   const len = data8.length;
-  // 补位：末尾追加 1 字节 0x80 与 8 字节比特长度，总长向上取整到 64 字节的倍数
   const total = (((len + 8) >> 6) + 1) << 6;
   const buf = new Uint8Array(total);
   buf.set(data8);
   buf[len] = 0x80;
-
   const dv = new DataView(buf.buffer);
   const bits = len * 8;
+  // 高 32 位用除法（`>>> 0` 只能拿低 32 位），低 32 位直接截断
   dv.setUint32(total - 8, Math.floor(bits / 4294967296));
   dv.setUint32(total - 4, bits >>> 0);
+  return buf;
+}
 
-  // 工作区：8 个 32 位状态 + 64 字消息表，按 64 字节一块滚动
-  // 必须 slice 复制——直接改常量会污染下一次调用
-  const H = SHA_H224.slice();
-  const w = new Uint32Array(64);
+/**
+ * 功能：把一块 64 字节展开成 64 字消息表（前 16 字直接读，其余按递推式生成）。
+ *
+ * 递推式：`W[i] = W[i-16] + σ0(W[i-15]) + W[i-7] + σ1(W[i-2])`，全程 `>>> 0` 保 32 位。
+ * @param {DataView} view 补位后消息的视图
+ * @param {number} off 本块的起始字节偏移
+ * @param {Uint32Array} words 复用同一块 64 字工作区（避免每块都分配）
+ * @returns {void}
+ */
+export function sha224Words(view: DataView, off: number, words: Uint32Array): void {
+  for (let i = 0; i < 16; i++) words[i] = view.getUint32(off + i * 4);
+  for (let i = 16; i < 64; i++) {
+    const a15 = words[i - 15];
+    const a2 = words[i - 2];
+    const s0 = (rotr(a15, 7) ^ rotr(a15, 18) ^ (a15 >>> 3)) >>> 0;
+    const s1 = (rotr(a2, 17) ^ rotr(a2, 19) ^ (a2 >>> 10)) >>> 0;
+    words[i] = (words[i - 16] + s0 + words[i - 7] + s1) >>> 0;
+  }
+}
 
-  for (let off = 0; off < total; off += 64) {
-    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4);
-    // 消息表扩展到 64 字：W[i] = W[i-16] + σ0(W[i-15]) + W[i-7] + σ1(W[i-2])，全程 >>> 0 保 32 位
-    for (let i = 16; i < 64; i++) {
-      const a15 = w[i - 15],
-        a2 = w[i - 2];
-      const s0 = (rotr(a15, 7) ^ rotr(a15, 18) ^ (a15 >>> 3)) >>> 0;
-      const s1 = (rotr(a2, 17) ^ rotr(a2, 19) ^ (a2 >>> 10)) >>> 0;
-      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
-    }
+/**
+ * 功能：64 轮压缩，把一块消息混进 8 字状态（就地更新）。
+ *
+ * SHA-224 与 SHA-256 只差初始值与输出截断，轮函数完全一样：这里不需要知道摘要长度。
+ * @param {Uint32Array} state 8 字状态（会被就地修改）
+ * @param {Uint32Array} words 本块的 64 字消息表
+ * @returns {void}
+ */
+export function sha224Mix(state: Uint32Array, words: Uint32Array): void {
+  // 8 个工作寄存器：整块只在末尾写回 state 一次，避免 64 轮里反复读写同一块内存
+  let a = state[0];
+  let b = state[1];
+  let c = state[2];
+  let d = state[3];
+  let e = state[4];
+  let f = state[5];
+  let g = state[6];
+  let h = state[7];
 
-    let a = H[0],
-      b = H[1],
-      c = H[2],
-      d = H[3];
-    let e = H[4],
-      f = H[5],
-      g = H[6],
-      h = H[7];
-
-    for (let i = 0; i < 64; i++) {
-      // 64 轮压缩：SHA-224 与 SHA-256 只差初始值与输出截断，轮函数完全一样
-      const S1 = (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) >>> 0;
-      const ch = ((e & f) ^ (~e & g)) >>> 0;
-      const t1 = (h + S1 + ch + SHA_K[i] + w[i]) >>> 0;
-      const S0 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) >>> 0;
-      const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
-      const t2 = (S0 + maj) >>> 0;
-      h = g;
-      g = f;
-      f = e;
-      e = (d + t1) >>> 0;
-      d = c;
-      c = b;
-      b = a;
-      a = (t1 + t2) >>> 0;
-    }
-
-    H[0] = (H[0] + a) >>> 0;
-    H[1] = (H[1] + b) >>> 0;
-    H[2] = (H[2] + c) >>> 0;
-    H[3] = (H[3] + d) >>> 0;
-    H[4] = (H[4] + e) >>> 0;
-    H[5] = (H[5] + f) >>> 0;
-    H[6] = (H[6] + g) >>> 0;
-    H[7] = (H[7] + h) >>> 0;
+  for (let i = 0; i < 64; i++) {
+    // Σ1 与选择函数 ch 走 e/f/g；T1 里加上本轮常量与消息字，全部 >>> 0 截回 32 位
+    const s1 = (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) >>> 0;
+    const ch = ((e & f) ^ (~e & g)) >>> 0;
+    const t1 = (h + s1 + ch + SHA_K[i] + words[i]) >>> 0;
+    // Σ0 与多数函数 maj 走 a/b/c；T2 只由这两位决定，与消息无关
+    const s0 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) >>> 0;
+    const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
+    const t2 = (s0 + maj) >>> 0;
+    // 寄存器整体右移一格：d + T1 成为新的 e，T1 + T2 成为新的 a
+    h = g;
+    g = f;
+    f = e;
+    e = (d + t1) >>> 0;
+    d = c;
+    c = b;
+    b = a;
+    a = (t1 + t2) >>> 0;
   }
 
-  // SHA-224 只取前 7 个 32 位字（28 字节）
+  // 与块起始状态按 32 位模加，得到本块之后的状态（就地更新调用方的数组）
+  state[0] = (state[0] + a) >>> 0;
+  state[1] = (state[1] + b) >>> 0;
+  state[2] = (state[2] + c) >>> 0;
+  state[3] = (state[3] + d) >>> 0;
+  state[4] = (state[4] + e) >>> 0;
+  state[5] = (state[5] + f) >>> 0;
+  state[6] = (state[6] + g) >>> 0;
+  state[7] = (state[7] + h) >>> 0;
+}
+
+/**
+ * 功能：计算 SHA-224 摘要（纯 JS 实现，用于 Trojan 密码校验）。
+ *
+ * 三步各自成函数（补位 / 展开 / 压缩），这里只剩「按 64 字节滚动、取前 7 字输出」：
+ * 状态必须 `slice()` 复制，直接改 `SHA_H224` 会污染下一次调用；取前 7 个字就是
+ * SHA-224 与 SHA-256 的唯一差别（28 字节而不是 32 字节）。
+ * @param {Uint8Array|ArrayBuffer} data 待摘要数据
+ * @returns {Uint8Array} 28 字节摘要
+ */
+export function sha224Bytes(data: Uint8Array | ArrayBuffer) {
+  // 补位后长度必是 64 的整数倍，按块滚动即可，不需要再判尾块
+  const buf = sha224Pad(toU8(data));
+  const view = new DataView(buf.buffer);
+  // 状态按初值复制一份；工作区复用同一个 64 字数组
+  const state = SHA_H224.slice();
+  const words = new Uint32Array(64);
+  for (let off = 0; off < buf.length; off += 64) {
+    sha224Words(view, off, words);
+    sha224Mix(state, words);
+  }
+  // 输出前 7 个 32 位字（大端），第 8 个字属于 SHA-256 的部分直接被丢掉
   const out = new Uint8Array(28);
   const odv = new DataView(out.buffer);
-  for (let i = 0; i < 7; i++) odv.setUint32(i * 4, H[i]);
+  for (let i = 0; i < 7; i++) odv.setUint32(i * 4, state[i]);
   return out;
 }
+
 
 // ---- 并入自 ws.ts ----
 // 客户端 WS 那一侧的常量与生命周期动作：发送（含拆帧）、释放写锁与 socket。
@@ -363,7 +405,7 @@ export function errMsg(e: unknown, max = 200): string {
 // 1) 对外导出面不变（六十多个调用点零改动，「行为不变」由测试证明）；
 // 2) `VERSION` 仍然只有这一处真源（`doc-audit` 与发版脚本都读它）。
 
-export const VERSION = "7.337";
+export const VERSION = "7.338";
 
 // `sha224` 单独一行：它 `import { toU8 } from "./bytes"`，若挂在 `bytes.ts` 的再导出里
 // 就会形成 `bytes → sha224 → bytes` 的真循环（`tools/check-arch.js` 会报文件级循环）。

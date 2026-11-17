@@ -11123,6 +11123,52 @@ const hello337 = W.tlsHello("probe337.example");
 eq("第337组·ClientHello 仍是 handshake 记录", hello337[0], 0x16);
 ok("第337组·ClientHello 带 SNI 长度且不是空记录", hello337.length > 40);
 
+
+/**
+ * 第 338 组：SHA-224 的补位 / 展开 / 压缩三步各自成函数（摘要是纯计算，保持自由函数）。
+ */
+const srcUtil338 = fs.readFileSync("src/core/util.ts", "utf8").replace(/\r\n/g, "\n");
+const segUtil338 = (from, to) => {
+  const i = srcUtil338.indexOf(from);
+  if (i < 0) return "";
+  const j = srcUtil338.indexOf(to, i + 1);
+  return j < 0 ? srcUtil338.slice(i) : srcUtil338.slice(i, j);
+};
+const pad338 = segUtil338("export function sha224Pad(", "export function sha224Words(");
+const words338 = segUtil338("export function sha224Words(", "export function sha224Mix(");
+const mix338 = segUtil338("export function sha224Mix(", "export function sha224Bytes(");
+const bytes338 = segUtil338("export function sha224Bytes(", "// ---- 并入自 ws.ts ----");
+const bodyLines338 = (seg) => seg.split("\n").filter((l) => l.trim().length > 0).length;
+
+ok("第338组·补位是独立导出函数", srcUtil338.includes("export function sha224Pad(") && pad338.includes("buf[len] = 0x80;"));
+ok("第338组·补位写 64 位大端比特长度", pad338.includes("dv.setUint32(total - 8, Math.floor(bits / 4294967296));") && pad338.includes("dv.setUint32(total - 4, bits >>> 0);"));
+ok("第338组·补位长度向上取整到 64", pad338.includes("const total = (((len + 8) >> 6) + 1) << 6;"));
+ok("第338组·展开是独立导出函数", srcUtil338.includes("export function sha224Words(") && words338.includes("words[i] = view.getUint32(off + i * 4);"));
+ok("第338组·展开只递推后 48 字", words338.includes("for (let i = 16; i < 64; i++)") && words338.includes("words[i] = (words[i - 16] + s0 + words[i - 7] + s1) >>> 0;"));
+ok("第338组·压缩是独立导出函数", srcUtil338.includes("export function sha224Mix(") && mix338.includes("SHA_K[i] + words[i]"));
+ok("第338组·压缩跑满 64 轮并按加法并入状态", mix338.includes("for (let i = 0; i < 64; i++)") && mix338.split(">>> 0;").length - 1 >= 8);
+ok("第338组·入口只剩滚动与截断", bodyLines338(bytes338) <= 20 && bytes338.includes("sha224Pad(toU8(data))") && bytes338.includes("sha224Words(view, off, words);") && bytes338.includes("sha224Mix(state, words);"));
+ok("第338组·状态按初值复制，不污染常量", bytes338.includes("const state = SHA_H224.slice();") && !bytes338.includes("SHA_H224["));
+ok("第338组·三步按「补位 → 展开 → 压缩」顺序调用", bytes338.indexOf("sha224Pad(") < bytes338.indexOf("sha224Words(") && bytes338.indexOf("sha224Words(") < bytes338.indexOf("sha224Mix("));
+const hex338 = (u8) => Array.from(u8, (b) => b.toString(16).padStart(2, "0")).join("");
+eq("第338组·空串摘要与参考实现一致", hex338(W.sha224Bytes(new Uint8Array(0))), "d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f");
+eq("第338组·abc 摘要与参考实现一致", hex338(W.sha224Bytes(W.enc.encode("abc"))), "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7");
+eq("第338组·test123 摘要与参考实现一致", hex338(W.sha224Bytes(W.enc.encode("test123"))), "4f555b1bb8bc729a665b8892df73119e2ef2eb50dffaf0d5c546cf23");
+eq("第338组·1000 字节跨多块摘要一致", hex338(W.sha224Bytes(W.enc.encode("a".repeat(1000)))), "4e8f0ce90b64661a2b5e84be6d93a7d9b76871062f1814433d04a03d");
+const padded338 = W.sha224Pad(W.enc.encode("abc"));
+eq("第338组·补位后长度是 64 的倍数", padded338.length % 64, 0);
+ok("第338组·补位尾部是 0x80 与比特长度", padded338[3] === 0x80 && padded338[padded338.length - 1] === 24);
+const arrBuf338 = W.enc.encode("abc").buffer;
+eq("第338组·ArrayBuffer 输入与字节数组一致", hex338(W.sha224Bytes(arrBuf338)), "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7");
+const state338 = W.SHA_H224.slice();
+const work338 = new Uint32Array(64);
+const view338 = new DataView(new ArrayBuffer(64));
+W.sha224Words(view338, 0, work338);
+eq("第338组·全零块展开后首尾都是 0", work338[0] + work338[63], 0);
+W.sha224Mix(state338, work338);
+ok("第338组·压缩会改写状态", state338[0] !== W.SHA_H224[0] || state338[7] !== W.SHA_H224[7]);
+eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

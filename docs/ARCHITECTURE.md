@@ -291,7 +291,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `SubscriptionView` / `PageView` / `PanelView` | `src/views/sub.ts`、`src/views/panel.ts` | 三种订阅格式与面板渲染（`PanelView` 六个分区各一方法、样式抽成 `PANEL_CSS`） |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
 
-自由函数集中在 `src/core/{util,net,hist,quota,hosts,hostmem,http80,table,enums,types,facts,hook,state,const,counter,lock,latobs,firstobs,node-snapshot,transport}.ts`（编解码 / SHA-224 / WS / 超时 / 并发 / 环境解析 / 协议名 / 错误文本都在 `util.ts` 一个文件里，7.290 起不再拆分）、`src/proxy/protocol.ts`、`src/views/{html,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。
+自由函数集中在 `src/core/{util,net,hist,quota,hosts,hostmem,http80,table,enums,types,facts,hook,state,const,counter,lock,latobs,firstobs,node-snapshot,transport}.ts`（编解码 / SHA-224 / WS / 超时 / 并发 / 环境解析 / 协议名 / 错误文本都在 `util.ts` 一个文件里，7.290 起不再拆分；SHA-224 内部按「补位 `sha224Pad()` / 展开 `sha224Words()` / 压缩 `sha224Mix()`」三步各自成函数，7.338 起）、`src/proxy/protocol.ts`、`src/views/{html,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。
 
 ## 注释约定
 
