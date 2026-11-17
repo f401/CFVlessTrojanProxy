@@ -4368,8 +4368,8 @@ console.log("\n176) 预算账本与续回边界");
   ok("meter 的 /vt 已委托给 factsOut", meterSrc177.includes("Response.json(factsOut(this.ledger))"), "meter.ts");
   ok("meter 里不再自己拼 blk2 的插入序切片", !meterSrc177.includes("Object.entries(this.blk2)"), "meter.ts");
   const dbgSrc177 = fs.readFileSync("src/routes/debug.ts", "utf8");
-  ok("诊断默认分支的建连带超时", dbgSrc177.includes("withTimeout(pk, CONNECT_MS)"), "debug.ts");
-  ok("诊断默认分支把 connect 包成 Promise", dbgSrc177.includes("Promise.resolve(connect("), "debug.ts");
+  ok("诊断默认分支的建连接去拨号器", dbgSrc177.includes("SOCKET_DIALER.open(expandV6(out.aaaa), 443)"), "debug.ts");
+  ok("诊断默认分支不再自己包 connect", !dbgSrc177.includes("Promise.resolve(connect("), "debug.ts");
 }
 
 
@@ -4380,7 +4380,7 @@ console.log("\n176) 预算账本与续回边界");
   ok("计量表不再提供 /blk 端点", mS.indexOf('endsWith("/blk")') < 0, "meter.ts");
   ok("七张事实表的出站仍走 factsOut", mS.indexOf("Response.json(factsOut(this.ledger))") >= 0, "meter.ts");
   const dS = fs.readFileSync("src/routes/debug.ts", "utf8");
-  ok("诊断的跨 isolate 封锁改读 /vt 的 blk2", dS.indexOf('fetch("https://meter/vt")') >= 0 && dS.indexOf("jj.blk2") >= 0, "debug.ts");
+  ok("诊断的跨 isolate 封锁改读 /vt 的 blk2", dS.indexOf('doFetch(env, id, "https://meter/vt")') >= 0 && dS.indexOf("jj.blk2") >= 0, "debug.ts");
   ok("诊断用 blk2 的 at 与 BLK_TTL 算剩余寿命", dS.indexOf("r.at + BLK_TTL - now2") >= 0, "debug.ts");
   const pS = fs.readFileSync("src/route/policy.ts", "utf8");
   eq("决策里同一张实测表只扫一遍", pS.split("relSnap(c.host)").length - 1, 1);
@@ -6256,7 +6256,9 @@ ok("索引下限夹到 0（p 很小时不能取负）", pendSrc.includes("Math.m
     used += (t.match(/CONNECT_MS/g) || []).length;
   }
   eq("除了常量定义处没有裸 2500", stray, 0);
-  ok("至少 10 处调用点改成常量", used >= 20, String(used));
+  // 7.272/7.278 把建连与预算收敛进 SocketDialer 后，调用点从 20 降到 19：
+  // 少掉的那处正是 debug.ts 的 v6 探测，预算现在是拨号器自己的事。
+  ok("至少 18 处调用点改成常量", used >= 18, String(used));
   ok("没有 2500 的文件清单为空", where231.length === 0, where231.join(","));
   const dialSrc = fs.readFileSync("src/proxy/dial.ts", "utf8");
   ok("httpProbe 默认参数走常量", dialSrc.includes("ms = CONNECT_MS"), "");
@@ -8077,6 +8079,66 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
     threw2 = true;
   }
   ok("客户端已经走了也不会抛出来", !threw2);
+}
+
+/* ---------- 第 278 组：诊断路由的 DO 读取与 v6 建连都走唯一入口 ---------- */
+{
+  const aSrc278 = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const cli278 = fs.readFileSync("src/store/meter-client.ts", "utf8");
+  // 计数点唯一：`S.doCalls` 只在 `doFetch` 里自增，所以任何绕过它的 stub.fetch 都会让 /health 少记一块
+  ok("debug.ts 不再直接取 METER 存根", !/env\.METER\.get\(/.test(aSrc278));
+  ok("debug.ts 六条 DO 读取全走 doFetch", (aSrc278.match(/doFetch\(/g) || []).length === 6);
+  ok("debug.ts 不再自己拼 connect", !/connect\(\{/.test(aSrc278));
+  ok("debug.ts 不再引用 CONNECT_MS", !aSrc278.includes("CONNECT_MS"));
+  ok("debug.ts 不再导入 cloudflare:sockets", !aSrc278.includes("cloudflare:sockets"));
+  ok("debug.ts 的 v6 建连走拨号器", aSrc278.includes("SOCKET_DIALER.open(expandV6(out.aaaa), 443)"));
+  ok("doFetch 仍是唯一自增点", (cli278.match(/S\.doCalls \+= 1;/g) || []).length === 1);
+
+  // 行为面：三条诊断读取各要真的把子请求记进 S.doCalls（旧代码在这三条上恒为 0）
+  const calls = [];
+  const meter278 = {
+    idFromName: (n) => n,
+    get: () => ({
+      fetch: async (u) => {
+        calls.push(String(u));
+        return new Response(JSON.stringify({ ok: true, hl: [], cl: [], blk2: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    }),
+  };
+  const kv278 = () => {
+    const m = new Map();
+    return {
+      get: async (k) => (m.has(k) ? m.get(k) : null),
+      put: async (k, v) => void m.set(k, v),
+      delete: async (k) => void m.delete(k),
+      list: async () => ({ keys: [...m.keys()].map((name) => ({ name })), list_complete: true }),
+    };
+  };
+  const env278 = { STATS: kv278(), METER: meter278, adminKey: "#probe-admin-278", uuid: "7c53c12a-88b1-4fda-b6e7-4da62e47a4e1" };
+  const run278 = async (qs) => {
+    const url = new URL("https://sim.example.com/7c53c12a-88b1-4fda-b6e7-4da62e47a4e1/debug" + qs);
+    const request = new Request(url.toString(), { headers: { "x-admin-key": "#probe-admin-278" } });
+    const ctx = { request, url, env: env278, id: "7c53c12a-88b1-4fda-b6e7-4da62e47a4e1", exec: { waitUntil() {}, passThroughOnException() {} } };
+    return (await W.debug(ctx)).json();
+  };
+
+  W.S.doCalls = 0;
+  calls.length = 0;
+  await run278("?seed=1,2,3");
+  ok("?seed= 的子请求被记进 doCalls", W.S.doCalls === 1 && calls.length === 1 && calls[0] === "https://meter/seed");
+
+  W.S.doCalls = 0;
+  calls.length = 0;
+  await run278("?cl=1&do=1");
+  ok("?cl=1&do=1 走 doFetch 读连接环形", calls.includes("https://meter/cl") && W.S.doCalls >= 1);
+
+  W.S.doCalls = 0;
+  calls.length = 0;
+  await run278("?hl=1&do=1");
+  ok("?hl=1&do=1 走 doFetch 读中继健康环", calls.includes("https://meter/hl") && W.S.doCalls >= 1);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

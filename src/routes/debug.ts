@@ -1,8 +1,5 @@
-import { CONNECT_MS, errMsg, withTimeout } from "../core/util";
+import { errMsg, withTimeout } from "../core/util";
 import { probeHttp80, splitRelay } from "../core/http80";
-import { connect } from "cloudflare:sockets";
-import type { Socket } from "cloudflare:sockets";
-
 import { S } from "../core/state";
 import { json } from "../edge/respond";
 import { diagVerdict, hostKey } from "../nodes/metrics";
@@ -24,9 +21,10 @@ import { DEAD } from "../route/deadfacts";
 import { DIRECT, chanKey } from "../route/channel";
 import { HEALTH } from "../route/relay-health";
 import { checkTarget, dohQuery, expandV6, httpProbe, isCfHost, resolveAAAA, resolveV4All } from "../proxy/dial";
+import { SOCKET_DIALER } from "../proxy/socket-dialer";
 import { aliveList, commitPool, flushPx, pxSet } from "../px/pool";
 import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
-import { clSnapshot, restoreUsage } from "../store/index";
+import { clSnapshot, doFetch, restoreUsage } from "../store/index";
 import { adminOnly } from "../edge/auth";
 import { METER_PROBES } from "./debug-meter";
 
@@ -47,7 +45,8 @@ export async function debug(c: UserCtx): Promise<Response> {
     try {
       const rows = vtDelta();
       if (rows.length) {
-        await env.METER.get(env.METER.idFromName(String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase())).fetch("https://meter/add", {
+        // 走 `doFetch`：它同时把这次子请求记进 `S.doCalls`，绕过它 `/health` 的计数就少一块
+        await doFetch(env, String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase(), "https://meter/add", {
           method: "POST",
           body: JSON.stringify({ vt: rows }),
         });
@@ -88,7 +87,7 @@ export async function debug(c: UserCtx): Promise<Response> {
     if (url.searchParams.get("do") === "1") {
       try {
         const raw = String(c.env.uuid || c.env.uuids).split(",")[0].trim().toLowerCase();
-        const rr = await c.env.METER.get(c.env.METER.idFromName(raw)).fetch("https://meter/hl");
+        const rr = await doFetch(c.env, raw, "https://meter/hl");
         ring = ((await rr.json()) as { hl?: unknown }).hl || [];
       } catch {
         ring = [];
@@ -105,7 +104,7 @@ export async function debug(c: UserCtx): Promise<Response> {
     let ring: ClRec[] = [];
     if (url.searchParams.get("do") === "1" && env.METER) {
       try {
-        const r = await env.METER.get(env.METER.idFromName(id)).fetch("https://meter/cl");
+        const r = await doFetch(env, id, "https://meter/cl");
         const j = (await r.json()) as { cl?: ClRec[] };
         if (Array.isArray(j.cl)) ring = j.cl;
       } catch {
@@ -252,7 +251,7 @@ export async function debug(c: UserCtx): Promise<Response> {
       try {
         // 读的是 blk2 事实（host|relay → { n, at }），不是计量表里那张早已没有生产者的旧封锁表：
         // 那张表从 7.124 起就没有写者了，诊断会一直显示「DO 里没有封锁」，把空表当成了「没被封锁」。
-        const rr = await env.METER.get(env.METER.idFromName(id)).fetch("https://meter/vt");
+        const rr = await doFetch(env, id, "https://meter/vt");
         const jj = (await rr.json()) as { blk2?: Array<{ k: string; n: number; at: number }> };
         const now2 = Date.now();
         for (const r of jj.blk2 || []) {
@@ -373,9 +372,9 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
     if (denyTf) return denyTf;
     const tfHost = String(url.searchParams.get("tf") || "");
     const tfRelay = String(url.searchParams.get("r") || "");
-    const stub = c.env.METER.get(c.env.METER.idFromName("tf-probe"));
+    // 实例名固定 `tf-probe`：这条探测不写任何用户账本，只是想借 DO 的 CPU 做一次真握手
     const r = (await withTimeout(
-      stub.fetch(`https://meter/tf?h=${encodeURIComponent(tfHost)}&r=${encodeURIComponent(tfRelay)}`),
+      doFetch(c.env, "tf-probe", `https://meter/tf?h=${encodeURIComponent(tfHost)}&r=${encodeURIComponent(tfRelay)}`),
       20000,
     )) as Response | undefined;
     const body = r ? await withTimeout(r.json(), 5000) : { ok: false, err: "tf-timeout" };
@@ -400,8 +399,7 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
     let seedOk = false;
     let seedStatus = 0;
     try {
-      const stub = env.METER.get(env.METER.idFromName(id));
-      const r = await stub.fetch("https://meter/seed", {
+      const r = await doFetch(env, id, "https://meter/seed", {
         method: "POST",
         body: JSON.stringify({ up: u0, down: d0, conns: c0, first: Date.now() }),
       });
@@ -433,19 +431,17 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
     else {
       // 只想知道这条 v6 地址能不能建连。`connect()` 本身没有超时：黑洞地址会一直挂着，
       // 占住免费计划全局 6 个 `connect` 名额中的一个（7.169–7.171 修过五处同类）。
-      let pk: Promise<Socket> | null = null;
       try {
-        // `connect()` 返回的是 Socket（连接在 `.opened` 上），包成 Promise 才能 race
-        pk = Promise.resolve(connect({ hostname: expandV6(out.aaaa), port: 443 }));
-        const s6 = await withTimeout(pk, CONNECT_MS);
+        // 预算与「超时后关掉迟到 socket」只有一处实现（`SocketDialer.open`）：这个分支以前
+        // 自己抄了一遍，7.272 收敛时漏了它，于是两个文件各有一份建连预算的语义。
+        const s6 = await SOCKET_DIALER.open(expandV6(out.aaaa), 443);
         out.v6Connect = "ok";
         try {
           s6.close();
-        } catch (e) {}
+        } catch (e) {
+          // 关不掉无所谓：这条连接只为验一次可达性
+        }
       } catch (e) {
-        // 超时只是「先返回」，socket 可能随后才连上：到手就关，否则它长期占一个名额
-        const late = pk;
-        if (late) void late.then((s) => { try { s.close(); } catch { /* 已经关了 */ } }).catch(() => { /* 本来就没连上 */ });
         out.v6Connect = "ERR " + errMsg(e);
       }
     }
