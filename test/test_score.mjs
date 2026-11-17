@@ -5426,11 +5426,14 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   // 源码锁：三处 write 都必须带 withTimeout，且不许再出现裸的 await w.write(
   const probeSrc = fs.readFileSync("src/px/probe.ts", "utf8");
   const httpSrc = fs.readFileSync("src/core/http80.ts", "utf8");
+  // 写超时现在收在 RawProbe.send 里（两个探测只传各自的报文与预算），判据不变：
+  // 「写报文必须带时限」由类里那一处 withTimeout 保证，两个探测都经它发。
   ok(
     "probeProxy 的 write 有超时",
-    probeSrc.includes('withTimeout(w.write(PROBE_HELLO), CONNECT_MS, "timeout")'),
+    probeSrc.includes("probe.send(PROBE_HELLO, CONNECT_MS)") &&
+      probeSrc.includes('withTimeout(w.write(bytes), budgetMs, "timeout")'),
   );
-  ok("probeSni 的 write 跟随 ms", probeSrc.includes('withTimeout(w.write(tlsHello(sni)), ms, "timeout")'));
+  ok("probeSni 的 write 跟随 ms", probeSrc.includes("probe.send(tlsHello(sni), ms)"));
   ok("http80 的 write 有超时", httpSrc.includes('withTimeout(w.write(new TextEncoder().encode(req)), CONNECT_MS, "timeout")'));
   ok("http80 引入了 withTimeout", httpSrc.includes('import { CONNECT_MS, withTimeout } from "./util";'));
   ok(
@@ -11068,6 +11071,57 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   W.DEAD.clear();
   W.S.cfHttp.clear();
 }
+
+
+/**
+ * 第 337 组：原始探测会话收进 RawProbe（开放反代探测与 SNI 探测只保留「首段字节怎么判」）。
+ */
+const srcProbe337 = fs.readFileSync("src/px/probe.ts", "utf8").replace(/\r\n/g, "\n");
+const clsProbe337 = (() => {
+  // 取类体：从 `export class RawProbe {` 到其收尾的整行 `}`
+  const i = srcProbe337.indexOf("export class RawProbe {");
+  if (i < 0) return "";
+  const j = srcProbe337.indexOf("\n}\n", i);
+  return j < 0 ? "" : srcProbe337.slice(i, j);
+})();
+const seg337 = (from, to) => {
+  const i = srcProbe337.indexOf(from);
+  if (i < 0) return "";
+  const j = srcProbe337.indexOf(to, i);
+  return j < 0 ? srcProbe337.slice(i) : srcProbe337.slice(i, j);
+};
+const proxySeg337 = seg337("export async function probeProxy(", "export function tlsHello(");
+const sniSeg337 = seg337("export async function probeSni(", "// ---- 并入自 geo.ts ----");
+
+ok("第337组·探测会话是导出类", srcProbe337.includes("export class RawProbe {"));
+ok("第337组·五个成员齐备", ["async open(", "async send(", "async peek(", "close(): void", "get tcpMs(", "get elapsedMs("].every((x) => clsProbe337.includes(x)));
+ok("第337组·建连只在会话里（含 sslip.io 回退）", clsProbe337.includes("await connect({ hostname: this.host, port: this.port })") && clsProbe337.split(".sslip.io").length - 1 === 1);
+ok("第337组·写报文用 finally 释放写锁", clsProbe337.includes('.finally(() => w.releaseLock())'));
+ok("第337组·收字节有上限、预算与等待下限", clsProbe337.includes("buf.length < maxBytes") && clsProbe337.includes("const deadline = Date.now() + budgetMs") && clsProbe337.includes("Math.max(waitFloorMs, deadline - Date.now())"));
+ok("第337组·提前判据参与循环条件", clsProbe337.includes("!(done && done(buf))"));
+ok("第337组·关闭时把引用清空", clsProbe337.includes("this.sock = null;"));
+ok("第337组·反代探测改用会话且自己不再建连", proxySeg337.includes("new RawProbe(h, p)") && !proxySeg337.includes("connect({"));
+ok("第337组·反代探测的预算与上限只写一处", proxySeg337.includes("probe.peek(8192, 4000, 200,") && proxySeg337.includes("probe.send(PROBE_HELLO, CONNECT_MS)"));
+ok("第337组·SNI 探测改用会话且自己不再建连", sniSeg337.includes("new RawProbe(nodeHost, nodePort)") && !sniSeg337.includes("connect({"));
+ok("第337组·SNI 探测只收 8 字节", sniSeg337.includes("probe.peek(8, ms, 150,") && sniSeg337.includes("probe.send(tlsHello(sni), ms)"));
+ok("第337组·两处都只用一条关闭路径", proxySeg337.includes("probe.close();") && sniSeg337.includes("probe.close();") && !proxySeg337.includes("sock.close()") && !sniSeg337.includes("sock.close()"));
+const probe337 = new W.RawProbe("probe337.example", 443);
+eq("第337组·未建连时建连耗时为 0", probe337.tcpMs, 0);
+ok("第337组·未建连时总耗时非负", probe337.elapsedMs >= 0);
+const empty337 = await probe337.peek(8, 20, 5);
+eq("第337组·未建连时收字节得到空", empty337.length, 0);
+probe337.close();
+probe337.close();
+ok("第337组·重复关闭不抛错", true);
+const denied337 = await W.probeSni("127.0.0.1", 443, "probe337.example");
+eq("第337组·SNI 探测拒绝内网目标", denied337.err, "denied");
+const proxyDenied337 = await W.probeProxy("127.0.0.1", 443);
+eq("第337组·反代探测拒绝内网目标", proxyDenied337, null);
+const proxyDenied337b = await W.probeProxy("10.1.2.3", 443);
+eq("第337组·反代探测拒绝私网目标", proxyDenied337b, null);
+const hello337 = W.tlsHello("probe337.example");
+eq("第337组·ClientHello 仍是 handshake 记录", hello337[0], 0x16);
+ok("第337组·ClientHello 带 SNI 长度且不是空记录", hello337.length > 40);
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

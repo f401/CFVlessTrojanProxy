@@ -275,6 +275,96 @@ export const PROBE_HELLO = (() => {
 })();
 
 /**
+ * 一次原始探测的会话：建连 → 写报文 → 按预算收首段字节。
+ *
+ * 为什么成类：开放反代探测与 SNI 探测除「首段字节怎么判」外完全一样（都要过 `checkTarget`、
+ * 都要给惰性 `connect()` 的第一次写设时限、都要按 deadline 循环读），而以前字节上限、等待下限、
+ * 总预算六个数字各写两处，改一处不会提醒另一处；「迟到连上要关」也只写在两个 finally 里。
+ */
+export class RawProbe {
+  private sock: Socket | null = null;
+  private startedAt = 0;
+  private connectedAt = 0;
+  /** @param host 候选主机 @param port 候选端口 */
+  constructor(readonly host: string, readonly port: number) {}
+
+  /** 建连；IPv4 字面量在 Workers 上常连不上时，可按需退回 sslip.io 让 DNS 承担一次。 */
+  async open(sslipFallback = false): Promise<void> {
+    this.startedAt = Date.now();
+    try {
+      this.sock = await connect({ hostname: this.host, port: this.port });
+    } catch (e0) {
+      if (!sslipFallback || !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(this.host)) throw e0;
+      this.sock = await connect({ hostname: this.host + ".sslip.io", port: this.port });
+    }
+    this.connectedAt = Date.now();
+  }
+  /** 建连耗时（毫秒）：纯网络 RTT。 */
+  get tcpMs(): number {
+    return Math.max(0, this.connectedAt - this.startedAt);
+  }
+  /** 从发起到此刻的耗时（毫秒）。 */
+  get elapsedMs(): number {
+    return Math.max(0, Date.now() - this.startedAt);
+  }
+
+  /** 写出探测报文：`connect()` 是惰性的，真正的建连发生在第一次写，所以必须有时限。 */
+  async send(bytes: Uint8Array, budgetMs: number): Promise<void> {
+    if (!this.sock) throw new Error("probe socket not open");
+    const w = this.sock.writable.getWriter();
+    // 结算后无论成败都要放锁，否则下一次写会撞上 "writer locked"
+    await withTimeout(w.write(bytes), budgetMs, "timeout").finally(() => w.releaseLock());
+  }
+
+  /**
+   * 读到够用、到点或对端断开为止。
+   * @param maxBytes 收够就不等（反代探测要读到证书，SNI 探测只要 8 字节）
+   * @param budgetMs 本轮总预算
+   * @param waitFloorMs 单次读的最小等待，避免剩余时间归零时立刻空转
+   * @param done 可选提前结束判据，每段重算（必须幂等）
+   * @returns 已收到的字节（可能为空）
+   */
+  async peek(maxBytes: number, budgetMs: number, waitFloorMs: number, done?: (buf: Uint8Array) => boolean): Promise<Uint8Array> {
+    if (!this.sock) return new Uint8Array(0);
+    const r = this.sock.readable.getReader();
+    const deadline = Date.now() + budgetMs;
+    let buf = new Uint8Array(0);
+    try {
+      while (Date.now() < deadline && buf.length < maxBytes && !(done && done(buf))) {
+        const wait = Math.max(waitFloorMs, deadline - Date.now());
+        let got: { value?: Uint8Array } | null = null;
+        try {
+          got = (await withTimeout(r.read(), wait, "timeout")) as { value?: Uint8Array };
+        } catch (e) {
+          break; // 超时/断开：跳出，交给调用方按已有字节出结论
+        }
+        const v = got && got.value;
+        if (!v || !v.length) break;
+        // 分片长度不定，拼成连续内存再判报文头
+        const merged = new Uint8Array(buf.length + v.length);
+        merged.set(buf, 0);
+        merged.set(v, buf.length);
+        buf = merged;
+      }
+    } finally {
+      try {
+        r.releaseLock();
+      } catch (e) {
+        // 读端已随 socket 一起关掉
+      }
+    }
+    return buf;
+  }
+
+  /** 关掉底层 socket：迟到连上的也要关，否则会一直占着 `connect()` 名额。 */
+  close(): void {
+    try {
+      if (this.sock) this.sock.close();
+    } catch (e) {} // 已经关了
+    this.sock = null;
+  }
+}
+/**
  * 探测某个候选是否为开放反代：TLS 握手后看证书链里是否出现 cloudflare。
  * @param {string} h 候选主机
  * @param {number} p 候选端口
@@ -282,75 +372,24 @@ export const PROBE_HELLO = (() => {
  */
 export async function probeProxy(h: string, p: number) {
   if (checkTarget(h, p)) return null; // 纵深防御：任何路径都不许探内网
-  const t0 = Date.now();
-  let sock = null;
+  const probe = new RawProbe(h, p);
   try {
-    try {
-      sock = await connect({ hostname: h, port: p });
-    } catch (e0) {
-      // IPv4 字面量在 Workers 上常常连不上，退回 sslip.io
-      if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(h)) throw e0;
-      sock = await connect({ hostname: h + ".sslip.io", port: p });
+    await probe.open(true);
+    const tcp = probe.tcpMs; // ① 建连：纯网络 RTT
+    await probe.send(PROBE_HELLO, CONNECT_MS);
+    // 已能下结论（不是 TLS 或已看到 cf 证书）就不再等下一段，否则 ms 会被拖长
+    const buf = await probe.peek(8192, 4000, 200, (b) => b.length > 0 && (b[0] !== 0x16 || /cloudflare/i.test(dec.decode(b))));
+    const ms = probe.elapsedMs;
+    if (buf.length && buf[0] !== 0x16) return { h, p, ms, tcp, tls: 0, ts: Date.now(), bad: "not-tls", head: toHex(buf.slice(0, 16)) };
+    if (buf.length && /cloudflare/i.test(dec.decode(buf))) {
+      // ② TLS 往返：建连完成到收到第一段证书字节。丢包会让这段异常变长。
+      return { h, p, ms, tcp, tls: Math.max(0, ms - tcp), ts: Date.now() };
     }
-    const tcp = Date.now() - t0; // ① 建连：纯网络 S.rtt
-    const w = sock.writable.getWriter();
-    // connect() 是惰性的：真正的 TCP 建连发生在第一次 write。只给 read 包超时不够 ——
-    // 黑洞候选会让这里一直挂着，而探活是按 SC.PROBE_CONC 个一批跑的，挂住一个就卡住整轮。
-    await withTimeout(w.write(PROBE_HELLO), CONNECT_MS, "timeout");
-    w.releaseLock();
-
-    const r = sock.readable.getReader();
-    let buf = new Uint8Array(0);
-    const deadline = Date.now() + 4000;
-
-    while (Date.now() < deadline && buf.length < 8192) {
-      const wait = Math.max(200, deadline - Date.now());
-      let got = null;
-      try {
-        got = (await withTimeout(r.read(), wait, "timeout")) as { value?: Uint8Array };
-      } catch (e) {
-        break; // 超时/断开：跳出，走下面的诊断返回
-      }
-      const v = got && got.value;
-      if (!v || !v.length) break;
-      const merged = new Uint8Array(buf.length + v.length);
-      merged.set(buf, 0);
-      merged.set(v, buf.length);
-      buf = merged;
-
-      if (buf[0] !== 0x16)
-        return {
-          h,
-          p,
-          ms: Date.now() - t0,
-          tcp,
-          tls: 0,
-          ts: Date.now(),
-          bad: "not-tls",
-          head: toHex(buf.slice(0, 16)),
-        };
-      if (/cloudflare/i.test(dec.decode(buf))) {
-        // ② TLS 往返：建连完成到收到第一段证书字节。丢包会让这段异常变长。
-        return { h, p, ms: Date.now() - t0, tcp, tls: Math.max(0, Date.now() - t0 - tcp), ts: Date.now() };
-      }
-    }
-    return {
-      h,
-      p,
-      ms: Date.now() - t0,
-      tcp,
-      tls: 0,
-      ts: Date.now(),
-      bad: "no-cf-cert",
-      len: buf.length,
-      head: toHex(buf.slice(0, 24)),
-    };
+    return { h, p, ms, tcp, tls: 0, ts: Date.now(), bad: "no-cf-cert", len: buf.length, head: toHex(buf.slice(0, 24)) };
   } catch (e) {
     return null;
   } finally {
-    try {
-      sock && sock.close();
-    } catch (e) {}
+    probe.close();
   }
 }
 
@@ -443,44 +482,21 @@ export function tlsHello(sni: string): Uint8Array {
  */
 export async function probeSni(nodeHost: string, nodePort: number, sni: string, ms = CONNECT_MS): Promise<SniProbe> {
   if (checkTarget(nodeHost, nodePort)) return { err: "denied" };
-  const t0 = Date.now();
-  let sock: Socket | null = null;
+  const probe = new RawProbe(nodeHost, nodePort);
   try {
-    sock = await connect({ hostname: nodeHost, port: nodePort });
     // 注意：Workers 的 connect() 是惰性的，真正的 TCP 建连发生在第一次 write/read，
     // 所以这里不单独报 tcp，只报"从发起到收到 ServerHello"的总耗时。
-    const w = sock.writable.getWriter();
-    // 同上：惰性 connect 的第一次 write 才是真正建连，必须有时限。
-    await withTimeout(w.write(tlsHello(sni)), ms, "timeout");
-    w.releaseLock();
-
-    const r = sock.readable.getReader();
-    const deadline = Date.now() + ms;
-    let buf = new Uint8Array(0);
-    while (Date.now() < deadline && buf.length < 8) {
-      const wait = Math.max(150, deadline - Date.now());
-      let got: { value?: Uint8Array } | null = null;
-      try {
-        got = (await withTimeout(r.read(), wait, "timeout")) as { value?: Uint8Array };
-      } catch (e) {
-        break;
-      }
-      const v = got && got.value;
-      if (!v || !v.length) break;
-      const merged = new Uint8Array(buf.length + v.length);
-      merged.set(buf, 0);
-      merged.set(v, buf.length);
-      buf = merged;
-    }
+    await probe.open(false);
+    await probe.send(tlsHello(sni), ms);
+    // 只要 8 字节：够判「是不是 TLS 记录」就停，剩下的等下去只会拖长诊断
+    const buf = await probe.peek(8, ms, 150, (x) => x.length >= 8);
     if (!buf.length) return { err: "no-data" };
     if (buf[0] !== 0x16) return { err: "not-tls", head: toHex(buf.slice(0, 8)) };
-    return { hs: Math.max(0, Date.now() - t0), err: "" };
+    return { hs: probe.elapsedMs, err: "" };
   } catch (e) {
     return { err: "tcp" };
   } finally {
-    try {
-      if (sock) sock.close();
-    } catch (e) {}
+    probe.close();
   }
 }
 
