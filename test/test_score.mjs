@@ -6463,8 +6463,8 @@ eq("AGENTS 头部缺陷数等于 H6 最大编号", Number(hm235 ? hm235[2] : -1)
   ok("package.json 有 indent 脚本", fs.readFileSync("package.json", "utf8").includes('"indent": "node tools/check-indent.mjs"'));
   const idxSrc = fs.readFileSync("src/index.ts", "utf8");
   ok("index.ts 的 S.site 回到六个空格", idxSrc.includes("\n      S.site = host;"));
-  const polSrc = fs.readFileSync("src/route/policy.ts", "utf8");
-  ok("policy.ts 的 HOOK 注册回到四个空格", polSrc.includes("\n    HOOK.syncAck = "));
+  const polSrc = fs.readFileSync("src/route/policy-wiring.ts", "utf8");
+  ok("policy-wiring.ts 的 HOOK 注册回到四个空格", polSrc.includes("\n    HOOK.syncAck = "));
   const tfbSrc = fs.readFileSync("src/route/tfb.ts", "utf8");
   ok("tfb.ts 的 splitRelay 行回到四个空格", tfbSrc.includes("\n    const ip = splitRelay(row.relay, 443)[0];"));
   const fmSrc = fs.readFileSync("src/store/factmerge.ts", "utf8");
@@ -8411,6 +8411,31 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   eq(`[${g}] 族键取可注册域`, [W.siteKey("a.b.example.co.uk"), W.siteKey("api.x.com"), W.siteKey("shop.example.com")], ["example.co.uk", "x.com", "example.com"]);
   eq(`[${g}] hostKey 对 IP 字面量原样返回`, W.hostKey("1.2.3.4"), "1.2.3.4");
   eq(`[${g}] 没有吞吐样本时 tput 模式回 -1`, W.hostScore({ n: 3, bad: 0, ttfb: 100, at: Date.now() }, "tput", Date.now()), -1);
+}
+console.log("\n[285] 策略本体与 HOOK 装配拆成两层");
+{
+  const fsx = fs;
+  const ctxSrc = fsx.readFileSync("src/route/policy-ctx.ts", "utf8");
+  const wireSrc = fsx.readFileSync("src/route/policy-wiring.ts", "utf8");
+  const polSrc285 = fsx.readFileSync("src/route/policy.ts", "utf8");
+  ok("类型层只有类型与常量（不碰 HOOK/S）", !ctxSrc.includes("HOOK.") && !ctxSrc.includes("from \"../core/state\""));
+  ok("类型层导出 Ctx/Choice/FULL_ON/HOST_MEM_MAX", ctxSrc.includes("export interface Ctx") && ctxSrc.includes("export interface Choice") && ctxSrc.includes("export const FULL_ON") && ctxSrc.includes("export const HOST_MEM_MAX"));
+  ok("装配层用结构化接口收参数", wireSrc.includes("install(policy: PolicySource): void {") && wireSrc.includes("export interface PolicySource"));
+  ok("装配层注册点 ≥ 18", (wireSrc.match(/HOOK\.[a-zA-Z]+ =/g) || []).length >= 18);
+  ok("装配层不含决策算法（没有 pin 表）", !wireSrc.includes("private pin") && !wireSrc.includes("HOST_MEM_MAX"));
+  ok("策略本体不再自己注册 HOOK", !polSrc285.includes("HOOK.decide = ") && !polSrc285.includes("HOOK.facts = "));
+  ok("策略本体通过 WIRING 装配", polSrc285.includes("WIRING.install(this);"));
+  ok("策略本体保留决策与三张表", polSrc285.includes("decide(c: Ctx): Choice {") && polSrc285.includes("private pin") && polSrc285.includes("private seq"));
+  ok("装配器与接口都对外可见", typeof W.WIRING === "object" && typeof W.PolicyWiring === "function");
+  // 行为面：换一个假策略装配进去，HOOK 真的会用它；再装回来还原
+  const fake = { shadow: () => ({ chan: { kind: "d" }, why: "fake-why" }), relays: () => [], prefer: () => false, win: () => ({ d: false, r: false }) };
+  W.WIRING.install(fake);
+  const viaFake = W.HOOK.decide({ host: "x285.example", cfHost: false, clientV6: false, legacyWantsRelay: false });
+  eq("装配后 HOOK.decide 用的是新策略", viaFake.why, "fake-why");
+  W.POLICY.install();
+  const viaReal = W.HOOK.decide({ host: "x285.example", cfHost: false, clientV6: false, legacyWantsRelay: false });
+  ok("装回真策略后不再是假实现", viaReal.why !== "fake-why" && typeof viaReal.why === "string");
+  ok("旧导出仍在（decide / shadow / policyOn）", typeof W.decide === "function" && typeof W.shadow === "function" && W.policyOn() === true);
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

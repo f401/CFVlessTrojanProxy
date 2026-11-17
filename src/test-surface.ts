@@ -122,6 +122,7 @@ export { STORE, Store } from "./store/store";
 export { VT, VerdictTable } from "./route/verdict";
 export { JUDGE, Judge } from "./route/judge";
 export { POLICY, Policy } from "./route/policy";
+export { PolicyWiring, WIRING } from "./route/policy-wiring";
 export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, tfBlockOk, tfRemember, pickFresh } from "./route/tfb";
 export { TFB, TfbBook } from "./route/tfbbook";

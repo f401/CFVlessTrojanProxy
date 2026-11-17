@@ -229,7 +229,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `MeterState` | `src/store/meter-state.ts` | 账本本体：五件账本 + 七张事实表 + 代号；`adopt()`/`restore()` 把落盘口径逐项映射到内存字段，`parts()` 反着来，`snapshot()`/`rollback()` 供 `/add` 落盘失败时回滚 |
 | `VerdictTable`（`VT`） | `src/route/verdict.ts` | 判定表（站点 × 通道） |
 | `Judge`（`JUDGE`） | `src/route/judge.ts` | 流量侧弱证据的累加与落判定 |
-| `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级 |
+| `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级：三张按站点的内存表（`pin`/`rot`/`seq`）+ 排序链 `neg → pos → score → vAt` |
+| `PolicyWiring`（`WIRING`） | `src/route/policy-wiring.ts` | 把策略接到 HOOK 的二十个槽位（漏注册不会有门禁报错，7.123 的 `HOOK.facts` 就是这样失效的） |
 | `RelayHealth`（`HEALTH`） | `src/route/relay-health.ts` | 中继健康表（sent/pending 语义） |
 | `RelayLedger` | `src/route/relay-ledger.ts` | 中继健康表的两张账本（已同步快照 + 待确认行）：`forget()` 是唯一删除入口，`counts()` 暴露规模以发现表外键 |
 | `CronLock`（`CRONLOCK`） | `src/core/lock.ts` | cron 闸门：持有时间戳 + `SC.CRON_STALE_MS` 截止；超时接管计 `cronStale`（布尔闩卡死即永久停摆） |
