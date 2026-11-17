@@ -49,6 +49,15 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 let pass = 0,
   fail = 0;
+/** 功能：把判定表的门面、表本体与类型三份源码合并成一段文本（源码锁读它）。 */
+const verdictAll = () =>
+  [
+    "src/route/verdict.ts",
+    "src/route/verdict-table.ts",
+    "src/route/verdict-types.ts",
+  ]
+    .map((f) => fs.readFileSync(f, "utf8"))
+    .join("\n");
 const eq = (n, a, b) => {
   // want 是 undefined / 函数，或拿到的东西是函数时，序列化比较会两边都变成 undefined，
   // 断言永远为真（v7.150 修的空断言：删掉某函数后，旧锁其实一直没在测）。
@@ -4142,7 +4151,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   eq("连接数取两者更大", setBack.c.conns, 60);
 
   // 6) 源码断言：三处写入路径都要 trim
-  const vSrc = fs.readFileSync("src/route/verdict.ts", "utf8");
+  const vSrc = verdictAll();
   ok("set 走上限检查", vSrc.includes("this.trim();"));
   ok("trim 委托给 BoundedMap.prune（先清过期、再按写入时间删最旧）", vSrc.includes("this.byKey.prune(Date.now());") && vSrc.includes("this.byKey.capacity()"));
 }
@@ -4670,7 +4679,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
 // ── 第 194 组：死导出与线协议类型的单一来源（7.195） ──
 {
   // ① 状态码→状态只有一处实现：导出的副本 stateOfCode 已删除，剩下的私有实现必须唯一
-  const srcVt = fs.readFileSync("src/route/verdict.ts", "utf8");
+  const srcVt = verdictAll();
   eq("verdict.ts 不再有 stateOfCode 死导出", srcVt.includes("stateOfCode"), false);
   eq("「2xx-3xx 可用」的映射全仓只写一次", srcVt.split("code >= 200 && code < 400").length - 1, 1);
   // 删副本不许改行为：三条映射仍要落在 1 / 2 / 3
@@ -7112,7 +7121,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   W.vClear();
 
   // D205-3：源码锁 —— 状态字面量不许再散落在判定路径上
-  const srcVer250 = fs.readFileSync("src/route/verdict.ts", "utf8");
+  const srcVer250 = verdictAll();
   ok("verdict.ts 用 St.Dead 而不是裸 3", srcVer250.includes("St.Dead") && !srcVer250.includes("return 3;"));
   ok("verdict.ts 的 vOk/vBad 走枚举", srcVer250.includes("=== St.Reachable") && srcVer250.includes("=== St.Blocked || e.state === St.Dead"));
   const srcEnums250 = fs.readFileSync("src/core/enums.ts", "utf8");
@@ -7204,7 +7213,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 // 判据：结构体的成员名必须能读出含义（AGENTS.md §6）。这里锁的是本轮改过的形状，
 // 防止后续又出现 `n` / `at` / `m` 这类要靠读实现才懂的字段。
 {
-  const vtSrc = fs.readFileSync("src/route/verdict.ts", "utf8");
+  const vtSrc = verdictAll();
   ok("判定行用 target", vtSrc.includes("target: HostName;"), "");
   ok("判定行用 channel", vtSrc.includes("channel: ChanToken;"), "");
   ok("判定行用 observations", vtSrc.includes("observations: SampleCount;"), "");
@@ -7300,7 +7309,7 @@ if (typeof t255.byKey.prune === "function") t255.byKey.prune(Date.now());
 ok("prune 顺手清掉过期行", t255.size() <= kept255 + 1, `size=${t255.size()}`);
 ok("lifeMs 报的是 VT_TTL_MS", typeof t255.byKey.lifeMs === "function" && t255.byKey.lifeMs() === W.VT_TTL_MS, `lifeMs=${t255.byKey.lifeMs && t255.byKey.lifeMs()}`);
 ok("capacity 报的是 600", typeof t255.byKey.capacity === "function" && t255.byKey.capacity() === 600, `cap=${t255.byKey.capacity && t255.byKey.capacity()}`);
-const vSrc255 = fs.readFileSync("src/route/verdict.ts", "utf8");
+const vSrc255 = verdictAll();
 ok("判定表用 BoundedMap", vSrc255.includes("private byKey = new BoundedMap"), "");
 ok("判定表不再自己写 sweep", !vSrc255.includes("private sweep"), "");
 ok("trim 只在超限时动手", vSrc255.includes("if (this.byKey.size <= this.byKey.capacity()) return;"), "");
@@ -8461,6 +8470,37 @@ console.log("\n[285] 策略本体与 HOOK 装配拆成两层");
   ok("过 1MB 才算真实吞吐", Math.abs(W.kbsOf(1048576, 1000) - 1024) < 1e-6, `got=${W.kbsOf(1048576, 1000)}`);
   ok("结算类是单例可实例化", W.SETTLE instanceof W.ConnSettle, "");
   ok("连接仍持有自己的采样权重（状态归连接）", connSrc286.includes("this.sampleW += use;") && settleSrc286.includes("takeWeight(bytes: number, dt: number, factor?: number): number;"), "");
+}
+console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
+{
+  const fac287 = fs.readFileSync("src/route/verdict.ts", "utf8");
+  const tab287 = fs.readFileSync("src/route/verdict-table.ts", "utf8");
+  const typ287 = fs.readFileSync("src/route/verdict-types.ts", "utf8");
+  ok("门面不再定义类", !fac287.includes("class ") && !fac287.includes("BoundedMap"));
+  ok("门面把表本体与类型再导出", fac287.includes('export { VerdictTable, VT } from "./verdict-table";') && fac287.includes('export { VT_TTL_MS } from "./verdict-types";'));
+  eq("门面保留十二个同名函数", (fac287.match(/^export function v/gm) || []).length, 12);
+  ok("门面不超过 140 行", fac287.split(/\r?\n/).length <= 140);
+  ok("表本体持有私有表与单例", tab287.includes("export class VerdictTable") && tab287.includes("private byKey = new BoundedMap") && tab287.includes("export const VT = new VerdictTable();"));
+  ok("表本体不再写同名函数", !/^export function v/m.test(tab287));
+  ok("状态机与通配拒写都在表本体", tab287.includes("private static stateOf(") && tab287.includes("private static blockWild("));
+  ok("类型文件只放类型与 TTL", typ287.includes("export type VState") && typ287.includes("export interface Verdict") && typ287.includes("export const VT_TTL_MS = 30 * 60_000;") && !typ287.includes("class "));
+  ok("TTL 只有一个真源", !tab287.includes("30 * 60_000") && !fac287.includes("30 * 60_000"));
+  ok("VT 是 VerdictTable 实例", W.VT instanceof W.VerdictTable);
+  W.vClear();
+  W.vSet("rt287.example", "d", 200, 12);
+  ok("2xx 记成可用", W.vOk("rt287.example", "d") && W.vState("rt287.example", "d") === W.St.Reachable);
+  W.vSet("rt287.example", "r:1.1.1.1", 403, 30);
+  ok("403 记成被拦", W.vBad("rt287.example", "r:1.1.1.1"));
+  W.vSet("rt287.example", "r:1.1.1.1", 200, 30, 0);
+  ok("弱证据不得把强证据的 blocked 冲成可用", W.vBad("rt287.example", "r:1.1.1.1"));
+  const before287 = W.VT.size();
+  W.vSet("*", "d", 200, 5);
+  W.vSetState("*", "r:2.2.2.2", W.St.Blocked, 1);
+  eq("通配目标一条都不落表", W.VT.size(), before287);
+  ok("通配在 vAll 里也查不到", W.vAll("*").length === 0);
+  W.VT.clearHost("rt287.example");
+  eq("清站点把该目标的行全删掉", W.vAll("rt287.example").length, 0);
+  W.vClear();
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

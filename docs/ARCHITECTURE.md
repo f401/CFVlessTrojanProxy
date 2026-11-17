@@ -228,7 +228,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `SocketDialer` | `src/proxy/socket-dialer.ts` | 按预算建连，超时后关掉「迟到成功」的 socket（四处手写过的同一条规则，现在只有一份实现） |
 | `MeterDiagnostics` | `src/store/meter-diagnostics.ts` | 计量 DO 的诊断端点（stage/tim/iter/burn/burnjs/crypto/tfb/tf）：每个端点一个方法，不落盘、不碰账目 |
 | `MeterState` | `src/store/meter-state.ts` | 账本本体：五件账本 + 七张事实表 + 代号；`adopt()`/`restore()` 把落盘口径逐项映射到内存字段，`parts()` 反着来，`snapshot()`/`rollback()` 供 `/add` 落盘失败时回滚 |
-| `VerdictTable`（`VT`） | `src/route/verdict.ts` | 判定表（站点 × 通道） |
+| `VerdictTable`（`VT`） | `src/route/verdict-table.ts` | 判定表（站点 × 通道）：状态机、TTL/上限、弱证据不得冲掉强证据、通配目标拒写；`verdict.ts` 只做同名转发，`verdict-types.ts` 放类型与 TTL |
 | `Judge`（`JUDGE`） | `src/route/judge.ts` | 流量侧弱证据的累加与落判定 |
 | `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级：三张按站点的内存表（`pin`/`rot`/`seq`）+ 排序链 `neg → pos → score → vAt` |
 | `PolicyWiring`（`WIRING`） | `src/route/policy-wiring.ts` | 把策略接到 HOOK 的二十个槽位（漏注册不会有门禁报错，7.123 的 `HOOK.facts` 就是这样失效的） |
