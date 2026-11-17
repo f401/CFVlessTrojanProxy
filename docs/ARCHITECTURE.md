@@ -275,7 +275,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `ClientFlow` | `src/proxy/connection.ts` | 客户端这一侧的流量控制：唯一读 `ws.bufferedAmount` 的地方，也是唯一区分「客户端自己走了」（记 `ccut`）与「真卡死」（记 `stall`）的地方 |
 | `DebugSuite`（`DEBUG`） | `src/routes/debug.ts` | 调试路由四个组件的持有者（读表 / 测网 / 写操作 / 计量探测）：收成一个对象后，「这次调试动用了哪些能力」在同一处读完，也是判断「某个参数会不会真的拨号」的入口 |
 | `DebugMeterProbes` | `src/routes/debug.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
-| `DebugTables` | `src/routes/debug.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：只读表、不拨号、不改状态 |
+| `DebugTables` | `src/routes/debug.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：`read()` 只按固定顺序编排，每个分支一个方法、只认自己那个参数键（`?blk=` 等自己取参数、自己拼载荷）；只读表、不拨号、不改状态，`&do=1` 时只有 `healthRows()` 与 `connRows()` 会多一次 DO 往返 |
 | `ProxyipView` | `src/routes/proxyip.ts` | `/proxyip` 的六个方法：只读报表（`?day`、`?src`）、两个管理员动作（`?reset` 清表、`?refresh` 跑一轮探活）、默认视图分三段——`liveRows()` 并内存表与跨 isolate 快照并按模式排序、`explain()` 只在 `?why=1` 时算画像与分项、`poolReport()` 只拼字段 |
 | `AdminView`（`admin` 门面） | `src/routes/admin.ts` | `/admin` 的四个分支各占一个方法：登出只清 cookie、登录做挑战-应答与限速、用户操作要读改写整份托管用户表（`cur.ok === false` 时必须拒绝，否则会把缺失用户整份删掉）、面板按用户数扇出 DO 往返并被 `ADMIN_STATS_MAX` 截断 |
 | `SubscriptionRoutes`（`subscription` 门面） | `src/routes/subscription.ts` | 控制页与订阅：`page()` 读用量 + 存活表两次往返、`feed(kind)` 把 clash / sing-box / 明文链接三种格式收成一条路（差别只有渲染器与 content-type，见 `FEEDS` 表）、`stats()` 的 JSON 分支零额外往返、`statsHtml()` 才并跨 isolate 快照 |

@@ -37,81 +37,180 @@ type DebugCtx = RouteCtx & { id: string };
  */
 export class DebugTables {
   /**
-   * 依次尝试每个只读分支。
+   * 依次尝试十一个只读分支。
    * @param c 路由上下文（含 `env` / `id`）
    * @param url 请求 URL
    * @returns 命中的分支响应；没有任何只读参数时返回 `null`，交给后面的测量/写操作分支
    */
   async read(c: DebugCtx, url: URL): Promise<Response | null> {
-    const { env, id } = c;
+    const q = url.searchParams;
+    // 前八个分支只读内存表：短路顺序就是响应顺序，与原实现逐行一致
+    const hit =
+      this.deadRows(q) ??
+      this.siteFacts(q) ??
+      this.egRows(q) ??
+      this.relayRows(q) ??
+      this.blockRows(q) ??
+      this.factsAll(q) ??
+      this.planRows(q) ??
+      this.verdictRows(q);
+    if (hit) return hit;
+    // 下面三个分支里有两个可能打 DO：`&do=1` 才多一次子请求，所以排在纯读分支之后
+    const heal = await this.healthRows(c, q);
+    if (heal) return heal;
+    const prefs = this.prefsRows(q);
+    if (prefs) return prefs;
+    return this.connRows(c, q);
+  }
+
+  /**
+   * 功能：`?dd=1` —— 被判死的节点（30 分钟后自动复活）。
+   * @param q 查询参数
+   * @returns 命中时的响应，否则 `null`
+   */
+  private deadRows(q: URLSearchParams): Response | null {
     // 判死的会挪到队尾，30 分钟复活
-    if (url.searchParams.get("dd")) return json({ rows: DEAD.snap() });
-    // 站点 × 中继的成功率事实（本 isolate）：样本越多越可信，因子越靠近 1
-    if (url.searchParams.get("pss")) {
-      const host = String(url.searchParams.get("pss"));
-      return json({ host, rows: PS.snap(host) });
-    }
-    if (url.searchParams.get("eg")) return json({ rows: EG.snap() });
-    if (url.searchParams.get("rt")) {
-      const host = String(url.searchParams.get("rt") || "").slice(0, 80);
-      return json({ host, rows: RELPERF.snap(host), alive: S.alive.size, ttl: REL_SAMPLE_TTL });
-    }
-    // 站点 × 中继的封锁行（v7.222）：文档里从 v8 起就写着 `?blk=<host>`，代码里一直没有这个分支。
-    // 只读内存表，不打 DO：要看别处 isolate 回传的行得配合 `?do=1` 那条链（那里是 /meter/vt）。
-    if (url.searchParams.get("blk")) {
-      const bh = String(url.searchParams.get("blk") || "").slice(0, 80);
-      const rows = BLK.snap().filter((r) => r.k === bh || r.k.startsWith(bh + "|"));
-      return json({ host: bh, muted: BLK.muted(bh), rows: rows.slice(0, 60), ttl: BLK_TTL });
-    }
-    // 事实层五张表一次看全（v7.222）：eg / ps / dead / blk2 / dns，容量与条数都能直接看出来
-    if (url.searchParams.get("facts") === "1") {
-      return json({ tables: FACTS.snap(), counters: cntView() });
-    }
-    // 本轮预算分配（v7.222）：与 `?vt=<host>` 分支里的 plan 同一口径，省得为了看预算先造一个 host
-    if (url.searchParams.get("plan") === "1") {
-      return json({ plan: planView(S.pool.length, S.alive.size), counters: cntView() });
-    }
-    const vtHost = String(url.searchParams.get("vt") || "").slice(0, 80);
-    if (vtHost) {
-      // 只读表：userland TLS 探测已在 7.69 删除（免费计划必然 1102），证据一律来自真实流量与 tfb。
-      // 这里曾经还回三个恒空字段（ips / nodes / rows）——它们来自已删除的扫描器，
-      // 于是「扫描结果为空」和「根本没有扫描」在响应里长得一模一样（v7.154 删掉）。
-      const plan = planView(S.pool.length, S.alive.size);
-      const pol = { same: S.polSame, diff: S.polDiff, why: S.polWhy };
-      return json({ host: vtHost, table: VT.all(), pol, plan, counters: cntView() });
-    }
-    // 站点偏好表：判定表按通道聚合后的「能打通 / 打不通」两栏
-    if (url.searchParams.get("hl") === "1") {
-      let ring: unknown = [];
-      if (url.searchParams.get("do") === "1") {
-        try {
-          const raw = String(c.env.uuid || c.env.uuids).split(",")[0].trim().toLowerCase();
-          const rr = await doFetch(c.env, raw, "https://meter/hl");
-          ring = ((await rr.json()) as { hl?: unknown }).hl || [];
-        } catch {
-          ring = [];
-        }
+    if (!q.get("dd")) return null;
+    return json({ rows: DEAD.snap() });
+  }
+
+  /**
+   * 功能：`?pss=<host>` —— 站点 × 中继的成功率事实（本 isolate）。
+   * @param q 查询参数
+   * @returns 命中时的响应，否则 `null`
+   */
+  private siteFacts(q: URLSearchParams): Response | null {
+    const raw = q.get("pss");
+    if (!raw) return null;
+    const host = String(raw).slice(0, 80);
+    return json({ host, rows: PS.snap(host) });
+  }
+
+  /**
+   * 功能：`?eg=1` —— 出口地址族事实表。
+   * @param q 查询参数
+   * @returns 命中时的响应，否则 `null`
+   */
+  private egRows(q: URLSearchParams): Response | null {
+    if (!q.get("eg")) return null;
+    return json({ rows: EG.snap() });
+  }
+
+  /**
+   * 功能：`?rt=<host>` —— 站点 × 中继的实测样本（含存活表规模与 TTL）。
+   * @param q 查询参数
+   * @returns 命中时的响应，否则 `null`
+   */
+  private relayRows(q: URLSearchParams): Response | null {
+    if (!q.get("rt")) return null;
+    // 站点名是客户端可控的，截断到 80 字符再进表，避免拿它当无界键
+    const host = String(q.get("rt") || "").slice(0, 80);
+    return json({ host, rows: RELPERF.snap(host), alive: S.alive.size, ttl: REL_SAMPLE_TTL });
+  }
+
+  /**
+   * 功能：`?blk=<host>` —— 站点 × 中继的封锁行（只读内存表）。
+   * @param q 查询参数
+   * @returns 命中时的响应，否则 `null`
+   */
+  private blockRows(q: URLSearchParams): Response | null {
+    if (!q.get("blk")) return null;
+    // 文档里从 v8 起就写着 `?blk=<host>`；只读内存表，要看别处 isolate 回传的行得配 `?do=1`
+    const host = String(q.get("blk") || "").slice(0, 80);
+    const rows = BLK.snap().filter((r) => r.k === host || r.k.startsWith(host + "|"));
+    return json({ host, muted: BLK.muted(host), rows: rows.slice(0, 60), ttl: BLK_TTL });
+  }
+
+  /**
+   * 功能：`?facts=1` —— 事实层五张表的容量与条数一次看全。
+   * @param q 查询参数
+   * @returns 命中时的响应，否则 `null`
+   */
+  private factsAll(q: URLSearchParams): Response | null {
+    if (q.get("facts") !== "1") return null;
+    return json({ tables: FACTS.snap(), counters: cntView() });
+  }
+
+  /**
+   * 功能：`?plan=1` —— 本轮预算分配（与 `?vt=<host>` 分支同一口径）。
+   * @param q 查询参数
+   * @returns 命中时的响应，否则 `null`
+   */
+  private planRows(q: URLSearchParams): Response | null {
+    if (q.get("plan") !== "1") return null;
+    return json({ plan: planView(S.pool.length, S.alive.size), counters: cntView() });
+  }
+
+  /**
+   * 功能：`?vt=<host>` —— 判定表全文 + 策略命中原因 + 预算。
+   * @param q 查询参数
+   * @returns 命中时的响应，否则 `null`
+   */
+  private verdictRows(q: URLSearchParams): Response | null {
+    const host = String(q.get("vt") || "").slice(0, 80);
+    if (!host) return null;
+    // 这里曾经还回三个恒空字段（ips / nodes / rows），它们来自已删除的扫描器，
+    // 于是「扫描结果为空」和「根本没有扫描」在响应里长得一模一样（v7.154 删掉）
+    const plan = planView(S.pool.length, S.alive.size);
+    const pol = { same: S.polSame, diff: S.polDiff, why: S.polWhy };
+    return json({ host, table: VT.all(), pol, plan, counters: cntView() });
+  }
+
+  /**
+   * 功能：`?hl=1` —— 拼路健康度（本地表 + 可选 DO 环形缓冲）。
+   * @param c 路由上下文（要 `env`）
+   * @param q 查询参数
+   * @returns 命中时的响应，否则 `null`
+   */
+  private async healthRows(c: DebugCtx, q: URLSearchParams): Promise<Response | null> {
+    if (q.get("hl") !== "1") return null;
+    // 环形缓冲要跨 isolate 才有意义，所以只有显式 `&do=1` 才多花一次子请求
+    let ring: unknown = [];
+    if (q.get("do") === "1") {
+      try {
+        const raw = String(c.env.uuid || c.env.uuids).split(",")[0].trim().toLowerCase();
+        const rr = await doFetch(c.env, raw, "https://meter/hl");
+        ring = ((await rr.json()) as { hl?: unknown }).hl || [];
+      } catch {
+        // 读不到就是空环：不把这一维的失败当整轮失败（与 /logs 同口径）
+        ring = [];
       }
-      return json({ local: HEALTH.json(20), sizes: HEALTH.counts(), ring });
     }
-    if (url.searchParams.get("prefs") === "1") {
-      return json({ prefs: prefsJson(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });
-    }
-    if (url.searchParams.get("cl") === "1") {
-      const local = PEND.clSnap(40);
-      let ring: ClRec[] = [];
-      if (url.searchParams.get("do") === "1" && env.METER) {
-        try {
-          const r = await doFetch(env, id, "https://meter/cl");
-          const j = (await r.json()) as { cl?: ClRec[] };
-          if (Array.isArray(j.cl)) ring = j.cl;
-        } catch {
-          ring = [];
-        }
+    return json({ local: HEALTH.json(20), sizes: HEALTH.counts(), ring });
+  }
+
+  /**
+   * 功能：`?prefs=1` —— 站点偏好表与策略命中原因。
+   * @param q 查询参数
+   * @returns 命中时的响应，否则 `null`
+   */
+  private prefsRows(q: URLSearchParams): Response | null {
+    if (q.get("prefs") !== "1") return null;
+    return json({ prefs: prefsJson(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });
+  }
+
+  /**
+   * 功能：`?cl=1` —— 连接观测（本地快照 + 可选 DO 环形缓冲）。
+   * @param c 路由上下文（要 `env` 与 `id`）
+   * @param q 查询参数
+   * @returns 命中时的响应，否则 `null`
+   */
+  private async connRows(c: DebugCtx, q: URLSearchParams): Promise<Response | null> {
+    if (q.get("cl") !== "1") return null;
+    const { env, id } = c;
+    const local = PEND.clSnap(40);
+    let ring: ClRec[] = [];
+    if (q.get("do") === "1" && env.METER) {
+      try {
+        const r = await doFetch(env, id, "https://meter/cl");
+        const j = (await r.json()) as { cl?: ClRec[] };
+        if (Array.isArray(j.cl)) ring = j.cl;
+      } catch {
+        // 同上：DO 读失败只让这一维为空，本地快照照旧返回
+        ring = [];
       }
-      return json({ local, ring, now: Date.now() });
     }
-    return null;
+    return json({ local, ring, now: Date.now() });
   }
 }
 

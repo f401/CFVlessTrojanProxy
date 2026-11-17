@@ -5945,12 +5945,12 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
 // ---------- 第 223 组：文档写了但代码没有的调试端点（v7.222） ----------
 {
   const dbg = debugAll();
-  ok("debug 有 ?blk= 分支", dbg.includes('url.searchParams.get("blk")'));
-  ok("?blk= 按站点前缀过滤封锁行", dbg.includes("BLK.snap().filter((r) => r.k === bh || r.k.startsWith(bh + \"|\"))") || dbg.includes('r.k.startsWith(bh + "|")'));
-  ok("?blk= 报告自愈静音", dbg.includes("muted: BLK.muted(bh)"));
-  ok("debug 有 ?facts=1 分支", dbg.includes('url.searchParams.get("facts") === "1"'));
+  ok("debug 有 ?blk= 分支", dbg.includes('q.get("blk")'));
+  ok("?blk= 按站点前缀过滤封锁行", dbg.includes("BLK.snap().filter((r) => r.k === host || r.k.startsWith(host + \"|\"))") || dbg.includes('r.k.startsWith(bh + "|")'));
+  ok("?blk= 报告自愈静音", dbg.includes("muted: BLK.muted(host)"));
+  ok("debug 有 ?facts=1 分支", dbg.includes('q.get("facts") !== "1"'));
   ok("?facts=1 发的是事实层快照", dbg.includes("tables: FACTS.snap()"));
-  ok("debug 有 ?plan=1 分支", dbg.includes('url.searchParams.get("plan") === "1"'));
+  ok("debug 有 ?plan=1 分支", dbg.includes('q.get("plan") !== "1"'));
   ok("?plan=1 与 vt 分支同一口径", dbg.includes("planView(S.pool.length, S.alive.size)"));
 
   // 分支背后那几张表真的会给出数据（不是恒空的桩）
@@ -8421,7 +8421,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok(`[${g}] 编排层保持「只读在测量与写之前」`, orch.indexOf("DEBUG.tables.read(") < orch.indexOf("DEBUG.nets.bench(") && orch.indexOf("DEBUG.nets.bench(") < orch.indexOf("DEBUG.actions.refill("));
   ok(`[${g}] 编排层不超 120 行`, orch.length > 0 && orch.split(/\r?\n/).length <= 120);
   // 只读表：十一个分支都在这里，且不出现拨号/建连/写 KV 的能力
-  eq(`[${g}] 只读表层持有十一个分支`, ["\"dd\"", "\"pss\"", "\"eg\"", "\"rt\"", "\"blk\"", "\"facts\"", "\"plan\"", "\"vt\"", "\"hl\"", "\"prefs\"", "\"cl\""].every((x) => tabs.includes("searchParams.get(" + x + ")")), true);
+  eq(`[${g}] 只读表层持有十一个分支`, ["\"dd\"", "\"pss\"", "\"eg\"", "\"rt\"", "\"blk\"", "\"facts\"", "\"plan\"", "\"vt\"", "\"hl\"", "\"prefs\"", "\"cl\""].every((x) => tabs.includes("q.get(" + x + ")")), true);
   ok(`[${g}] 只读表层不建连、不写状态`, !tabs.includes("SOCKET_DIALER.open(") && !tabs.includes("pxSet(") && !tabs.includes("flushPx(") && !tabs.includes("refillPool("));
   // 测网层：三种「花钱」的能力都留了上限
   ok(`[${g}] 测网层的测速有 20 秒封顶`, nets.includes("const ac = new AbortController();") && nets.includes(", 20000)"));
@@ -11168,6 +11168,77 @@ eq("第338组·全零块展开后首尾都是 0", work338[0] + work338[63], 0);
 W.sha224Mix(state338, work338);
 ok("第338组·压缩会改写状态", state338[0] !== W.SHA_H224[0] || state338[7] !== W.SHA_H224[7]);
 eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
+
+// ---------- 第 340 组：只读诊断表按分支各成一方法（v7.340） ----------
+{
+  const g = 340;
+  const dbg = debugAll();
+  // read 的编排段：从签名到第一个分支方法之前
+  const readBody = (() => {
+    const i = dbg.indexOf("async read(");
+    const j = dbg.indexOf("return this.connRows(c, q);") + "return this.connRows(c, q);".length;
+    return i >= 0 && j > i ? dbg.slice(i, j) : "";
+  })();
+  ok(
+    `[${g}] read 只按固定顺序委托十一个分支`,
+    [
+      "this.deadRows(",
+      "this.siteFacts(",
+      "this.egRows(",
+      "this.relayRows(",
+      "this.blockRows(",
+      "this.factsAll(",
+      "this.planRows(",
+      "this.verdictRows(",
+      "this.healthRows(",
+      "this.prefsRows(",
+      "this.connRows(",
+    ].every((x) => readBody.includes(x))
+  );
+  // 编排层再出现参数判断，就意味着有人又往它里面塞逻辑
+  ok(`[${g}] read 自己不再读任何参数`, !readBody.includes('q.get("'));
+  ok(`[${g}] read 不超过 25 行`, readBody.length > 0 && readBody.split(/\r?\n/).length <= 25);
+  eq(
+    `[${g}] 十一个分支各是一个方法`,
+    ["deadRows", "siteFacts", "egRows", "relayRows", "blockRows", "factsAll", "planRows", "verdictRows", "healthRows", "prefsRows", "connRows"].every(
+      (x) => dbg.includes("private " + x + "(") || dbg.includes("private async " + x + "(")
+    ),
+    true
+  );
+  // 分支各自读自己的参数键：漏一个就会静默落到下一个分支
+  eq(
+    `[${g}] 每个分支只认自己那个参数键`,
+    ["\"dd\"", "\"pss\"", "\"eg\"", "\"rt\"", "\"blk\"", "\"facts\"", "\"plan\"", "\"vt\"", "\"hl\"", "\"prefs\"", "\"cl\""].every((x) => dbg.includes("q.get(" + x + ")")),
+    true
+  );
+  ok(`[${g}] 只有两个分支可能打 DO`, dbg.split('q.get("do") === "1"').length - 1 === 2);
+  ok(`[${g}] 两个 DO 分支各自吞掉读失败`, dbg.split("ring = [];").length - 1 === 2);
+
+  // 行为：编排顺序与「没有只读参数就返回 null」是这套拆法的契约
+  const env340 = { uuid: "11111111-1111-1111-1111-111111111111" };
+  const tables340 = W.DEBUG.tables;
+  const call340 = (qs) => tables340.read({ env: env340, id: env340.uuid }, new URL("https://dbg340.test/x" + qs));
+  ok(`[${g}] 没有只读参数时返回 null（交给测量/写分支）`, (await call340("")) === null);
+  ok(`[${g}] 未知参数同样返回 null`, (await call340("?nope=1")) === null);
+  const dd340 = await call340("?dd=1");
+  ok(`[${g}] ?dd=1 给出 rows 数组`, (await dd340.json()).rows.length >= 0);
+  const pss340 = await call340("?pss=a340.example.com");
+  eq(`[${g}] ?pss= 回显站点名`, (await pss340.json()).host, "a340.example.com");
+  const plan340 = await call340("?plan=1");
+  ok(`[${g}] ?plan=1 给出预算与计数`, Boolean((await plan340.json()).plan));
+  W.BLK.clear();
+  W.BLK.load([
+    { k: "b340.example.com|10.7.0.1", n: 3, at: Date.now() },
+    { k: "b340.example.com|10.7.0.2", n: 1, at: Date.now() },
+    { k: "other340.example.com|10.7.0.3", n: 3, at: Date.now() },
+  ]);
+  const blk340 = await (await call340("?blk=b340.example.com")).json();
+  eq(`[${g}] ?blk= 只回该站点前缀的行`, blk340.rows.length, 2);
+  const hl340 = await (await call340("?hl=1")).json();
+  eq(`[${g}] ?hl=1 不带 &do=1 时不打 DO`, hl340.ring.length, 0);
+  ok(`[${g}] ?hl=1 仍返回本地表`, Array.isArray(hl340.local) && typeof hl340.sizes === "object");
+  W.BLK.clear();
+}
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
