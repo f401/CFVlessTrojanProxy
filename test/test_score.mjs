@@ -1,12 +1,12 @@
 import fs from "node:fs";
 /**
- * 存储层三层源码拼在一起：`meter.ts`（DO 外壳）/ `meteradd.ts`（`/add` 合并）/ `metershard.ts`（分片落盘）。
+ * 存储层四段源码拼在一起：`meter.ts`（DO 外壳）/ `meter-state.ts`（账本本体与落盘映射）/ `meteradd.ts`（`/add` 合并）/ `metershard.ts`（分片落盘）。
  * v7.218 把后两块从 `meter.ts` 拆出去（单文件 ≤560 行的硬上限），源码锁断言跟着改成「在存储层存在」，
  * 避免以后每次挪文件都要改一批断言。
- * @returns {string} 三段源码
+ * @returns {string} 四段源码
  */
 const storeSrc = () =>
-  ["src/store/meter.ts", "src/store/meteradd.ts", "src/store/metershard.ts"]
+  ["src/store/meter.ts", "src/store/meter-state.ts", "src/store/meteradd.ts", "src/store/metershard.ts"]
     .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
     .join("\n");
 
@@ -1147,10 +1147,10 @@ reset();
     threw = true;
   }
   eq("DO 落盘失败会抛错", threw, true);
-  eq("DO 落盘失败回滚内存", m.usage.up, 0);
+  eq("DO 落盘失败回滚内存", m.ledger.usage.up, 0);
   fail = false;
   await m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
-  eq("恢复后只记一次", m.usage.up, 10);
+  eq("恢复后只记一次", m.ledger.usage.up, 10);
 }
 
 // DO 请求串行化：并发 /add 不能交错写坏内存/storage
@@ -1325,9 +1325,9 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
       body: '{"up":0,"down":0,"conns":0,"spd":{"__proto__":{"med":1},"ok:443":{"med":2,"at":1}}}',
     }),
   );
-  eq("spd 容器是 null 原型", Object.getPrototypeOf(doP.m.nodeSnapshots), null);
-  eq("__proto__ 不作为自有键写入", Object.prototype.hasOwnProperty.call(doP.m.nodeSnapshots, "__proto__"), false);
-  ok("正常节点仍保留", !!doP.m.nodeSnapshots["ok:443"]);
+  eq("spd 容器是 null 原型", Object.getPrototypeOf(doP.m.ledger.nodeSnapshots), null);
+  eq("__proto__ 不作为自有键写入", Object.prototype.hasOwnProperty.call(doP.m.ledger.nodeSnapshots, "__proto__"), false);
+  ok("正常节点仍保留", !!doP.m.ledger.nodeSnapshots["ok:443"]);
 }
 
 /* ---------- 探活不能灌水面板成功率 ---------- */
@@ -3284,11 +3284,11 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
     .fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify(body) }))
     .then(() => "ok", () => "rejected");
   eq("落盘失败时 /add 返回失败（让发送侧重发这一批）", r1, "rejected");
-  eq("失败后连接观测没有留在内存里", d.m.connRing.length, 0);
-  eq("失败后用量也没有留在内存里", [d.m.usage.up, d.m.usage.down], [0, 0]);
+  eq("失败后连接观测没有留在内存里", d.m.ledger.connRing.length, 0);
+  eq("失败后用量也没有留在内存里", [d.m.ledger.usage.up, d.m.ledger.usage.down], [0, 0]);
   failPut = false;
   await d.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify(body) }));
-  eq("重发同一批后连接观测只算一次", [d.m.connRing.length, d.m.connRing[0].n, d.m.connRing[0].ok], [1, 4, 3]);
+  eq("重发同一批后连接观测只算一次", [d.m.ledger.connRing.length, d.m.ledger.connRing[0].n, d.m.ledger.connRing[0].ok], [1, 4, 3]);
   const j108 = await (await d.m.fetch(new Request("https://m/get"))).json();
   eq("用量也只算一次", [j108.up, j108.down], [100, 200]);
 }
@@ -3655,7 +3655,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   eq("同一到期时刻取更严格的状态", Number(r3.s), 3);
   // 老数据（裸数字，只有到期时间）仍要能读：按 blocked 处理
   const K4 = "vt154c.test|r:203.0.113.93";
-  d4.m.vt[K4] = now + 600000;
+  d4.m.ledger.vt[K4] = now + 600000;
   const r4 = (await VT()).find((x) => x.k === K4) || {};
   eq("老格式（裸到期时间）读成 blocked", Number(r4.s), 2);
   ok("DO 侧存状态（源码）", storeSrc().includes("r.s === St.Dead ? St.Dead : St.Blocked"));
@@ -3881,18 +3881,18 @@ const dset = (m, body) => m.fetch(new Request("https://meter/set", { method: "PO
 {
   const a = mkDO();
   await dset(a.m, { up: 0, down: 0, conns: 7, first: 1000 });
-  eq("只有连接数、没有字节的用户也能恢复（旧代码整条跳过）", a.m.usage.conns, 7);
-  eq("首次使用时间跟着恢复", a.m.usage.first, 1000);
+  eq("只有连接数、没有字节的用户也能恢复（旧代码整条跳过）", a.m.ledger.usage.conns, 7);
+  eq("首次使用时间跟着恢复", a.m.ledger.usage.first, 1000);
   await dset(a.m, { up: 0, down: 0, conns: 12, first: 1000 });
-  eq("字节没变多时不再整体跳过：连接数继续前进", a.m.usage.conns, 12);
+  eq("字节没变多时不再整体跳过：连接数继续前进", a.m.ledger.usage.conns, 12);
 }
 {
   const b = mkDO();
   await dset(b.m, { up: 100, down: 200, conns: 9, first: 1000 });
   await dset(b.m, { up: 150, down: 200, conns: 3, first: 5000 });
-  eq("快照落后时不会把更大的连接数改小", b.m.usage.conns, 9);
-  eq("首次使用时间取更早的那个", b.m.usage.first, 1000);
-  eq("字节按快照恢复（快照更大才覆盖）", b.m.usage.up + b.m.usage.down, 350);
+  eq("快照落后时不会把更大的连接数改小", b.m.ledger.usage.conns, 9);
+  eq("首次使用时间取更早的那个", b.m.ledger.usage.first, 1000);
+  eq("字节按快照恢复（快照更大才覆盖）", b.m.ledger.usage.up + b.m.ledger.usage.down, 350);
 }
 const mSrc166 = storeSrc();
 ok("恢复门槛含连接数（与 /seed 口径一致）", mSrc166.includes("wantN > curN"));
@@ -4365,7 +4365,7 @@ console.log("\n176) 预算账本与续回边界");
   eq("freshTop 直接按时间戳降序取", W.freshTop([{ t: 1 }, { t: 3 }, { t: 2 }], (r) => r.t, 2).map((r) => r.t).join(","), "3,2");
   eq("freshTop 不超上限时原样返回", W.freshTop([{ t: 1 }, { t: 3 }], (r) => r.t, 5).length, 2);
   const meterSrc177 = storeSrc();
-  ok("meter 的 /vt 已委托给 factsOut", meterSrc177.includes("Response.json(factsOut(this))"), "meter.ts");
+  ok("meter 的 /vt 已委托给 factsOut", meterSrc177.includes("Response.json(factsOut(this.ledger))"), "meter.ts");
   ok("meter 里不再自己拼 blk2 的插入序切片", !meterSrc177.includes("Object.entries(this.blk2)"), "meter.ts");
   const dbgSrc177 = fs.readFileSync("src/routes/debug.ts", "utf8");
   ok("诊断默认分支的建连带超时", dbgSrc177.includes("withTimeout(pk, CONNECT_MS)"), "debug.ts");
@@ -4378,7 +4378,7 @@ console.log("\n176) 预算账本与续回边界");
   const mS = storeSrc();
   ok("计量表里不再有旧封锁表字段", !/this\.blk\b/.test(mS), "meter.ts");
   ok("计量表不再提供 /blk 端点", mS.indexOf('endsWith("/blk")') < 0, "meter.ts");
-  ok("七张事实表的出站仍走 factsOut", mS.indexOf("Response.json(factsOut(this))") >= 0, "meter.ts");
+  ok("七张事实表的出站仍走 factsOut", mS.indexOf("Response.json(factsOut(this.ledger))") >= 0, "meter.ts");
   const dS = fs.readFileSync("src/routes/debug.ts", "utf8");
   ok("诊断的跨 isolate 封锁改读 /vt 的 blk2", dS.indexOf('fetch("https://meter/vt")') >= 0 && dS.indexOf("jj.blk2") >= 0, "debug.ts");
   ok("诊断用 blk2 的 at 与 BLK_TTL 算剩余寿命", dS.indexOf("r.at + BLK_TTL - now2") >= 0, "debug.ts");
@@ -5719,12 +5719,12 @@ const shardKeys = [...bigDo.store.keys()].sort();
 const shardSize = (k) => String(bigDo.store.get(k)).length;
 eq("表填满后按体积拆片", shardKeys.join(","), "a,f1,f2,f3");
 ok("每片都在 DO 单值上限内（131072）", shardKeys.every((k) => shardSize(k) <= 131072), shardKeys.map((k) => `${k}=${shardSize(k)}`).join(" "));
-const cnt7 = (m) => ["vt", "hl", "eg", "ps", "dead", "blk2", "dns"].map((t) => Object.keys(m[t] || {}).length).join(",");
-const beforeCnt = cnt7(bigDo.m);
+const cnt7 = (led) => ["vt", "hl", "eg", "ps", "dead", "blk2", "dns"].map((t) => Object.keys(led[t] || {}).length).join(",");
+const beforeCnt = cnt7(bigDo.m.ledger);
 // 同一个 storage 再建一个 Meter = isolate 重启：分片里的七张表必须读回来
 const bigDo2 = mkDO([...bigDo.store.entries()]);
 await bigDo2.m.fetch(new Request("https://m/get"));
-eq("重启后七张事实表都读回来", cnt7(bigDo2.m), beforeCnt);
+eq("重启后七张事实表都读回来", cnt7(bigDo2.m.ledger), beforeCnt);
 ok("七张表都不是空的", beforeCnt.split(",").every((x) => Number(x) > 0), beforeCnt);
 const smallDo = mkDO();
 await smallDo.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
@@ -5750,17 +5750,17 @@ ok("两条恢复路径都读分片", (meterSrc.match(/await this\.loadShards\(\)
 const stampDo = mkDO();
 await stampDo.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify(doFill(200)) }));
 await stampDo.m.save();
-ok("拆片后代号大于 0", Number(stampDo.m.fs) > 0, String(stampDo.m.fs));
+ok("拆片后代号大于 0", Number(stampDo.m.ledger.fs) > 0, String(stampDo.m.ledger.fs));
 // 留一份上一轮的分片，然后模拟「表缩小了、退回单键，但删残片失败」
 const staleF2 = stampDo.store.get("f2");
-for (const t of ["vt", "hl", "eg", "ps", "dead", "blk2", "dns"]) stampDo.m[t] = {};
-stampDo.m.eg["1.2.3.4"] = { f: 4, at: Date.now() };
+for (const t of ["vt", "hl", "eg", "ps", "dead", "blk2", "dns"]) stampDo.m.ledger[t] = {};
+stampDo.m.ledger.eg["1.2.3.4"] = { f: 4, at: Date.now() };
 await stampDo.m.save();
-eq("退回单键后代号回到 0", stampDo.m.fs, 0);
+eq("退回单键后代号回到 0", stampDo.m.ledger.fs, 0);
 stampDo.store.set("f2", staleF2);
 const stampDo2 = mkDO([...stampDo.store.entries()]);
 await stampDo2.m.fetch(new Request("https://m/get"));
-eq("残留分片不会盖掉新写的单键值", Object.keys(stampDo2.m.eg).join(","), "1.2.3.4");
+eq("残留分片不会盖掉新写的单键值", Object.keys(stampDo2.m.ledger.eg).join(","), "1.2.3.4");
 // 同号分片必须照读（正常的分片恢复不能被代号挡住）
 const stampDo3 = mkDO();
 await stampDo3.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify(doFill(200)) }));
@@ -5768,7 +5768,7 @@ await stampDo3.m.save();
 const stamped = stampDo3.store.get("f2");
 const stampDo4 = mkDO([...stampDo3.store.entries()]);
 await stampDo4.m.fetch(new Request("https://m/get"));
-ok("同号分片照读", Object.keys(stampDo4.m.ps || {}).length > 0 && Object.keys(stampDo4.m.eg || {}).length > 0, JSON.stringify({ ps: Object.keys(stampDo4.m.ps || {}).length, eg: Object.keys(stampDo4.m.eg || {}).length }));
+ok("同号分片照读", Object.keys(stampDo4.m.ledger.ps || {}).length > 0 && Object.keys(stampDo4.m.ledger.eg || {}).length > 0, JSON.stringify({ ps: Object.keys(stampDo4.m.ledger.ps || {}).length, eg: Object.keys(stampDo4.m.ledger.eg || {}).length }));
 void stamped;
 const msSrc220 = fs.readFileSync("src/store/metershard.ts", "utf8");
 ok("账本类型里记了代号", msSrc220.includes("fs?: number;"));
@@ -5776,9 +5776,9 @@ ok("单键路径写 fs: 0", msSrc220.includes("await st.put(\"a\", await seal(en
 ok("分片路径用同一个代号", msSrc220.includes("const fs = Date.now();") && msSrc220.includes("await st.put(\"f2\", await seal(env as Env, { fs, ...f2 }));"));
 ok("读分片时比代号", msSrc220.includes("if (Number(o.fs) !== want) {") && msSrc220.includes("cnt(\"shardBad\");"));
 ok("代号为 0 就不读分片", msSrc220.includes("if (!want) return out;"));
-ok("save 之后记住本次代号", storeSrc().includes("this.fs = await saveState(this.env, this.state.storage, {"));
-ok("恢复时把 a 里的代号读出来", storeSrc().includes("this.fs = Number((o as unknown as { fs?: number }).fs) || 0;"));
-ok("loadShards 把代号传下去", storeSrc().includes("readShards(this.env, this.state.storage, this.fs)"));
+ok("save 之后记住本次代号", storeSrc().includes("this.ledger.fs = await saveState(this.env, this.state.storage, this.ledger.parts());"));
+ok("恢复时把 a 里的代号读出来", storeSrc().includes("this.fs = Number((body as unknown as { fs?: number }).fs) || 0;"));
+ok("loadShards 把代号传下去", storeSrc().includes("readShards(this.env, this.state.storage, this.ledger.fs)"));
 // ── 第 221 组：账本解不开时不能静默从零开始（换 kek / 值损坏）
 const mkMeter = (store, kek) => {
   let gate = Promise.resolve();
@@ -5836,8 +5836,8 @@ ok("能解开就不留底", goodStore.get("a_bak") === undefined);
 const meterSrc221 = storeSrc();
 ok("配置里登记了 doBad", fs.readFileSync("src/core/state.ts", "utf8").includes("\"doBad\","));
 ok("构造函数里有 else 分支", meterSrc221.includes("cnt(\"doBad\");"));
-ok("留底带着原值", meterSrc221.includes("this.bakRaw = all;"));
-ok("落盘前备份 a_bak", meterSrc221.includes("await this.state.storage.put(\"a_bak\", this.bakRaw);"));
+ok("留底带着原值", meterSrc221.includes("this.ledger.keepBackup(all);"));
+ok("落盘前备份 a_bak", meterSrc221.includes("const bak = this.ledger.takeBackup();") && meterSrc221.includes("await this.state.storage.put(\"a_bak\", bak);"));
 
 // ---- 第 222 组：站点级自愈（sweep → mute）不能被别处回传的封锁事实撤销（v7.221）----
 const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
@@ -6436,8 +6436,8 @@ eq("AGENTS 头部缺陷数等于 H6 最大编号", Number(hm235 ? hm235[2] : -1)
   ok("tfb.ts 的 splitRelay 行回到四个空格", tfbSrc.includes("\n    const ip = splitRelay(row.relay, 443)[0];"));
   const fmSrc = fs.readFileSync("src/store/factmerge.ts", "utf8");
   ok("factmerge 的 eg 过期判断回到四个空格", fmSrc.includes("\n        if (r.at <= Date.now() - FACT_TTL.eg) continue;"));
-  const msSrc = fs.readFileSync("src/store/meter.ts", "utf8");
-  ok("meter.ts 的代号行回到十个空格", msSrc.includes("\n          this.fs = Number((o as unknown as { fs?: number }).fs) || 0;"));
+  const msSrc = fs.readFileSync("src/store/meter-state.ts", "utf8");
+  ok("meter-state.ts 的代号行回到四个空格", msSrc.includes("\n    this.fs = Number((body as unknown as { fs?: number }).fs) || 0;"));
 
 // ---- 第 239 组：一轮 cron 的 fetch 子请求账本（D193）----
 // DNS 那一笔必须等于「站点数 × 解析服务数」：一个站点会依次试每个 DoH，前一个失败才换下一个。
@@ -7845,26 +7845,27 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
       }),
     }),
   );
-  const u274 = do274.m.usage || {};
+  const u274 = do274.m.ledger.usage || {};
   eq("用量累计落在 usage 上", [u274.up, u274.down, u274.conns], [5, 7, 2]);
-  const g274 = do274.m.dayCounter || {};
+  const g274 = do274.m.ledger.dayCounter || {};
   ok("全局日计数落在 dayCounter 上", g274.d === today274 && g274.k274 === 3);
-  eq("连接观测落在 connRing 上", (do274.m.connRing || []).length, 1);
+  eq("连接观测落在 connRing 上", (do274.m.ledger.connRing || []).length, 1);
   ok("旧单字母不再是账本字段", ["c", "g", "s", "e", "cl"].every((k) => !(k in do274.m)));
   const meterSrc = fs.readFileSync("src/store/meter.ts", "utf8").split(/\r?\n/).join("\n");
-  const code274 = meterSrc.split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*")).join("\n");
+  const stateSrc274 = fs.readFileSync("src/store/meter-state.ts", "utf8").split(/\r?\n/).join("\n");
+  const code274 = [meterSrc, stateSrc274].join("\n").split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*")).join("\n");
   ok("类字段声明用的是语义名", ["usage: UsageMeter;", "dayCounter: CounterDoc;", "nodeSnapshots: Record<string, NodeSnap>;", "errors: ErrItem[];", "connRing: ClRec[];"].every((x) => code274.includes(x)));
   ok("类里不再有单字母字段声明", !/^\s{2}(c|g|s|e|cl):/m.test(code274));
   ok(
     "restore 逐项映射落盘键",
-    code274.includes("private restore(parts: MeterStore): void") &&
+    code274.includes("restore(parts: MeterStore): void") &&
       code274.includes("this.usage = { ...this.usage, ...parts.c }") &&
       code274.includes("this.dayCounter = parts.g as CounterDoc") &&
       code274.includes("this.nodeSnapshots = Object.assign(Object.create(null), parts.s)") &&
       code274.includes("this.errors = parts.e as ErrItem[]") &&
       code274.includes("this.connRing = parts.cl as ClRec[]"),
   );
-  ok("loadShards 不再整块灌对象", code274.includes("this.restore(parts);") && !code274.includes("Object.assign(this, await readShards"));
+  ok("loadShards 不再整块灌对象", code274.includes(".restore(parts);") && !code274.includes("Object.assign(this, await readShards"));
   const addSrc = fs.readFileSync("src/store/meteradd.ts", "utf8");
   ok(
     "AddTarget 也是语义名",
@@ -7956,6 +7957,90 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   const dmSrc275 = fs.readFileSync("src/routes/debug-meter.ts", "utf8");
   ok("派发路径带出真实状态码", dmSrc275.includes("ok: resp.ok, doStatus: resp.status"));
   ok("派发路径统一用 withTimeout 包住 DO 调用", dmSrc275.includes("withTimeout(stub.fetch(") && dmSrc275.includes("spec.budgetMs"));
+}
+
+// ---- 第 276 组：账本本体从 Meter 里拆成 MeterState（落盘映射只写一处）----
+{
+  const msSrc276 = fs.readFileSync("src/store/meter.ts", "utf8").split(/\r?\n/).join("\n");
+  const stSrc276 = fs.readFileSync("src/store/meter-state.ts", "utf8").split(/\r?\n/).join("\n");
+  // ① 结构：Meter 只剩 DO 生命周期与端点，账本字段与落盘映射都在 MeterState 里
+  ok("Meter 持有账本对象", msSrc276.includes("ledger: MeterState;"));
+  ok("Meter 不再自己声明用量字段", !msSrc276.includes("usage: UsageMeter;"));
+  ok("Meter 不再自己声明七张事实表", !msSrc276.includes("vt: Record<string, number |"));
+  ok("Meter 的 /add 合并把状态对象交出去", msSrc276.includes("applyAdd(this.ledger, d)"));
+  ok("快照取自状态对象", msSrc276.includes("this.ledger.snapshot()"));
+  ok("落盘失败回滚走状态对象", msSrc276.includes("this.ledger.rollback(snap)"));
+  ok("落盘形状由 parts() 给出", msSrc276.includes("saveState(this.env, this.state.storage, this.ledger.parts())"));
+  ok("逐项映射仍在状态类里", stSrc276.includes("this.usage = { ...this.usage, ...parts.c }"));
+  // ② 初值：七张表齐全、节点快照用 null 原型（`__proto__` 当键不能改原型）
+  const st276 = new W.MeterState();
+  eq("初始用量全 0", [st276.usage.up, st276.usage.down, st276.usage.conns], [0, 0, 0]);
+  eq("初始代号 0（事实就在 a 里）", st276.fs, 0);
+  eq(
+    "初始七张表齐全",
+    [st276.vt, st276.hl, st276.eg, st276.ps, st276.dead, st276.blk2, st276.dns].every((x) => x && typeof x === "object"),
+    true,
+  );
+  eq("节点快照是 null 原型", Object.getPrototypeOf(st276.nodeSnapshots), null);
+  // ③ 落盘形状：parts() 的键就是存储键（改名只改内存口径，盘上口径不动）
+  st276.usage.up = 7;
+  const p276 = st276.parts();
+  eq("parts() 仍然用 c/g/s/e/cl", [p276.c.up, p276.g.d, Object.keys(p276.s).length, p276.e.length, p276.cl.length], [7, "", 0, 0, 0]);
+  eq(
+    "parts() 带七张事实表",
+    ["vt", "hl", "eg", "ps", "dead", "blk2", "dns"].every((k) => p276[k] && typeof p276[k] === "object"),
+    true,
+  );
+  // ④ adopt()：老数据缺哪个字段就保留默认值，不缺的逐项装回
+  const st276b = new W.MeterState();
+  st276b.adopt({ c: { up: 5, down: 6 }, g: { d: "2026-01-01" }, cl: [{ k: "a", t: 1 }], fs: 42 });
+  eq("adopt 装回用量", [st276b.usage.up, st276b.usage.down, st276b.usage.conns], [5, 6, 0]);
+  eq("adopt 装回日计数", st276b.dayCounter.d, "2026-01-01");
+  eq("adopt 装回连接环", st276b.connRing.length, 1);
+  eq("adopt 装回代号", st276b.fs, 42);
+  eq("adopt 没给的字段仍是默认", st276b.usage.first, 0);
+  // ⑤ 快照与回滚：连接观测在表里就地累加，所以必须深拷
+  const st276c = new W.MeterState();
+  st276c.connRing.push({ k: "r1", t: 1 });
+  const snap276 = st276c.snapshot();
+  st276c.usage.up = 99;
+  st276c.connRing[0].t = 2;
+  st276c.connRing.push({ k: "r2", t: 3 });
+  st276c.rollback(snap276);
+  eq("回滚恢复用量", st276c.usage.up, 0);
+  eq("回滚恢复连接环条数", st276c.connRing.length, 1);
+  eq("回滚是深拷（行内改动不残留）", st276c.connRing[0].t, 1);
+  // ⑥ 解不开的旧值：只备份一次，拿下即清空（否则每次落盘都重写 a_bak）
+  const st276d = new W.MeterState();
+  eq("没有待备份原文时返回 null", st276d.takeBackup(), null);
+  st276d.keepBackup("raw");
+  eq("取下原文", st276d.takeBackup(), "raw");
+  eq("取下后清空", st276d.takeBackup(), null);
+  // ⑦ 落盘失败回滚仍然真的回滚（行为，不只读源码）
+  let gate276 = Promise.resolve();
+  const storage276 = {
+    get: async () => null,
+    put: async () => {
+      throw new Error("storage down");
+    },
+    delete: async () => {},
+  };
+  const st276e = {
+    storage: storage276,
+    blockConcurrencyWhile: (fn) => {
+      gate276 = Promise.resolve(fn());
+    },
+  };
+  const m276 = new W.Meter(st276e, {});
+  await gate276;
+  let threw276 = false;
+  try {
+    await m276.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10 }) }));
+  } catch (e) {
+    threw276 = true;
+  }
+  eq("落盘失败会抛出去（呼叫方据此重试）", threw276, true);
+  eq("落盘失败后内存里的用量回到 0", m276.ledger.usage.up, 0);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

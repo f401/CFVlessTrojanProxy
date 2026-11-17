@@ -3,6 +3,7 @@ export { sha224Bytes, toHex, VERSION, shadowRate, secretPwd, eachLimit, withTime
 export { trimAged, dropExpired } from "./core/hostmem";
 export { aesKey, b64d, b64e, seal, unseal } from "./store/crypto";
 export { factsOut, freshTop } from "./store/factout";
+export { MeterState } from "./store/meter-state";
 export { detectProtocol, parseVLESS, parseTrojan, loadUsers, normAtyp, readAddr } from "./proxy/protocol";
 export { DOH_ENDPOINTS, checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
 export { isPxHost, pxHostList } from "./core/hosts";

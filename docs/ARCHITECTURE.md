@@ -218,6 +218,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Dialer` / `RegionPicker` | `src/proxy/dialer.ts`、`region.ts` | 中继串行拨号、地区选择 |
 | `SocketDialer` | `src/proxy/socket-dialer.ts` | 按预算建连，超时后关掉「迟到成功」的 socket（四处手写过的同一条规则，现在只有一份实现） |
 | `MeterDiagnostics` | `src/store/meter-diagnostics.ts` | 计量 DO 的诊断端点（stage/tim/iter/burn/burnjs/crypto/tfb/tf）：每个端点一个方法，不落盘、不碰账目 |
+| `MeterState` | `src/store/meter-state.ts` | 账本本体：五件账本 + 七张事实表 + 代号；`adopt()`/`restore()` 把落盘口径逐项映射到内存字段，`parts()` 反着来，`snapshot()`/`rollback()` 供 `/add` 落盘失败时回滚 |
 | `VerdictTable`（`VT`） | `src/route/verdict.ts` | 判定表（站点 × 通道） |
 | `Judge`（`JUDGE`） | `src/route/judge.ts` | 流量侧弱证据的累加与落判定 |
 | `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级 |
