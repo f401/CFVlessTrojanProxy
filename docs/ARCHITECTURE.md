@@ -211,7 +211,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Store` / `Seal` | `src/store/store.ts`、`crypto.ts` | KV 写入节流、AES 密钥缓存 |
 | 快照读写（自由函数 `writeSnap` / `getSnap` / `flushSnap`） | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存（无跨请求状态要独占，所以没有类） |
 | `PendingLedger`（`PEND`） | `src/store/pend.ts` | 待上报账本、自适应退避与 flush 定时器 |
-| `Pool` | `src/px/pool.ts` | 池子、准入复测游标、探活坏点表（代际提交在 `poolgen.ts`：写前读 KV 锚点、三者取最大 +1、锚点写失败留证据） |
+| `Pool` | `src/px/pool.ts` | 门面：`nsOf`/`pxSet`/`flushPx` 与 `Pool` 的九个委托方法；存活表与探活冷却在 `alive.ts`，一轮维护在 `scan.ts`，代际提交在 `poolgen.ts` |
+| `AliveBoard`（`ALIVE`） | `src/px/alive.ts` | 存活表：冷启动从种子名单铺底（四档回退）、裁「重罚」、超 `ALIVE_MAX` 按先删不在池里的再删最慢的收缩、补国家码；`pxGet()`/`aliveList()` 是它的门面 |
+| `ProbeCooldown`（`PROBE_COOL`） | `src/px/alive.ts` | 探活坏点表：`skip()` 判「暂时跳过」、`bump()` 记连续失败、`sweep()` 先删过期再按 `PROBE_BAD_MAX` 淘汰最久没更新的 |
+| `PoolScan` | `src/px/scan.ts` | 一轮池子维护的执行器：准入复测 → 探新候选 → 头部复测 → 其余 alive 环切刷新 → 存活表裁剪 → 国家码 → 统计表裁剪 → 中转实测 → 落盘；每段一个方法，`run()` 只写顺序 |
 | `SourceHealth`（`SOURCES`） | `src/px/probe.ts` | 池子源健康度（连续失败降权、1 小时冷却、不删源） |
 | `SeedStore` | `src/px/seed.ts` | 跨 isolate 的种子表（只存名字） |
 | `Selector` | `src/px/selector.ts` | 站点偏好 + 单层抽样入口 |

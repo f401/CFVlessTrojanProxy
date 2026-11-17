@@ -4244,15 +4244,15 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
 
 /* 175：探活 RTT 不能写进真实首字节的矩；冷却中的源要真的跳过（7.185） */
 {
-  const pSrc = fs.readFileSync("src/px/pool.ts", "utf8");
+  const pSrc = fs.readFileSync("src/px/scan.ts", "utf8");
   eq(
     "pool.ts 里没有任何 nsLatency 调用（探活 RTT 不是真实首字节）",
     (pSrc.match(/^\s*nsLatency\(/gm) || []).length,
     0,
   );
   ok(
-    "pool.ts 仍然把探活写进样本数（nsProbe）",
-    (pSrc.match(/^\s*nsProbe\(/gm) || []).length >= 4,
+    "探活仍然把样本写进统计（nsProbe）：② 与 ②b 复测合并进 probeInto 后剩三处调用",
+    (pSrc.match(/^\s*nsProbe\(/gm) || []).length >= 3,
     true,
   );
   const pk = "11.9.9.9:443";
@@ -6019,10 +6019,11 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   ok("过了 TTL 不再判跳过", W.probeBadSkip(key226(9), t0 + W.SC.PROBE_BAD_TTL + 1) === false);
   PB.clear();
   // 源码锁：清理函数存在、且 cronScan 每轮都调它
-  const poolSrc226 = fs.readFileSync("src/px/pool.ts", "utf8");
+  const poolSrc226 = fs.readFileSync("src/px/scan.ts", "utf8");
+const aliveSrc226 = fs.readFileSync("src/px/alive.ts", "utf8");
   ok("cronScan 每轮都扫这张表", poolSrc226.includes("sweepProbeBad();"));
-  ok("扫的时候先看 TTL", poolSrc226.includes("if (now - v.at > SC.PROBE_BAD_TTL) {"));
-  ok("超上限按 at 升序淘汰", poolSrc226.includes("sort((a, b) => a[1].at - b[1].at)"));
+  ok("扫的时候先看 TTL", aliveSrc226.includes("if (now - entry.at > SC.PROBE_BAD_TTL) {"));
+  ok("超上限按 at 升序淘汰", aliveSrc226.includes("sort((a, b) => a[1].at - b[1].at)"));
 }
 // ---------- 第 227 组：S.needPx 的窗口只有一个真源（7.226） ----------
 {
@@ -7613,7 +7614,7 @@ eq("拆地址：方括号无端口", W.splitRelay("[2a06:98c0::103]", 443).join(
 
 // 五处调用点都改走同一份实现
 ok("调试探针不再内联拆地址", !code265("src/routes/debug.ts").includes('lastIndexOf(":")') && code265("src/routes/debug.ts").includes("const [ph, pp] = splitRelay(pr, 443);"));
-ok("池子探活不再内联拆地址", !code265("src/px/pool.ts").includes('lastIndexOf(":")') && code265("src/px/pool.ts").includes("splitRelay(k, 443)"));
+ok("池子探活不再内联拆地址", !code265("src/px/scan.ts").includes('lastIndexOf(":")') && code265("src/px/scan.ts").includes("splitRelay(k, 443)"));
 ok("名单打包不再内联拆地址", !code265("src/px/seed.ts").includes("k.slice(0, i)") && code265("src/px/seed.ts").includes("splitRelay(k, 443)"));
 ok("订阅渲染不再内联拆地址", !code265("src/views/sub.ts").includes('lastIndexOf(":")') && code265("src/views/sub.ts").includes("const [ip] = splitRelay(k, 443);"));
 
@@ -8139,6 +8140,77 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   calls.length = 0;
   await run278("?hl=1&do=1");
   ok("?hl=1&do=1 走 doFetch 读中继健康环", calls.includes("https://meter/hl") && W.S.doCalls >= 1);
+}
+
+// ── 279. 一轮池子维护从 pool.ts 拆成 PoolScan + AliveBoard（v7.279）──
+{
+  const poolSrc279 = fs.readFileSync("src/px/pool.ts", "utf8");
+  const scanSrc279 = fs.readFileSync("src/px/scan.ts", "utf8");
+  const aliveSrc279 = fs.readFileSync("src/px/alive.ts", "utf8");
+  ok("pool.ts 只剩门面：不再有分并发的那一段", !poolSrc279.includes("for (const seg of chunks"), poolSrc279.length);
+  ok("pool.ts 不再摆弄复测队列", !poolSrc279.includes("S.reProbe.splice"), "");
+  ok("scan.ts 是一轮维护的执行器", scanSrc279.includes("export class PoolScan"), "");
+  ok(
+    "cronScan 只剩一行委托",
+    /export async function cronScan\(env: Env, adm = 0\): Promise<void> \{\s*await new PoolScan\(env, adm\)\.run\(\);\s*\}/.test(scanSrc279),
+    "",
+  );
+  ok("run() 先收拾坏点表再读池子", scanSrc279.indexOf("sweepProbeBad();") < scanSrc279.indexOf("await pxGet(this.env);"), "");
+  ok(
+    "run() 的顺序：复测 → 探新 → 头部 → 其余 → 裁剪 → 国家码 → 统计 → 中转 → 落盘",
+    [
+      "await this.retestFlagged(",
+      "await this.probeNew(",
+      "await this.recheckHead(",
+      "await this.refreshRest(",
+      "if (this.pruneAndTrim())",
+      "await ALIVE.fillCountries();",
+      "this.trimStats();",
+      "await this.probeRelays();",
+      "await this.persistSeed();",
+    ].every((m, i, arr) => i === 0 || scanSrc279.indexOf(arr[i - 1]) < scanSrc279.indexOf(m)),
+    "",
+  );
+  ok("alive.ts 同时有冷却表与存活表", aliveSrc279.includes("export class ProbeCooldown") && aliveSrc279.includes("export class AliveBoard"), "");
+  ok(
+    "pool.ts 原样再导出旧名字（调用点零改动）",
+    ["probeBadSkip", "bumpProbeBad", "sweepProbeBad", "pxGet", "aliveList", "cronScan", "PoolScan", "ALIVE"].every((n) => poolSrc279.includes(n)),
+    "",
+  );
+
+  // 冷却表：连续失败到 SCAN_BAD_MAX 才跳过，成功一次就恢复；TTL 过了自动作废
+  const cool = "cool279.test:443";
+  eq("没记录时不跳过", W.PROBE_COOL.skip(cool), false);
+  W.PROBE_COOL.bump(cool, false);
+  eq("失败一次还不跳过", W.PROBE_COOL.skip(cool), false);
+  W.PROBE_COOL.bump(cool, false);
+  W.PROBE_COOL.bump(cool, false);
+  eq("连续失败到上限才跳过", W.PROBE_COOL.skip(cool), true);
+  W.PROBE_COOL.bump(cool, true);
+  eq("成功一次就重新可探", W.PROBE_COOL.skip(cool), false);
+
+  const cool2 = "cool279b.test:443";
+  W.PROBE_COOL.bump(cool2, false);
+  W.PROBE_COOL.bump(cool2, false);
+  W.PROBE_COOL.bump(cool2, false);
+  eq("TTL 内仍然跳过", W.PROBE_COOL.skip(cool2, Date.now() + 1000), true);
+  eq("TTL 过了自动恢复", W.PROBE_COOL.skip(cool2, Date.now() + W.SC.PROBE_BAD_TTL + 1), false);
+
+  // 上限：越过 PROBE_BAD_MAX 时把最久没更新的淘汰掉（表没有别的裁剪路径）
+  for (let i = 0; i < W.SC.PROBE_BAD_MAX + 20; i++) W.PROBE_COOL.bump("cap279-" + i + ".test:443", false);
+  const dropped = W.PROBE_COOL.sweep();
+  ok("越过上限会淘汰最久没更新的", dropped >= 20, "dropped=" + dropped);
+
+  // 存活表裁剪：先删不在池子里的，再按延迟从慢到快删
+  W.S.alive = new Map([
+    ["in279.test:443", { h: "in279.test", p: 443, cc: "", ms: 50 }],
+    ["out279.test:443", { h: "out279.test", p: 443, cc: "", ms: 10 }],
+  ]);
+  const trimmed = W.ALIVE.trimToMax([{ h: "in279.test", p: 443 }], 1);
+  eq("裁剪先删不在池子里的那条", W.S.alive.has("out279.test:443"), false);
+  eq("裁剪保住池子里的那条（哪怕它更慢）", W.S.alive.has("in279.test:443"), true);
+  eq("裁剪返回「动过表」", trimmed, true);
+  eq("池子够小就不动", W.ALIVE.trimToMax([{ h: "in279.test", p: 443 }], 8), false);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
