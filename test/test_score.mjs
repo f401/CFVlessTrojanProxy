@@ -9608,6 +9608,44 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("[320] /set 不把已更大的字节数改小", [s320.up, s320.down], [5, 10]);
 }
 
+/* ---------- 321. 池子报表：行视图 / 解释 / 组装 各成一法 ---------- */
+{
+  // 统一成 LF 再按 "\n  }\n" 切方法体：仓库里这个文件是 LF，但 checkout 出来可能是 CRLF
+  const pip321 = fs.readFileSync("src/routes/proxyip.ts", "utf8").replace(/\r\n/g, "\n");
+  // 按 2 空格缩进的收尾行切出方法体：这比按行号稳妥（文件会继续变长）
+  const body321 = (sig) => {
+    const at = pip321.indexOf(sig);
+    if (at < 0) return "";
+    const end = pip321.indexOf("\n  }\n", at);
+    return pip321.slice(at, end < 0 ? undefined : end + 4);
+  };
+  const live = body321("  private async liveRows(");
+  const why = body321("  private explain(");
+  const rep = body321("  private async poolReport()");
+  ok("[321] 行视图自己取跨 isolate 快照并排序", live.includes("nodeSnapGet(") && live.includes("nsOf(") && live.includes(".sort("));
+  ok("[321] 解释块自己算画像与分项", why.includes("HOSTS.rank(") && why.includes("scoreParts("));
+  ok("[321] 组装函数不再自己取快照", rep.length > 0 && !rep.includes("nodeSnapGet(") && !rep.includes("HOSTS.rank("));
+  eq("[321] 冷却键只算一次（不再两处各扫一遍 nstat）", (pip321.match(/S\.nstat\.entries\(\)/g) || []).length, 1);
+  ok("[321] 三个方法各守一段", live.split("\n").length <= 60 && why.split("\n").length <= 75 && rep.split("\n").length <= 60,
+    `${live.split("\n").length}/${why.split("\n").length}/${rep.split("\n").length}`);
+  ok("[321] 视图类上确实有这三个方法", typeof W.ProxyipView.prototype.liveRows === "function" && typeof W.ProxyipView.prototype.explain === "function" && typeof W.ProxyipView.prototype.poolReport === "function");
+
+  const mk321 = (q) => ({
+    env: { NODE_ENV: "test" },
+    url: new URL("https://sim.example.com/u/proxyip" + q),
+    host: "sim.example.com",
+    id: "u321b",
+  });
+  const d321 = await (await W.proxyip(mk321(""))).json();
+  eq("[321] 默认视图仍给完整快照", Array.isArray(d321.alive) && d321.pool.memOnly === true, true);
+  eq("[321] 默认视图不含解释块", "hostPref" in d321 || "explain" in d321, false);
+  const w321 = await (await W.proxyip(mk321("?why=1"))).json();
+  eq("[321] ?why=1 才带解释块", Array.isArray(w321.hostPref) && Array.isArray(w321.explain), true);
+  const l321 = await (await W.proxyip(mk321("?mode=lat"))).json();
+  eq("[321] 延迟模式仍能出快照", Array.isArray(l321.alive), true);
+  eq("[321] 手动/自动标签按绑定判断", d321.mode, "manual");
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

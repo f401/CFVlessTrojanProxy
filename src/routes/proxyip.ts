@@ -173,20 +173,23 @@ export class ProxyipView {
   }
 
   /**
-   * 功能：默认视图 —— 中转池现状（每条的代价、吞吐、失败率与是否在冷却），`?why=1` 附带选择原因。
-   * @returns {Promise<Response>} 池子快照
+   * 功能：把内存存活表与 DO 里的跨 isolate 快照并成每一行的视图，并按当前模式排序。
+   * @param {Awaited<ReturnType<typeof pxGet>>} px `pxGet` 的返回值（存活表与池子状态）
+   * @returns {{ rows: Array<{ node: string; n: number; bytes: number }>; modeQ: "lat" | "tput"; blacklist: string[] }} 排好序的行、模式与当时处在冷却期的键
    */
-  private async poolReport(): Promise<Response> {
+  private async liveRows(
+    px: Awaited<ReturnType<typeof pxGet>>,
+  ): Promise<{
+    rows: Array<{ node: string; n: number; bytes: number }>;
+    modeQ: "lat" | "tput";
+    blacklist: string[];
+  }> {
     const env = this.env;
-    const url = this.url;
-    const id = this.id;
-    const px = await pxGet(env);
     const alive = px.alive || [];
-    const stat: Record<string, unknown> = px.state || {};
-    const aliveKeys = (alive || []).map((x) => x.h + ":" + x.p);
+    const aliveKeys = alive.map((x) => x.h + ":" + x.p);
     const nsMap = nsOf(aliveKeys, aliveKeys.length);
-    // 并上 DO 里的跨 isolate 快照：否则换 isolate 看就是一片 kbps=0
-    const snapS = await nodeSnapGet(env, id);
+    // 并上 DO 里的跨 isolate 快照：否则换一个 isolate 看就是一片 kbps=0
+    const snapS = await nodeSnapGet(env, this.id);
     for (const [k, v] of Object.entries(snapS)) {
       if (!v) continue;
       const cur = nsMap[k] || {};
@@ -198,10 +201,9 @@ export class ProxyipView {
         n: Math.max(Number(cur.n) || 0, v.n || 0),
       };
     }
-    const modeQ = url.searchParams.get("mode") === "lat" ? "lat" : "tput";
-    const poolSize = Number(stat.poolN) || 0;
+    const modeQ: "lat" | "tput" = this.url.searchParams.get("mode") === "lat" ? "lat" : "tput";
     const blacklist = [...S.nstat.entries()].filter(([, s]) => s.blackUntil > Date.now()).map(([k]) => k);
-    const rows = (alive || [])
+    const rows = alive
       .map((x) => {
         const k = x.h + ":" + x.p;
         const ns: Record<string, number> = (nsMap as Record<string, Record<string, number>>)[k] || {};
@@ -221,18 +223,88 @@ export class ProxyipView {
           ok: ns.ok || 0,
           fail: ns.fail || 0,
           black: blacklist.includes(k),
-          cur: S.curs.lat === k || S.curs.tput === k,
         };
       })
-      .sort((a, b) => (modeQ === "lat" ? a.lat - b.lat : a.tput - b.tput));
+      .sort((a, b) => (modeQ === "lat" ? a.lat - b.lat : a.tput - b.tput))
+      .map((r) => ({ ...r, cur: S.curs.lat === r.node || S.curs.tput === r.node }));
+    return { rows, modeQ, blacklist };
+  }
 
+  /**
+   * 功能：?why=1 的解释块 —— 站点级偏好（最多 12 条）与前 8 行的分项。
+   *   只在诊断时算：每个站点要做一次画像排序，每条行要重算一次 `scoreParts`。
+   * @param {"lat" | "tput"} modeQ 查询模式
+   * @param {Array<{ node: string; n: number; bytes: number }>} rows 已排好序的行
+   * @returns {Record<string, unknown>} 可直接并进响应的两个字段
+   */
+  private explain(
+    modeQ: "lat" | "tput",
+    rows: Array<{ node: string; n: number; bytes: number }>,
+  ): Record<string, unknown> {
+    // 站点级偏好：哪些站被钉在了哪个节点上（最多 12 条，按样本数排）
+    const hostPref = [...S.hostNode.entries()]
+      .map(([h, m]) => {
+        let n = 0,
+          ok = 0,
+          bad = 0,
+          ttfb = 0;
+        for (const s of m.values()) {
+          n += s.n;
+          ok += s.ok;
+          bad += s.bad;
+          if (s.ttfb && (!ttfb || s.ttfb < ttfb)) ttfb = s.ttfb;
+        }
+        const rank = HOSTS.rank(h, modeQ);
+        return {
+          host: h,
+          nodes: m.size,
+          n,
+          ok,
+          bad,
+          bestTtfb: ttfb,
+          pick: rank.length ? rank[0].k : "",
+          pickV: rank.length ? Math.round(rank[0].v) : 0,
+        };
+      })
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 12);
+    const explain = rows.slice(0, 8).map((r) => {
+      const sp = scoreParts(r.node, modeQ);
+      return {
+        k: r.node,
+        v: Math.round(sp.score),
+        chosen: S.curs[modeQ] === r.node,
+        // 与排序用的是同一份分项，不再另写一套诊断公式
+        parts: {
+          latencyMs: Math.round(sp.latencyMs),
+          e10Ms: Math.round(sp.e10Ms),
+          pFailRisk: Math.round(sp.pFailRisk * 1000) / 1000,
+          pStall: Math.round(sp.pStall * 1000) / 1000,
+          capBps: Math.round(sp.capBps),
+          confB: Math.round(sp.confB * 1000) / 1000,
+          nEff: Math.round(sp.nEff * 10) / 10,
+          latN: Math.round(sp.latN * 10) / 10,
+          sampleAgeMs: sp.sampleAgeMs < 0 ? -1 : Math.round(sp.sampleAgeMs),
+          gate: sp.gate,
+        },
+        n: r.n,
+        bytes: r.bytes,
+      };
+    });
+    return { hostPref, explain };
+  }
+
+  /**
+   * 功能：默认视图 —— 中转池现状（每条的代价、吞吐、失败率与是否在冷却），`?why=1` 附带选择原因。
+   * @returns {Promise<Response>} 池子快照
+   */
+  private async poolReport(): Promise<Response> {
+    const env = this.env;
+    const px = await pxGet(env);
+    const stat: Record<string, unknown> = px.state || {};
+    const { rows, modeQ, blacklist } = await this.liveRows(px);
     const out: Record<string, unknown> = {
-      mode:
-        String(env.proxyip || "")
-          .trim()
-          .toLowerCase() === "auto"
-          ? "auto"
-          : "manual",
+      mode: "manual",
       colo: stat.colo || "??",
       cnt: cntView(),
       current: S.curs.tput || S.curs.lat || "",
@@ -251,7 +323,7 @@ export class ProxyipView {
       regions: await regionListAsync(env),
       blacklist,
       pool: {
-        size: poolSize,
+        size: Number(stat.poolN) || 0,
         gen: Number(stat.gen) || 0,
         poolKey: stat.poolKey || "",
         builtAt: Number(stat.builtAt) || 0,
@@ -259,61 +331,15 @@ export class ProxyipView {
       },
       stat: stat || {},
     };
-
-    if (url.searchParams.get("why") === "1") {
-      // 站点级偏好：哪些站被钉在了哪个节点上（最多 12 条，按样本数排）
-      const hp = [...S.hostNode.entries()]
-        .map(([h, m]) => {
-          let n = 0,
-            ok = 0,
-            bad = 0,
-            ttfb = 0;
-          for (const s of m.values()) {
-            n += s.n;
-            ok += s.ok;
-            bad += s.bad;
-            if (s.ttfb && (!ttfb || s.ttfb < ttfb)) ttfb = s.ttfb;
-          }
-          const rank = HOSTS.rank(h, modeQ);
-          return {
-            host: h,
-            nodes: m.size,
-            n,
-            ok,
-            bad,
-            bestTtfb: ttfb,
-            pick: rank.length ? rank[0].k : "",
-            pickV: rank.length ? Math.round(rank[0].v) : 0,
-          };
-        })
-        .sort((a, b) => b.n - a.n)
-        .slice(0, 12);
-      out.hostPref = hp;
-      out.explain = rows.slice(0, 8).map((r) => {
-        const sp = scoreParts(r.node, modeQ);
-        return {
-          k: r.node,
-          v: Math.round(sp.score),
-          chosen: S.curs[modeQ] === r.node,
-          // 与排序用的是同一份分项，不再另写一套诊断公式
-          parts: {
-            latencyMs: Math.round(sp.latencyMs),
-            e10Ms: Math.round(sp.e10Ms),
-            pFailRisk: Math.round(sp.pFailRisk * 1000) / 1000,
-            pStall: Math.round(sp.pStall * 1000) / 1000,
-            capBps: Math.round(sp.capBps),
-            confB: Math.round(sp.confB * 1000) / 1000,
-            nEff: Math.round(sp.nEff * 10) / 10,
-            latN: Math.round(sp.latN * 10) / 10,
-            sampleAgeMs: sp.sampleAgeMs < 0 ? -1 : Math.round(sp.sampleAgeMs),
-            gate: sp.gate,
-          },
-          n: r.n,
-          bytes: r.bytes,
-        };
-      });
+    // 手动/自动的判据只影响面板上的一个标签，放在组装之后算，别打断上面那段纯字段拼接
+    if (
+      String(env.proxyip || "")
+        .trim()
+        .toLowerCase() === "auto"
+    ) {
+      out.mode = "auto";
     }
-
+    if (this.url.searchParams.get("why") === "1") Object.assign(out, this.explain(modeQ, rows));
     return json(out);
   }
 }
