@@ -8566,17 +8566,21 @@ console.log("\n[287] 判定表只有一个文件：类型、表本体、单例�
   const psSrc = fs.readFileSync("src/route/psfacts.ts", "utf8");
   ok("四个旧文件都不再单独存在",
     ["ps-types.ts", "ps-prior.ts", "ps-outbox.ts", "ps-table.ts"].every((f) => !fs.existsSync("src/route/" + f)), "");
-  ok("形状、先验、队列、表本体现在同在一个文件",
-    psSrc.includes("export class PsFacts") && psSrc.includes("export class PsOutbox") &&
-      psSrc.includes("export function psPrior(") && psSrc.includes("export const PS_TTL = FACT_TTL.ps;"), "");
+  ok("形状、先验、表本体现在同在一个文件，且队列由基类提供",
+    psSrc.includes("export class PsFacts extends FactTable<") &&
+      psSrc.includes("export function psPrior(") && psSrc.includes("export const PS_TTL = FACT_TTL.ps;") &&
+      !psSrc.includes("export class PsOutbox"), "");
   ok("只留一个单例", (psSrc.match(/export const PS = new PsFacts\(\);/g) || []).length === 1);
 ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", "psOk", "psBest", "psFactor", "psSnap"].some((n) => psSrc.includes(`export function ${n}(`)) && ["note", "okOf", "bestOf", "factor", "snap"].every((m) => psSrc.includes(`  ${m}(`)), "");
   ok("待发队列带批次上限", psSrc.includes("export const PS_BATCH = 60;"), "");
   // 队列类同在一个文件里，所以「有没有自己记账」要看 PsFacts 的类体，而不是整个文件。
   const psBody = psSrc.slice(psSrc.indexOf("export class PsFacts"));
-  ok("表本体持有队列而不是自己记账",
-    psBody.includes("private outbox = new PsOutbox();") && !psBody.includes("private pending") && !psBody.includes("private sent"), "");
-  ok("表本体用 TTL 判过期", psSrc.includes("now - r.at > PS_TTL"));
+  ok("表本体不再自己记账（pending/sent 在基类）",
+    !psBody.includes("private outbox") && !psBody.includes("private pending") && !psBody.includes("private sent") &&
+      psBody.includes("this.put(k, { q: Math.round(q), n, at: now, top }, now);"), "");
+  ok("表本体声明寿命，过期判定在基类",
+    psSrc.includes("protected get ttlMs(): number {") && psSrc.includes("return PS_TTL;") &&
+      !psSrc.includes("now - r.at > PS_TTL"), "");
   ok("PsWire 形状只声明一次", (psSrc.match(/export interface PsWire \{/g) || []).length === 1);
   // 行为面：门面转发仍然指向真实实现
   ok("单例仍是 PsFacts", W.PS instanceof W.PsFacts);
@@ -8948,6 +8952,54 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("冷却表不再有模块函数", !/export function (probeBadSkip|sweepProbeBad)\(/.test(aliveSrc303));
 }
 
+// 第 305 组：事实表的待上报队列只有一份实现（继承 FactTable），不再各抄一遍
+{
+  const egSrc = fs.readFileSync("src/route/egfacts.ts", "utf8");
+  const psSrc = fs.readFileSync("src/route/psfacts.ts", "utf8");
+  const deadSrc = fs.readFileSync("src/route/deadfacts.ts", "utf8");
+  const dnsSrc = fs.readFileSync("src/route/dnsfacts.ts", "utf8");
+  ok("四张事实表都继承同一个基类",
+    [egSrc, psSrc, deadSrc, dnsSrc].every((x) => /export class \w+ extends FactTable</.test(x)), "");
+  ok("出口族与成功率表不再自己维护 pending/sent",
+    !egSrc.includes("private sent") && !egSrc.includes("private pend") &&
+      !psSrc.includes("private sent") && !psSrc.includes("private pending") &&
+      !psSrc.includes("export class PsOutbox"), "");
+  ok("批次上限各自在子类里声明（eg 16 / ps 60）",
+    egSrc.includes("protected get batchMax(): number {") && egSrc.includes("return 16;") &&
+      psSrc.includes("return PS_BATCH;"), "");
+  // 行为面：同一批没有被 ack 之前会被重复交出（重发 = 重试，不是重复计数）
+  W.PS.clear();
+  W.PS.note("ps305.example", "203.0.113.71", true, Date.now());
+  {
+    const d1 = W.PS.delta();
+    const d2 = W.PS.delta();
+    eq("未 ack 时同一行会被重复交出（重试语义）", d1.length === 1 && d2.length === 1, true);
+    W.PS.ack();
+    eq("ack 之后不再重发", W.PS.delta().length, 0);
+  }
+  // nack 什么都不清：失败的那批必须还在，否则这条证据永远到不了 DO
+  W.PS.clear();
+  W.PS.note("ps305.example", "203.0.113.72", false, Date.now());
+  {
+    const d1 = W.PS.delta();
+    W.PS.nack();
+    const d2 = W.PS.delta();
+    eq("nack 之后同一行原样重发", d1.length === 1 && d2.length === 1 && d2[0].k === d1[0].k, true);
+  }
+  // 出口族表：同族重复观测不刷新 at（否则过期时间会被无限推后）
+  W.EG.clear();
+  {
+    const t0 = Date.now() - 5 * 60000;
+    W.EG.note("203.0.113.73", 4, t0 + 60000);
+    const before = W.EG.snap()[0].at;
+    W.EG.note("203.0.113.73", 4, t0);
+    eq("同族且更旧的观测不覆盖", W.EG.snap()[0].at, before);
+    W.EG.note("203.0.113.73", 6, t0 + 60000);
+    eq("换族才覆盖", W.EG.famOf("203.0.113.73"), 6);
+  }
+  W.PS.clear();
+  W.EG.clear();
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

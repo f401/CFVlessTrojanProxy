@@ -160,7 +160,7 @@ export { CAP, CAP_MAX, CAP_TTL, CapFacts } from "./route/capfacts";
 export { ALIVE_TARGET, srcStat } from "./px/aliveplan";
 export { FACT_ALL, factList, factOn, factParse } from "./route/factflags";
 export { factMul } from "./route/factmul";
-export { PS, PS_BATCH, PS_TTL, PsFacts, PsOutbox, psPrior } from "./route/psfacts";
+export { PS, PS_BATCH, PS_TTL, PsFacts, psPrior } from "./route/psfacts";
 export { DEAD, DEAD_N, DeadFacts } from "./route/deadfacts";
 export { FO, FirstObs, FO_GRAY, FO_LIMIT, FO_PAGE } from "./core/firstobs";
 export { LAT, LatObs } from "./core/latobs";

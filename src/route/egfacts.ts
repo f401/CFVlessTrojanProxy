@@ -7,13 +7,26 @@
 // 纪律（v8 §15 的 I2）：这里只产出**代价偏置**，永远不参与「能不能用」的判定。
 // 一个 `eg=6` 的中继仍然可能在别的站点头等好使，把它从候选里删掉就是 7.57 的老路
 // （通配硬封锁 → 可用池变薄 → 失败率 10%→50%）。
+//
+// 生命周期（有界化、分批上行、ack/nack 的纪律）全部继承自 `FactTable`：这张表原来自己也抄过
+// 一份 `pend`/`sent` + `delta`/`ack`/`nack`，与 `ps`/`blk`/`dead`/`dns` 一字不差 —— 抄四遍就会
+// 修两遍（7.143、7.177）。现在子类只回答「行长什么样」和「三个刻度是多少」。
 import { cnt } from "../core/counter";
 import { FACT_TTL, PAGE_ABS } from "../core/facts";
+import { FactTable } from "./fact-table";
 
-/** 一条出口族事实：`i` 中继 IP，`f` 族（4 或 6），`at` 观测时间 */
+/** 一条出口族事实的线格式：`i` 中继 IP，`f` 族（4 或 6），`at` 观测时间 */
 export interface EgRow {
   i: string;
   f: number;
+  at: number;
+}
+
+/** 表内一行：键已经是 IP，所以行里只留族与时间 */
+interface EgEntry {
+  /** 出口族：4 或 6 */
+  f: number;
+  /** 最后一次观测时间 */
   at: number;
 }
 
@@ -24,19 +37,48 @@ export const EG_TTL = FACT_TTL.eg;
 const EG_MAX = 512;
 
 /**
- * 功能：出口族事实表。持有 (中继 IP → 族) 的记忆、待上报增量与合并逻辑。
+ * 功能：出口族事实表 —— 持有 (中继 IP → 族) 的记忆，增量上行与合并交给基类。
  *
  * 为什么要有待上报（pending）而不是「记下就算数」：增量是搭 `/meter/add` 的车上去的，
  * 一次 POST 失败（1102、超时）如果已经把本地标记成「已发送」，这条事实就永久丢了。
  * 所以取增量时不清理，等 DO 回 200 后由 `ack()` 统一清理，失败走 `nack()` 重发。
  */
-export class EgFacts {
-  /** 已知事实：IP → { f, at } */
-  private bySite = new Map<string, { f: number; at: number }>();
-  /** 尚未确认送达的增量：IP → { f, at } */
-  private pend = new Map<string, { f: number; at: number }>();
-  // 这一批真正发出去的行（键 → 发出时的 at）：ack 只清它们，见 ack() 的注释
-  private sent = new Map<string, number>();
+export class EgFacts extends FactTable<EgEntry, EgRow> {
+  /** 寿命：出口族一条事实的有效期 */
+  protected get ttlMs(): number {
+    return EG_TTL;
+  }
+
+  /** 上限：超出就按观测时间淘汰最旧的 */
+  protected get maxRows(): number {
+    return EG_MAX;
+  }
+
+  /** 每批上限：`/meter/add` 的车身要小，一次最多交 16 行 */
+  protected get batchMax(): number {
+    return 16;
+  }
+
+  /**
+   * 功能：把一行编成线格式（键已经是 IP）。
+   * @param {string} key 中继 IP
+   * @param {EgEntry} row 行
+   * @returns {EgRow} 线格式
+   */
+  protected toWire(key: string, row: EgEntry): EgRow {
+    return { i: key, f: row.f, at: row.at };
+  }
+
+  /**
+   * 功能：把线格式解码成一行（坏行返回 null）。
+   * @param {EgRow} wire 线格式
+   * @returns {{ key: string; row: EgEntry } | null} 键与行；族不是 4/6 或时间缺失就整条跳过
+   */
+  protected parseWire(wire: EgRow): { key: string; row: EgEntry } | null {
+    if (!wire || typeof wire.i !== "string" || (wire.f !== 4 && wire.f !== 6)) return null;
+    if (typeof wire.at !== "number") return null;
+    return { key: wire.i, row: { f: wire.f, at: wire.at } };
+  }
 
   /**
    * 功能：记一条出口族事实。
@@ -47,12 +89,30 @@ export class EgFacts {
    */
   note(ip: string, fam: number, at = Date.now()): void {
     if (!ip || (fam !== 4 && fam !== 6)) return;
-    const cur = this.bySite.get(ip);
+    const cur = this.getNow(ip);
     // 同族且不比已知的新：什么都不用做（避免每次请求都刷新 at，把过期时间无限推后）
     if (cur && cur.f === fam && cur.at >= at) return;
-    this.bySite.set(ip, { f: fam, at });
-    this.pend.set(ip, { f: fam, at });
-    this.trim(at);
+    this.put(ip, { f: fam, at }, at);
+  }
+
+  /**
+   * 功能：读本地那一行，不做过期删除之外的副作用（供 `note` 判「要不要重写」）。
+   * @param {string} ip 中继 IP
+   * @returns {EgEntry | null} 仍然有效的行
+   */
+  private getNow(ip: string): EgEntry | null {
+    return this.get(ip, Date.now());
+  }
+
+  /**
+   * 功能：取待上报的增量（不清空，等 ack），顺带记一条「这批发了多少」的计数。
+   * @returns {EgRow[]} 最多 16 行：`/meter/add` 的车身要小，剩下的下一轮再发
+   */
+  delta(): EgRow[] {
+    const out = super.delta();
+    // 计数只在这里：面板上「eg 上行量」要能看出是不是每轮都在发，而不是只有失败时才有信号
+    if (out.length) cnt("egSent", out.length);
+    return out;
   }
 
   /**
@@ -62,13 +122,8 @@ export class EgFacts {
    * @returns {number} 4 / 6 / 0（0 表示未知或已过期）
    */
   famOf(ip: string, now = Date.now()): number {
-    const e = this.bySite.get(ip);
-    if (!e) return 0;
-    if (now - e.at > EG_TTL) {
-      this.bySite.delete(ip);
-      return 0;
-    }
-    return e.f;
+    const e = this.get(ip, now);
+    return e ? e.f : 0;
   }
 
   /**
@@ -77,9 +132,9 @@ export class EgFacts {
    * 而 0.95/1.05 这种「轻微偏置」会被 relCost/psFactor 的差异淹没，等于没上线（三轮 A/B 差异都在噪声内）。
    * 为什么未知族不能压太狠：未知里也可能有 v4，压到最底会让探索永远学不到新 v4（`egUnk` 一直是 5/8）。
    * 为什么是乘数不是过滤：v8 §15 的 I1 —— `eg` 只改排序，永不剔除候选；唯一硬排除是 `dead`。
-   * @param ip 中继 IP
-   * @param cf 目标是否 CF 托管（只有这类站点对出口族敏感）
-   * @param now 当前时间
+   * @param {string} ip 中继 IP
+   * @param {boolean} cf 目标是否 CF 托管（只有这类站点对出口族敏感）
+   * @param {number} now 当前时间
    * @returns {number} 代价乘数
    */
   bias(ip: string, cf = false, now = Date.now()): number {
@@ -93,105 +148,28 @@ export class EgFacts {
   }
 
   /**
-   * 功能：取待上报的增量（不清空，等 ack）。
-   * @returns {EgRow[]} 最多 16 行：`/meter/add` 的车身要小，剩下的下一轮再发
-   */
-  delta(): EgRow[] {
-    const out: EgRow[] = [];
-    for (const [i, e] of this.pend) {
-      out.push({ i, f: e.f, at: e.at });
-      this.sent.set(i, e.at);
-      if (out.length >= 16) break;
-    }
-    if (out.length) cnt("egSent", out.length);
-    return out;
-  }
-
-  /** 功能：上报成功 —— 待发增量正式生效。@returns {void} */
-  ack(): void {
-    // 只清这一批真正发出去的行：delta() 有上限（本表最多 16 行），一次清空全部 pending 会让
-    // 超出上限的行既没发出去、也不再重发 —— 证据就这样永久丢了（v7.143 修）。
-    // 只在值没变新时才清：delta 与 ack 之间可能又记了一条更新的观测，那条还没发过。
-    for (const [k, at] of this.sent) {
-      const cur = this.pend.get(k);
-      if (cur && cur.at <= at) this.pend.delete(k);
-    }
-    this.sent.clear();
-  }
-
-  /** 功能：上报失败 —— 丢弃待发标记，下一轮重新登记（值仍在 `m` 里，重发不会丢数据）。@returns {void} */
-  nack(): void {
-    this.sent.clear();
-    // 保留 pending：上报失败时下一轮 delta() 会把同一批原样再给一次（重发 = 重试，幂等靠 at）。
-    // 清掉它就等于「这条证据从此不会送到 DO」—— 与 v8 §3 的 pending 语义相反（只有 ack 才清）。
-  }
-
-  /**
-   * 功能：合并远端事实（冷启动拉回来的那份）。
-   * @param {EgRow[]} rows 远端行
-   * @returns {number} 真正被采纳的行数（更旧的忽略，便于观察合并效果）
-   */
-  load(rows: EgRow[]): number {
-    let n = 0;
-    for (const r of rows) {
-      if (!r || typeof r.i !== "string" || (r.f !== 4 && r.f !== 6) || typeof r.at !== "number") continue;
-      const cur = this.bySite.get(r.i);
-      if (cur && cur.at >= r.at) continue;
-      this.bySite.set(r.i, { f: r.f, at: r.at });
-      n += 1;
-    }
-    this.trim(0);
-    return n;
-  }
-
-  /**
    * 功能：列出已知 v4 出口，最近的在前。
    * 用途：冷 isolate 里 `S.alive` 还是空的时候，用它兜底挑一条「已验证能把页面送回来」的中继，
    * 而不是退回直连（CF→CF 直连几乎必被自家边缘拒）。
-   * @param now 当前时间（用于过滤过期行）
+   * @param {number} now 当前时间（用于过滤过期行）
    * @returns {string[]} 中继 IP 列表
    */
   v4List(now = Date.now()): string[] {
-    this.trim(now);
-    const out: Array<{ i: string; at: number }> = [];
-    for (const [i, r] of this.bySite) if (r.f === 4) out.push({ i, at: r.at });
-    out.sort((a2, b2) => b2.at - a2.at);
-    return out.map((x) => x.i);
+    const out = this.entries(now)
+      .filter(([, row]) => row.f === 4)
+      .map(([ip, row]) => ({ ip, at: row.at }));
+    out.sort((a, b) => b.at - a.at);
+    return out.map((x) => x.ip);
   }
 
   /**
    * 功能：导出当前有效的 `eg` 行（供 `/health` 与调试口展示）。
-   * @returns {EgRow[]} 出口族事实行
+   * @returns {EgRow[]} 出口族事实行（最近的 64 条，最新的在前）
    */
   snap(): EgRow[] {
-    const now = Date.now();
-    const out: EgRow[] = [];
-    for (const [i, e] of this.bySite) if (now - e.at <= EG_TTL) out.push({ i, f: e.f, at: e.at });
-    out.sort((a, b) => b.at - a.at);
-    return out.slice(0, 64);
-  }
-
-  /** 功能：清零（单测用）。@returns {void} */
-  clear(): void {
-    this.bySite.clear();
-    this.pend.clear();
-    this.sent.clear();
-  }
-
-  /**
-   * 功能：有界化 —— 清掉过期行，仍超上限就按观测时间淘汰最旧的。
-   * @param {number} now 当前时间
-   * @returns {void}
-   */
-  private trim(now: number): void {
-    if (this.bySite.size <= EG_MAX) {
-      if (now > 0) for (const [ip, e] of this.bySite) if (now - e.at > EG_TTL) this.bySite.delete(ip);
-      return;
-    }
-    if (now > 0) for (const [ip, e] of this.bySite) if (now - e.at > EG_TTL) this.bySite.delete(ip);
-    if (this.bySite.size <= EG_MAX) return;
-    const rows = [...this.bySite.entries()].sort((a, b) => a[1].at - b[1].at);
-    for (let i = 0; i < rows.length - EG_MAX; i++) this.bySite.delete(rows[i][0]);
+    const rows = this.entries(Date.now()).map(([ip, row]) => ({ i: ip, f: row.f, at: row.at }));
+    rows.sort((a, b) => b.at - a.at);
+    return rows.slice(0, 64);
   }
 }
 
@@ -249,13 +227,12 @@ export function egDerive(ip: string, down: number, ev: EgEv = {}, now = Date.now
   return 0;
 }
 
-
 /**
  * 功能：统计一组中继的出口族分布 —— `alive` 里到底有几条 v4 出口，是 v8 的一等预算项。
  * 为什么要它：好出口为 0 条时排序再好也只有个位数成功率（0→1 条值 82 个点），
  * 所以「有几条 v4 出口」必须能在 `/health` 上直接看到，而不是靠猜。
- * @param ips 中继 IP 列表
- * @param now 当前时间
+ * @param {string[]} ips 中继 IP 列表
+ * @param {number} now 当前时间
  * @returns {{ v4: number, v6: number, unk: number }} 分布
  */
 export function egCounts(ips: string[], now = Date.now()): { v4: number; v6: number; unk: number } {
