@@ -271,6 +271,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `DebugSuite`（`DEBUG`） | `src/routes/debug.ts` | 调试路由四个组件的持有者（读表 / 测网 / 写操作 / 计量探测）：收成一个对象后，「这次调试动用了哪些能力」在同一处读完，也是判断「某个参数会不会真的拨号」的入口 |
 | `DebugMeterProbes` | `src/routes/debug.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
 | `DebugTables` | `src/routes/debug.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：只读表、不拨号、不改状态 |
+| `ProxyipView` | `src/routes/proxyip.ts` | `/proxyip` 的四个视图与两个管理员动作各占一个方法：只读报表（用量、源健康）不碰内存，`?reset`/`?refresh` 会清单并跑一轮探活，默认视图才去等 `pxGet` 与 DO 快照 |
 | `DebugNets` | `src/routes/debug-nets.ts` | 会对外拨号的诊断分支门面：七个分支在四个组件里，这里只按「只读 → 测速 → 诊断 → 探活 → 抓源 → 钉住 → 明文 HTTP → 判定批 → 真握手 → 回填 → seed → 兜底」的顺序派发（顺序变了，`?diag=x&refill=1` 会先花一次抓源） |
 | `DebugBench` | `src/routes/debug-nets.ts` | 出口测速（花 fetch 子请求，同文件） |
 | `DebugDiag` | `src/routes/debug-nets.ts` | 站点诊断（读样本免费、主动探活占 `connect()`，同文件） |

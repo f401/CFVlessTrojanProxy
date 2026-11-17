@@ -9400,6 +9400,19 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("reset 清空缓存", W.CANDS.cache.at.lat || 0, 0);
 }
 
+/* ---------- 316. /proxyip 的五个分支各占一个方法（视图对象） ---------- */
+{
+  const pipSrc316 = fs.readFileSync("src/routes/proxyip.ts", "utf8");
+  ok("代理池路由有视图类", /^export class ProxyipView \{/m.test(pipSrc316));
+  ok("入口只做对象创建与一次执行", /export async function proxyip\(c: UserCtx\): Promise<Response> \{\s*return new ProxyipView\(c\)\.run\(\);\s*\}/m.test(pipSrc316));
+  ok("五个分支各是一个方法", ["dayReport", "sourceReport", "resetPool", "refreshPool", "poolReport"].every((n) => pipSrc316.includes("private async " + n + "(") || pipSrc316.includes("private async " + n + "()") || pipSrc316.includes("private " + n + "(")));
+  ok("分派顺序与原来一致（只读在前、动作在后）", pipSrc316.indexOf("this.dayReport()") < pipSrc316.indexOf("this.resetPool()") && pipSrc316.indexOf("this.sourceReport()") < pipSrc316.indexOf("this.refreshPool()"));
+  ok("只读报表不改内存（?day 不碰 S.alive）", pipSrc316.slice(pipSrc316.indexOf("private async dayReport"), pipSrc316.indexOf("private async sourceReport")).indexOf("S.alive") < 0);
+  ok("两个写动作都要管理员", pipSrc316.slice(pipSrc316.indexOf("private async resetPool"), pipSrc316.indexOf("private async poolReport")).split("adminOnly(this.c)").length - 1 === 2);
+  ok("refresh 被 cron 占住时如实回绝（带持有毫秒）", pipSrc316.includes("heldMs: CRONLOCK.age()"));
+  ok("视图持有本次请求的上下文", pipSrc316.includes("private readonly url: URL;") && pipSrc316.includes("private readonly id: string;"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
