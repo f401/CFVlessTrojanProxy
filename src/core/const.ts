@@ -82,6 +82,9 @@ export const HIST_BASE = 16 * 1024; // 直方图起点 16 KB/s
 export const HIST_N = 12; // 16K ~ 32M
 export const RTT_MAX = 24; // 每个用户最多记 24 个入口标签（防 ?ip= 刷爆快照）
 
+/** 活跃池的目标规模：低于它就认为「池子不够」（/health 的 relays.short 判据）*/
+export const ALIVE_TARGET = 16;
+
 /** 信誉表落盘的最小间隔（全局闸门，防多 isolate 叠加写 KV） */
 export const SEED_WRITE_GAP = 90 * 60000;
 

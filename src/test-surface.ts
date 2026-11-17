@@ -41,7 +41,7 @@ export {
 export { regionEntries } from "./views/sub-common";
 export { SUBVIEW, SubscriptionView } from "./views/sub";
 export { ROUTES, RouteTable } from "./routes/table";
-export { PAGES, PageView } from "./views/pageview";
+export { PAGES, PageView } from "./views/panel";
 export { loadRtt, rttLearn, rttMark } from "./nodes/metrics";
 export { HOSTS, HostProfile, siteKey } from "./nodes/metrics";
 export { subHeaders, effectiveQuota } from "./core/quota";
@@ -154,7 +154,7 @@ export { Mode, St } from "./core/enums";
 export { BoundedMap } from "./core/table";
 export { EG, EG_BIG, EG_TINY, EG_TTL, EgFacts, egCounts, egDerive } from "./route/egfacts";
 export { CAP, CAP_MAX, CAP_TTL, CapFacts } from "./route/capfacts";
-export { ALIVE_TARGET, srcStat } from "./px/aliveplan";
+export { ALIVE_TARGET } from "./core/const";
 export { FACT_ALL, factList, factOn, factParse } from "./route/factflags";
 export { factMul } from "./route/factmul";
 export { PS, PS_BATCH, PS_TTL, PsFacts, psPrior } from "./route/psfacts";

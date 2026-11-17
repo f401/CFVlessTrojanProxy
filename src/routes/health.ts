@@ -11,8 +11,9 @@ import { DEAD } from "../route/deadfacts";
 import { FO, LAT } from "../core/obs";
 import { DNS } from "../route/dnsfacts";
 import { egCounts } from "../route/egfacts";
+import { SOURCES } from "../px/probe";
 import { CAP } from "../route/capfacts";
-import { ALIVE_TARGET, srcStat } from "../px/aliveplan";
+import { ALIVE_TARGET } from "../core/const";
 import { factList } from "../route/factflags";
 import { BLK } from "../route/blkfacts";
 
@@ -40,7 +41,7 @@ cf: FACT.snap(),
     lat: LAT.snap(),
     dns: DNS.snap(),
     cap: CAP.snap(),
-    src: srcStat(),
+    src: SOURCES.stat(),
     facts: factList(c.env),
     // short 是唯一的「池子够不够」判据：低于目标时 cron 那套扫描已经在满预算跑（7.179）
     relays: (() => { const ips = [...S.alive.values()].map((x) => String(x.h || "")).filter(Boolean); const c = egCounts(ips); return { alive: ips.length, target: ALIVE_TARGET, short: ips.length < ALIVE_TARGET, eg4: c.v4, eg6: c.v6, egUnk: c.unk }; })(),

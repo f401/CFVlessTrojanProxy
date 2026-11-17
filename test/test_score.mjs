@@ -2935,11 +2935,11 @@ console.log("\n91) 活跃池目标：只作判据（加码函数已删）");
   ok("/health 的 relays 给出目标规模与「不够」标记", hsrc.includes("target: ALIVE_TARGET") && hsrc.includes("short: ips.length < ALIVE_TARGET"));
   // 注释里可以留历史说明，只禁「调用」——因此按 `alivePlan(` 判，而不是按名字
   ok("cron 不再调用加码函数", !/alivePlan\s*\(/.test(fs.readFileSync("src/routes/cron.ts", "utf8")));
-  const s0 = W.srcStat();
+  const s0 = W.SOURCES.stat();
   eq("初始没有失败源", s0.bad, 0);
   W.SOURCES.note("https://example.invalid/list.txt", false);
   W.SOURCES.note("https://example.invalid/list.txt", false);
-  const s1 = W.srcStat();
+  const s1 = W.SOURCES.stat();
   eq("连续失败的源计入", s1.bad, 1);
   eq("带恢复时间", s1.retryAt > Date.now(), true);
 }
@@ -9124,8 +9124,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   const panel = fs.readFileSync("src/views/panel.ts", "utf8");
   eq(`[${g}] 面板：五个渲染入口都在 panel.ts`,
     ["renderHtml", "renderLogin", "renderAdminHint", "renderAdmin", "renderStatsHtml"].every((x) => new RegExp("export function " + x + "\\(").test(panel)), true);
-  ok(`[${g}] 页面壳一次性从 panel.ts 取齐（不再分三条 import）`,
-    fs.readFileSync("src/views/pageview.ts", "utf8").includes('from "./panel"'));
+  ok(`[${g}] 页面壳与五个渲染入口同住 panel.ts（页壳不再是单独文件）`,
+    !fs.existsSync("src/views/pageview.ts") && !fs.existsSync("src/views/html.ts") && panel.includes("export class PageView") && panel.includes("export function fmtBytes("));
 
   const dbg = fs.readFileSync("src/routes/debug.ts", "utf8");
   eq(`[${g}] 调试路由：四段都在一个文件`,
@@ -9248,6 +9248,57 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     eq("延迟分布把成功与失败各记一条", latSnap311.n, 2);
     eq("延迟分布的 p50 就是那条成功样本", latSnap311.p50, 800);
   }
+
+// ═══ 第 312 组：源健康度自报概览、视图页壳并入面板（7.312）═══
+{
+  const g = 312;
+  const probeSrc312 = fs.readFileSync("src/px/probe.ts", "utf8");
+  const panelSrc312 = fs.readFileSync("src/views/panel.ts", "utf8");
+  const constSrc312 = fs.readFileSync("src/core/const.ts", "utf8");
+  const healthSrc312 = fs.readFileSync("src/routes/health.ts", "utf8");
+
+  ok(`[${g}] 三份被并掉的旧文件都不在了`,
+    !fs.existsSync("src/px/aliveplan.ts") && !fs.existsSync("src/views/html.ts") && !fs.existsSync("src/views/pageview.ts"));
+
+  eq(`[${g}] 池子目标规模回到常量表（只声明一次）`,
+    W.ALIVE_TARGET === 16 && (constSrc312.match(/export const ALIVE_TARGET = 16;/g) || []).length === 1, true);
+
+  ok(`[${g}] 源健康度自己回答「补货是不是一直失败」`,
+    probeSrc312.includes("  stat(now = Date.now()): { bad: number; retryAt: number } {"));
+  ok(`[${g}] stat 不数已到期的条目（到期即视为健康源重试）`,
+    probeSrc312.includes("if (!v.until || v.until <= now) continue;"));
+  ok(`[${g}] /health 走单例方法而不是模块函数`,
+    healthSrc312.includes("src: SOURCES.stat(),") && !healthSrc312.includes("srcStat("));
+
+  ok(`[${g}] 面板：五个渲染入口 + 转义/字节格式化 + 页壳同住 panel.ts`,
+    ["renderHtml", "renderLogin", "renderAdminHint", "renderAdmin", "renderStatsHtml"].every((x) => panelSrc312.includes("export function " + x + "(")) &&
+      panelSrc312.includes("export function fmtBytes(") &&
+      panelSrc312.includes("export function escapeHtml(") &&
+      panelSrc312.includes("export class PageView"));
+  ok(`[${g}] 面板不再 import 已并掉的两个文件`,
+    !panelSrc312.includes('from "./pageview"') && !panelSrc312.includes('from "./html"'));
+
+  const tsFiles312 = [];
+  const walk312 = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const q = dir + "/" + e.name;
+      if (e.isDirectory()) walk312(q);
+      else if (e.name.endsWith(".ts")) tsFiles312.push(q);
+    }
+  };
+  walk312("src");
+  ok(`[${g}] 源码文件数已降到 113 以内（当前 ${tsFiles312.length}）`, tsFiles312.length <= 113);
+
+  // 行为面：一次失败就进冷却统计；成功清零后不再计入
+  const src312 = "https://example.invalid/poolsrc-312.txt";
+  W.SOURCES.note(src312, false);
+  const st312 = W.SOURCES.stat();
+  ok(`[${g}] 失败一次就出现在概览里（bad ≥ 1，retryAt > 0）`, st312.bad >= 1 && st312.retryAt > Date.now(), true);
+  W.SOURCES.note(src312, true);
+  const clean312 = W.SOURCES.snap()[src312];
+  ok(`[${g}] 成功清零后这一条不再占冷却位（until 归零）`, clean312 && clean312.until === 0 && clean312.n === 0, true);
+  ok(`[${g}] stat 的返回形状固定`, Object.keys(W.SOURCES.stat()).sort().join(",") === "bad,retryAt");
+}
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

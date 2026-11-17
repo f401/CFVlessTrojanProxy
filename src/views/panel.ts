@@ -1,8 +1,88 @@
-import { escapeHtml, fmtBytes } from "./html";
 import { loadNodes, pickProtos, COLO_CITY } from "./sub-common";
 import { P_T, VERSION } from "../core/util";
 import { effectiveQuota } from "../core/quota";
 
+// ---- 并入自 html.ts ----
+/* HTML 小工具：转义与字节格式化 */
+
+/**
+ * 功能：把字节数格式化成人类可读形式（KB/MB/GB，保留一位小数）。
+ * @param n 字节数
+ * @returns 字符串
+ */
+export function fmtBytes(n: number) {
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = Number(n) || 0;
+  while (v >= 1024 && i < u.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(i ? 1 : 0)} ${u[i]}`;
+}
+
+/**
+ * 功能：HTML 转义（面板与错误页所有插值都必须过它）。
+ * @param s 任意值（会先 String 化）
+ * @returns 转义后的字符串
+ */
+export function escapeHtml(s: unknown) {
+  const MAP: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return String(s).replace(/[&<>"']/g, (c) => MAP[c]);
+}
+
+// ---- 并入自 pageview.ts ----
+export interface StatsIn {
+  env: Env;
+  id: string;
+  stats: StatsView;
+  learned: Record<string, RttEntry>;
+  nodeRows: StatsNodeRow[];
+  errs: ErrItem[];
+}
+
+export interface AdminIn {
+  url: URL;
+  users: { list: UserRec[] };
+  statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }>;
+  pageKey?: string;
+}
+
+/**
+ * 页面视图（P6-3）：面板 / 统计 / 登录 / 管理台都从这一个对象出。
+ * 序列化全在 views 层，routes 只负责取数与包 header。
+ */
+export class PageView {
+  /** 用户面板（/<uuid>/page） */
+  panel(env: Env, url: URL, id: string, host: string, key: string, info: PanelInfo): string {
+    return renderHtml(env, url, id, host, key, info);
+  }
+
+  /** 用量统计页（/<uuid>/stats?format=html） */
+  stats(o: StatsIn): string {
+    return renderStatsHtml(o.env, o.id, o.stats, o.learned, o.nodeRows, o.errs);
+  }
+
+  /** 登录页 */
+  login(nonce: string, err?: string | null): string {
+    return renderLogin(nonce, err);
+  }
+
+  /** 管理台 */
+  admin(o: AdminIn): string {
+    return renderAdmin(o.url, o.users, o.statsMap, o.pageKey || "");
+  }
+
+  /** 未配置 adminKey 的提示页 */
+  adminHint(): string {
+    return renderAdminHint();
+  }
+}
+
+/** 进程内唯一实例 */
+export const PAGES = new PageView();
+
+// ---- 门面（对外导出面保持不变） ----
 // ---- 并入自 panel-admin.ts ----
 /**
  * 渲染管理面板（用户列表 + 用量 + 增删操作）。

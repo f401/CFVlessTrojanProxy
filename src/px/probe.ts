@@ -143,6 +143,26 @@ export class SourceHealth {
     for (const [k, v] of this.bad) out[k] = { n: v.n, until: v.until };
     return out;
   }
+
+  /**
+   * 功能：源健康度概览 —— /health 用，回答「补货是不是一直失败」。
+   *
+   * 为什么必须有这个数：补货成功与否决定了能不能维持活跃池的规模，而 6 个公开源实测
+   * 每轮都有 1~2 个失败（可达 1/6、4/6、5/6），失败时不看脸色，只能靠这个数。
+   * @param now 当前时间（毫秒时间戳；测试可注入假时间）
+   * @returns {bad, retryAt} 当前冷却中的源数量、最早恢复时间
+   */
+  stat(now = Date.now()): { bad: number; retryAt: number } {
+    let bad = 0;
+    let retryAt = 0;
+    for (const v of this.bad.values()) {
+      // 已到期的条目不参与统计：它下一轮就会被 rank() 当作健康源重新尝试
+      if (!v.until || v.until <= now) continue;
+      bad += 1;
+      if (!retryAt || v.until < retryAt) retryAt = v.until;
+    }
+    return { bad, retryAt };
+  }
 }
 
 /** 进程内单例：池子源健康度（每个 isolate 各自一份，不跨 isolate 共享） */

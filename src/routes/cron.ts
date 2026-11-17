@@ -94,7 +94,7 @@ async function cronOnce(env: Env): Promise<void> {
   // 放在最外层是因为下面三段都要用：准入探活用 adm，续回用户数用 sub。
   const plan = planRound(S.pool.length, S.alive.size);
   try {
-    // 准入吃满本轮预算即可：加码函数 alivePlan 在 7.179 删除（它永远是恒等变换，见 px/aliveplan.ts 的文档）
+    // 准入吃满本轮预算即可：加码函数 alivePlan 在 7.179 删除（它永远是恒等变换，见 ALIVE_TARGET 的文档）
     await cronScan(env, plan.adm);
     await tfbRound(env);
     await dnsRound();
