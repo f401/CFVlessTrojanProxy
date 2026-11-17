@@ -5358,7 +5358,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   ok("三次探测都把挂死的 socket 关掉", closedWr >= 3, String(closedWr));
   globalThis.__simConnect = prevSimWr;
   // 源码锁：三处 write 都必须带 withTimeout，且不许再出现裸的 await w.write(
-  const probeSrc = fs.readFileSync("src/px/probe.ts", "utf8");
+  const probeSrc = fs.readFileSync("src/px/rawprobe.ts", "utf8");
   const httpSrc = fs.readFileSync("src/core/http80.ts", "utf8");
   ok(
     "probeProxy 的 write 有超时",
@@ -6263,7 +6263,7 @@ ok("索引下限夹到 0（p 很小时不能取负）", pendSrc.includes("Math.m
   ok("没有 2500 的文件清单为空", where231.length === 0, where231.join(","));
   const dialSrc = fs.readFileSync("src/proxy/dial.ts", "utf8");
   ok("httpProbe 默认参数走常量", dialSrc.includes("ms = CONNECT_MS"), "");
-  const probeSrc = fs.readFileSync("src/px/probe.ts", "utf8");
+  const probeSrc = fs.readFileSync("src/px/rawprobe.ts", "utf8");
   ok("probeSni 默认参数走常量", probeSrc.includes("ms = CONNECT_MS"), "");
   ok("SC.STALL 仍在（语义是卡顿当量）", W.SC.STALL === 2500, String(W.SC.STALL));
 }
@@ -6478,7 +6478,7 @@ W.S.alive.clear();
 try { await W.refillPool({ poolSrc: many240.join(",") }, 0); } finally { globalThis.fetch = realFetch240; }
 ok("抓取次数等于源列表长度", hits240 === srcs240.length, hits240 + " vs " + srcs240.length);
 ok("抓取次数不超过上界", hits240 <= cap240 && hits240 > 0, hits240);
-const probeSrc240 = fs.readFileSync("src/px/probe.ts", "utf8");
+const probeSrc240 = fs.readFileSync("src/px/poolsrc.ts", "utf8");
 const budgetSrc240 = fs.readFileSync("src/route/budget.ts", "utf8");
 ok("probe.ts 有 REFILL_MAX 常量", probeSrc240.includes("export const REFILL_MAX = 6;"));
 ok("poolSources 截断自定义列表", probeSrc240.includes("return list.length ? list.slice(0, REFILL_MAX) : POOL_SOURCES;"));
@@ -8247,6 +8247,35 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   eq("tput 模式默认驻留 20 分钟", W.dwellOf({}, "tput"), W.SC.DWELL_TPUT);
   eq("非正数覆盖回落默认", W.dwellOf({ pxDwellMin: "0" }, "lat"), W.SC.DWELL);
   eq("正数覆盖按分钟换算", W.dwellOf({ pxDwellMin: "3" }, "lat"), 3 * 60000);
+}
+
+// ──────────────────────────────── 第 281 组：probe.ts 一分为四（源清单 / 原始探活 / 地理 / 失败阈值）────────────────────────────────
+{
+  const facadeSrc = fs.readFileSync("src/px/probe.ts", "utf8");
+  const poolSrc = fs.readFileSync("src/px/poolsrc.ts", "utf8");
+  const rawSrc = fs.readFileSync("src/px/rawprobe.ts", "utf8");
+  const geoSrc = fs.readFileSync("src/px/geo.ts", "utf8");
+  const failSrc = fs.readFileSync("src/px/failpolicy.ts", "utf8");
+  // 门面只做再导出：没有函数体、没有值定义
+  ok("门面不再定义函数", !facadeSrc.includes("export function ") && !facadeSrc.includes("export async function "), "");
+  ok("门面不再定义常量", !/^export const \w+ = /m.test(facadeSrc), "");
+  eq("门面四个来源各一行", ["poolsrc", "rawprobe", "geo", "failpolicy"].filter((m) => facadeSrc.includes(`"${"./" + m}"`)).length, 4);
+  ok("门面不超过 15 行", facadeSrc.split("\n").length <= 15, String(facadeSrc.split("\n").length));
+  // 四块各就各位
+  ok("poolsrc 有源清单与抓取", poolSrc.includes("export const POOL_SOURCES = [") && poolSrc.includes("export async function refillPool("), "");
+  ok("poolsrc 有源健康度与去重", poolSrc.includes("export class SourceHealth {") && poolSrc.includes("export function takePoolLine("), "");
+  ok("poolsrc 不含探活", !poolSrc.includes("PROBE_HELLO") && !poolSrc.includes("probeProxy("), "");
+  ok("rawprobe 有四种探活入口", rawSrc.includes("export const PROBE_HELLO") && rawSrc.includes("export async function probeProxy(") && rawSrc.includes("export function tlsHello(") && rawSrc.includes("export async function probeSni("), "");
+  ok("rawprobe 不再抓源", !rawSrc.includes("refillPool(") && !rawSrc.includes("POOL_SOURCES"), "");
+  ok("geo 只做标注", geoSrc.includes("export async function geoLabel(") && !geoSrc.includes("connect({"), "");
+  ok("failpolicy 只有阈值", failSrc.includes("export function pxPolicy(") && !failSrc.includes("await "), "");
+  // 导出面没变：老名字仍然能用，行为也照旧
+  eq("REFILL_MAX 仍是 6", W.REFILL_MAX, 6);
+  eq("三个探活入口仍可调用", [W.probeProxy, W.probeSni, W.tlsHello].every((f) => typeof f === "function"), true);
+  eq("抓取入口仍可调用", typeof W.refillPool === "function" && typeof W.poolSources === "function", true);
+  eq("阈值默认 3 / 5", JSON.stringify(W.pxPolicy({})), JSON.stringify({ fail: 3, force: 5 }));
+  eq("阈值可被 env 覆盖", JSON.stringify(W.pxPolicy({ pxFailMax: "4", pxForceAt: "7" })), JSON.stringify({ fail: 4, force: 7 }));
+  eq("非法覆盖回落默认", JSON.stringify(W.pxPolicy({ pxFailMax: "0", pxForceAt: "-1" })), JSON.stringify({ fail: 3, force: 5 }));
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

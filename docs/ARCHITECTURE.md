@@ -11,7 +11,7 @@ store/    index kv crypto         适配器：KV / 加密 / 快照 / 计量 / Me
           snapshot pend stats
           meter-client meter
 nodes/    stat score metrics       节点域：统计原语、评分与候选表、画像与看板行
-px/       pool poolgen probe seed selector pickpath rotation failbook 中转域：候选池、探活、信誉表、选择器
+px/       pool poolgen poolsrc rawprobe geo failpolicy seed selector pickpath rotation failbook 中转域：候选池、抓取源、探活、选择器
           const regions              共享常量 / 地区列表（打破 pool 互引）
 proxy/    protocol dial session     数据面：协议、拨号、会话
           fallback tunnel connection
