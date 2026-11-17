@@ -9733,6 +9733,59 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   }
   eq("[322] 有限等待把失败原样抛出", threw322, true);
 }
+// ---- [323] 判定的四段：事实写入 / 整页记账 / 小响应判定各自成方法 ----
+{
+  const jSrc = fs.readFileSync("src/route/judge.ts", "utf8").replace(/\r\n/g, "\n");
+  const body = (sig) => {
+    const i = jSrc.indexOf(sig);
+    if (i < 0) return "";
+    const j = jSrc.indexOf("\n  }", i + sig.length);
+    return j < 0 ? "" : jSrc.slice(i, j);
+  };
+  const on = body("  onTraffic(e: TrafficEvt): void {");
+  ok("[323] onTraffic 只留编排：事实 → 整页 → 小响应", on.includes("this.facts(e, ty);") && on.includes("this.pageHit(e, chan, ck, ty);") && on.includes("this.small(e, chan, ck, ty);"));
+  ok("[323] onTraffic 自己不写事实、不记账", !on.includes("PS.note(") && !on.includes("BLK.note(") && !on.includes("egDerive(") && !on.includes("cnt(\"trHit\")") && !on.includes("cnt(\"trSmall\")"));
+  ok("[323] onTraffic 不超过 20 行", on.split("\n").length <= 20, on.split("\n").length);
+  const f = body("  private facts(e: TrafficEvt, ty: number): void {");
+  ok("[323] facts 写五张事实表", f.includes("HEALTH.note(") && f.includes("FACT.decide(") && f.includes("PS.note(") && f.includes("BLK.note(") && f.includes("BLK.contra(") && f.includes("egDerive("));
+  ok("[323] facts 不做整页记账", !f.includes("cnt(\"trHit\")") && !f.includes("recordTraffic(") && !f.includes("markPos("));
+  const p = body("  private pageHit(e: TrafficEvt, chan: Chan, ck: string, now: number): void {");
+  ok("[323] pageHit 只做整页记账", p.includes("cnt(\"trHit\")") && p.includes("recordTraffic(") && p.includes("markPos(") && !p.includes("markBlocked(") && !p.includes("HEALTH.note("));
+  const s = body("  private small(e: TrafficEvt, chan: Chan, ck: string, now: number): void {");
+  ok("[323] small 只做小响应判定", s.includes("cnt(\"trSmall\")") && s.includes("markBlocked(") && s.includes("needPx.set(") && !s.includes("HEALTH.note(") && !s.includes("recordTraffic("));
+  ok("[323] 三段按执行顺序排列", jSrc.indexOf("  private facts(") < jSrc.indexOf("  private pageHit(") && jSrc.indexOf("  private pageHit(") < jSrc.indexOf("  private small("));
+
+  // 行为面：整页不进小响应计数；tiny 进；零字节与超时形态都不进
+  const H323 = "split323.example";
+  // smCnt 的键是「站点|通道」（通道键来自 chanKey），所以只能按前缀数本站点留下几行。
+  // 时间戳必须用真实时间：bigDiff 是「(bigByHost.get(host) || 0) > now - BASE_TTL」，
+  // 若用一个很小的 now（例如 900000），缺省 0 也会被当成「本站点刚出过整页」，
+  // 于是 small() 直接走 markBlocked 把计数删掉 —— 那是测试时钟错，不是被测代码错。
+  const keepMax323 = W.SC.SM_CNT_MAX;
+  W.SC.SM_CNT_MAX = 1000;
+  const t323 = Date.now() - 60000;
+  const cnt323 = () => Array.from(W.S.smCnt.keys()).filter((k) => k.startsWith(H323 + "|")).length;
+  W.S.smCnt.clear();
+  W.S.bigByHost.delete(H323);
+  W.S.bigChan.delete(H323);
+  const ev323 = (o) => ({ host: H323, cf: false, ok: true, down: 0, up: 0, life: 500, via: "node", node: "198.51.100.9:443", ...o });
+  W.JUDGE.onTraffic(ev323({ down: 60000, life: 1200, at: t323 }));
+  eq("[323] 整页走 pageHit，小响应计数一条都不留", cnt323(), 0);
+  W.JUDGE.onTraffic(ev323({ down: 900, at: t323 + 1000 }));
+  ok("[323] 小响应走 small，留下一条计数", cnt323() >= 1, "cnt=" + cnt323());
+  W.JUDGE.onTraffic(ev323({ down: 900, at: t323 + 2000 }));
+  ok("[323] 再来一次小响应，计数累加", (W.S.smCnt.get(H323 + "|r:198.51.100.9") || 0) >= 2, "n=" + String(W.S.smCnt.get(H323 + "|r:198.51.100.9")));
+  const n323 = cnt323();
+  W.JUDGE.onTraffic(ev323({ down: 0, at: t323 + 3000 }));
+  eq("[323] 零字节不进 small", cnt323(), n323);
+  W.JUDGE.onTraffic(ev323({ down: 900, life: 9000, at: t323 + 4000 }));
+  eq("[323] 超时形态不进 small", cnt323(), n323);
+  W.SC.SM_CNT_MAX = keepMax323;
+  W.S.smCnt.clear();
+  W.S.bigByHost.delete(H323);
+  W.S.bigChan.delete(H323);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

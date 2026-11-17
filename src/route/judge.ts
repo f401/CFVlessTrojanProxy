@@ -121,6 +121,27 @@ export class Judge {
     if (e.host === S.site) return; // 探自己域名必 522（CF 自环），不构成任何通道证据
     // 事件自己的时间戳：回放/聚合的事件必须按发生时间归批，否则三批会被压成一批
     const ty = (e as { at?: number }).at ?? Date.now();
+    this.facts(e, ty);
+    const chan = this.chanOf(e);
+    const ck = e.host + "|" + chanKey(chan);
+    // 整页：出口族的硬证据已经在上面的 facts 里提取过，这里只记账
+    if (e.ok && e.down >= BIG) {
+      this.pageHit(e, chan, ck, ty);
+      return;
+    }
+    // 剩下的判据只针对「一次可疑的小响应」：大响应是正常流量、超时与零字节不是证据
+    if (e.down <= 0 || e.down >= SMALL_MAX || e.life > 8000 || e.up > 16384) return;
+    this.small(e, chan, ck, ty);
+  }
+
+  /**
+   * 功能：写入这条观测能撑得起的事实（中继存活度、成功率、封锁投票、出口族推导）。
+   * 这一段要碰五张事实表，且生产与影子共用同一次裁决 —— 所以必须在任何判定分支之前跑。
+   * @param e 流量事件
+   * @param ty 事件自己的时间戳（回放/聚合的事件按发生时间归批）
+   * @returns 无
+   */
+  private facts(e: TrafficEvt, ty: number): void {
     HEALTH.note(e.node, e.down, e.ok); // 中继存活度：与站点无关的那一半证据
     // v8 的写入裁决：`commitFact` 决定「这条观测最多能写一条什么事实」。
     // 生产与影子**共用同一次裁决**（`FACT.decide`）：以前影子先算、生产再算一次，而影子算完就会
@@ -147,9 +168,6 @@ export class Judge {
         else if (out.reason === "R_TINY_PEER") PS.note(e.host, pip, false, ty);
       }
     }
-    const chan = this.chanOf(e);
-    const ck = e.host + "|" + chanKey(chan);
-    const now = ty;
     // 事件自己的时间戳：回放/聚合的事件必须按发生时间归批，否则三批会被压成一批
     // v8 的 blk：只有「本通道 tiny + 同窗口另一通道出过整页」才投票（三批独立确认后才写行）。
     // 这里只喂证据，不决定顺序 —— 后果是代价 ×6（policy 里乘），候选永远不会被移出。
@@ -164,27 +182,45 @@ export class Judge {
     }
 
     // 整页是出口族的硬证据，必须在下面「整页直接 return」之前提取，否则永远走不到那条分支。
-    if (e.via === "node" && e.node) egDerive(relayIpOf(e.node), e.down, { siteV4: DNS.v6Of(e.host) === 0, cf: !!e.cf }, now);
-    if (e.ok && e.down >= BIG) {
-      cnt("trHit");
-      S.bigByHost.set(e.host, now);
-      S.bigChan.set(e.host, ck);
-      // 键是客户端带过来的站点名，不是有限集合：超过上限先按最旧压回，
-      // 两张表必须同步裁剪（bigDiff 同时读这两张，落单的键会让判定读到别站点的通道）
-      if (S.bigByHost.size > SC.HOST_MEM_MAX) {
-        trimAged(S.bigByHost);
-        for (const h of S.bigChan.keys()) if (!S.bigByHost.has(h)) S.bigChan.delete(h);
-      }
-      S.smCnt.delete(ck);
-      recordTraffic({ target: e.host, chan, down: e.down, ok: true });
-      recordPass({ target: e.host, chan, down: e.down, ok: true });
-      // 正记忆：这条中继刚给本站出过整页 —— 10 分钟内优先复用它。
-      // 依据只有本 isolate 的观测，不跨 isolate 共享（各 isolate 的出口质量不同）。
-      if (e.via === "node" && e.node) this.markPos(e.host, relayIpOf(e.node), now);
-      return;
-    }
-    if (e.down <= 0 || e.down >= SMALL_MAX || e.life > 8000 || e.up > 16384) return;
+    if (e.via === "node" && e.node) egDerive(relayIpOf(e.node), e.down, { siteV4: DNS.v6Of(e.host) === 0, cf: !!e.cf }, ty);
+  }
 
+  /**
+   * 功能：整页响应的记账（站点确实能出内容，本通道恢复正常）。
+   * @param e 流量事件
+   * @param chan 通道
+   * @param ck 通道键（判定表键）
+   * @param now 事件时间戳
+   * @returns 无
+   */
+  private pageHit(e: TrafficEvt, chan: Chan, ck: string, now: number): void {
+    cnt("trHit");
+    S.bigByHost.set(e.host, now);
+    S.bigChan.set(e.host, ck);
+    // 键是客户端带过来的站点名，不是有限集合：超过上限先按最旧压回，
+    // 两张表必须同步裁剪（bigDiff 同时读这两张，落单的键会让判定读到别站点的通道）
+    if (S.bigByHost.size > SC.HOST_MEM_MAX) {
+      trimAged(S.bigByHost);
+      for (const h of S.bigChan.keys()) if (!S.bigByHost.has(h)) S.bigChan.delete(h);
+    }
+    S.smCnt.delete(ck);
+    recordTraffic({ target: e.host, chan, down: e.down, ok: true });
+    recordPass({ target: e.host, chan, down: e.down, ok: true });
+    // 正记忆：这条中继刚给本站出过整页 —— 10 分钟内优先复用它。
+    // 依据只有本 isolate 的观测，不跨 isolate 共享（各 isolate 的出口质量不同）。
+    if (e.via === "node" && e.node) this.markPos(e.host, relayIpOf(e.node), now);
+    return;
+  }
+
+  /**
+   * 功能：小响应的判定（本站点能出内容与否，决定「软降权」「提醒中转」还是「落封锁」）。
+   * @param e 流量事件
+   * @param chan 通道
+   * @param ck 通道键（判定表键）
+   * @param now 事件时间戳
+   * @returns 无
+   */
+  private small(e: TrafficEvt, chan: Chan, ck: string, now: number): void {
     cnt("trSmall");
     if (e.cf) {
       if (e.down < 900) cnt("sz1");

@@ -238,7 +238,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `MeterAdd` | `src/store/meteradd.ts` | `/add` 的合并器：日计数、错误环、连接观测、判定表、六张事实表、中继存活度、节点快照、用量各一个私有方法，`apply()` 只负责顺序；`FactMerger` 是它的私有成员，不再需要模块级单例 |
 | `MeterEndpoints` | `src/store/meter.ts` | 计量 DO 的端点实现：`/add`、`/seed`、`/set` 三个会改账本的（各自处理回滚）与 `/cl`/`/hl`/`/vt`/`/cnt` 四个只读的；`Meter` 只留串行化、落盘与生命周期 |
 | `VerdictTable`（`VT`） | `src/route/verdict.ts` | 判定表（站点 × 通道）：状态机、TTL/上限、弱证据不得冲掉强证据、通配目标拒写；公开类型与 `VT_TTL_MS` 同住这一个文件，调用方直接用 `VT.set(...)`/`VT.bad(...)`（7.300 删掉了十二个同名转发函数） |
-| `Judge`（`JUDGE`） | `src/route/judge.ts` | 流量侧弱证据的累加与落判定 |
+| `Judge`（`JUDGE`） | `src/route/judge.ts` | 判定出口：`onTraffic` 只做编排（事实 → 整页 → 小响应 → 封锁），四段各一方法；正/负记忆与封锁结论都在同一处 |
 | `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级：三张按站点的内存表（`pin`/`rot`/`seq`）+ 排序链 `neg → pos → score → vAt` |
 | `PolicyWiring`（`WIRING`） | `src/route/policy-wiring.ts` | 把策略接到 HOOK 的二十个槽位（漏注册不会有门禁报错，7.123 的 `HOOK.facts` 就是这样失效的） |
 | `RelayHealth`（`HEALTH`） | `src/route/relay-health.ts` | 中继健康表（sent/pending 语义） |
