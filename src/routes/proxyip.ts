@@ -7,7 +7,7 @@ import { hostRank, logErr } from "../nodes/metrics";
 import { costOf, invalidateRank, scoreParts } from "../nodes/score";
 import { nodeSnapGet } from "../store/index";
 import { cronScan, nsOf, pxGet } from "../px/pool";
-import { POOL_SOURCES, srcHealth, srcRank } from "../px/probe";
+import { POOL_SOURCES, SOURCES } from "../px/probe";
 import { SEL } from "../px/selector";
 import { cnt, cntView } from "../core/counter";
 import { CRONLOCK } from "../core/lock";
@@ -61,10 +61,10 @@ export async function proxyip(c: UserCtx): Promise<Response> {
   if (url.searchParams.get("src") === "1") {
     const deny = await adminOnly(c);
     if (deny) return deny;
-    const rank = srcRank(env);
+    const rank = SOURCES.rank(env);
     return json({
       order: rank.map((x, i) => ({ i, src: x })),
-      health: srcHealth(),
+      health: SOURCES.snap(),
       total: POOL_SOURCES.length,
       custom: Boolean(env.poolSrc),
       now: Date.now(),

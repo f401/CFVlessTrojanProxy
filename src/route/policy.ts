@@ -441,6 +441,14 @@ export class Policy implements PinSource {
   }
 
   /**
+   * 功能：策略是否生效（`SC.POLICY` 分级：0 只影子统计 / 1 只放开硬规则 / 2 全生效）。
+   * 这是只读属性而不是方法：它是配置的投影，没有动作，调用点读 `POLICY.enabled` 即可。
+   */
+  get enabled(): boolean {
+    return SC.POLICY > 0;
+  }
+
+  /**
    * 功能：把策略装配到 HOOK 槽位（由 `src/index.ts` 的副作用 import 触发）。
    * 装配逻辑本体在 `PolicyWiring.install`：那一层管「谁接哪个槽位」，这里只是入口。
    * @returns {void}
@@ -453,19 +461,3 @@ export class Policy implements PinSource {
 /** 进程内唯一策略 */
 export const POLICY = new Policy();
 POLICY.install();
-
-/** 兼容旧导出（单测与预算模块直接调） */
-export function decide(c: Ctx): Choice {
-  return POLICY.decide(c);
-}
-/** 功能：shadow 是薄包装，直接委托 POLICY.shadow。@param c Ctx。@returns 转发 POLICY.shadow 的返回值（Choice） */
-export function shadow(c: Ctx): Choice {
-  return POLICY.shadow(c);
-}
-/**
- * 功能：策略是否生效（SC.POLICY 分级：0 只影子统计 / 1 只放开硬规则 / 2 全生效）。
- * @returns 生效为 true
- */
-export function policyOn(): boolean {
-  return SC.POLICY > 0;
-}

@@ -119,7 +119,7 @@ export {
   errHist,
 } from "./nodes/metrics";
 export { ERRS } from "./nodes/errlog";
-export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, srcNote, srcRank, srcHealth, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES, pxPolicy } from "./px/probe";
+export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES, pxPolicy } from "./px/probe";
 export { regionListAsync } from "./px/regions";
 export { PEND, RESTORE_MAX, clSnapshot, nodeSnapGet, pendFlush, primaryId, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
 export { doFetch, meterGet } from "./store/meter-client";
@@ -152,7 +152,6 @@ export { VT_TTL_MS } from "./route/verdict";
 export { vtDelta, vtLoad, vtAck, vtNack } from "./route/verdictsync";
 export { recordTraffic } from "./route/observe";
 export { DIRECT, chanKey, nodeKeyOf } from "./route/channel";
-export { decide, shadow, policyOn } from "./route/policy";
 export { pxDecision } from "./proxy/pxhook";
 export { HOOK } from "./core/hook";
 export { DNS_BATCH, SHARE_PEND, SHARE_SNAP, TFB_CALLS, SUB_FIXED, SUB_FIXED_N, planRound, planView } from "./route/budget";

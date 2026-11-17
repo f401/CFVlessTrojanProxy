@@ -172,33 +172,6 @@ export function poolSources(env: Env): string[] {
 }
 
 /**
- * 功能：按健康度排序的源列表（薄包装，委托 SOURCES.rank）。
- * @param env 环境变量
- * @returns 源 URL 数组
- */
-export function srcRank(env: Env): string[] {
-  return SOURCES.rank(env);
-}
-
-/**
- * 功能：记录一次抓取结果（薄包装，委托 SOURCES.note）。
- * @param src 源 URL
- * @param ok 是否成功
- * @returns 无
- */
-export function srcNote(src: string, ok: boolean): void {
-  SOURCES.note(src, ok);
-}
-
-/**
- * 功能：源健康快照（薄包装，委托 SOURCES.snap）。
- * @returns 源 URL → { n, until }
- */
-export function srcHealth(): Record<string, { n: number; until: number }> {
-  return SOURCES.snap();
-}
-
-/**
  * 功能：按源健康度顺序抓取并合并去重（失败的源排到最后，不删除）。
  *
  * 冷却中的源在已经抓到足够条目时会**直接跳过**（`skip: true`，记 `srcSkip`）：
@@ -216,7 +189,7 @@ export async function refillPool(env: Env, keep = 0): Promise<PoolRefill> {
   // 全部照抓的话冷却等于没做（每轮仍然白烧 5 个子请求）。keep 是当前池子大小，
   // 跳过之后新池子不能比它小太多，否则 commitPool 的缩水守卫会拒掉整轮刷新。
   const enough = Math.max(POOL_ENOUGH, Math.ceil(keep * 0.75));
-  for (const src of srcRank(env)) {
+  for (const src of SOURCES.rank(env)) {
     if (seen.size >= enough && SOURCES.cooling(src)) {
       sources[src] = { lines: 0, ok: 0, skip: true };
       cnt("srcSkip");
@@ -248,7 +221,7 @@ export async function refillPool(env: Env, keep = 0): Promise<PoolRefill> {
       lines = -1;
     }
     sources[src] = { lines, ok: seen.size - before };
-    srcNote(src, lines >= 0);
+    SOURCES.note(src, lines >= 0);
   }
   for (const h of EXTRA_HOSTS) {
     // seen 的键是 "ip:port"：以前用不带端口的 h 去重，永远判不存在，

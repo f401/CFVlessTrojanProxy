@@ -1694,13 +1694,13 @@ W.VT.clear();
 eq("清空后表为空", W.VT.all().length, 0);
 // 第 31 组：通道策略（影子）与子请求预算
 const rCtx = { host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5", "45.136.117.194"], legacyWantsRelay: true };
-eq("cf 目标优先挑可用的中继", W.decide(rCtx).chan.kind, "r");
-eq("v6 客户端 + cf 目标只走非 CF 中继", W.decide({ ...rCtx, clientV6: true }).chan.ip, "45.136.117.194");
-eq("普通目标走直连", W.decide({ ...rCtx, cfHost: false }).chan.kind, "d");
+eq("cf 目标优先挑可用的中继", W.POLICY.decide(rCtx).chan.kind, "r");
+eq("v6 客户端 + cf 目标只走非 CF 中继", W.POLICY.decide({ ...rCtx, clientV6: true }).chan.ip, "45.136.117.194");
+eq("普通目标走直连", W.POLICY.decide({ ...rCtx, cfHost: false }).chan.kind, "d");
 W.VT.clear(); W.S.polSame = 0; W.S.polDiff = 0; W.S.polWhy = {};
-W.shadow(rCtx);
+W.POLICY.shadow(rCtx);
 eq("影子模式统计一致", W.S.polSame, 1);
-W.shadow({ ...rCtx, legacyWantsRelay: false });
+W.POLICY.shadow({ ...rCtx, legacyWantsRelay: false });
 eq("影子模式统计不一致", W.S.polDiff, 1);
 const pl = W.planRound(1600, 8);
 ok("预算不超过子请求硬上限", pl.adm <= W.SC.SCAN_SUB, JSON.stringify(pl));
@@ -1708,7 +1708,7 @@ ok("池子很饿时优先给准入", pl.adm >= 4, JSON.stringify(pl));
 // 7.62 起策略全生效（level 2）：判定层已有 660+ 条断言与线上实测背书，
 // 且「隧道直连成功证据 / 中继软降权」这些判据只有全生效时才真正影响选路。
 ok("策略默认全生效（level 2）", W.SC.POLICY === 2);
-ok("policyOn 在 level>=1 时为真", W.policyOn() === true);
+ok("policyOn 在 level>=1 时为真", W.POLICY.enabled === true);
 // 第 32 组：决策注入（core HOOK）与影子一致率
 ok("策略实现已注册到 HOOK", typeof W.HOOK.decide === "function");
 W.S.polSame = 0; W.S.polDiff = 0;
@@ -1871,18 +1871,18 @@ eq("状态里不再有「最近一次复核结果」", W.S.vtLast, undefined);
 // 第 42 组：HTTP 状态码判据接进决策（状态码级证据，1 个请求即可学会）
 W.VT.clear(); W.S.cfHttp.clear();
 W.S.cfHttp.set("x.com", { code: 403, colo: "SOF", t: Date.now() });
-const d403 = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5"], legacyWantsRelay: false });
+const d403 = W.POLICY.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5"], legacyWantsRelay: false });
 ok("本出口 403 → 决策绕中继", d403.chan.kind === "r" && d403.why === "http403");
 W.S.cfHttp.set("x.com", { code: 200, colo: "VIE", t: Date.now() });
-const d200 = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5"], legacyWantsRelay: true });
+const d200 = W.POLICY.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5"], legacyWantsRelay: true });
 // 本出口 fetch 的 200 只代表 CF 自己出得去，不代表隧道直连出得去（实测同一时刻 200 → 隧道 403），
 // 所以只有隧道直连自己有过成功证据时才省这一跳。
 eq("本出口 200 但隧道直连无证据 → 仍走已知可用中继", d200.chan.kind, "r");
 W.VT.setState("x.com", "d", 1, 1);
-const d200b = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5"], legacyWantsRelay: false });
+const d200b = W.POLICY.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5"], legacyWantsRelay: false });
 ok("隧道直连有过成功证据 → 才省这一跳（direct-ok）", d200b.chan.kind === "d" && d200b.why === "direct-ok");
 W.S.cfHttp.clear();
-ok("没有状态码证据时不会强行推翻池子判断", W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: false }).chan.kind === "d");
+ok("没有状态码证据时不会强行推翻池子判断", W.POLICY.decide({ host: "x.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: false }).chan.kind === "d");
 // 第 43 组：差分判据 —— 保护「正常的业务 403」
 W.VT.clear();
 W.S.needPx.clear();
@@ -1924,7 +1924,7 @@ W.VT.clear();
 W.S.cfHttp.clear();
 W.VT.setState("y.com", "r:1.1.1.1", 2, 1);
 W.VT.setState("y.com", "d", 2, 1);
-const dHeal = W.decide({ host: "y.com", cfHost: true, clientV6: false, relays: ["1.1.1.1"], legacyWantsRelay: true });
+const dHeal = W.POLICY.decide({ host: "y.com", cfHost: true, clientV6: false, relays: ["1.1.1.1"], legacyWantsRelay: true });
 eq("没有通道可走时仍然给出中继（不断路）", dHeal.chan.kind, "r");
 eq("自愈后该站点的封禁结论被清掉", W.VT.bad("y.com", "r:1.1.1.1"), false);
 // 3) 业务 403（站点根路径本身就不是 200）不会被单次判死
@@ -1999,14 +1999,14 @@ ok("未知子路径返回 undefined（404）", W.ROUTES.route("nope") === undefi
   W.VT.clear();
   W.VT.setState("x.com", "r:9.9.9.1", 2, 1);
   Math.random = () => 0.01; // 命中 5% 复检
-  const d1 = W.decide(c53);
+  const d1 = W.POLICY.decide(c53);
   ok("被判死的通道会被 5% 概率复检", d1.why === "explore" && d1.chan.ip === "9.9.9.1", d1.why);
   Math.random = () => 0.9; // 不命中
-  const d2 = W.decide(c53);
+  const d2 = W.POLICY.decide(c53);
   ok("不在复检时仍避开被判死的通道", d2.why !== "explore" && d2.chan.ip === "9.9.9.2", d2.why);
   // 复检成功后应恢复正常（探测级 ok）
   W.VT.setState("x.com", "r:9.9.9.1", 1, 1);
-  const d3 = W.decide(c53);
+  const d3 = W.POLICY.decide(c53);
   ok("复检成功即解除封禁", W.VT.state("x.com", "r:9.9.9.1") === 1 && d3.why !== "explore", d3.why);
   // 成功只代表「当时能通」：再次出现差分证据应能重新判死（否则一旦通过就再也不学）
   W.VT.clear(); // 换一个干净场景：只有流量级的弱 ok
@@ -2025,7 +2025,7 @@ ok("PageView 可构造", typeof W.PageView === "function", "PageView");
   W.VT.clear();
   const relays = ["7.7.7.1", "7.7.7.2", "7.7.7.3", "7.7.7.4"];
   for (const ip of relays) W.VT.setState("x.com", "r:" + ip, 2, 1);
-  const d = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true });
+  const d = W.POLICY.decide({ host: "x.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true });
   ok("整池判死时仍有可用通道", d.chan.kind !== "d" && relays.includes(d.chan.ip), d.why);
   ok("只保留最近两条判死，其余被解除", relays.filter((ip) => W.VT.state("x.com", "r:" + ip) === 2).length <= 2, relays.map((ip) => W.VT.state("x.com", "r:" + ip)).join(","));
   W.VT.clear();
@@ -2110,18 +2110,18 @@ eq("tfClass 带内容体 → site", W.tfClass([
 /* ---------- 63. 源健康度：连续失败的源被降权，成功即恢复 ---------- */
 {
   const envSrc = { poolSrc: "https://a.example/x.txt, https://b.example/y.txt, https://c.example/z.txt" };
-  eq("env.poolSrc 覆盖生效", W.srcRank(envSrc).join(","), "https://a.example/x.txt,https://b.example/y.txt,https://c.example/z.txt");
-  eq("没有 poolSrc 时用内置表", W.srcRank({}).length, 6);
-  W.srcNote("https://a.example/x.txt", false);
-  eq("失败一次仍排第一", W.srcRank(envSrc)[0], "https://a.example/x.txt");
-  W.srcNote("https://a.example/x.txt", false);
-  eq("连续两次失败排到最后", W.srcRank(envSrc)[2], "https://a.example/x.txt");
-  eq("其余源保持原顺序", W.srcRank(envSrc).slice(0, 2).join(","), "https://b.example/y.txt,https://c.example/z.txt");
-  eq("失败源仍会被重试（不删除）", W.srcRank(envSrc).length, 3);
-  W.srcNote("https://a.example/x.txt", true);
-  eq("成功一次立刻恢复首位", W.srcRank(envSrc)[0], "https://a.example/x.txt");
-  eq("env.poolSrc 非法值回退内置表", W.srcRank({ poolSrc: "not-a-url" }).length, 6);
-  eq("health 记录了该源", typeof W.srcHealth()["https://a.example/x.txt"], "object");
+  eq("env.poolSrc 覆盖生效", W.SOURCES.rank(envSrc).join(","), "https://a.example/x.txt,https://b.example/y.txt,https://c.example/z.txt");
+  eq("没有 poolSrc 时用内置表", W.SOURCES.rank({}).length, 6);
+  W.SOURCES.note("https://a.example/x.txt", false);
+  eq("失败一次仍排第一", W.SOURCES.rank(envSrc)[0], "https://a.example/x.txt");
+  W.SOURCES.note("https://a.example/x.txt", false);
+  eq("连续两次失败排到最后", W.SOURCES.rank(envSrc)[2], "https://a.example/x.txt");
+  eq("其余源保持原顺序", W.SOURCES.rank(envSrc).slice(0, 2).join(","), "https://b.example/y.txt,https://c.example/z.txt");
+  eq("失败源仍会被重试（不删除）", W.SOURCES.rank(envSrc).length, 3);
+  W.SOURCES.note("https://a.example/x.txt", true);
+  eq("成功一次立刻恢复首位", W.SOURCES.rank(envSrc)[0], "https://a.example/x.txt");
+  eq("env.poolSrc 非法值回退内置表", W.SOURCES.rank({ poolSrc: "not-a-url" }).length, 6);
+  eq("health 记录了该源", typeof W.SOURCES.snap()["https://a.example/x.txt"], "object");
 }
 
 // 64) 错误分类直方图（/health 的 errsByKind）
@@ -2330,8 +2330,8 @@ console.log("\n75) 正记忆优先复用");
   W.VT.setState(host, "r:" + b, 1, 1);
   W.VT.setState(host, "r:" + a, 1, 1);
   const ctx = { host, cfHost: true, clientV6: false, relays: [a, b], legacyWantsRelay: true };
-  eq("站点级选择优先正记忆中继", W.decide(ctx).chan.ip, b);
-  eq("普通目标不受正记忆影响", W.decide({ ...ctx, cfHost: false }).chan.kind, "d");
+  eq("站点级选择优先正记忆中继", W.POLICY.decide(ctx).chan.ip, b);
+  eq("普通目标不受正记忆影响", W.POLICY.decide({ ...ctx, cfHost: false }).chan.kind, "d");
 }
 
 // 第 38c 组：站点 × 中继的实测性能记忆（同一中继对不同站点快慢不同）
@@ -2344,7 +2344,7 @@ console.log("\n75) 正记忆优先复用");
   eq("样本按站点分开存", W.relCost("b.example.com", "203.0.113.7"), 1e6);
   // 两条中继都能通时，选代价更低的那条（健康度都未知 → 由站点 × 中继决定）
   const ctxR = { host: "a.example.com", cfHost: true, clientV6: false, relays: ["203.0.113.9", "203.0.113.7"], legacyWantsRelay: true };
-  eq("按站点 × 中继选更快的那条", W.decide(ctxR).chan.ip, "203.0.113.7");
+  eq("按站点 × 中继选更快的那条", W.POLICY.decide(ctxR).chan.ip, "203.0.113.7");
   eq("调试快照按代价升序", W.relSnap("a.example.com")[0].relayIp, "203.0.113.7");
   W.RELPERF.clear();
   eq("清空后代价回到未知", W.relCost("a.example.com", "203.0.113.7"), 1e6);
@@ -2356,8 +2356,8 @@ console.log("\n75) 正记忆优先复用");
   // 甲：首字节 150ms、只有 100 KB/s；乙：首字节 400ms、2500 KB/s
   W.relNote("c.example.com", "203.0.113.11", 150, 100);
   W.relNote("c.example.com", "203.0.113.12", 400, 2500);
-  eq("delay 模式选首字节更快的那条", W.decide({ host: "c.example.com", cfHost: true, clientV6: false, relays: ["203.0.113.12", "203.0.113.11"], legacyWantsRelay: true, mode: "lat" }).chan.ip, "203.0.113.11");
-  eq("tput 模式选拉 1MB 更快的那条", W.decide({ host: "c.example.com", cfHost: true, clientV6: false, relays: ["203.0.113.11", "203.0.113.12"], legacyWantsRelay: true, mode: "tput" }).chan.ip, "203.0.113.12");
+  eq("delay 模式选首字节更快的那条", W.POLICY.decide({ host: "c.example.com", cfHost: true, clientV6: false, relays: ["203.0.113.12", "203.0.113.11"], legacyWantsRelay: true, mode: "lat" }).chan.ip, "203.0.113.11");
+  eq("tput 模式选拉 1MB 更快的那条", W.POLICY.decide({ host: "c.example.com", cfHost: true, clientV6: false, relays: ["203.0.113.11", "203.0.113.12"], legacyWantsRelay: true, mode: "tput" }).chan.ip, "203.0.113.12");
   // 新站点没量过这条中继时，用它在别处学到的容量兜底（+200ms 罚），不该退回 1e6 重学一遍
   eq("新站点沿用跨站点学到的中继容量", W.relCostMode("tput", "d.example.com", "203.0.113.12") < 1e6, true);
   eq("本站点亲测比跨站点兜底更便宜", W.relCostMode("tput", "c.example.com", "203.0.113.12") < W.relCostMode("tput", "d.example.com", "203.0.113.12"), true);
@@ -2378,7 +2378,7 @@ console.log("\n75) 正记忆优先复用");
   W.relNote("g.example.com", "203.0.113.21", 200, 1000);
   const picked = [];
   for (let i = 0; i < 2; i++) {
-    const d = W.decide({ host: "g.example.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true, mode: "tput" });
+    const d = W.POLICY.decide({ host: "g.example.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true, mode: "tput" });
     picked.push(d.chan.ip);
     eq("吞吐模式给未量过的中继采样机会（why）", d.why, "rel-rot");
   }
@@ -2386,7 +2386,7 @@ console.log("\n75) 正记忆优先复用");
   eq("两条未量过的中继各被轮到一次", new Set(picked).size, 2);
   W.RELPERF.clear();
   // 延迟模式仍按老办法钉住：首字节场景下「先量三条」的代价比吞吐模式高
-  const dl = W.decide({ host: "f.example.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true, mode: "lat" });
+  const dl = W.POLICY.decide({ host: "f.example.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true, mode: "lat" });
   eq("延迟模式不轮换", dl.why, "cold-pin");
   W.RELPERF.clear();
 }
@@ -2404,11 +2404,11 @@ console.log("\n76) 出口族事实（v8 的 eg）");
   // 冷 isolate：S.alive 还没探出来（relays 为空）时，用事实里的 v4 出口兜底，而不是直连
   W.EG.clear();
   W.EG.note("203.0.113.7", 4, Date.now());
-  const pin = W.decide({ host: "x.example.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: true });
+  const pin = W.POLICY.decide({ host: "x.example.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: true });
   eq("冷启动无存活中继时用 eg 里的 v4 出口", pin.why, "eg-pin");
   eq("冷启动兜底选的是那条 v4", pin.chan.ip, "203.0.113.7");
   W.EG.clear();
-  const none = W.decide({ host: "x.example.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: true });
+  const none = W.POLICY.decide({ host: "x.example.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: true });
   eq("既没有存活中继也没有 eg 时才直连", none.why, "direct");
   eq("CF 站点：v4 出口不罚", T.bias("203.0.113.7", true, t0 + 1000), 1);
   eq("CF 站点：v6 出口重罚（实测 0/9 全 403）", T.bias("2001:db8::1", true, t0 + 1000), 40);
@@ -2436,12 +2436,12 @@ console.log("\n76) 出口族事实（v8 的 eg）");
   W.EG.clear(); W.DEAD.clear();
   // 客户端 v6 + CF 站点：只要本站点有新鲜的直连成功证据，仍然选直连（族不传递）
   W.VT.setState("v6c.example.com", "d", 1, 1);
-  eq("v6 客户端 + CF 站点有直连证据 → direct-ok", W.decide({ host: "v6c.example.com", cfHost: true, clientV6: true, relays: ["203.0.113.21"], legacyWantsRelay: true }).why, "direct-ok");
+  eq("v6 客户端 + CF 站点有直连证据 → direct-ok", W.POLICY.decide({ host: "v6c.example.com", cfHost: true, clientV6: true, relays: ["203.0.113.21"], legacyWantsRelay: true }).why, "direct-ok");
   W.VT.clear();
   W.EG.note("198.51.100.8", 4, Date.now());
   W.DEAD.note("198.51.100.8", false, Date.now());
   W.DEAD.note("198.51.100.8", false, Date.now());
-  eq("eg-pin 跳过已判死的 v4 出口（无存活中继时退直连）", W.decide({ host: "dead.example.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: true }).why, "direct");
+  eq("eg-pin 跳过已判死的 v4 出口（无存活中继时退直连）", W.POLICY.decide({ host: "dead.example.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: true }).why, "direct");
   W.EG.clear(); W.DEAD.clear();
   eq("非 CF 站点不做族分层（github/example 在 v6 上都能过）", T.bias("2001:db8::1", false, t0 + 1000), 1.05);
   eq("过了寿命就当作未知", T.famOf("203.0.113.7", t0 + W.EG_TTL + 1), 0);
@@ -2457,7 +2457,7 @@ console.log("\n76) 出口族事实（v8 的 eg）");
   W.EG.note("203.0.113.11", 4, Date.now());
   W.relNote("eg.example", "203.0.113.9", 100, 500);
   W.relNote("eg.example", "203.0.113.11", 100, 500);
-  const egPick = W.decide({ host: "eg.example", cfHost: true, clientV6: false, relays: ["203.0.113.9", "203.0.113.11"], legacyWantsRelay: true });
+  const egPick = W.POLICY.decide({ host: "eg.example", cfHost: true, clientV6: false, relays: ["203.0.113.9", "203.0.113.11"], legacyWantsRelay: true });
   eq("实测代价相同时优先 v4 出口", egPick.chan && egPick.chan.ip, "203.0.113.11");
   W.EG.clear();
 }
@@ -2599,9 +2599,9 @@ console.log("\n80) 站点 × 中继成功率（ps）：只折价、不剔候选"
   W.PS.note(H, "203.0.113.5", true, t0 + 1);
   W.PS.note(H, "203.0.113.6", false, t0);
   W.PS.note(H, "203.0.113.6", false, t0 + 1);
-  const d = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.6", "203.0.113.5"], legacyWantsRelay: true, mode: "tput" });
+  const d = W.POLICY.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.6", "203.0.113.5"], legacyWantsRelay: true, mode: "tput" });
   eq("按站点的成功率历史选更靠前的那条", d.chan.ip, "203.0.113.5");
-  const d2 = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.11"], legacyWantsRelay: true, mode: "tput" });
+  const d2 = W.POLICY.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.11"], legacyWantsRelay: true, mode: "tput" });
   eq("历史很差的通道仍然是候选（只折价不剔除）", d2.chan.ip, "203.0.113.11");
   W.PS.clear();
   W.S.peers.clear();
@@ -2640,15 +2640,15 @@ console.log("\n81) 中继「连不上」（dead）：唯一允许挪到队尾的
   W.PS.clear();
   W.relNote(H, "203.0.113.71", 200, 0, now);
   W.relNote(H, "203.0.113.72", 200, 0, now);
-  const d1 = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.72", "203.0.113.71"], legacyWantsRelay: true, mode: "tput" });
+  const d1 = W.POLICY.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.72", "203.0.113.71"], legacyWantsRelay: true, mode: "tput" });
   eq("两条都健康时按排序取第一条", d1.chan.ip, "203.0.113.72");
   W.DEAD.note("203.0.113.72", false, now);
   W.DEAD.note("203.0.113.72", false, now + 1);
-  const d2 = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.72", "203.0.113.71"], legacyWantsRelay: true, mode: "tput" });
+  const d2 = W.POLICY.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.72", "203.0.113.71"], legacyWantsRelay: true, mode: "tput" });
   eq("判死的挪到队尾，换另一条", d2.chan.ip, "203.0.113.71");
   W.DEAD.note("203.0.113.71", false, now + 2);
   W.DEAD.note("203.0.113.71", false, now + 3);
-  const d3 = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.72", "203.0.113.71"], legacyWantsRelay: true, mode: "tput" });
+  const d3 = W.POLICY.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.72", "203.0.113.71"], legacyWantsRelay: true, mode: "tput" });
   eq("全池判死时仍返回候选（不返回空）", ["203.0.113.71", "203.0.113.72"].includes(d3.chan.ip), true);
   W.DEAD.clear();
   W.S.peers.clear();
@@ -2725,9 +2725,9 @@ console.log("\n83) 单 IP 封锁（blk）：三批 × 每批 3 次、只折价�
   W.relNote(H2, "203.0.113.94", 300, 0, t0);
   W.relNote(H2, "203.0.113.95", 100, 0, t0);
   feed(H2, "203.0.113.95", t0);
-  const d1 = W.decide({ host: H2, cfHost: true, clientV6: false, relays: ["203.0.113.94", "203.0.113.95"], legacyWantsRelay: true, mode: "tput" });
+  const d1 = W.POLICY.decide({ host: H2, cfHost: true, clientV6: false, relays: ["203.0.113.94", "203.0.113.95"], legacyWantsRelay: true, mode: "tput" });
   eq("被判封锁的那条排到后面（原本它最快）", d1.chan.ip, "203.0.113.94");
-  const d2 = W.decide({ host: H2, cfHost: true, clientV6: false, relays: ["203.0.113.95"], legacyWantsRelay: true, mode: "tput" });
+  const d2 = W.POLICY.decide({ host: H2, cfHost: true, clientV6: false, relays: ["203.0.113.95"], legacyWantsRelay: true, mode: "tput" });
   eq("只剩被判封锁的一条时仍然用它（永不剔候选）", d2.chan.ip, "203.0.113.95");
   W.BLK.clear();
   W.S.peers.clear();
@@ -2774,7 +2774,7 @@ console.log("\n85) 康复通道（v8 D12）");
   let last = null;
   let hit = null;
   for (let i = 1; i <= 40; i++) {
-    const d = W.decide(C2);
+    const d = W.POLICY.decide(C2);
     if (d.why === "rehab") { if (!hit) hit = { i, ip: d.chan.ip }; }
     last = d;
   }
@@ -2937,8 +2937,8 @@ console.log("\n91) 活跃池目标：只作判据（加码函数已删）");
   ok("cron 不再调用加码函数", !/alivePlan\s*\(/.test(fs.readFileSync("src/routes/cron.ts", "utf8")));
   const s0 = W.srcStat();
   eq("初始没有失败源", s0.bad, 0);
-  W.srcNote("https://example.invalid/list.txt", false);
-  W.srcNote("https://example.invalid/list.txt", false);
+  W.SOURCES.note("https://example.invalid/list.txt", false);
+  W.SOURCES.note("https://example.invalid/list.txt", false);
   const s1 = W.srcStat();
   eq("连续失败的源计入", s1.bad, 1);
   eq("带恢复时间", s1.retryAt > Date.now(), true);
@@ -3211,12 +3211,12 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   // 站点名来自客户端请求、不是有限集合：两张按站点的表必须被压回上限
   W.POLICY.trim(0);
   for (let i = 0; i < 600; i++) {
-    W.decide({ host: `h${i}.cap.example.com`, cfHost: false, clientV6: false, relays: [], legacyWantsRelay: false });
+    W.POLICY.decide({ host: `h${i}.cap.example.com`, cfHost: false, clientV6: false, relays: [], legacyWantsRelay: false });
   }
   eq("决策序号表有上限（站点名不是有限集合）", W.POLICY.seqSize() <= 512, true);
   eq("冷启动钉住表有上限", W.POLICY.pinSize() <= 512, true);
   // 过期钉住会被清掉：先钉一条，再把时间推到 61 秒后
-  W.decide({ host: "pin.example.com", cfHost: true, clientV6: false, relays: ["198.51.100.44"], legacyWantsRelay: false });
+  W.POLICY.decide({ host: "pin.example.com", cfHost: true, clientV6: false, relays: ["198.51.100.44"], legacyWantsRelay: false });
   const pinBefore = W.POLICY.pinSize();
   eq("冷启动确实钉住了一条（否则下面的过期断言是空断言）", pinBefore >= 1, true);
   W.POLICY.trim(Date.now() + 61_000);
@@ -3320,14 +3320,14 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   W.BLK.load(rel.slice(0, 6).map((ip) => ({ k: H + "|" + ip, n: 3, at: t0 })));
   // 同一批中继在判定表里也已是「封锁」⇒ 它们从 usable 里消失，正是旧口径的病根
   for (const ip of rel.slice(0, 6)) W.VT.setState(H, "r:" + ip, 2, 1);
-  W.decide({ host: H, cfHost: false, clientV6: false, relays: rel, legacyWantsRelay: false });
+  W.POLICY.decide({ host: H, cfHost: false, clientV6: false, relays: rel, legacyWantsRelay: false });
   eq("整池 75% 有封锁行 ⇒ 触发站点级自愈", W.BLK.muted(H), true);
   eq("自愈把封锁行清掉：代价倍数回到 1", W.BLK.penOf(H, rel[0]), 1);
   // 反例：5/8 = 62.5% 不到 75%，不该自愈
   const H2 = "sweep2.example";
   W.BLK.load(rel.slice(0, 5).map((ip) => ({ k: H2 + "|" + ip, n: 3, at: t0 })));
   for (const ip of rel.slice(0, 5)) W.VT.setState(H2, "r:" + ip, 2, 1);
-  W.decide({ host: H2, cfHost: false, clientV6: false, relays: rel, legacyWantsRelay: false });
+  W.POLICY.decide({ host: H2, cfHost: false, clientV6: false, relays: rel, legacyWantsRelay: false });
   eq("只到 5/8 不触发自愈", W.BLK.muted(H2), false);
 }
 
@@ -3435,7 +3435,7 @@ ok("状态表里不再有 tsMem 的键", !Object.prototype.hasOwnProperty.call(W
   Math.random = () => 0;
   let ch;
   try {
-    ch = W.decide({ host: H, cfHost: false, clientV6: false, relays: rel, legacyWantsRelay: false });
+    ch = W.POLICY.decide({ host: H, cfHost: false, clientV6: false, relays: rel, legacyWantsRelay: false });
   } finally {
     Math.random = rnd;
   }
@@ -4668,19 +4668,19 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   // ① 新鲜直连整页证据：判定层选直连，闸门必须放行（旧代码在这里返回 true）
   W.VT.clear();
   W.VT.set("x.com", "d", 200, 40, 1);
-  const d1 = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["45.136.117.194"], legacyWantsRelay: true, mode: "tput" });
+  const d1 = W.POLICY.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["45.136.117.194"], legacyWantsRelay: true, mode: "tput" });
   eq("新鲜直连证据下判定层选直连", d1.chan.kind, "d");
   eq("新鲜直连证据下闸门不再硬绕中继", W.pxDecision(reqP, "x.com", true, true, 2), false);
   eq("非 CF 站点的直连证据同样放行", W.pxDecision(reqP, "x.com", false, true, 2), false);
 
   // ② 没有直连证据：判定层选一条中继，闸门走中继（这是 7.187 要保住的那一半）
-  const d2 = W.decide({ host: "y.org", cfHost: true, clientV6: false, relays: ["45.136.117.194"], legacyWantsRelay: true, mode: "tput" });
+  const d2 = W.POLICY.decide({ host: "y.org", cfHost: true, clientV6: false, relays: ["45.136.117.194"], legacyWantsRelay: true, mode: "tput" });
   ok("没有直连证据时判定层选一条中继", d2.chan.kind === "r", d2.why);
   eq("没有直连证据时闸门走中继", W.pxDecision(reqP, "y.org", true, false, 2), true);
 
   // ③ 直连被差分判死：闸门必须改走中继（不依赖 wantPx）
   W.VT.setState("z.net", "d", 2, 1);
-  const d3 = W.decide({ host: "z.net", cfHost: true, clientV6: false, relays: ["45.136.117.194"], legacyWantsRelay: false, mode: "tput" });
+  const d3 = W.POLICY.decide({ host: "z.net", cfHost: true, clientV6: false, relays: ["45.136.117.194"], legacyWantsRelay: false, mode: "tput" });
   ok("直连被判死时判定层改走中继", d3.chan.kind === "r", d3.why);
   eq("直连被判死时闸门走中继", W.pxDecision(reqP, "z.net", true, false, 2), true);
 
@@ -8468,7 +8468,10 @@ console.log("\n[285] 策略本体与 HOOK 装配拆成两层");
   W.POLICY.install();
   const viaReal = W.HOOK.decide({ host: "x285.example", cfHost: false, clientV6: false, legacyWantsRelay: false });
   ok("装回真策略后不再是假实现", viaReal.why !== "fake-why" && typeof viaReal.why === "string");
-  ok("旧导出仍在（decide / shadow / policyOn）", typeof W.decide === "function" && typeof W.shadow === "function" && W.policyOn() === true);
+// 7.301：三个转发函数已删——能力本身还在（单例上的方法与只读属性），入口不再多一层。
+ok("三个转发函数都已删除", [W.decide, W.shadow, W.policyOn].every((f) => f === undefined));
+ok("能力改挂在策略单例上", typeof W.POLICY.decide === "function" && typeof W.POLICY.shadow === "function");
+eq("策略是否生效是只读属性", W.POLICY.enabled, W.SC.POLICY > 0);
 }
 {
   // 第 286 组：连接结束时的结算流水线独立成类（v7.286）
@@ -8681,10 +8684,10 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   ok("策略本体声明自己可当 PinSource", polSrc.includes("export class Policy implements PinSource"));
   eq("轮换游标按条数取模", [W.POLICY.nextRotation(3), W.POLICY.nextRotation(3), W.POLICY.nextRotation(3), W.POLICY.nextRotation(3)], [0, 1, 2, 0]);
   W.VT.clear();
-  const v6c = W.decide({ host: "v6cf292.test", cfHost: true, clientV6: true, relays: ["104.18.32.1", "203.0.113.9"], legacyWantsRelay: true, mode: "tput" });
+  const v6c = W.POLICY.decide({ host: "v6cf292.test", cfHost: true, clientV6: true, relays: ["104.18.32.1", "203.0.113.9"], legacyWantsRelay: true, mode: "tput" });
   eq("v6 客户端打 CF 目标走非 CF 中继", v6c.why, "v6-cf");
   eq("v6-cf 挑的是非 CF 那条", v6c.chan.ip, "203.0.113.9");
-  const plain = W.decide({ host: "plain292.test", cfHost: false, clientV6: false, relays: [], legacyWantsRelay: false, mode: "tput" });
+  const plain = W.POLICY.decide({ host: "plain292.test", cfHost: false, clientV6: false, relays: [], legacyWantsRelay: false, mode: "tput" });
   eq("非 CF 目标没候选时直连", plain.why, "direct");
   W.VT.setState("rank292.test", "r:45.136.117.194", 2, 1);
   const rk = W.rankOf({ host: "rank292.test", cfHost: true, clientV6: false, relays: ["45.136.117.194", "203.0.113.9"], legacyWantsRelay: true, mode: "tput" });
@@ -8849,6 +8852,25 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("三个单例就位", W.SITE instanceof W.SitePick && W.PATHS instanceof W.PathPrefs && W.PICK instanceof W.PickPath);
   ok("空站点时一律不否决", W.PATHS.vetoed("", "203.0.113.9:443") === false);
   ok("空站点时通道判据也放行", W.PATHS.chanOpen("", "203.0.113.9:443") === true);
+}
+
+// [301] 薄包装与「只为测试存在的入口」已经收掉：调用点直接调单例
+{
+  const pol301 = fs.readFileSync("src/route/policy.ts", "utf8");
+  const src301 = fs.readFileSync("src/px/poolsrc.ts", "utf8");
+  const probe301 = fs.readFileSync("src/px/probe.ts", "utf8");
+  const ip301 = fs.readFileSync("src/routes/proxyip.ts", "utf8");
+  ok("策略模块不再有转发函数", !/export function (decide|shadow|policyOn)\(/.test(pol301));
+  ok("策略本体的两个方法还在", pol301.includes("  decide(c: Ctx): Choice {") && pol301.includes("  shadow(c: Ctx): Choice {"));
+  ok("策略是否生效改成只读属性", pol301.includes("  get enabled(): boolean {") && pol301.includes("return SC.POLICY > 0;"));
+  ok("源健康度不再有转发函数", !/export function (srcRank|srcNote|srcHealth)\(/.test(src301));
+  ok("源健康度内部直接用单例", src301.includes("SOURCES.rank(env)") && src301.includes("SOURCES.note(src,"));
+  ok("probe 的再导出里没有旧名字", !/src(Rank|Note|Health)/.test(probe301) && probe301.includes("SOURCES"));
+  ok("调用点直接用单例（不再经包装）", ip301.includes("SOURCES.rank(env)") && ip301.includes("SOURCES.snap()"));
+  eq("策略单例的能力齐全", [typeof W.POLICY.decide, typeof W.POLICY.shadow, typeof W.POLICY.enabled], ["function", "function", "boolean"]);
+  eq("源单例的能力齐全", [typeof W.SOURCES.rank, typeof W.SOURCES.note, typeof W.SOURCES.snap], ["function", "function", "function"]);
+  ok("源健康快照是对象", typeof W.SOURCES.snap() === "object");
+  ok("三个旧入口在测试窗口里也拿不到", [W.decide, W.shadow, W.policyOn, W.srcRank, W.srcNote, W.srcHealth].every((f) => f === undefined));
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

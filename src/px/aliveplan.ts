@@ -1,4 +1,4 @@
-import { srcHealth } from "./probe";
+import { SOURCES } from "./probe";
 
 /**
  * 活跃池的目标规模。
@@ -22,7 +22,7 @@ export const ALIVE_TARGET = 16;
  * @returns {{ bad: number; retryAt: number }} 当前失败的源数量、最早恢复时间
  */
 export function srcStat(): { bad: number; retryAt: number } {
-  const snap = srcHealth();
+  const snap = SOURCES.snap();
   let bad = 0;
   let retryAt = 0;
   for (const k of Object.keys(snap)) {
