@@ -1,44 +1,32 @@
-import { errMsg, withTimeout } from "../core/util";
-import { probeHttp80, splitRelay } from "../core/http80";
 import { S } from "../core/state";
-import { json } from "../edge/respond";
-import { diagVerdict, hostKey } from "../nodes/metrics";
-import { nsGet } from "../nodes/score";
-import { cfHttpCode } from "../proxy/cfverdict";
-import { runTfb } from "../route/tfb";
-import { BLK_TTL } from "../route/commitfact";
-import { VT_TTL_MS, vAll, vState } from "../route/verdict";
 import { vtDelta, vtLoad } from "../route/verdictsync";
-import { cntView } from "../core/counter";
-import { planView } from "../route/budget";
-import { prefsJson } from "../route/prefs";
-import { REL_SAMPLE_TTL, relSnap } from "../route/relperf";
-import { BLK } from "../route/blkfacts";
-import { FACTS } from "../route/factsstore";
-import { EG } from "../route/egfacts";
-import { psSnap } from "../route/psfacts";
-import { DEAD } from "../route/deadfacts";
-import { DIRECT, chanKey } from "../route/channel";
-import { HEALTH } from "../route/relay-health";
-import { checkTarget, dohQuery, expandV6, httpProbe, isCfHost, resolveAAAA, resolveV4All } from "../proxy/dial";
-import { SOCKET_DIALER } from "../proxy/socket-dialer";
-import { aliveList, commitPool, flushPx, pxSet } from "../px/pool";
-import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
-import { clSnapshot, doFetch, restoreUsage } from "../store/index";
-import { adminOnly } from "../edge/auth";
+import { doFetch } from "../store/index";
+import { ACTIONS } from "./debug-actions";
 import { METER_PROBES } from "./debug-meter";
+import { NETS } from "./debug-nets";
+import { TABLES } from "./debug-tables";
 
-import type { Chan } from "../route/channel";
 import type { RouteCtx } from "../edge/types";
-import { St } from "../core/enums";
 
-type UserCtx = RouteCtx & { id: string };
+/** 诊断路由的上下文：`/<uuid>/debug` 挂在用户前缀下，所以一定带着 `id` */
+type DebugCtx = RouteCtx & { id: string };
 
-/** /<uuid>/debug：站点诊断（?diag=<host>&probe=1 做一次 SNI 探测） */
-export async function debug(c: UserCtx): Promise<Response> {
-  const { env, url, host: _host, id, first: _first, ctx: _ctx } = c;
-  /* ---------- 连接记录：本 isolate 最近 40 条 +（&do=1）DO 环形 60 条 ---------- */
-  const vtHost = String(url.searchParams.get("vt") || "").slice(0, 80);
+/**
+ * `/<uuid>/debug`：把所有诊断入口按固定顺序分派给三类组件。
+ *
+ * - `TABLES`（`debug-tables.ts`）：只读表 —— 判定、事实层、健康度、连接记录；
+ * - `NETS`（`debug-nets.ts`）：会对外拨号的测量 —— 出口测速、站点诊断、原始探活、明文 HTTP、判定批；
+ * - `ACTIONS`（`debug-actions.ts`）：会改状态的写操作 —— 抓源、钉节点、回填用量（都先过 `adminOnly`）。
+ *
+ * 顺序是有意义的：只读分支必须排在测量与写操作之前，否则 `?diag=x&refill=1` 这种组合
+ * 会先花掉一次抓源再回答一个只读问题。`METER_PROBES` 与 `?tfb=`/`?tf=` 排在最后，
+ * 因为它们各自要占一次 DO 往返。
+ *
+ * @param c 路由上下文（含 `env` / `id` / `url`）
+ * @returns 命中的诊断分支响应；一个参数都没有时退化成 `?host=` 的 DNS/v6 可达性检查
+ */
+export async function debug(c: DebugCtx): Promise<Response> {
+  const { env, url, id } = c;
   // &do=1：先把这个 isolate 学的强证据写回 DO，再把 DO 里的合并回来，
   // 这样从任意边缘读都能看到「刚刚在别的 isolate 学到的封锁」。
   if (url.searchParams.get("do") === "1" && env.METER) {
@@ -46,405 +34,56 @@ export async function debug(c: UserCtx): Promise<Response> {
       const rows = vtDelta();
       if (rows.length) {
         // 走 `doFetch`：它同时把这次子请求记进 `S.doCalls`，绕过它 `/health` 的计数就少一块
-        await doFetch(env, String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase(), "https://meter/add", {
+        const userId = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
+        await doFetch(env, userId, "https://meter/add", {
           method: "POST",
           body: JSON.stringify({ vt: rows }),
         });
       }
     } catch {
-      // 忽略
+      // 写回失败不影响本次诊断：下面的 vtLoad 会重新尝试读
     }
     S.vtLoaded = false;
     await vtLoad(env);
   }
-  if (url.searchParams.get("dd")) return json({ rows: DEAD.snap() }); // 判死的会挪到队尾，30 分钟复活
-  // 站点 × 中继的成功率事实（本 isolate）：样本越多越可信，因子越靠近 1
-  if (url.searchParams.get("pss")) return json({ host: String(url.searchParams.get("pss")), rows: psSnap(String(url.searchParams.get("pss"))) });
-  if (url.searchParams.get("eg")) return json({ rows: EG.snap() });
-  if (url.searchParams.get("rt")) return json({ host: String(url.searchParams.get("rt") || "").slice(0, 80), rows: relSnap(String(url.searchParams.get("rt") || "").slice(0, 80)), alive: S.alive.size, ttl: REL_SAMPLE_TTL });
-  // 站点 × 中继的封锁行（v7.222）：文档里从 v8 起就写着 `?blk=<host>`，代码里一直没有这个分支。
-  // 只读内存表，不打 DO：要看别处 isolate 回传的行得配合 `?do=1` 那条链（那里是 /meter/vt）。
-  if (url.searchParams.get("blk")) {
-    const bh = String(url.searchParams.get("blk") || "").slice(0, 80);
-    const rows = BLK.snap().filter((r) => r.k === bh || r.k.startsWith(bh + "|"));
-    return json({ host: bh, muted: BLK.muted(bh), rows: rows.slice(0, 60), ttl: BLK_TTL });
-  }
-  // 事实层五张表一次看全（v7.222）：eg / ps / dead / blk2 / dns，容量与条数都能直接看出来
-  if (url.searchParams.get("facts") === "1") return json({ tables: FACTS.snap(), counters: cntView() });
-  // 本轮预算分配（v7.222）：与 `?vt=<host>` 分支里的 plan 同一口径，省得为了看预算先造一个 host
-  if (url.searchParams.get("plan") === "1") return json({ plan: planView(S.pool.length, S.alive.size), counters: cntView() });
-  if (vtHost) {
-    // 只读表：userland TLS 探测已在 7.69 删除（免费计划必然 1102），证据一律来自真实流量与 tfb。
-    // 这里曾经还回三个恒空字段（ips / nodes / rows）——它们来自已删除的扫描器，
-    // 于是「扫描结果为空」和「根本没有扫描」在响应里长得一模一样（v7.154 删掉）。
-    const plan = planView(S.pool.length, S.alive.size);
-    const pol = { same: S.polSame, diff: S.polDiff, why: S.polWhy };
-    return json({ host: vtHost, table: vAll(), pol, plan, counters: cntView() });
-  }
-  /* ---------- 站点偏好表：判定表按通道聚合后的「能打通 / 打不通」两栏 ---------- */
-  if (url.searchParams.get("hl") === "1") {
-    let ring: unknown = [];
-    if (url.searchParams.get("do") === "1") {
-      try {
-        const raw = String(c.env.uuid || c.env.uuids).split(",")[0].trim().toLowerCase();
-        const rr = await doFetch(c.env, raw, "https://meter/hl");
-        ring = ((await rr.json()) as { hl?: unknown }).hl || [];
-      } catch {
-        ring = [];
-      }
-    }
-    return json({ local: HEALTH.json(20), sizes: HEALTH.counts(), ring });
-  }
-  if (url.searchParams.get("prefs") === "1") {
-    return json({ prefs: prefsJson(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });
-  }
 
-  if (url.searchParams.get("cl") === "1") {
-    const local = clSnapshot(40);
-    let ring: ClRec[] = [];
-    if (url.searchParams.get("do") === "1" && env.METER) {
-      try {
-        const r = await doFetch(env, id, "https://meter/cl");
-        const j = (await r.json()) as { cl?: ClRec[] };
-        if (Array.isArray(j.cl)) ring = j.cl;
-      } catch {
-        ring = [];
-      }
-    }
-    return json({ local, ring, now: Date.now() });
-  }
+  // 1) 只读表
+  const table = await TABLES.read(c, url);
+  if (table) return table;
 
-  /* ---------- 出口测速：Worker 自己到源站有多快（?bench=<url>&bytes=4000000） ---------- */
-  // 和「客户端 → CF 边缘」那条腿分开量：这里只测 Worker 出口到源站的吞吐。
-  // 两个数一比就知道慢在哪一腿（边缘链路 vs 中继/源站），不用猜。只读前 N 字节、20 秒封顶。
-  const benchUrl = String(url.searchParams.get("bench") || "").slice(0, 300);
-  if (benchUrl) {
-    const cap = Math.max(
-      64 * 1024,
-      Math.min(32 * 1024 * 1024, Number(url.searchParams.get("bytes") || 4_000_000) || 4_000_000),
-    );
-    const t0 = Date.now();
-    let got = 0;
-    let first = 0;
-    let status = 0;
-    let err = "";
-    let aborted = false;
-    const ac = new AbortController();
-    // 源站很慢时不能把这次调用拖死：20 秒后中止，已读到的字节照样报出来
-    const timer = setTimeout(() => {
-      aborted = true;
-      ac.abort();
-    }, 20000);
-    try {
-      const r = await fetch(benchUrl, { signal: ac.signal });
-      status = r.status;
-      if (r.body) {
-        const rd = r.body.getReader();
-        for (;;) {
-          const { value, done } = await rd.read();
-          if (done) break;
-          if (value && value.length) {
-            got += value.length;
-            if (!first) first = Date.now();
-            if (got >= cap) break;
-          }
-        }
-        try {
-          rd.cancel();
-        } catch (e) {
-          // 取消失败无所谓：连接本来就要丢
-        }
-      }
-    } catch (e) {
-      err = errMsg(e).slice(0, 80);
-    }
-    clearTimeout(timer);
-    // 用「从发起到读完」的总时长算速率：cf 里同网源站会把整段 body 一次性缓冲好，
-    // 只按「首字节到末字节」算会得到 3.9 GB/s 这种假数字。ttfb 单独报。
-    const total = Math.max(1, Date.now() - t0);
-    return json({
-      bench: benchUrl,
-      status,
-      kb: Math.round(got / 1024),
-      ms: total,
-      kbs: Math.round(got / 1024 / (total / 1000)),
-      ttfb: first ? first - t0 : 0,
-      aborted,
-      err,
-    });
-  }
-  /* ---------- 站点诊断：这个站该用哪个节点 / 为什么被拦 ---------- */
-  const diagHost = String(url.searchParams.get("diag") || "")
-    .trim()
-    .toLowerCase();
-  if (diagHost) {
-    if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(diagHost)) {
-      return json({ ok: false, error: "域名格式不对" });
-    }
-    const port = Number(url.searchParams.get("port")) || 443;
-    const alive = await aliveList(env);
-    const ccOf: Record<string, string> = {};
-    for (const a of alive) ccOf[a.h + ":" + a.p] = a.cc || "";
-    const fam = hostKey(diagHost);
-    const rows: DiagRow[] = [];
-    const m = S.hostNode.get(fam);
-    if (m) {
-      for (const [node, s] of m) {
-        rows.push({ node, cc: ccOf[node] || "", ...s });
-      }
-    }
-    rows.sort((a, b) => b.n - a.n);
-    const direct = S.hostDirect.get(fam) || { ok: 0, bad: 0, at: 0 };
+  // 2) 会对外拨号的测量（顺序敏感：bench 与 diag 都要花真流量）
+  const bench = await NETS.bench(url);
+  if (bench) return bench;
+  const diag = await NETS.diag(c, url);
+  if (diag) return diag;
+  const probe = await NETS.rawProbe(url);
+  if (probe) return probe;
 
-    // 主动探测：不信历史样本时，直接拿每个节点试一次
-// （只验"能不能把这个 SNI 转出去"：probeSni 发完 ClientHello 就等 ServerHello，不完成握手，拿不到应用层状态）
-    let probe: Array<{ node: string; cc: string } & SniProbe> | null = null;
-    if (url.searchParams.get("probe") === "1") {
-      probe = await Promise.all(
-        alive.slice(0, 6).map(async (a) => {
-          // 第 4 个参数是探测超时（ms），不是目标端口；以前把 port 传进去，
-          // 默认 443 会把超时压到 443ms，正常的慢站全被判死。
-          const r = await probeSni(a.h, a.p, diagHost);
-          return { node: a.h + ":" + a.p, cc: a.cc || "", ...r };
-        }),
-      );
-    }
+  // 3) 会改状态的写操作
+  const refill = await ACTIONS.refill(c, url);
+  if (refill) return refill;
+  const pin = await ACTIONS.pinCurrent(c, url);
+  if (pin) return pin;
 
-    // 有真实样本就用真实样本；没有就退化成这一轮探测的结果
-    let basis = rows;
-    let basisLabel = "真实流量";
-    if (!rows.length && probe) {
-      basis = probe.map((p) => ({
-        node: p.node,
-        cc: p.cc,
-        n: 1,
-        ok: p.err ? 0 : 1,
-        bad: p.err ? 1 : 0,
-        bytes: 0,
-        ttfb: p.hs || 0,
-      }));
-      basisLabel = "主动探测";
-    }
-    // 判定：先看 DNS 解析出的 IP 在不在 CF 网段，再用 HTTP 探一次拿真实状态码
-// （Worker 自己发 HTTPS 请求时看得到状态码；走中继的 WebSocket 隧道是端到端 TLS，看不到状态行——那一路要靠 tfb 在 DO 里用 tunnelfetch 单独建连）
-    const ips = await resolveV4All(diagHost).catch(() => []);
-    const cfHosted = await isCfHost(diagHost).catch(() => false);
-    const live = await httpProbe(diagHost, 4000).catch(() => ({ code: 0, colo: "" }));
-    if (live.code) S.cfHttp.set(diagHost, { code: live.code, colo: live.colo, t: Date.now() });
-    const cfVerdict = {
-      ips,
-      cfHosted,
-      code: live.code,
-      colo: live.colo,
-      cached: cfHttpCode(diagHost),
-      blocked: live.code >= 400,
-    };
-    // 该站点在中继上被判 blocked/dead 的条目（来自判定表，带来源与时间）
-    const relayBlocked: Array<{ node: string; state: number; src: number; left: number }> = [];
-    for (const v of vAll()) {
-      if (!v.channel.startsWith("r:") || v.state < St.Blocked) continue;
-      relayBlocked.push({ node: v.channel.slice(2) + ":443", state: v.state, src: v.src, left: Math.round((v.updatedAt + VT_TTL_MS - Date.now()) / 1000) });
-    }
-    // &do=1：把 DO 里跨 isolate 的那份判定也拉出来看（否则只能看到本 isolate 学到的）
-    let ringBlk: Array<{ node: string; n: number; left: number }> = [];
-    if (url.searchParams.get("do") === "1" && env.METER) {
-      try {
-        // 读的是 blk2 事实（host|relay → { n, at }），不是计量表里那张早已没有生产者的旧封锁表：
-        // 那张表从 7.124 起就没有写者了，诊断会一直显示「DO 里没有封锁」，把空表当成了「没被封锁」。
-        const rr = await doFetch(env, id, "https://meter/vt");
-        const jj = (await rr.json()) as { blk2?: Array<{ k: string; n: number; at: number }> };
-        const now2 = Date.now();
-        for (const r of jj.blk2 || []) {
-          if (!r || !r.k.startsWith(diagHost + "|")) continue;
-          const left = Math.round((r.at + BLK_TTL - now2) / 1000);
-          if (left <= 0) continue;
-          ringBlk.push({ node: r.k.slice(diagHost.length + 1), n: r.n, left });
-        }
-        ringBlk.sort((a, b) => b.left - a.left);
-      } catch (e) {
-        ringBlk = [];
-      }
-    }
-    relayBlocked.sort((a, b) => b.left - a.left);
-    const v = diagVerdict(basis, direct);
-
-    return json({
-      host: diagHost,
-      family: fam,
-      port,
-      kind: v.kind,
-      verdict: v.verdict,
-      suspect: v.suspect,
-      basis: basisLabel,
-      direct,
-      samples: rows,
-      probe,
-      alive: alive.length,
-      cfVerdict,
-      relayBlocked,
-      ringBlk,
-note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿到连接结果；要看真状态码用 cached（本 isolate 直连会话缓存）或 /debug?tfb=",
-    });
-  }
-
-  const pr = url.searchParams.get("probe");
-  if (pr) {
-    // 拆地址只准有一份实现：内联 lastIndexOf 会把 [v6]:443 当成主机名 "[v6]" 拒掉，
-    // 而 IPv6 中继恰恰是最需要用 ?probe= 量的那批（v6 出口是 CF 托管站点 403 的来源）。
-    const [ph, pp] = splitRelay(pr, 443);
-    const bad = checkTarget(ph, pp);
-    if (bad) return json({ probe: pr, ok: false, error: bad });
-    const r = await probeProxy(ph, pp);
-    return json({ probe: pr, ok: !!r, result: r });
-  }
-  if (url.searchParams.get("refill") === "1") {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    // 和 cron 共用同一套抓取/去重/2MB 截断，别再维护第二份
-    const refill = await refillPool(env);
-    const merged = refill.pool;
-    // 默认提交（debug 端点已有 UUID 鉴权）；&dry=1 只看不写，&force=1 无视线池 60% 守卫
-    let commit: Record<string, unknown> = { ok: true, skipped: true };
-    if (merged.length && url.searchParams.get("dry") !== "1") {
-      commit = await commitPool(env, merged, url.searchParams.get("force") === "1");
-    }
-    return json({
-      sources: refill.sources,
-      merged: merged.length,
-      pool: merged.length,
-      committed: !!commit.ok && !commit.skipped,
-      gen: commit.gen || 0,
-      reason: commit.reason || "",
-      kvLastWrite: S.kvStat,
-      extra: EXTRA_HOSTS,
-    });
-  }
-
-  // 手动指定当前节点：?cur=1.2.3.4:443（用于对比不同节点的真实速度）
-  if (url.searchParams.get("cur")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    const want = String(url.searchParams.get("cur")).trim();
-    if (!/^[0-9a-zA-Z.\-]+:\d+$/.test(want)) return json({ ok: false, error: "格式应为 host:port" });
-    await pxSet(env, { cur: want });
-    const s0 = nsGet(want);
-    s0.blackUntil = 0;
-    s0.freeUntil = 0;
-    s0.streak = 0;
-    const fx = await flushPx(env, true);
-    S.pxFailMem = 0;
-    // 钉节点要跟着写 KV 锚点，否则别的 isolate 起来会挑回原来那条（返回 ok 但没落盘就是谎报）
-    return json({ ok: true, cur: want, curs: S.curs, anchor: fx.ok ? "ok" : "fail", note: fx.ok ? undefined : fx.err });
-  }
-
-  // 明文 HTTP 诊断：?http=x.com&r=185.253.117.147:80（r 省略=直连）。
-  // :80 的状态码语义因站而异（x.com 直连回 500、经中继常回中继自己的 404），只诊断、不写判定。
-  if (url.searchParams.get("http")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    const hh = String(url.searchParams.get("http"));
-    const rr = url.searchParams.get("r") || "";
-    const pp = url.searchParams.get("p") || "/";
-    if (!env.METER) return json({ ok: false, error: "no METER" });
-    try {
-      // 明文探测很便宜（connect + 读 ≤2KB），直接在请求路径做，不绕 DO（DO 那条会等 20s+ 才被重置）
-      const out = await withTimeout(probeHttp80(hh, rr, pp), 6000);
-      const chan = rr ? ({ kind: "r", ip: rr.split(":")[0] } as Chan) : DIRECT;
-      return json({ ok: true, probe: out, note: "diagnostic only", chan: chanKey(chan), state: vState(hh, chanKey(chan)) });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
+  // 4) 明文 HTTP 与计量 DO 诊断（各自一次 DO 或直连往返）
+  const http = await NETS.http(c, url);
+  if (http) return http;
   // 六个「计量 DO 诊断」端点（?burn= / ?stage= / ?tim= / ?iter= / ?burnjs= / ?crypto=）交给
   // `DebugMeterProbes`：它们的形状完全一样（校验管理员 → 取带实例名的 DO → 带超时 fetch →
   // 包成 { ok, doStatus, <item> }），写成六个 if 块时每一步都可能在某一块里漏掉。
-  const probe = await METER_PROBES.run(c, url, id);
-  if (probe) return probe;
-  // IP 级封锁探测（见 route/tfb.ts）
-  if (url.searchParams.get("tfb")) {
-    const denyB = await adminOnly(c);
-    if (denyB) return denyB;
-    return runTfb(c, String(url.searchParams.get("tfb") || ""), Number(url.searchParams.get("n") || 2), String(url.searchParams.get("r") || ""));
-  }
+  const meterProbe = await METER_PROBES.run(c, url, id);
+  if (meterProbe) return meterProbe;
+  const tfb = await NETS.tfb(c, url);
+  if (tfb) return tfb;
+  const tf = await NETS.tf(c, url);
+  if (tf) return tf;
 
-  if (url.searchParams.get("tf")) {
-    const denyTf = await adminOnly(c);
-    if (denyTf) return denyTf;
-    const tfHost = String(url.searchParams.get("tf") || "");
-    const tfRelay = String(url.searchParams.get("r") || "");
-    // 实例名固定 `tf-probe`：这条探测不写任何用户账本，只是想借 DO 的 CPU 做一次真握手
-    const r = (await withTimeout(
-      doFetch(c.env, "tf-probe", `https://meter/tf?h=${encodeURIComponent(tfHost)}&r=${encodeURIComponent(tfRelay)}`),
-      20000,
-    )) as Response | undefined;
-    const body = r ? await withTimeout(r.json(), 5000) : { ok: false, err: "tf-timeout" };
-    return Response.json({ host: tfHost, relay: tfRelay, do: body });
-  }
-  // 从 KV 快照回填用量（只在 DO 累计仍为 0 时生效，重建脚本后靠它恢复历史数字）
-  if (url.searchParams.get("restore") === "1") {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    const v = await restoreUsage(env, id);
-    return json({ ok: !!v, restored: v || null });
-  }
+  // 5) 回填类（都要管理员）
+  const restore = await ACTIONS.restore(c, url, id);
+  if (restore) return restore;
+  const seed = await ACTIONS.seed(c, url, id);
+  if (seed) return seed;
 
-  // 手动回填用量（仅在 DO 累计为 0 时生效，用于重建脚本后恢复历史数字）
-  if (url.searchParams.get("seed")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    const [u0, d0, c0] = String(url.searchParams.get("seed"))
-      .split(",")
-      .map((x) => Number(x) || 0);
-    let seeded = null;
-    let seedOk = false;
-    let seedStatus = 0;
-    try {
-      const r = await doFetch(env, id, "https://meter/seed", {
-        method: "POST",
-        body: JSON.stringify({ up: u0, down: d0, conns: c0, first: Date.now() }),
-      });
-      seedOk = r.ok;
-      seedStatus = r.status;
-      seeded = await r.json();
-      S.meterCache.set(id, { v: seeded, t: Date.now() });
-    } catch (e) {
-      return json({ ok: false, error: String(errMsg(e)) });
-    }
-    return json({ ok: seedOk, doStatus: seedStatus, seeded });
-  }
-
-  const h = url.searchParams.get("host") || "example.com";
-  const out: Record<string, unknown> = { host: h, aaaa: null, a: null, v6Connect: null };
-  try {
-    out.aaaa = await resolveAAAA(h);
-  } catch (e) {
-    out.aaaa = "ERR " + errMsg(e);
-  }
-  try {
-    out.a = await dohQuery(h, "A");
-  } catch (e) {
-    out.a = "ERR " + errMsg(e);
-  }
-  if (out.aaaa && typeof out.aaaa === "string" && out.aaaa.includes(":")) {
-    const bad6 = checkTarget(out.aaaa, 443);
-    if (bad6) out.v6Connect = "denied: " + bad6;
-    else {
-      // 只想知道这条 v6 地址能不能建连。`connect()` 本身没有超时：黑洞地址会一直挂着，
-      // 占住免费计划全局 6 个 `connect` 名额中的一个（7.169–7.171 修过五处同类）。
-      try {
-        // 预算与「超时后关掉迟到 socket」只有一处实现（`SocketDialer.open`）：这个分支以前
-        // 自己抄了一遍，7.272 收敛时漏了它，于是两个文件各有一份建连预算的语义。
-        const s6 = await SOCKET_DIALER.open(expandV6(out.aaaa), 443);
-        out.v6Connect = "ok";
-        try {
-          s6.close();
-        } catch (e) {
-          // 关不掉无所谓：这条连接只为验一次可达性
-        }
-      } catch (e) {
-        out.v6Connect = "ERR " + errMsg(e);
-      }
-    }
-  }
-  return json(out);
+  // 6) 兜底：两个地址族各查一次，再试一次 v6 建连
+  return NETS.host(url);
 }

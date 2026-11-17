@@ -18,7 +18,7 @@ proxy/    protocol dial session     数据面：协议、拨号、会话
           ws-in                      客户端→上游字节流（8MB 上行队列上限）
 views/    sub* panel* html          纯渲染：sub-common/singbox/links + panel/admin/stats
 edge/     respond types auth        响应与安全头、请求上下文、管理会话
-routes/   health subscription admin   proxyip debug tools(barrel)
+routes/   health subscription admin   proxyip debug(+tables/nets/actions) tools(barrel)
           logs cron
 index.ts                            组装根：分发 + ws 升级 + cron
 ```
@@ -255,6 +255,9 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `FirstObs` | `src/core/firstobs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
 | `Attacher` | `src/proxy/attacher.ts` | 上游挂载与补救链：中转再试一条 → IPv6 兜底 → proxyip → 放弃 |
 | `DebugMeterProbes` | `src/routes/debug-meter.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
+| `DebugTables` | `src/routes/debug-tables.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：只读表、不拨号、不改状态 |
+| `DebugNets` | `src/routes/debug-nets.ts` | 会对外拨号的诊断分支（bench/diag/probe/http/tfb/tf/host）：每条都消耗 `connect()` 名额或子请求 |
+| `DebugActions` | `src/routes/debug-actions.ts` | 会改状态的诊断操作（refill/cur/restore/seed）：全部先过 `adminOnly`，都会写 KV 或 DO |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表 |
 | `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |

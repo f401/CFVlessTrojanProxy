@@ -21,6 +21,15 @@ const statAll = () =>
     .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
     .join("\n");
 
+/**
+ * 诊断路由四段源码拼在一起：`debug.ts`（编排）/ `debug-tables.ts`（只读表）/ `debug-nets.ts`（会拨号的测量）/ `debug-actions.ts`（会改状态的写）。
+ * v7.283 把原来 450 行的一条 if 链按「读 / 量 / 写」拆开，源码锁改成「在整个诊断模块里存在」。
+ * @returns {string} 四段源码
+ */
+const debugAll = () =>
+  ["src/routes/debug.ts", "src/routes/debug-tables.ts", "src/routes/debug-nets.ts", "src/routes/debug-actions.ts"]
+    .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
+    .join("\n");
 import * as W from "./_bundle.mjs";
 import { webcrypto } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -3395,7 +3404,7 @@ ok("状态表里不再有 tsMem 的键", !Object.prototype.hasOwnProperty.call(W
 {
   const g = "144";
   const bundle = fs.readFileSync("test/_bundle.mjs", "utf8");
-  const dbg = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const dbg = debugAll();
   ok(`[${g}] 「Worker 看不到 HTTP 状态码」的过期说法已删掉`, !dbg.includes("Worker 看不到 HTTP 状态码"));
   ok(`[${g}] 调试端点改为指向 tfb 与状态码缓存`, bundle.includes("要看真状态码用 cached"));
   ok(`[${g}] 只验 SNI 的注释改成真实原因（不完成握手）`, dbg.includes("不完成握手，拿不到应用层状态"));
@@ -4378,7 +4387,7 @@ console.log("\n176) 预算账本与续回边界");
   const meterSrc177 = storeSrc();
   ok("meter 的 /vt 已委托给 factsOut", meterSrc177.includes("Response.json(factsOut(this.ledger))"), "meter.ts");
   ok("meter 里不再自己拼 blk2 的插入序切片", !meterSrc177.includes("Object.entries(this.blk2)"), "meter.ts");
-  const dbgSrc177 = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const dbgSrc177 = debugAll();
   ok("诊断默认分支的建连接去拨号器", dbgSrc177.includes("SOCKET_DIALER.open(expandV6(out.aaaa), 443)"), "debug.ts");
   ok("诊断默认分支不再自己包 connect", !dbgSrc177.includes("Promise.resolve(connect("), "debug.ts");
 }
@@ -4390,7 +4399,7 @@ console.log("\n176) 预算账本与续回边界");
   ok("计量表里不再有旧封锁表字段", !/this\.blk\b/.test(mS), "meter.ts");
   ok("计量表不再提供 /blk 端点", mS.indexOf('endsWith("/blk")') < 0, "meter.ts");
   ok("七张事实表的出站仍走 factsOut", mS.indexOf("Response.json(factsOut(this.ledger))") >= 0, "meter.ts");
-  const dS = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const dS = debugAll();
   ok("诊断的跨 isolate 封锁改读 /vt 的 blk2", dS.indexOf('doFetch(env, id, "https://meter/vt")') >= 0 && dS.indexOf("jj.blk2") >= 0, "debug.ts");
   ok("诊断用 blk2 的 at 与 BLK_TTL 算剩余寿命", dS.indexOf("r.at + BLK_TTL - now2") >= 0, "debug.ts");
   const pS = fs.readFileSync("src/route/policy.ts", "utf8");
@@ -5885,7 +5894,7 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
 
 // ---------- 第 223 组：文档写了但代码没有的调试端点（v7.222） ----------
 {
-  const dbg = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const dbg = debugAll();
   ok("debug 有 ?blk= 分支", dbg.includes('url.searchParams.get("blk")'));
   ok("?blk= 按站点前缀过滤封锁行", dbg.includes("BLK.snap().filter((r) => r.k === bh || r.k.startsWith(bh + \"|\"))") || dbg.includes('r.k.startsWith(bh + "|")'));
   ok("?blk= 报告自愈静音", dbg.includes("muted: BLK.muted(bh)"));
@@ -6984,7 +6993,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   const curOk = await run248("?cur=1.2.3.4:443", {});
   eq("钉节点落盘成功时 anchor 为 ok", curOk.anchor, "ok");
 
-  const srcDbg248 = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const srcDbg248 = debugAll();
   ok("转发分支不再无条件写 ok: true", !srcDbg248.includes("return json({ ok: true, burn: await resp.json() })"));
   const srcMeter275 = fs.readFileSync("src/routes/debug-meter.ts", "utf8");
   ok("转发分支带出 DO 状态码", srcMeter275.includes("ok: resp.ok, doStatus: resp.status"));
@@ -7472,7 +7481,7 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
 
   const rhSrc = fs.readFileSync("src/route/relay-health.ts", "utf8");
   const ledSrc = fs.readFileSync("src/route/relay-ledger.ts", "utf8");
-  const dbgSrc = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const dbgSrc = debugAll();
   ok("健康表把两张账本换成了一个类", rhSrc.includes("private ledger = new RelayLedger();"), "缺 ledger 字段");
   ok("健康表自己不再持有 sent 表", !rhSrc.includes("private sent ="), "还有 private sent");
   ok("健康表自己不再持有 pending 表", !rhSrc.includes("private pending ="), "还有 private pending");
@@ -7624,7 +7633,7 @@ eq("拆地址：空串回默认端口", W.splitRelay("", 443).join("|"), "|443")
 eq("拆地址：方括号无端口", W.splitRelay("[2a06:98c0::103]", 443).join("|"), "2a06:98c0::103|443");
 
 // 五处调用点都改走同一份实现
-ok("调试探针不再内联拆地址", !code265("src/routes/debug.ts").includes('lastIndexOf(":")') && code265("src/routes/debug.ts").includes("const [ph, pp] = splitRelay(pr, 443);"));
+ok("调试探针不再内联拆地址", !debugAll().includes('lastIndexOf(":")') && debugAll().includes("const [ph, pp] = splitRelay(pr, 443);"));
 ok("池子探活不再内联拆地址", !code265("src/px/scan.ts").includes('lastIndexOf(":")') && code265("src/px/scan.ts").includes("splitRelay(k, 443)"));
 ok("名单打包不再内联拆地址", !code265("src/px/seed.ts").includes("k.slice(0, i)") && code265("src/px/seed.ts").includes("splitRelay(k, 443)"));
 ok("订阅渲染不再内联拆地址", !code265("src/views/sub.ts").includes('lastIndexOf(":")') && code265("src/views/sub.ts").includes("const [ip] = splitRelay(k, 443);"));
@@ -7681,7 +7690,7 @@ eq("chanPref 对没测过的中继回 1（未知不惩罚）", W.chanPref("10.9.
 const srcPol267 = fs.readFileSync("src/route/policy.ts", "utf8");
 const srcPref267 = fs.readFileSync("src/route/prefs.ts", "utf8");
 const srcVs267 = fs.readFileSync("src/route/verdictsync.ts", "utf8");
-const srcDbg267 = fs.readFileSync("src/routes/debug.ts", "utf8");
+const srcDbg267 = debugAll();
 ok("policy 用 St.Reachable 过滤判定行", srcPol267.includes("v.state !== St.Reachable"), "");
 ok("prefs 用 St.Reachable/St.Blocked 分栏", srcPref267.includes("x.state === St.Reachable") && srcPref267.includes("x.state >= St.Blocked"), "");
 ok("prefs 的 chan() 用 St.Reachable", srcPref267.includes("if (state === St.Reachable) return 0;"), "");
@@ -7965,7 +7974,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
     "规格表覆盖六个参数名",
     ["burn", "stage", "tim", "iter", "burnjs", "crypto"].every((p) => W.METER_PROBES.specs.some((x) => x.param === p)),
   );
-  const dbgSrc275 = fs.readFileSync("src/routes/debug.ts", "utf8").split(/\r?\n/).join("\n");
+  const dbgSrc275 = debugAll().split(/\r?\n/).join("\n");
   ok("debug.ts 只留一行委托", dbgSrc275.includes("METER_PROBES.run(c, url, id)"));
   ok("debug.ts 不再自己读这六个参数", !dbgSrc275.includes("searchParams.get(\"burn\")") && !dbgSrc275.includes("searchParams.get(\"burnjs\")") && !dbgSrc275.includes("searchParams.get(\"crypto\")"));
   const dmSrc275 = fs.readFileSync("src/routes/debug-meter.ts", "utf8");
@@ -8095,7 +8104,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
 
 /* ---------- 第 278 组：诊断路由的 DO 读取与 v6 建连都走唯一入口 ---------- */
 {
-  const aSrc278 = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const aSrc278 = debugAll();
   const cli278 = fs.readFileSync("src/store/meter-client.ts", "utf8");
   // 计数点唯一：`S.doCalls` 只在 `doFetch` 里自增，所以任何绕过它的 stub.fetch 都会让 /health 少记一块
   ok("debug.ts 不再直接取 METER 存根", !/env\.METER\.get\(/.test(aSrc278));
@@ -8325,5 +8334,45 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok("成功留下 tcp 样本", W.nsGet(k282).tcp > 0, "");
 }
 
+
+// —— 283：调试路由按「读 / 量 / 写」拆成三个组件（7.283） ——
+{
+  const g = "283";
+  const orch = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const tabs = fs.readFileSync("src/routes/debug-tables.ts", "utf8");
+  const nets = fs.readFileSync("src/routes/debug-nets.ts", "utf8");
+  const acts = fs.readFileSync("src/routes/debug-actions.ts", "utf8");
+  // 编排层只按固定顺序调用三个组件，自己不再读任何参数：这条锁防的是「拆完之后又往编排里塞逻辑」
+  ok(`[${g}] 编排层不再自己判断参数`, !orch.includes("searchParams.get(\"dd\")") && !orch.includes("searchParams.get(\"bench\")"));
+  eq(`[${g}] 编排层按顺序调用十二个组件方法`, ["TABLES.read(", "NETS.bench(", "NETS.diag(", "NETS.rawProbe(", "ACTIONS.refill(", "ACTIONS.pinCurrent(", "NETS.http(", "METER_PROBES.run(", "NETS.tfb(", "NETS.tf(", "ACTIONS.restore(", "ACTIONS.seed(", "NETS.host("].every((x) => orch.includes(x)), true);
+  ok(`[${g}] 编排层保持「只读在测量与写之前」`, orch.indexOf("TABLES.read(") < orch.indexOf("NETS.bench(") && orch.indexOf("NETS.bench(") < orch.indexOf("ACTIONS.refill("));
+  ok(`[${g}] 编排层不超 120 行`, orch.split(/\r?\n/).length <= 120);
+  // 只读表：十一个分支都在这里，且不出现拨号/建连/写 KV 的能力
+  eq(`[${g}] 只读表层持有十一个分支`, ["\"dd\"", "\"pss\"", "\"eg\"", "\"rt\"", "\"blk\"", "\"facts\"", "\"plan\"", "\"vt\"", "\"hl\"", "\"prefs\"", "\"cl\""].every((x) => tabs.includes("searchParams.get(" + x + ")")), true);
+  ok(`[${g}] 只读表层不建连、不写状态`, !tabs.includes("SOCKET_DIALER.open(") && !tabs.includes("pxSet(") && !tabs.includes("flushPx(") && !tabs.includes("refillPool("));
+  // 测网层：三种「花钱」的能力都留了上限
+  ok(`[${g}] 测网层的测速有 20 秒封顶`, nets.includes("const ac = new AbortController();") && nets.includes(", 20000)"));
+  ok(`[${g}] 测网层的明文 HTTP 有 6 秒上限`, nets.includes("withTimeout(probeHttp80(") && nets.includes(", 6000)"));
+  ok(`[${g}] 测网层建连走拨号器`, nets.includes("SOCKET_DIALER.open(") && !nets.includes("connect({"));
+  ok(`[${g}] 测网层的判定批走 doFetch`, nets.includes("doFetch(c.env, \"tf-probe\""));
+  // 写层：四个分支都必须先过 adminOnly（数量锁：少一个就意味着有条写操作不需要管理员）
+  eq(`[${g}] 写层四个分支都先过管理员检查`, acts.split("await adminOnly(c)").length - 1, 4);
+  eq(`[${g}] 三个组件各导出单例`, ["export const TABLES", "export const NETS", "export const ACTIONS"].every((x) => (tabs + nets + acts).includes(x)), true);
+  // 行为：缺管理员时写分支直接拒绝，不会真的去抓源
+  const env283 = { uuid: "11111111-1111-1111-1111-111111111111" };
+  const mk283 = (q) => ({
+    request: new Request("https://h/" + env283.uuid + "/debug" + q),
+    env: env283,
+    id: env283.uuid,
+    url: new URL("https://h/" + env283.uuid + "/debug" + q),
+    exec: { waitUntil() {}, passThroughOnException() {} },
+  });
+  const deny283 = await W.debug(mk283("?refill=1"));
+  ok(`[${g}] 没有管理员时抓源分支被拒`, deny283.status === 403 || deny283.status === 401);
+  const seed283 = await W.debug(mk283("?seed=1,2,3"));
+  ok(`[${g}] 没有管理员时回填分支被拒`, seed283.status === 403 || seed283.status === 401);
+  const pin283 = await W.debug(mk283("?cur=1.2.3.4:443"));
+  ok(`[${g}] 没有管理员时钉节点分支被拒`, pin283.status === 403 || pin283.status === 401);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
