@@ -137,7 +137,7 @@ export { CAP, CAP_MAX, CAP_TTL, CapFacts, capFactor } from "./route/capfacts";
 export { ALIVE_TARGET, srcStat } from "./px/aliveplan";
 export { FACT_ALL, factList, factOn, factParse } from "./route/factflags";
 export { factMul } from "./route/factmul";
-export { PS, PS_TTL, psBest, psFactor, psNote, psOk, psPrior, psSnap } from "./route/psfacts";
+export { PS, PS_BATCH, PS_TTL, PsFacts, PsOutbox, psBest, psFactor, psNote, psOk, psPrior, psSnap } from "./route/psfacts";
 export { DEAD, DEAD_N, deadNote, isDead } from "./route/deadfacts";
 export { FO, FirstObs, FO_GRAY, FO_LIMIT, FO_PAGE } from "./core/firstobs";
 export { LAT, LatObs } from "./core/latobs";

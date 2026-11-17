@@ -58,6 +58,10 @@ const verdictAll = () =>
   ]
     .map((f) => fs.readFileSync(f, "utf8"))
     .join("\n");
+/** 功能：把「站点 × 中继」成功率事实的五个文件合成一段文本（源码锁读它）。 */
+const psAll = () =>
+  ["src/route/psfacts.ts", "src/route/ps-types.ts", "src/route/ps-prior.ts", "src/route/ps-outbox.ts", "src/route/ps-table.ts"]
+    .map((f) => fs.readFileSync(f, "utf8")).join("\n");
 const eq = (n, a, b) => {
   // want 是 undefined / 函数，或拿到的东西是函数时，序列化比较会两边都变成 undefined，
   // 断言永远为真（v7.150 修的空断言：删掉某函数后，旧锁其实一直没在测）。
@@ -3154,11 +3158,14 @@ eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
   eq("但历史最好仍是 100%（康复通道还认它）", W.psBest(rh, rip) > 0.99, true);
   // 7.143 起 sent 又回来了，但这次它**有读端**：ack() 靠它只清这一批真正发出去的行
   // （delta 有上限，一次清空整个 pending 会把超限的行丢掉）。这里锁住「发完即清」这个不变量。
+  W.PS.clear();
   W.PS.note("sent.example", "203.0.113.90", true, Date.now());
-  W.PS.delta();
-  eq("psfacts 的已发表在 delta 后非空（ack 要用它）", W.PS.sent instanceof Map && W.PS.sent.size > 0, true);
+  // 待发队列拆成 PsOutbox 之后（7.289），`PS.sent` 这张内部表不再对外：锁改成可观察语义 ——
+  // 交出去的那条在 ack 之后不会重发；没交出去的行照样留着（重发即重试）。
+  const sent1 = W.PS.delta();
+  eq("delta 交出的行里含刚记的那条", sent1.some((r) => r.k.startsWith("sent.example")), true);
   W.PS.ack();
-  eq("ack 之后已发表清空（不会只增不减）", W.PS.sent instanceof Map && W.PS.sent.size === 0, true);
+  eq("ack 之后同一行不再重发（待发已清）", W.PS.delta().some((r) => r.k.startsWith("sent.example")), false);
   W.DNS.note("sent.example", true, Date.now());
   W.DNS.delta();
   W.DNS.ack();
@@ -3669,7 +3676,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   eq("DO 里当前均值跟着新观测", Number(prow.q), 40);
   eq("DO 里的历史最好只升不降", Number(prow.top), 200);
   // 源码锁：增量必须把 top 放进线格式
-  ok("增量带 top（源码）", fs.readFileSync("src/route/psfacts.ts", "utf8").includes("top: r.top ?? r.q"));
+  ok("增量带 top（源码）", fs.readFileSync("src/route/ps-outbox.ts", "utf8").includes("top: r.top ?? r.q"));
 }
 // 154. DO 必须把判定表的状态一起存下来：只存到期时间的话，dead（硬排除）读回来变成 blocked（软降权）
 {
@@ -4083,7 +4090,7 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   const h80 = fs.readFileSync("src/core/http80.ts", "utf8");
   ok("probeHttp80 用 splitRelay 解析中继", /relay \? splitRelay\(relay, 80\)/.test(h80));
   // ps 行的线格式只有一份（psfacts.ts 的 PsWire），出站必须真的带上 top（7.163 漏的跟随）
-  const psSrc = fs.readFileSync("src/route/psfacts.ts", "utf8");
+  const psSrc = psAll();
   ok("PsWire 带上 top（曾经行过的证据要能跨 isolate）", /\/\*\*[\s\S]*?\*\/[\s\S]*?top\?:/.test(psSrc) && psSrc.includes("export interface PsWire"));
   ok("PsWire 声明了 top 字段", /top\?: number;/.test(psSrc));
   const foSrc = fs.readFileSync("src/store/factout.ts", "utf8");
@@ -8543,6 +8550,52 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   ok("冻结后立即不可用", W.usable("g288:443") === false && W.isFrozen("g288:443") === true, "");
   W.S.alive.delete("g288:443");
   W.invalidateRank();
+}
+
+// 第 289 组：「站点 × 中继」成功率事实按「形状 / 先验 / 待发队列 / 表本体 / 门面」拆开（7.289）
+{
+  const facSrc = fs.readFileSync("src/route/psfacts.ts", "utf8");
+  const typeSrc = fs.readFileSync("src/route/ps-types.ts", "utf8");
+  const priorSrc = fs.readFileSync("src/route/ps-prior.ts", "utf8");
+  const boxSrc = fs.readFileSync("src/route/ps-outbox.ts", "utf8");
+  const tableSrc = fs.readFileSync("src/route/ps-table.ts", "utf8");
+  ok("门面不再定义表本体", !facSrc.includes("class PsFacts {"));
+  ok("门面转出类型与四个模块",
+    facSrc.includes('export * from "./ps-types"') && facSrc.includes('export { psPrior } from "./ps-prior"') &&
+      facSrc.includes('from "./ps-outbox"') && facSrc.includes('export { PsFacts } from "./ps-table"'), "");
+  ok("门面只留一个单例", (facSrc.match(/export const PS = new PsFacts\(\);/g) || []).length === 1);
+  ok("五个薄包装还在门面上",
+    ["psNote", "psOk", "psBest", "psFactor", "psSnap"].every((n) => facSrc.includes(`export function ${n}(`)), "");
+  // 形状与刻度：只有类型、常量与一个刻度换算，不碰 EG 也不定义类
+  ok("形状层只有类型与刻度", !/\bclass \b/.test(typeSrc) && !typeSrc.includes("EG.") && typeSrc.includes("export const PS_TTL = FACT_TTL.ps;"));
+  ok("形状层有 toQ", /export function toQ\(p: number\): number/.test(typeSrc));
+  // 先验层是唯一允许「没量过先给个数」的地方
+  ok("先验层只答一个问题",
+    priorSrc.includes("export function psPrior(") && priorSrc.includes('from "./egfacts"') && !/\bclass \b/.test(priorSrc), "");
+  ok("先验层不碰表本体", !priorSrc.includes("PsRow") && !priorSrc.includes("PS_TTL"));
+  // 待发队列：pending/sent 的纪律与批次上限都在这里，不认 TTL
+  ok("待发队列是独立的类", boxSrc.includes("export class PsOutbox") && boxSrc.includes("export const PS_BATCH = 60;"));
+  ok("待发队列四个入口齐备",
+    ["push(", "delta(", "ack(", "nack("].every((n) => boxSrc.includes(`  ${n}`)), "");
+  ok("待发队列不管寿命", !boxSrc.includes("PS_TTL"));
+  // 表本体：认 TTL、认先验，但不再自己维护 pending/sent
+  ok("表本体持有队列而不是自己记账",
+    tableSrc.includes("private outbox = new PsOutbox();") && !tableSrc.includes("private pending") && !tableSrc.includes("private sent"), "");
+  ok("表本体用 TTL 判过期", tableSrc.includes("now - r.at > PS_TTL"));
+  ok("表本体不定义 PsWire 形状（避免第二份真源）", !tableSrc.includes("export interface PsWire"));
+  // 行为面：门面转发仍然指向真实实现
+  ok("单例仍是 PsFacts", W.PS instanceof W.PsFacts);
+  ok("批次上限对外可见", W.PS_BATCH === 60);
+  eq("未知族的先验仍是 0.83", W.psPrior("198.51.100.7"), 0.83);
+  W.PS.clear();
+  W.PS.note("ps289.example", "203.0.113.91", true, Date.now());
+  {
+    const f289 = W.psFactor("ps289.example", "203.0.113.91");
+    ok("折价因子夹在 1/2 与 2 之间", f289 >= 0.5 && f289 <= 2, String(f289));
+  }
+  ok("观测进了待发队列", W.PS.delta().some((r) => r.k === "ps289.example|203.0.113.91"));
+  eq("历史最好跟着观测涨上去", W.psBest("ps289.example", "203.0.113.91"), 1);
+  W.PS.clear();
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
