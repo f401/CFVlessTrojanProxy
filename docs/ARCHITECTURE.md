@@ -214,7 +214,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `stat-view` | `src/nodes/stat.ts` | 派生视图（`effView`/`pFailOf`/`availOf` 等纯函数，同文件） |
 | `stat-observe` | `src/nodes/stat.ts` | 九类观测写入（`nsOk`/`nsFail`/`nsLatency`…，同文件） |
 | `Store` / `Seal` | `src/store/store.ts`、`crypto.ts` | KV 写入节流、AES 密钥缓存 |
-| 快照读写（自由函数 `writeSnap` / `getSnap` / `flushSnap`） | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存（无跨请求状态要独占，所以没有类） |
+| 快照读写（自由函数 `flushSnap` / `writeSnap` / `getSnap`） | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存（无跨请求状态要独占，所以没有类）；`writeSnap` 只做编排，读快照 / 全局闸门 / 建骨架 / 合并用量 / 合并延迟 / 落盘各成一个函数 |
 | `PendingLedger`（`PEND`） | `src/store/pend.ts` | 待上报账本与 flush 定时器：`flush` 只编排（摘批 → 拼体 → 发 → 确认或退回 → 退避），搭车增量由 `PendCarry` 记账（`owner`/`sync`/`rows`） |
 | `Pool` | `src/px/pool.ts` | 门面：`nsOf`/`pxSet`/`flushPx` 与 `Pool` 的九个委托方法；存活表与探活冷却在 `alive.ts`，一轮维护在 `scan.ts`，代际提交在 `poolgen.ts` |
 | `AliveBoard`（`ALIVE`） | `src/px/alive.ts` | 存活表：冷启动从种子名单铺底（四档回退）、裁「重罚」、超 `ALIVE_MAX` 按先删不在池里的再删最慢的收缩、补国家码；`pxGet()`/`aliveList()` 是它的门面 |

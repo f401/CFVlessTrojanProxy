@@ -10274,6 +10274,183 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   }
 }
 
+// —— 第 331 组：快照落盘的 89 行拆成六步，用量/延迟/错误各自合并 ——
+{
+  const srcSnap331 = fs.readFileSync("src/store/snapshot.ts", "utf8").replace(/\r\n/g, "\n");
+  /** 功能：按签名切出一段顶格函数的源码（到下一个顶格收尾为止）。 */
+  const body331 = (sig) => {
+    const at = srcSnap331.indexOf(sig);
+    if (at < 0) return "";
+    const rest = srcSnap331.slice(at + sig.length);
+    const end = rest.search(/\n\}\n/);
+    return rest.slice(0, end < 0 ? rest.length : end);
+  };
+
+  const w331 = body331("async function writeSnap(");
+  ok("writeSnap 只做编排（读 → 闸门 → 骨架 → 合并 → 落盘）", [
+    "await readPrevSnap(env)",
+    "gateHeld(prev, now, force)",
+    "seedSnap(prev, now)",
+    "mergeUsage(next, now)",
+    "mergeRtt(next)",
+    "trimRtt(next)",
+    "mergeErrs(next)",
+    "await commitSnap(env, next, now)",
+  ].every((x) => w331.includes(x)));
+  ok("writeSnap 自己不碰 KV、不记账", !w331.includes("kvSet(") && !w331.includes("kvGetStrict") && !w331.includes("cnt("));
+  ok("writeSnap 收成二十行以内", w331.split("\n").filter((x) => x.trim()).length <= 18, String(w331.split("\n").filter((x) => x.trim()).length));
+
+  const readFn331 = body331("async function readPrevSnap(");
+  ok("读快照严格且失败可观察", readFn331.includes("kvGetStrict<SnapDoc>(env, \"snap\")") && readFn331.includes('cnt("snapFlushReadFail")') && readFn331.includes("return null;"));
+
+  const gateFn331 = body331("function gateHeld(");
+  ok("全局闸门仍然对 force 放行", gateFn331.includes("if (!force && now - (prev.ts || 0) < FLUSH_GAP) {"));
+  ok("被闸门挡掉时把本地基线推进到别人那一次", gateFn331.includes("S.snapWritten = Math.max(") && gateFn331.includes("S.snapChecked = Math.max("));
+
+  const seedFn331 = body331("function seedSnap(");
+  ok("骨架跨天重置用量", seedFn331.includes("prev.date === day ?"));
+  ok("骨架把错误截到最近 50 条", seedFn331.includes("(prev.errs || []).slice(-50)"));
+
+  const useFn331 = body331("function mergeUsage(");
+  ok("用量按相加合并", useFn331.includes("(p.up || 0) + (s.up || 0)") && useFn331.includes("(p.down || 0) + (s.down || 0)") && useFn331.includes("(p.conns || 0) + (s.conns || 0)"));
+  ok("首末次连接取极值", useFn331.includes("Math.min(p.first") && useFn331.includes("Math.max(p.last"));
+
+  const rttFn331 = body331("function mergeRtt(");
+  ok("延迟按 0.3 衰减做 EWMA", rttFn331.includes("(p.rtt || v.rtt) * 0.7 + v.rtt * 0.3"));
+  ok("延迟桶用无原型对象（__proto__ 标签不会改原型）", rttFn331.includes("Object.create(null)"));
+
+  const trimFn331 = body331("function trimRtt(");
+  ok("落盘前按 RTT_MAX 裁剪标签", trimFn331.includes("RTT_MAX") && trimFn331.includes("delete tgt[keys[i]]"));
+
+  const errFn331 = body331("function mergeErrs(");
+  ok("错误追加后仍只留 50 条", errFn331.includes("concat(S.errs).slice(-50)"));
+
+  const commitFn331 = body331("async function commitSnap(");
+  ok("先写成功再清本地（失败时增量必须留到下一轮）", commitFn331.indexOf("await kvSet(") >= 0 && commitFn331.indexOf("await kvSet(") < commitFn331.indexOf("S.stats.clear();"));
+  ok("写失败有计数", commitFn331.includes('cnt("snapFlushFail")'));
+
+  // 行为面：用内存 KV 桩把六个分支跑一遍（KV 值会被加密，回读一律走 getSnap）
+  const store331 = Object.create(null);
+  let failPut331 = false;
+  let failGet331 = false;
+  let puts331 = 0;
+  const env331 = {
+    STATS: {
+      get: async (k) => {
+        if (failGet331) throw new Error("kv get down");
+        return k in store331 ? store331[k] : null;
+      },
+      put: async (k, v) => {
+        if (failPut331) throw new Error("kv put down");
+        store331[k] = v;
+        puts331 += 1;
+      },
+    },
+  };
+  const cnt331 = (k) => Number(W.cntView()[k]) || 0;
+  const keep331 = {
+    stats: [...W.S.stats.entries()],
+    rtt: [...W.S.rtt.entries()],
+    errs: [...W.S.errs],
+    written: W.S.snapWritten,
+    checked: W.S.snapChecked,
+    bytes: W.S.snapBytes,
+    busy: W.S.snapBusy,
+  };
+  const fresh331 = () => {
+    W.S.stats.clear();
+    W.S.rtt.clear();
+    W.S.errs.length = 0;
+    W.S.snapWritten = 0;
+    W.S.snapChecked = 0;
+    W.S.snapBytes = 0;
+    W.S.snapBusy = false;
+    W.S.stats.set("a331", { up: 2, down: 3, conns: 1, first: 5, last: 9 });
+  };
+  const today331 = new Date().toISOString().slice(0, 10);
+
+  try {
+    // ① 读失败：不写、计数、本地读数原样留着
+    fresh331();
+    failGet331 = true;
+    const beforeRead331 = cnt331("snapFlushReadFail");
+    await W.flushSnap(env331, true);
+    eq("读失败不写快照", puts331, 0);
+    eq("读失败计一次 snapFlushReadFail", cnt331("snapFlushReadFail") - beforeRead331, 1);
+    eq("读失败后本地读数仍在", W.S.stats.has("a331"), true);
+    failGet331 = false;
+
+    // ② 全局闸门：别人刚写过就跳过，并把基线推进到那一次
+    fresh331();
+    store331.snap = { v: 1, ts: Date.now(), date: today331, stats: {}, rtt: {}, errs: [] };
+    await W.flushSnap(env331);
+    eq("别人刚写过就不写", puts331, 0);
+    ok("闸门把 snapWritten 推到别人那一次", W.S.snapWritten > 0, String(W.S.snapWritten));
+
+    // ③ force 放行全局闸门
+    fresh331();
+    await W.flushSnap(env331, true);
+    eq("force 放行全局闸门", puts331, 1);
+
+    // ④ 跨天重置 + 错误截断 + 成功后清本地
+    fresh331();
+    const old331 = [];
+    for (let i = 0; i < 40; i += 1) old331.push({ t: i, m: "old" + i, k: "e" });
+    store331.snap = {
+      v: 1,
+      ts: 0,
+      date: "1970-01-01",
+      stats: { old331: { up: 5, down: 6, conns: 2, first: 1, last: 2 } },
+      rtt: {},
+      errs: old331,
+    };
+    for (let i = 0; i < 30; i += 1) W.S.errs.push({ t: i, m: "new" + i, k: "e" });
+    await W.flushSnap(env331, true);
+    const wrote331 = await W.getSnap(env331, true);
+    eq("跨天后旧用量被丢掉", Object.keys(wrote331.stats).includes("old331"), false);
+    eq("本次用量写进去了", wrote331.stats.a331 && wrote331.stats.a331.up, 2);
+    eq("错误只留最近 50 条", wrote331.errs.length, 50);
+    eq("写成功后本地读数被清空", W.S.stats.size + W.S.rtt.size + W.S.errs.length, 0);
+    eq("写成功后脏字节归零", W.S.snapBytes, 0);
+
+    // ⑤ 同一天：用量相加而不是覆盖
+    fresh331();
+    store331.snap = {
+      v: 1,
+      ts: 0,
+      date: today331,
+      stats: { a331: { up: 5, down: 6, conns: 2, first: 1, last: 4 } },
+      rtt: {},
+      errs: [],
+    };
+    await W.flushSnap(env331, true);
+    const same331 = await W.getSnap(env331, true);
+    eq("同一天用量相加", same331.stats.a331.up, 7);
+    eq("同一天连接数相加", same331.stats.a331.conns, 3);
+
+    // ⑥ 写失败：本地读数必须留下，失败可观察
+    fresh331();
+    store331.snap = { v: 1, ts: 0, date: today331, stats: {}, rtt: {}, errs: [] };
+    failPut331 = true;
+    const beforePut331 = cnt331("snapFlushFail");
+    await W.flushSnap(env331, true);
+    failPut331 = false;
+    eq("写失败计一次 snapFlushFail", cnt331("snapFlushFail") - beforePut331, 1);
+    eq("写失败后本地读数仍在", W.S.stats.has("a331"), true);
+  } finally {
+    W.S.stats.clear();
+    W.S.rtt.clear();
+    W.S.errs.length = 0;
+    for (const [k, v] of keep331.stats) W.S.stats.set(k, v);
+    for (const [k, v] of keep331.rtt) W.S.rtt.set(k, v);
+    for (const e of keep331.errs) W.S.errs.push(e);
+    W.S.snapWritten = keep331.written;
+    W.S.snapChecked = keep331.checked;
+    W.S.snapBytes = keep331.bytes;
+    W.S.snapBusy = keep331.busy;
+  }
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

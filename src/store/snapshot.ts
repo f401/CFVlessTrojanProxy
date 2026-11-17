@@ -195,38 +195,74 @@ export async function flushSnap(env: Env, force?: boolean): Promise<void> {
 }
 
 /**
- * 功能：真正合并并写入快照（把 DO 与本地读数合并后落 KV）。
+ * 功能：真正合并并写入快照（把本地读数并进上一份快照后落 KV）。
+ *
+ * 五步各自失败后果不同，所以各成一步：读（读失败必须放弃，不能当空快照覆盖别人）、
+ * 全局闸门（挡掉 = 别人刚写过，本地增量留到下一轮）、建骨架（跨天重置）、
+ * 合并（用量 / 延迟 / 错误三类口径不同）、落盘（成功才清本地，失败要可观察）。
  * @param env 环境变量
  * @param now 当前时间戳
  * @param force 跳过 45 分钟全局闸门（强制落盘时用）
  * @returns 无
  */
 async function writeSnap(env: Env, now: number, force = false): Promise<void> {
-  // 第二个闸门是"全局"的：每个 isolate 各写各的会让写次数随实例数线性增长
-  // （实测 8 个 isolate × 24 次/天 = 192 次）。快照本身就是合并写入，
-  // 45 分钟内别人写过就跳过，自己的增量留在内存里下一轮合并，一条不丢。
-  // 这里必须 fresh：缓存里的 ts 可能已经过时 5 分钟，会误判"该写了"。
-  // 这里必须 fresh + 严格：读失败时不能当空快照继续写，否则会把别的
-  // isolate 的当日统计/错误整份覆盖掉。
-  let prev: SnapDoc;
+  const prev = await readPrevSnap(env);
+  // 读失败：不能当空快照继续写（会把别的 isolate 的当日统计/错误整份覆盖掉）
+  if (!prev) return;
+  // 别人 45 分钟内写过就跳过：自己的增量留在内存里下一轮合并，一条不丢
+  if (gateHeld(prev, now, force)) return;
+  const next = seedSnap(prev, now);
+  mergeUsage(next, now);
+  mergeRtt(next);
+  trimRtt(next);
+  mergeErrs(next);
+  await commitSnap(env, next, now);
+}
+
+/**
+ * 功能：严格读上一份快照 —— 读失败时计一次 `snapFlushReadFail` 并返回 null。
+ *
+ * 必须 fresh + 严格：缓存里的 `ts` 可能已经过时 5 分钟，会误判「该写了」；
+ * 读失败时更不能当空快照继续写，否则会把别的 isolate 的当日统计整份覆盖掉。
+ * @param env 环境变量
+ * @returns 上一份快照（没有快照时给空骨架）；读失败返回 null，调用方必须放弃这次写
+ */
+async function readPrevSnap(env: Env): Promise<SnapDoc | null> {
   try {
-    prev = (await kvGetStrict<SnapDoc>(env, "snap")) || { v: 1, ts: 0, date: "", stats: {}, rtt: {}, errs: [] };
+    return (await kvGetStrict<SnapDoc>(env, "snap")) || { v: 1, ts: 0, date: "", stats: {}, rtt: {}, errs: [] };
   } catch (e) {
-    // 同 usageSnapWrite：读失败时不写（防止覆盖别的 isolate 的当日统计），但要让失败可观察
     cnt("snapFlushReadFail");
-    return;
+    return null;
   }
-  // force 同样要绕开全局闸门：这是"现在就要写"的意思，被挡掉等于没写（调用方拿不到任何反馈）
+}
+
+/**
+ * 功能：45 分钟的全局闸门 —— 每个 isolate 各写各的会让写次数随实例数线性增长。
+ * @param prev 上一份快照（`ts` 是别的 isolate 的写入时刻）
+ * @param now 当前时间
+ * @param force 强制落盘时绕过闸门（否则 force 就是个死开关，v7.201 的教训）
+ * @returns 是否应当跳过这次写（返回 true 时已把本地基线推进到别人那一次）
+ */
+function gateHeld(prev: SnapDoc, now: number, force: boolean): boolean {
   if (!force && now - (prev.ts || 0) < FLUSH_GAP) {
     // 别人刚写过：把本地基线推进到那一次，并把下一次检查推到闸门结束，
     // 避免下一批连接反复走 getSnap 再跳过。
     S.snapWritten = Math.max(S.snapWritten || 0, prev.ts || 0);
     S.snapChecked = Math.max(S.snapChecked || 0, (prev.ts || 0) + FLUSH_GAP);
-    return;
+    return true;
   }
+  return false;
+}
 
+/**
+ * 功能：建出这次要写的骨架 —— 跨天重置用量、错误只留最近 50 条。
+ * @param prev 上一份快照
+ * @param now 当前时间戳（写进 `ts`）
+ * @returns 待合并的新快照（`stats` / `rtt` 已是上一份的浅拷贝）
+ */
+function seedSnap(prev: SnapDoc, now: number): SnapDoc {
   const day = new Date().toISOString().slice(0, 10);
-  const next: SnapDoc = {
+  return {
     v: 1,
     ts: now,
     date: day,
@@ -234,18 +270,34 @@ async function writeSnap(env: Env, now: number, force = false): Promise<void> {
     rtt: { ...(prev.rtt || {}) },
     errs: (prev.errs || []).slice(-50),
   };
+}
 
+/**
+ * 功能：把本地按用户累计的用量并进快照（字节与连接数相加，首末次连接取极值）。
+ * @param next 待写快照（就地修改）
+ * @param now 当前时间（给缺 `first` 的新行兜底）
+ * @returns 无
+ */
+function mergeUsage(next: SnapDoc, now: number): void {
   for (const [id, s] of S.stats) {
     const p = next.stats[id] || { up: 0, down: 0, conns: 0, first: s.first, last: s.last };
     next.stats[id] = {
       up: (p.up || 0) + (s.up || 0),
       down: (p.down || 0) + (s.down || 0),
       conns: (p.conns || 0) + (s.conns || 0),
+      // 首次连接取更早、末次取更晚：面板上的「活跃区间」因此跨 isolate 也单调
       first: Math.min(p.first || s.first || now, s.first || now),
       last: Math.max(p.last || 0, s.last || 0),
     };
   }
+}
 
+/**
+ * 功能：把本地按「用户 × 标签」的延迟桶并进快照（rtt 按 0.3 衰减做 EWMA，计数相加）。
+ * @param next 待写快照（就地修改）
+ * @returns 无
+ */
+function mergeRtt(next: SnapDoc): void {
   for (const [id, bucket] of S.rtt) {
     // 不能直接复用 prev 里的普通对象：tag="__proto__" 时赋值会改原型而不是写键
     const tgt = Object.create(null) as Record<string, RttEntry>;
@@ -267,21 +319,47 @@ async function writeSnap(env: Env, now: number, force = false): Promise<void> {
     }
     next.rtt[id] = tgt;
   }
-  // 老快照可能已经攒了很多标签：落盘前统一裁到 RTT_MAX（按最后活跃时间）
+}
+
+/**
+ * 功能：落盘前把每个用户下的标签裁到 `RTT_MAX`（按最后活跃时间留新的）。
+ *
+ * 老快照可能已经攒了很多标签：不裁的话 `rtt` 会一直涨，而面板只画前几条。
+ * @param next 待写快照（就地修改）
+ * @returns 无
+ */
+function trimRtt(next: SnapDoc): void {
   for (const tgt of Object.values(next.rtt)) {
     const keys = Object.keys(tgt);
     if (keys.length <= RTT_MAX) continue;
     keys.sort((a, b) => (tgt[a].ts || 0) - (tgt[b].ts || 0));
     for (let i = 0; i < keys.length - RTT_MAX; i++) delete tgt[keys[i]];
   }
+}
 
+/**
+ * 功能：把本地错误追加进快照并只留最近 50 条。
+ * @param next 待写快照（就地修改）
+ * @returns 无
+ */
+function mergeErrs(next: SnapDoc): void {
   if (S.errs.length) next.errs = next.errs.concat(S.errs).slice(-50);
+}
 
+/**
+ * 功能：落盘并在成功后清空本地读数（失败时本地原样留着，下一轮重试）。
+ * @param env 环境变量
+ * @param next 待写快照
+ * @param now 当前时间（成功时记进 `S.snapWritten`）
+ * @returns 无
+ */
+async function commitSnap(env: Env, next: SnapDoc, now: number): Promise<void> {
   try {
     await kvSet(env, "snap", next, { expirationTtl: 86400 * 30 });
     S.snapCache = { v: next, t: Date.now() };
     S.snapWritten = now;
     S.snapBytes = 0;
+    // 只有写成功才清：KV 抖动时这些增量必须留到下一轮，否则这一段流量永久消失
     S.stats.clear();
     S.rtt.clear();
     S.errs.length = 0;

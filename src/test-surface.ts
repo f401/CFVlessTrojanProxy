@@ -103,7 +103,7 @@ export {
 export { ERRS } from "./nodes/errlog";
 export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES, pxPolicy } from "./px/probe";
 export { regionListAsync } from "./px/regions";
-export { PEND, RESTORE_MAX, nodeSnapGet, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
+export { PEND, RESTORE_MAX, getSnap, kvGetStrict, nodeSnapGet, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
 export { doFetch, meterGet } from "./store/meter-client";
 export { runCron } from "./routes/cron";
 export { ProxyipView, proxyip } from "./routes/proxyip";
