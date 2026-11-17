@@ -41,13 +41,6 @@ export interface StatsIn {
   errs: ErrItem[];
 }
 
-export interface AdminIn {
-  url: URL;
-  users: { list: UserRec[] };
-  statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }>;
-  pageKey?: string;
-}
-
 /**
  * 页面视图（P6-3）：面板 / 统计 / 登录 / 管理台都从这一个对象出。
  * 序列化全在 views 层，routes 只负责取数与包 header。
@@ -63,20 +56,6 @@ export class PageView {
     return renderStatsHtml(o.env, o.id, o.stats, o.learned, o.nodeRows, o.errs);
   }
 
-  /** 登录页 */
-  login(nonce: string, err?: string | null): string {
-    return renderLogin(nonce, err);
-  }
-
-  /** 管理台 */
-  admin(o: AdminIn): string {
-    return renderAdmin(o.url, o.users, o.statsMap, o.pageKey || "");
-  }
-
-  /** 未配置 adminKey 的提示页 */
-  adminHint(): string {
-    return renderAdminHint();
-  }
 }
 
 /** 进程内唯一实例 */
@@ -84,155 +63,6 @@ export const PAGES = new PageView();
 
 // ---- 门面（对外导出面保持不变） ----
 // ---- 并入自 panel-admin.ts ----
-/**
- * 渲染管理面板（用户列表 + 用量 + 增删操作）。
- * @param {URL} url 请求 URL
- * @param {Array<object>} users 用户列表
- * @param {Map<string,object>} statsMap 用量表
- * @returns {string} HTML
- */
-export function renderAdmin(
-  url: URL,
-  users: { list: UserRec[] },
-  statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }>,
-  pageKey = "",
-) {
-  // 用 ?k=adminKey 直接打开面板时，表单 POST 也必须带同一个 k
-  const ak = url.searchParams.get("k") || "";
-  const opAction = "/admin/op" + (ak ? "?k=" + encodeURIComponent(ak) : "");
-  const rows = users.list
-    .map((u: UserRec) => {
-      // 没读到用量与「用量为 0」是两件事：前者显示「—」，别编一个 0 出来
-      const s = statsMap[u.id];
-      const has = !!s;
-      const used = has ? fmtBytes((s.up || 0) + (s.down || 0)) : "—";
-      const today = has ? fmtBytes((s.todayUp || 0) + (s.todayDown || 0)) : "—";
-      const dis = u.enabled === false;
-      const ops = u.managed
-        ? `<form method="post" action="${escapeHtml(opAction)}" style="display:inline">
-             <input type="hidden" name="id" value="${u.id}">
-             <button name="op" value="toggle">${dis ? "启用" : "禁用"}</button>
-             <button name="op" value="reset">重置密码</button>
-             <button name="op" value="del" onclick="return confirm('确定删除？')">删除</button>
-           </form>`
-        : `<span class="mu">环境变量，不可改</span>`;
-      // 控制页/订阅都要带 pageKey（设了访问口令时）
-      const kq = pageKey ? "?k=" + encodeURIComponent(pageKey) : "";
-      const base = url.origin + "/" + encodeURIComponent(u.id);
-      const panelHref = base + kq;
-      const subClash = base + "/cl" + kq;
-      const subSb = base + "/sb" + kq;
-      const subTy = base + "/ty" + kq;
-      return `<tr class="${dis ? "off" : ""}">
-        <td class="u">${escapeHtml(u.id)}</td>
-        <td class="u">${u.pwd ? escapeHtml(u.pwd) : "<span class='mu'>—</span>"}</td>
-        <td>${escapeHtml(u.note || "")}</td>
-        <td>${dis ? "已禁用" : "正常"}</td>
-        <td>${today}</td>
-        <td>${used}</td>
-        <td class="lnk">
-          <a class="btn" href="${escapeHtml(panelHref)}" target="_blank" rel="noreferrer">打开</a>
-          <button data-copy="${escapeHtml(subClash)}" title="复制 Clash 订阅">cl</button>
-          <button data-copy="${escapeHtml(subSb)}" title="复制 sing-box 订阅">sb</button>
-          <button data-copy="${escapeHtml(subTy)}" title="复制明文链接订阅">ty</button>
-        </td>
-        <td>${ops}</td>
-      </tr>`;
-    })
-    .join("");
-
-  const total = users.list.filter((x) => x.enabled !== false).length;
-  // 有谁没读到：在标题下给一句说明，否则「—」会被当成坏了
-  const missing = users.list.filter((u: UserRec) => !statsMap[u.id]).length;
-  const missNote = missing
-    ? `<div class="mu" style="font-size:12.5px;margin:-10px 0 14px">其中 ${missing} 个用户这次没读到用量（本次预算或 DO 抖动），用量列显示「—」</div>`
-    : "";
-
-  return `<!doctype html><html lang="zh"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>用户管理</title>
-<style>
-body{font:15px/1.6 -apple-system,system-ui,sans-serif;margin:0;padding:20px;max-width:1000px;color:#1f2328}
-h1{font-size:18px;margin:0 0 4px}
-.sub{color:#6b7280;font-size:13px;margin-bottom:18px}
-table{border-collapse:collapse;width:100%;font-size:13.5px}
-td,th{border:1px solid #e3e6ea;padding:7px 9px;text-align:left;vertical-align:top}
-th{background:#fafbfc}
-.u{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}
-.mu{color:#9ca3af}
-tr.off td{opacity:.5}
-button{padding:3px 8px;font-size:12px;margin:1px;border:1px solid #d1d5db;background:#fff;border-radius:4px;cursor:pointer}
-button:hover{background:#f3f4f6}
-.lnk{white-space:nowrap}
-a.btn{display:inline-block;padding:3px 8px;font-size:12px;border:1px solid #d1d5db;border-radius:4px;color:#1f2328;text-decoration:none;background:#fff}
-a.btn:hover{background:#f3f4f6}
-.add{margin:16px 0;padding:12px;border:1px solid #e3e6ea;border-radius:8px;background:#fafbfc}
-input[type=text]{padding:5px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:13px}
-code{background:#f3f4f6;padding:1px 5px;border-radius:4px}
-</style>
-<h1>用户管理</h1>
-<div class="sub">共 ${users.list.length} 个用户，启用 ${total} 个 · 数据存于 KV，面板改动立即生效</div>
-${missNote}
-
-<form class="add" method="post" action="${escapeHtml(opAction)}">
-  <input type="hidden" name="op" value="add">
-  备注：<input type="text" name="note" placeholder="例如：朋友A" size="18">
-  <button type="submit">新增用户（自动生成 UUID + 密码）</button>
-</form>
-
-<table>
-<tr><th>UUID</th><th>Trojan 密码</th><th>备注</th><th>状态</th><th>今日</th><th>累计</th><th>入口</th><th>操作</th></tr>
-${rows || '<tr><td colspan="8" class="mu">还没有用户</td></tr>'}
-</table>
-
-<div class="sub" style="margin-top:18px">
-新增后把 UUID / 密码发给对方：控制页 <code>${url.origin}/&lt;uuid&gt;</code>，订阅 <code>/&lt;uuid&gt;/cl</code>。
-每行「打开」直达该用户控制页，cl/sb/ty 按钮复制对应订阅地址（含访问口令）。
-</div>
-<script>
-(function () {
-  /**
-   * 功能：生成一次性的提示条 HTML（成功/失败样式）。
-   * @param msg 文本（会被转义）
-   * @param bad 是否为错误样式
-   * @returns HTML 片段
-   */
-  function flash(b, t) {
-    var old = b.getAttribute("data-label") || b.textContent;
-    b.textContent = t;
-    setTimeout(function () { b.textContent = old; }, 1200);
-  }
-  document.addEventListener("click", function (e) {
-    var b = e.target.closest ? e.target.closest("button[data-copy]") : null;
-    if (!b) return;
-    var text = b.getAttribute("data-copy");
-    /**
-     * 功能：浏览器端小函数：复制成功后提示「已复制」（内联进页面，服务端不执行）。
-     * @returns 无
-     */
-    function done() { flash(b, "已复制"); }
-    /**
-     * 功能：出错时的兜底响应（保留提示，不抛给用户 500）。
-     * @param msg 提示文本
-     * @returns 响应
-     */
-    function fallback() {
-      try {
-        var ta = document.createElement("textarea");
-        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
-        document.body.appendChild(ta); ta.select();
-        document.execCommand("copy"); document.body.removeChild(ta); done();
-      } catch (err) { window.prompt("手动复制：", text); }
-    }
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(done, fallback);
-    } else fallback();
-  });
-})();
-</script>
-</body></html>`;
-}
-
 /* ==================================================================
  * §9  路由与响应
  * ================================================================== */
@@ -321,47 +151,9 @@ ${total ? `<div class="bar"><i style="width:${usedPercent}%"></i></div>` : ""}
 </body>`;
 }
 
-// ---- 门面（对外导出面保持不变） ----
-/**
- * 功能：渲染控制面板（用量、节点、判定、日志等分区的 HTML）。
- * @param env 环境变量
- * @param url 当前 URL（决定高亮的分区）
- * @param id 用户 id
- * @param host 站点域名
- * @param key 管理密钥（写进页面内的链接）
- * @param info 面板数据
- * @returns HTML 字符串
- */
-export function renderHtml(env: Env, url: URL, id: string, host: string, key: string, info: PanelInfo) {
-  const base = `${url.origin}/${id}`;
-  // 路径里已经有 ? 时必须用 &，否则 /stats?format=html?k=xxx 会把 format 的值
-  // 变成 "html?k=xxx"，页面退化成 JSON，k 也不会被解析。
-  const withKey = (path: string) =>
-    key ? path + (path.includes("?") ? "&k=" : "?k=") + encodeURIComponent(key) : path;
-  const i = info || {};
-
-  const protos = pickProtos(env, url, Boolean(i[P_T + "Pwd"]));
-  const regions = i.regions || [];
-  const nodeCount = loadNodes(env, host).length * protos.length + regions.length * protos.length;
-
-  const row = (k: string, v: string, mono = false) =>
-    `<tr><td class="k">${k}</td><td class="${mono ? "u" : ""}">${v}</td></tr>`;
-
-  const link = (path: string, desc: string, tag: string) => {
-    const p = withKey(path);
-    return `<tr><td class="t">${tag || "GET"}</td><td class="u"><a href="${base}${p}" target="_blank">${base}${p}</a></td><td class="d">${desc}</td></tr>`;
-  };
-
-  const topLink = (path: string, desc: string, tag: string) => {
-    const p = withKey(path);
-    return `<tr><td class="t">${tag || "GET"}</td><td class="u"><a href="${url.origin}${p}" target="_blank">${url.origin}${p}</a></td><td class="d">${desc}</td></tr>`;
-  };
-
-  return `<!doctype html><html lang="zh"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(host)}</title>
-<style>
-:root{--bd:#e3e6ea;--bg:#fafbfc;--tx:#1f2328;--mu:#6b7280;--ac:#2563eb}
+// ---- 面板页面：一个类六个分区，组装只剩一次 join ----
+/** 面板页面的静态样式（整段模板里唯一不随数据变化的部分，单独拿出来便于比对改动） */
+const PANEL_CSS = `:root{--bd:#e3e6ea;--bg:#fafbfc;--tx:#1f2328;--mu:#6b7280;--ac:#2563eb}
 *{box-sizing:border-box}
 body{font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;margin:0;padding:20px;color:var(--tx);background:#fff;max-width:980px}
 h1{font-size:19px;margin:0 0 4px}
@@ -381,145 +173,253 @@ code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:12.5px}
 .note{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:#374151;font-size:13.5px;margin-top:10px}
 .note b{color:var(--tx)}
 ul{margin:6px 0 0 18px;padding:0}
-li{margin:3px 0}
+li{margin:3px 0}`;
+
+/**
+ * 功能：控制面板视图 —— 六个分区各一个方法，渲染只做组装。
+ *
+ * 为什么成类而不留一个大函数：121 行的模板里塞着三样东西 —— ① 静态样式、② 六个彼此独立的分区
+ * （身份 / 订阅 / 状态 / 监控 / 参数 / 行为说明）、③ 四个闭包（withKey/row/link/topLink）被六个分区共用。
+ * 改任何一个分区都要在 121 行里定位，而「链接要不要带口令」这种共有规则散在闭包里看不出是全局约定。
+ * 现在共有规则是实例方法、分区是命名的方法，组装只剩一次 join。
+ *
+ * 页面里所有插值都必须过 escapeHtml（站点名、地区名、当前节点都来自请求或池子）。
+ */
+export class PanelView {
+  private readonly url: URL;
+  private readonly id: string;
+  private readonly host: string;
+  private readonly key: string;
+  private readonly info: PanelInfo;
+  private readonly base: string;
+  private readonly protos: string[];
+  private readonly regions: string[];
+  private readonly nodeCount: number;
+
+  /**
+   * 功能：保存渲染需要的全部输入，并先算好三个派生量（基础地址、协议清单、节点数）。
+   * @param {Env} env 环境变量
+   * @param {URL} url 当前 URL（决定协议与口令）
+   * @param {string} id 用户 id
+   * @param {string} host 站点域名
+   * @param {string} key 管理密钥（写进页面里的链接）
+   * @param {PanelInfo | null} info 面板数据
+   */
+  constructor(env: Env, url: URL, id: string, host: string, key: string, info: PanelInfo | null) {
+    this.url = url;
+    this.id = id;
+    this.host = host;
+    this.key = key;
+    // 缺数据时给一份空壳：模板里每个字段都有兜底文案，宁少显示不抛错
+    this.info = info || ({} as PanelInfo);
+    this.base = `${url.origin}/${id}`;
+    this.protos = pickProtos(env, url, Boolean(this.info[P_T + "Pwd"]));
+    this.regions = this.info.regions || [];
+    // 节点数 = 手动节点 × 协议数 + 地区节点 × 协议数（客户端实际会看到的条目数）
+    this.nodeCount = loadNodes(env, host).length * this.protos.length + this.regions.length * this.protos.length;
+  }
+
+  /**
+   * 功能：渲染整页（八个片段按固定顺序用空行拼接）。
+   * @returns {string} 完整 HTML
+   */
+  render(): string {
+    return [
+      this.header(),
+      this.identity(),
+      this.subscriptions(),
+      this.statusTable(),
+      this.monitor(),
+      this.params(),
+      this.behaviour(),
+      this.footer(),
+    ].join("\n\n");
+  }
+
+  /**
+   * 功能：把口令拼进链接 —— 路径里已经有 ? 时必须用 &。
+   * @param {string} path 相对路径（可带查询串）
+   * @returns {string} 带口令的路径
+   */
+  private withKey(path: string): string {
+    return this.key ? path + (path.includes("?") ? "&k=" : "?k=") + encodeURIComponent(this.key) : path;
+  }
+
+  /**
+   * 功能：一行「键 → 值」。
+   * @param {string} k 键名
+   * @param {string} v 已转义的值
+   * @param {boolean} [mono] 是否用等宽字体（UUID / 节点地址用）
+   * @returns {string} tr 片段
+   */
+  private row(k: string, v: string, mono = false): string {
+    return `<tr><td class="k">${k}</td><td class="${mono ? "u" : ""}">${v}</td></tr>`;
+  }
+
+  /**
+   * 功能：一条带本站前缀的链接（挂在用户 id 下）。
+   * @param {string} path 相对路径
+   * @param {string} desc 说明
+   * @param {string} tag 左侧标签（YAML / JSON / ACTION …）
+   * @returns {string} tr 片段
+   */
+  private link(path: string, desc: string, tag: string): string {
+    const p = this.withKey(path);
+    return `<tr><td class="t">${tag || "GET"}</td><td class="u"><a href="${this.base}${p}" target="_blank">${this.base}${p}</a></td><td class="d">${desc}</td></tr>`;
+  }
+
+  /**
+   * 功能：一条根路径链接（健康检查这类不在用户 id 下的端点）。
+   * @param {string} path 相对路径
+   * @param {string} desc 说明
+   * @param {string} tag 左侧标签
+   * @returns {string} tr 片段
+   */
+  private topLink(path: string, desc: string, tag: string): string {
+    const p = this.withKey(path);
+    return `<tr><td class="t">${tag || "GET"}</td><td class="u"><a href="${this.url.origin}${p}" target="_blank">${this.url.origin}${p}</a></td><td class="d">${desc}</td></tr>`;
+  }
+
+  /**
+   * 功能：页头（head、样式、标题、副标题）。
+   * @returns {string} HTML
+   */
+  private header(): string {
+    return `<!doctype html><html lang="zh"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(this.host)}</title>
+<style>
+${PANEL_CSS}
 </style>
 
-<h1>${escapeHtml(host)}<span class="badge">VLESS + Trojan</span></h1>
-<div class="sub">同一 WebSocket 端点，按首帧自动识别协议 · 出口默认 Cloudflare，失败降级 proxyip · v${VERSION}</div>
+<h1>${escapeHtml(this.host)}<span class="badge">VLESS + Trojan</span></h1>
+<div class="sub">同一 WebSocket 端点，按首帧自动识别协议 · 出口默认 Cloudflare，失败降级 proxyip · v${VERSION}</div>`;
+  }
 
-<h2>身份</h2>
+  /**
+   * 功能：身份分区（UUID / 密码 / WS 路径 / 协议）。
+   * @returns {string} HTML
+   */
+  private identity(): string {
+    return `<h2>身份</h2>
 <table>
-${row("UUID", id, true)}
-${row("密码", escapeHtml(String(i[P_T + "Pwd"] || "（未配置）")), true)}
-${row("WS 路径", "<code>/?ed=2560</code>", false)}
-${row("协议", protos.join(" + "), false)}
-</table>
+${this.row("UUID", this.id, true)}
+${this.row("密码", escapeHtml(String(this.info[P_T + "Pwd"] || "（未配置）")), true)}
+${this.row("WS 路径", "<code>/?ed=2560</code>", false)}
+${this.row("协议", this.protos.join(" + "), false)}
+</table>`;
+  }
 
-<h2>订阅（导入客户端用这个）</h2>
+  /**
+   * 功能：订阅分区（三种格式的导入链接）。
+   * @returns {string} HTML
+   */
+  private subscriptions(): string {
+    return `<h2>订阅（导入客户端用这个）</h2>
 <table>
 <tr><th>类型</th><th>链接</th><th>说明</th></tr>
-${link("/cl", "Clash / mihomo / Clash Verge Rev", "YAML")}
-${link("/sb", "sing-box（含 TUN 入站）", "JSON")}
-${link("/ty", "Base64 分享串（v2rayN / Shadowrocket）", "B64")}
+${this.link("/cl", "Clash / mihomo / Clash Verge Rev", "YAML")}
+${this.link("/sb", "sing-box（含 TUN 入站）", "JSON")}
+${this.link("/ty", "Base64 分享串（v2rayN / Shadowrocket）", "B64")}
 </table>
-<div class="note">别名：<code>/pcl</code> = <code>/cl</code>，<code>/psb</code> = <code>/sb</code>，<code>/pty</code> = <code>/ty</code>。
-加 <code>?proto=vless</code> 或 <code>?proto=trojan</code> 只导出单一协议。</div>
+<div class="note">别名：<code>/pcl</code> = <code>/cl</code>，<code>/psb</code> = <code>/sb</code>，<code>/pty</code> = <code>/ty</code>。\n加 <code>?proto=vless</code> 或 <code>?proto=trojan</code> 只导出单一协议。</div>`;
+  }
 
-<h2>状态</h2>
+  /**
+   * 功能：状态分区（节点数、地区、当前节点、用量）。
+   * @returns {string} HTML
+   */
+  private statusTable(): string {
+    return `<h2>状态</h2>
 <table>
-${row("节点数", nodeCount + " 个（含地区节点 " + regions.length * protos.length + " 个）", false)}
-${row("地区出口", escapeHtml(regions.length ? regions.join(" / ") : "暂无可用的地区 proxyip"), false)}
-${row("本机房", escapeHtml(i.colo + "　|　" + (i.funnel || "-")), false)}
-${row("当前节点 · 吞吐优先", escapeHtml(i.curTput || "（未定）"), true)}
-${row("当前节点 · 速率优先", escapeHtml(i.curLat || "（未定）"), true)}
-${row("备用节点", (i.aliveCount || 0) + " 个", false)}
-${row("用量", (i.used || "0 B") + " / " + (i.quota || "不限"), false)}
-${row("今日", i.today || "0 B", false)}
-${row("到期", escapeHtml(i.expire || "长期"), false)}
-</table>
+${this.row("节点数", this.nodeCount + " 个（含地区节点 " + this.regions.length * this.protos.length + " 个）", false)}
+${this.row("地区出口", escapeHtml(this.regions.length ? this.regions.join(" / ") : "暂无可用的地区 proxyip"), false)}
+${this.row("本机房", escapeHtml(this.info.colo + "　|　" + (this.info.funnel || "-")), false)}
+${this.row("当前节点 · 吞吐优先", escapeHtml(this.info.curTput || "（未定）"), true)}
+${this.row("当前节点 · 速率优先", escapeHtml(this.info.curLat || "（未定）"), true)}
+${this.row("备用节点", (this.info.aliveCount || 0) + " 个", false)}
+${this.row("用量", (this.info.used || "0 B") + " / " + (this.info.quota || "不限"), false)}
+${this.row("今日", this.info.today || "0 B", false)}
+${this.row("到期", escapeHtml(this.info.expire || "长期"), false)}
+</table>`;
+  }
 
-<h2>监控与调试</h2>
+  /**
+   * 功能：监控与调试分区（健康、用量、日志、池子、探测端点）。
+   * @returns {string} HTML
+   */
+  private monitor(): string {
+    return `<h2>监控与调试</h2>
 <table>
 <tr><th>方法</th><th>链接</th><th>说明</th></tr>
-${topLink("/health", "服务健康：UUID 数、池子大小、错误数、当前机房", "GET")}
-${link("/stats", "用量 JSON（上行/下行/连接数）", "JSON")}
-${link("/stats?format=html", "用量看板：进度条 + 各入口实测 RTT/机房 + 最近错误", "HTML")}
-${link("/logs", "最近 50 条异常（仅当前 isolate）", "JSON")}
-${link("/proxyip", "代理池状态：当前节点、备选（含国家）、黑名单、轮换策略", "JSON")}
-${link("/proxyip?refresh=1", "手动触发一轮扫描（验 20 个候选，约 20–40 秒）", "ACTION")}
-${link("/debug?host=example.com", "查某域名的 A / AAAA 解析结果", "DEBUG")}
-${link("/debug?probe=1.2.3.4:443", "单点探测某个候选 proxyip 是否可用", "DEBUG")}
-</table>
+${this.topLink("/health", "服务健康：UUID 数、池子大小、错误数、当前机房", "GET")}
+${this.link("/stats", "用量 JSON（上行/下行/连接数）", "JSON")}
+${this.link("/stats?format=html", "用量看板：进度条 + 各入口实测 RTT/机房 + 最近错误", "HTML")}
+${this.link("/logs", "最近 50 条异常（仅当前 isolate）", "JSON")}
+${this.link("/proxyip", "代理池状态：当前节点、备选（含国家）、黑名单、轮换策略", "JSON")}
+${this.link("/proxyip?refresh=1", "手动触发一轮扫描（验 20 个候选，约 20–40 秒）", "ACTION")}
+${this.link("/debug?host=example.com", "查某域名的 A / AAAA 解析结果", "DEBUG")}
+${this.link("/debug?probe=1.2.3.4:443", "单点探测某个候选 proxyip 是否可用", "DEBUG")}
+</table>`;
+  }
 
-<h2>参数</h2>
+  /**
+   * 功能：参数分区（?ed= / ?proto= / ?rg= / ?ip= / ?k=）。
+   * @returns {string} HTML
+   */
+  private params(): string {
+    return `<h2>参数</h2>
 <table>
-${row("?ed=2560", "早期数据长度，把首包塞进 WS 握手，省 1 个 RTT", false)}
-${row("?proto=", "<code>vless</code> / <code>trojan</code> / <code>both</code>（订阅用）", false)}
-${row("?rg=", "强制地区出口，如 <code>rg=de</code>、<code>rg=nl</code>（数据面用）", false)}
-${row("?ip=", "入口标签，仅用于 RTT 统计，不影响功能", false)}
-${row("?k=", "页面口令（配置了 pageKey 才生效）", false)}
-</table>
+${this.row("?ed=2560", "早期数据长度，把首包塞进 WS 握手，省 1 个 RTT", false)}
+${this.row("?proto=", "<code>vless</code> / <code>trojan</code> / <code>both</code>（订阅用）", false)}
+${this.row("?rg=", "强制地区出口，如 <code>rg=de</code>、<code>rg=nl</code>（数据面用）", false)}
+${this.row("?ip=", "入口标签，仅用于 RTT 统计，不影响功能", false)}
+${this.row("?k=", "页面口令（配置了 pageKey 才生效）", false)}
+</table>`;
+  }
 
-<h2>行为说明</h2>
+  /**
+   * 功能：行为说明分区（默认出口、地区出口、切换策略、鉴权）。
+   * @returns {string} HTML
+   */
+  private behaviour(): string {
+    return `<h2>行为说明</h2>
 <div class="note">
 <ul>
 <li><b>默认出口</b>：直连，出口是 Cloudflare 边缘 IP；连不上（Cloudflare 托管站点如 X）才降级到 proxyip。</li>
 <li><b>地区出口</b>：路径带 <code>&amp;rg=xx</code> 时跳过直连，直接用该国 proxyip，出口即该国 IP。</li>
-<li><b>切换策略</b>：<code>${i.policy || "失败 5 次才换，切换后驻留 6 小时"}</code>，能通就一直用，不主动跳 IP。</li>
+<li><b>切换策略</b>：<code>${this.info.policy || "失败 5 次才换，切换后驻留 6 小时"}</code>，能通就一直用，不主动跳 IP。</li>
 <li><b>鉴权</b>：UUID（VLESS）/ 密码（Trojan），两者共用同一套统计。</li>
 </ul>
-</div>
+</div>`;
+  }
 
-<div class="sub" style="margin-top:22px">path 里的 <code>ed=2560</code> 不要去掉；换客户端只改订阅链接即可。</div>
+  /**
+   * 功能：页脚（收尾提示与闭合标签）。
+   * @returns {string} HTML
+   */
+  private footer(): string {
+    return `<div class="sub" style="margin-top:22px">path 里的 <code>ed=2560</code> 不要去掉；换客户端只改订阅链接即可。</div>
 </body></html>`;
+  }
+}
+
+/**
+ * 功能：渲染控制面板（薄入口 —— 保留它是因为路由与单测都从这里进）。
+ * @param env 环境变量
+ * @param url 当前 URL（决定高亮的分区）
+ * @param id 用户 id
+ * @param host 站点域名
+ * @param key 管理密钥（写进页面内的链接）
+ * @param info 面板数据
+ * @returns HTML 字符串
+ */
+export function renderHtml(env: Env, url: URL, id: string, host: string, key: string, info: PanelInfo) {
+  return new PanelView(env, url, id, host, key, info).render();
 }
 
 /* ---------- 会话与登录（挑战-应答，密码不出现在任何请求里） ---------- */
 
-/**
- * 渲染登录页。
- * @param {string} nonce 一次性串
- * @param {string} [err] 错误提示
- * @returns {string} HTML
- */
-export function renderLogin(nonce: string, err?: string | null) {
-  return `<!doctype html><html lang="zh"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>登录</title>
-<style>
-body{font:15px/1.6 -apple-system,system-ui,sans-serif;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#f7f8fa;color:#1f2328}
-.box{background:#fff;border:1px solid #e3e6ea;border-radius:12px;padding:26px 24px;width:320px;box-shadow:0 2px 12px rgba(0,0,0,.04)}
-h1{font-size:17px;margin:0 0 16px}
-input{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #d1d5db;border-radius:7px;font-size:14px}
-button{margin-top:12px;width:100%;padding:9px;border:0;border-radius:7px;background:#2563eb;color:#fff;font-size:14px;cursor:pointer}
-button:disabled{background:#9ca3af}
-.err{color:#dc2626;font-size:13px;margin-top:10px}
-.tip{color:#6b7280;font-size:12px;margin-top:14px;line-height:1.5}
-</style>
-<div class="box">
-  <h1>管理员登录</h1>
-  <form id="f" method="post" action="/admin/login">
-    <input type="hidden" name="n" value="${nonce}">
-    <input type="hidden" name="p" value="">
-    <input id="pw" type="password" placeholder="密码" autocomplete="current-password" autofocus>
-    <button id="btn" type="submit">登录</button>
-  </form>
-  ${err ? `<div class="err">${err}</div>` : ""}
-  <div class="tip">密码只在浏览器里参与 SHA-256 计算，请求里只有哈希，且每次带随机 nonce 防重放。</div>
-</div>
-<script>
-const f=document.getElementById('f'),pw=document.getElementById('pw'),btn=document.getElementById('btn');
-f.addEventListener('submit',async e=>{
-  e.preventDefault();
-  if(!pw.value) return;
-  btn.disabled=true; btn.textContent='校验中…';
-  try{
-    const data=new TextEncoder().encode(f.n.value+':'+pw.value);
-    const buf=await crypto.subtle.digest('SHA-256',data);
-    f.p.value=[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
-    f.submit();
-  }catch(err){ btn.disabled=false; btn.textContent='登录'; alert('浏览器不支持 crypto.subtle（需要 HTTPS）'); }
-});
-</script>
-</body></html>`;
-}
-
 /* ==================================================================
  * §8b  用户管理面板（登录 + 增删改）
  * ================================================================== */
-
-
-/**
- * 渲染“未配置 adminKey”的提示页。
- * @returns {string} HTML
- */
-export function renderAdminHint() {
-  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>需要配置</title><body style="font:15px/1.6 system-ui;margin:32px;max-width:640px">
-<h2>管理面板未启用</h2>
-<p>请在 Worker 的环境变量里加一个 <code>adminKey</code>（随便一串足够长的随机字符），然后访问：</p>
-<p><code>/admin?k=你设置的adminKey</code></p>
-<p style="color:#666">建议：<code>openssl rand -hex 16</code> 生成。</p></body>`;
-}
-
-

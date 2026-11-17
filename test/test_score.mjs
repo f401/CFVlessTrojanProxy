@@ -2018,7 +2018,8 @@ ok("未知子路径返回 undefined（404）", W.ROUTES.route("nope") === undefi
   W.VT.clear();
 }
 // ═══ 第 54 组：PageView（P6-3）═══
-ok("PageView 是类实例且五个视图都在", typeof W.PAGES === "object" && ["panel", "stats", "login", "admin", "adminHint"].every((k) => typeof W.PAGES[k] === "function"), "PAGES");
+ok("PageView 是类实例且两个视图都在（panel / stats）", typeof W.PAGES === "object" && ["panel", "stats"].every((k) => typeof W.PAGES[k] === "function"), "PAGES");
+ok("登录页与管理页的三个渲染入口搬到 admin.ts", ["renderLogin", "renderAdmin", "renderAdminHint"].every((k) => typeof W[k] === "function"), "admin html");
 ok("PageView 可构造", typeof W.PageView === "function", "PageView");
 // ═══ 第 55 组：整池被判死时的比例兜底（P6-4）═══
 {
@@ -5190,7 +5191,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
     if (m) fields.push(m[1]);
   }
   eq("PanelInfo 字段都被解析到", fields.length > 8, true);
-  const missing = fields.filter((f) => srcPanel.includes("i." + f) === false);
+  const missing = fields.filter((f) => srcPanel.includes("this.info." + f) === false);
   eq("每个字段都有渲染点", missing.join(","), "");
   eq("curPx 已从类型里删掉", /\bcurPx\b/.test(srcTypes), false);
 
@@ -9124,8 +9125,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     !/from "\.\/transport-(types|tunnelfetch)"/.test(tf));
 
   const panel = fs.readFileSync("src/views/panel.ts", "utf8");
-  eq(`[${g}] 面板：五个渲染入口都在 panel.ts`,
-    ["renderHtml", "renderLogin", "renderAdminHint", "renderAdmin", "renderStatsHtml"].every((x) => new RegExp("export function " + x + "\\(").test(panel)), true);
+  eq(`[${g}] 面板：页与看板两个入口在 panel.ts`,
+    ["renderHtml", "renderStatsHtml"].every((x) => new RegExp("export function " + x + "\\(").test(panel)) && ["renderLogin", "renderAdmin", "renderAdminHint"].every((x) => new RegExp("export function " + x + "\\(").test(fs.readFileSync("src/routes/admin.ts", "utf8"))), true);
   ok(`[${g}] 页面壳与五个渲染入口同住 panel.ts（页壳不再是单独文件）`,
     !fs.existsSync("src/views/pageview.ts") && !fs.existsSync("src/views/html.ts") && panel.includes("export class PageView") && panel.includes("export function fmtBytes("));
 
@@ -9272,8 +9273,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok(`[${g}] /health 走单例方法而不是模块函数`,
     healthSrc312.includes("src: SOURCES.stat(),") && !healthSrc312.includes("srcStat("));
 
-  ok(`[${g}] 面板：五个渲染入口 + 转义/字节格式化 + 页壳同住 panel.ts`,
-    ["renderHtml", "renderLogin", "renderAdminHint", "renderAdmin", "renderStatsHtml"].every((x) => panelSrc312.includes("export function " + x + "(")) &&
+  ok(`[${g}] 面板：两个页入口 + 转义/字节格式化 + 页壳同住 panel.ts`,
+    ["renderHtml", "renderStatsHtml"].every((x) => panelSrc312.includes("export function " + x + "(")) &&
       panelSrc312.includes("export function fmtBytes(") &&
       panelSrc312.includes("export function escapeHtml(") &&
       panelSrc312.includes("export class PageView"));
@@ -9784,6 +9785,56 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   W.S.smCnt.clear();
   W.S.bigByHost.delete(H323);
   W.S.bigChan.delete(H323);
+}
+
+// 第 324 组：面板页按「一个类六个分区」组织（7.324）
+
+{
+  const panelSrc = fs.readFileSync("src/views/panel.ts", "utf8");
+  ok("面板页成了 PanelView 类", panelSrc.includes("export class PanelView"), "");
+  for (const m of ["header", "identity", "subscriptions", "statusTable", "monitor", "params", "behaviour", "footer"]) {
+    ok("分区方法存在：" + m, panelSrc.includes("private " + m + "(): string"), "");
+  }
+  const fnAt = panelSrc.indexOf("export function renderHtml(");
+  ok("renderHtml 仍是入口", fnAt > 0, "");
+  const fnBody = panelSrc.slice(fnAt, fnAt + 260);
+  ok("renderHtml 只做委托", fnBody.includes("return new PanelView(") && fnBody.includes("<!doctype") === false, "");
+  ok("静态样式抽成 PANEL_CSS", panelSrc.includes("const PANEL_CSS = `"), "");
+  eq("组装只有一次 join", (panelSrc.match(/\.join\("\\n\\n"\)/g) || []).length, 1);
+  const clsBody = panelSrc.slice(panelSrc.indexOf("export class PanelView"), fnAt);
+  ok("不再有 const i = info 这个别名", panelSrc.includes("const i = info") === false, "");
+  ok("插值都走 this.info", clsBody.includes("this.info.") && /\$\{i\./.test(clsBody) === false, "");
+  ok("类的文档写清为什么成类", panelSrc.includes("为什么成类"), "");
+
+  const env324 = { nodes: "", uuids: "" };
+  const url324 = new URL("https://panel.example.com/u1");
+  const info324 = {
+    regions: ["HK"],
+    curLat: "1.2.3.4:443",
+    curTput: "1.2.3.4:443",
+    colo: "HKG",
+    funnel: "-",
+    aliveCount: 3,
+    used: "1 B",
+    today: "1 B",
+    quota: "不限",
+    expire: "长期",
+    policy: "失败 5 次才换",
+  };
+  const viaFn = W.renderHtml(env324, url324, "u1", "site.example.com", "pw", info324);
+  const viaCls = new W.PanelView(env324, url324, "u1", "site.example.com", "pw", info324).render();
+  eq("薄入口与类渲染完全一致", viaFn === viaCls, true);
+  eq(
+    "六个分区都在",
+    ["身份", "订阅（导入客户端用这个）", "状态", "监控与调试", "参数", "行为说明"].filter((s) =>
+      viaFn.includes("<h2>" + s + "</h2>")
+    ).length,
+    6
+  );
+  const esc324 = W.renderHtml(env324, url324, "u1", "<b>x</b>", "pw", info324);
+  eq("站点名被转义", esc324.includes("&lt;b&gt;x&lt;/b&gt;") && esc324.includes("<b>x</b>") === false, true);
+  eq("带查询串的路径用 &k=", viaFn.includes("/stats?format=html&k=pw"), true);
+  eq("普通路径用 ?k=", viaFn.includes("/cl?k=pw"), true);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

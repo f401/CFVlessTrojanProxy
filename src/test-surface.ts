@@ -120,10 +120,11 @@ export {
   TFPROBES,
 } from "./routes/debug-nets";
 export { renderStatsHtml } from "./views/panel";
+export { PanelView, renderHtml } from "./views/panel";
 export { statsNodeRows } from "./nodes/stats-rows";
 export { randomPwd } from "./edge/auth";
 
-export { renderAdmin } from "./views/panel";
+export { renderAdmin, renderAdminHint, renderLogin } from "./routes/admin";
 export { RL_MEM, adminAuthed, rlReset, rlTake, sha256Hex, sessionToken } from "./edge/auth";
 export { html, CSP_STATIC } from "./edge/respond";
 export { wsToStream } from "./proxy/ws-in";
