@@ -45,7 +45,7 @@ export {
   edgeCount,
 } from "./views/sub";
 export { regionEntries } from "./views/sub-common";
-export { SUBVIEW, SubscriptionView } from "./views/sub";
+export { SubscriptionView } from "./views/sub";
 export { ROUTES, RouteTable } from "./routes/table";
 export { PageView } from "./views/panel";
 export { loadRtt, rttLearn, rttMark } from "./nodes/metrics";

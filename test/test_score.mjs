@@ -1984,7 +1984,7 @@ ok("RegionPicker 可构造", typeof W.RegionPicker === "function", "RegionPicker
 ok("Attacher 是类实例且可 run()", typeof W.Attacher === "function" && typeof W.Attacher.prototype.run === "function" && W.ATTACHER === undefined, "ATTACHER 单例已退场（7.354）");
 ok("Attacher 可构造", typeof W.Attacher === "function", "Attacher");
 // ═══ 第 51 组：SubscriptionView（P6-1）═══
-ok("SubscriptionView 是类实例且可 render()", typeof W.SUBVIEW === "object" && typeof W.SUBVIEW.render === "function", "SUBVIEW");
+ok("SubscriptionView 是类实例且可 render()", typeof W.SubscriptionView === "function" && typeof W.SubscriptionView.prototype.render === "function" && W.SUBVIEW === undefined, "SUBVIEW");
 ok("SubscriptionView 可构造", typeof W.SubscriptionView === "function", "SubscriptionView");
 // ═══ 第 52 组：路由表（P6-2）═══
 ok("RouteTable 注册了四条用户级路由", W.ROUTES.names().join(",") === "subscription,logs,proxyip,debug", W.ROUTES.names().join(","));
@@ -9104,8 +9104,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   const sb = W.renderSingbox(env308, url308, id308, "edge.example.com", {}, ["HK"]);
   ok("links 仍是 vless:// 链接串", atob(lk).includes("vless://"), "links 输出丢了 vless 头");
   ok("singbox 仍是可解析 JSON", (() => { try { JSON.parse(sb); return true; } catch { return false; } })(), "singbox 输出不是 JSON");
-  eq("SUBVIEW 的 links 分发就是 renderLinks", W.SUBVIEW.render({ env: env308, url: url308, id: id308, host: "edge.example.com", learned: {}, regions: ["HK"] }, "links"), lk);
-  eq("SUBVIEW 的 singbox 分发就是 renderSingbox", W.SUBVIEW.render({ env: env308, url: url308, id: id308, host: "edge.example.com", learned: {}, regions: ["HK"] }, "singbox"), sb);
+  eq("SUBVIEW 的 links 分发就是 renderLinks", new W.SubscriptionView().render({ env: env308, url: url308, id: id308, host: "edge.example.com", learned: {}, regions: ["HK"] }, "links"), lk);
+  eq("SUBVIEW 的 singbox 分发就是 renderSingbox", new W.SubscriptionView().render({ env: env308, url: url308, id: id308, host: "edge.example.com", learned: {}, regions: ["HK"] }, "singbox"), sb);
 }
 
 // ===== 309. 三个家族并回单文件：传输层 / 面板 / 调试路由 =====
@@ -9233,7 +9233,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     ok(
       "订阅视图分派与 clash 渲染同住一个文件",
       sub311.includes("export class SubscriptionView") &&
-        sub311.includes("export const SUBVIEW = new SubscriptionView();") &&
+        !sub311.includes("export const SUBVIEW =") && sub311.includes("export class SubscriptionView {") &&
         sub311.includes("export function renderClash"),
       "sub.ts 必须同时住着 renderClash 与 SubscriptionView",
     );
@@ -10688,8 +10688,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("控制页不再取池子的当前中继（白付一次往返）", !page333.includes("px:cur") && !page333.includes("SEL.current("));
 
   const feed333 = body333("private async feed(");
-  ok("三种订阅共用一条渲染路径", feed333.includes("SUBVIEW.render(") && feed333.includes("subHeaders(env, s)") && feed333.includes("spec.json ?"));
-  eq("三种格式不再各抄一份渲染", (srcSub333.match(/SUBVIEW\.render\(/g) || []).length, 1);
+  ok("三种订阅共用一条渲染路径", feed333.includes("this.view.render(") && feed333.includes("subHeaders(env, s)") && feed333.includes("spec.json ?"));
+  eq("三种格式不再各抄一份渲染", (srcSub333.match(/this\.view\.render\(/g) || []).length, 1);
   eq("用量头只在这一条路径上挂（两个响应分支各一次）", (srcSub333.match(/subHeaders\(/g) || []).length, 2);
 
   const stats333 = body333("private async stats()");
@@ -11913,6 +11913,68 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     "模块函数缺了"
   );
 }
+// ---------- 第 358 组：订阅渲染器由路由类自己持有（v7.358）----------
+{
+  const subSrc358 = fs.readFileSync("src/views/sub.ts", "utf8");
+  const routeSrc358 = fs.readFileSync("src/routes/subscription.ts", "utf8");
+  ok(
+    "[358] 渲染器不再以模块级单例存在",
+    !/^export const SUBVIEW = new SubscriptionView\(\);/m.test(subSrc358),
+    "SUBVIEW 还在",
+  );
+  ok(
+    "[358] 类本身仍在（能力没删，只是换了持有者）",
+    subSrc358.includes("export class SubscriptionView {"),
+    "类不见了",
+  );
+  ok(
+    "[358] 路由按类名引入渲染器",
+    routeSrc358.includes('import { SubscriptionView, trojanPasswordOf } from "../views/sub";'),
+    "import 形态不对",
+  );
+  ok(
+    "[358] 路由类自己持有渲染器字段",
+    routeSrc358.includes("private readonly view = new SubscriptionView();"),
+    "字段不在",
+  );
+  eq(
+    "[358] 三种格式的渲染只经一处字段调用",
+    (routeSrc358.match(/this\.view\.render\(/g) || []).length,
+    1,
+  );
+  ok(
+    "[358] 不再直接引用模块级单例",
+    !routeSrc358.includes("SUBVIEW.render("),
+    "还有裸单例调用",
+  );
+  ok(
+    "[358] 测试窗口只剩类，单例已退场",
+    W.SUBVIEW === undefined && typeof W.SubscriptionView === "function",
+    "窗口形态不对",
+  );
+  const envRet358 = { uuid: "u1", pwd: "pw", host: "edge358.example.com" };
+  const urlRet358 = new URL("https://edge358.example.com/u1/cl");
+  const inRet358 = { env: envRet358, url: urlRet358, id: "u1", host: "edge358.example.com", learned: {}, regions: ["HK"] };
+  const viewA358 = new W.SubscriptionView();
+  eq(
+    "[358] clash 分发就是 renderClash",
+    viewA358.render(inRet358, "clash"),
+    W.renderClash(envRet358, urlRet358, "u1", "edge358.example.com", {}, ["HK"], undefined),
+  );
+  const viewB358 = new W.SubscriptionView();
+  ok("[358] 两个实例互不影响", viewA358 !== viewB358, "同一实例");
+  eq(
+    "[358] 未知格式回落到 clash（历史行为）",
+    viewB358.render(inRet358, "nope"),
+    viewB358.render(inRet358, "clash"),
+  );
+  eq(
+    "[358] 类上只有 render 与私有的 table",
+    Object.getOwnPropertyNames(W.SubscriptionView.prototype).sort().join(","),
+    "constructor,render,table",
+  );
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

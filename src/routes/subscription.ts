@@ -4,7 +4,7 @@ import { dwellOf } from "../px/selector";
 import { SC } from "../core/const";
 import { PageView, fmtBytes } from "../views/panel";
 import { effectiveQuota, subHeaders } from "../core/quota";
-import { SUBVIEW, trojanPasswordOf } from "../views/sub";
+import { SubscriptionView, trojanPasswordOf } from "../views/sub";
 import type { SubKind } from "../views/sub";
 import { readStats, nodeSnapGet } from "../store/index";
 import { statsNodeRows } from "../nodes/stats-rows";
@@ -30,7 +30,7 @@ export async function subscription(c: UserCtx, kind: string): Promise<Response> 
 /**
  * 订阅这一族要发的三种格式 —— 渲染器与响应体类型。
  *
- * 三者唯一差别就是 `SUBVIEW.render` 的第二个参数与响应体的 content-type，
+ * 三者唯一差别就是 `this.view.render` 的第二个参数与响应体的 content-type，
  * 所以一张表就够了；**口令变体**（`pcl`/`psb`/`pty`，路径里带 `k=`）与普通变体走同一条路。
  */
 const FEEDS: Record<string, { fmt: SubKind; json: boolean }> = {
@@ -58,6 +58,13 @@ export class SubscriptionRoutes {
    * 在 `SubscriptionRoutes` 里就能读到，不必跳到 `panel.ts` 的尾部找实例。
    */
   private readonly pages = new PageView();
+  /**
+   * 订阅渲染器：三种格式共用一张分派表。
+   *
+   * 7.358 前它是模块级 `SUBVIEW`。它是无字段的纯分派器，但订阅内容就是这个类的产出，
+   * 挂模块上时读 `feed()` 的人看不出来走的是哪份渲染实现。
+   */
+  private readonly view = new SubscriptionView();
 
   /**
    * 功能：记下这次请求的上下文（构造期不做任何 I/O）。
@@ -127,7 +134,7 @@ export class SubscriptionRoutes {
     const spec = FEEDS[kind];
     const s = await readStats(env, id);
     await aliveList(env);
-    const body = SUBVIEW.render({ env, url, id, host, learned, regions, auth }, spec.fmt);
+    const body = this.view.render({ env, url, id, host, learned, regions, auth }, spec.fmt);
     return spec.json ? json(body, subHeaders(env, s)) : text(body, subHeaders(env, s));
   }
 

@@ -40,8 +40,6 @@ export class SubscriptionView {
   }
 }
 
-/** 进程内唯一实例 */
-export const SUBVIEW = new SubscriptionView();
 
 // ---- 门面（对外导出面保持不变） ----
 export * from "./sub-common";
