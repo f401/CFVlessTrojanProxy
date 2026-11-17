@@ -42,6 +42,8 @@ export { SEEDS } from "./px/seed";
 export { Connection } from "./proxy/connection";
 export { CAGG_MAX, ConnSettle, SETTLE, type SettleView } from "./proxy/conn-settle";
 export { SAMPLE_MIN_BYTES, SAMPLE_STD_BYTES, SITE_MIN_BYTES, TRANSFER_ENOUGH, kbsOf, sampleWeight, stalledWindow } from "./proxy/conn-sample";
+export { NODE_EMIT_GAP_MS, NODE_WIN_MS, SITE_WIN_MS, SampleWindow } from "./proxy/sample-window";
+export { FLOW_TICK_MS, ClientFlow } from "./proxy/client-flow";
 export {
   nsGet,
   nsSpeed,

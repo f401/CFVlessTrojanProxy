@@ -401,8 +401,7 @@ eq("初始水位 = 512KB", c.mark, 512 * 1024);
 
 // 造一个 2 秒、2MB 的窗口
 c.node = "n:443";
-c.sampleAt = Date.now() - 2000;
-c.sampleDown = 0;
+c.win.begin(Date.now() - 2000, 0, 0);
 c.down = 2 * 1024 * 1024;
 const keep = await c.tick(fakeWs);
 eq("tick 返回 true（未触发背压）", keep, true);
@@ -413,7 +412,7 @@ eq("tick 推进了水位", c.mark > c.down, true);
 reset();
 const c2 = new W.Connection({}, {}, "lat", "");
 c2.down = 2 * 1024 * 1024;
-c2.sampleAt = Date.now() - 2000;
+c2.win.begin(Date.now() - 2000, 0, 0);
 await c2.tick(fakeWs);
 eq("直连不产生吞吐样本", W.S.nstat.size, 0);
 
@@ -8834,6 +8833,70 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   };
   const badResp = await W.NETS.diag(badCtx, badCtx.url);
   eq(`[${g}] 域名不合法时诊断直接报错`, ((await badResp.json()) || {}).ok, false);
+}
+
+
+/* ---------- 295. 连接把「采样窗口」与「客户端背压」拆成两个类 ---------- */
+{
+  const winSrc = fs.readFileSync("src/proxy/sample-window.ts", "utf8");
+  const flowSrc = fs.readFileSync("src/proxy/client-flow.ts", "utf8");
+  const connSrc = fs.readFileSync("src/proxy/connection.ts", "utf8");
+
+  ok("sample-window 里有 SampleWindow 类", /export class SampleWindow \{/.test(winSrc));
+  ok("client-flow 里有 ClientFlow 类", /export class ClientFlow \{/.test(flowSrc));
+  ok(
+    "连接通过组合持有两个对象（不再自己声明采样字段）",
+    connSrc.includes("readonly win = new SampleWindow();") &&
+      connSrc.includes("readonly flow = new ClientFlow();") &&
+      !/^  sampleAt = 0;$/m.test(connSrc) &&
+      !/^  stallMs = 0;$/m.test(connSrc),
+    "win/flow 组合或字段残留不符",
+  );
+  ok("连接把采样字段暴露成只读 getter", /get sampleAt\(\): number \{/.test(connSrc) && /get siteEmitted\(\): number \{/.test(connSrc));
+  ok("连接的背压只剩一行委托", connSrc.includes("return this.flow.gate(ws, this.sock);"));
+  // 只看代码行：注释里提到 bufferedAmount 是在解释「谁负责读它」，不算还在读缓冲
+  const connCode = connSrc
+    .split(/\r?\n/)
+    .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
+    .join("\n");
+  ok("缓冲读写只在 client-flow 里（连接不再直接比 bufferedAmount）", !connCode.includes("bufferedAmount"));
+  ok(
+    "采样权重仍归连接（结算要用 sampleW）",
+    connSrc.includes("this.sampleW += use;") && winSrc.includes("emitted(now: number): void"),
+  );
+  ok("节点级窗口的最短长度与出样本间隔各是一处常量", winSrc.includes("export const NODE_WIN_MS = 800;") && winSrc.includes("export const NODE_EMIT_GAP_MS = 5000;"));
+  ok("站点级窗口 60 秒也是常量", winSrc.includes("export const SITE_WIN_MS = 60000;"));
+  ok("窗口类不碰连接、不碰全局状态", !winSrc.includes("S.") && !winSrc.includes("cnt("));
+
+  // 行为面：用显式时间戳跑，避免依赖真实时钟
+  const sw = new W.SampleWindow();
+  sw.begin(10000, 0, 0);
+  eq("窗口短于 800ms 不产生样本", sw.node(10500, 900000, 0), null);
+  const w1 = sw.node(12000, 204800, 0);
+  ok("2 秒 200KB 的窗口可以出样本", Boolean(w1) && w1.bytes === 204800 && w1.elapsedMs === 2000, JSON.stringify(w1));
+  sw.emitted(12000);
+  eq("距上次出样本不足 5 秒不重复采", sw.node(14000, 500000, 0), null);
+  const w2 = sw.node(20000, 800000, 0);
+  // 注意：卡在「出样本间隔」上时窗口边界不推进（否则 dt 会只剩 2 秒），所以这里是从 w1 起算的 8 秒 595200 字节
+  ok("满 5 秒后可以再采", Boolean(w2) && w2.bytes === 595200 && w2.elapsedMs === 8000, JSON.stringify(w2));
+
+  const small = new W.SampleWindow();
+  small.begin(10000, 0, 0);
+  eq("小于 64KB 的窗口不出样本", small.node(12000, 1000, 0), null);
+  eq("没出样本也推进了窗口边界（否则下次 dt 被拖长）", small.at, 12000);
+
+  const st = new W.SampleWindow();
+  st.begin(0, 0, 0);
+  eq("一半时间在背压算“瓶颈在客户端”", st.stalled(1000, 600), true);
+  eq("少量背压不算", st.stalled(1000, 500), false);
+
+  // 背压：客户端自己走了记 ccut，而不是节点的 cut
+  const flow = new W.ClientFlow();
+  eq("缓冲未超限直接放行", await flow.gate({ bufferedAmount: 0, readyState: 1, send() {}, close() {} }, null), true);
+  eq("缓冲未超限不累计背压毫秒", flow.stallMs, 0);
+  const gone = { bufferedAmount: 1e9, readyState: 3, send() {}, close() {} };
+  eq("客户端已断开时门禁返回假", await flow.gate(gone, null), false);
+  eq("走的路径记 ccut 不记 stall", (W.S.cnt.ccut || 0) > 0 && !(W.S.cnt.stall || 0), true);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

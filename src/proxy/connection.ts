@@ -4,9 +4,11 @@ import { hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { nsFail, nsSpeed } from "../nodes/score";
 import { S } from "../core/state";
-import { UP_STALL_MS, WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS, closeQuietly, releaseAll, withTimeout } from "../core/util";
+import { UP_STALL_MS, closeQuietly, releaseAll, withTimeout } from "../core/util";
 import { SETTLE } from "./conn-settle";
-import { SAMPLE_MIN_BYTES, sampleWeight, stalledWindow } from "./conn-sample";
+import { ClientFlow } from "./client-flow";
+import { SampleWindow } from "./sample-window";
+import { sampleWeight } from "./conn-sample";
 
 
 /** 每收到多少字节触发一次 tick */
@@ -25,8 +27,10 @@ export const TICK_BYTES = 512 * 1024;
  * 改造前每个 64KB chunk 要读 3 次 bufferedAmount、取 1 次时钟；
  * 4MB/s 下就是每秒 192 次跨边界调用。现在降到每秒 8 次。
  *
- * 连接结束时的「结算」不在这里：那个流水线要碰六张表（见 `./conn-settle.ts`），
- * 与本文件的热路径职责完全不同，所以按「连接持有状态、结算只读状态」分工。
+ * 这个类现在只管「连接持有状态 + 热路径」：
+ * · 关连接时的结算流水线在 `./conn-settle.ts`（要碰六张表）；
+ * · 采样窗口的边界与间隔在 `./sample-window.ts`（每 5 秒 / 60 秒各一套）；
+ * · 客户端背压与「谁先走了」的归因在 `./client-flow.ts`（唯一读 bufferedAmount 的地方）。
  */
 
 export class Connection {
@@ -47,16 +51,13 @@ export class Connection {
   up = 0;
   mark = TICK_BYTES; // 下一个 tick 的字节水位
 
-  // —— 采样窗口 ——
-  sampleAt = 0;
-  sampleDown = 0;
-  lastEmit = 0;
-  sampleW = 0; // 本连接已贡献给直方图的权重（上限 SC.CONN_W_CAP）
+  /** 两个采样窗口（节点级 5 秒 / 站点级 60 秒）的边界状态 */
+  readonly win = new SampleWindow();
+  /** 客户端背压与「客户端先走」的归因 */
+  readonly flow = new ClientFlow();
+  /** 本连接已贡献给直方图的权重（上限 SC.CONN_W_CAP） */
+  sampleW = 0;
   inflightKey = ""; // 已经计入在途的节点（变更时迁移）
-  stallMark = 0; // 上次采样时的累计背压毫秒（算窗口 stall 占比）
-  siteAt = 0; // 站点吞吐：上一次采样时刻
-  siteDown = 0; // 站点吞吐：上一次采样时的下行字节
-  siteEmitted = 0; // 已写过几次站点级 bps（写过就别再用"一生平均"覆盖）
 
   // —— 生命周期 ——
   markedOk = false;
@@ -79,14 +80,13 @@ export class Connection {
   // —— 结算 ——
   reportedUp = 0;
   reportedDown = 0;
-  stallMs = 0;
 
   // —— 观测 ——
   tAttach = 0; // 连上上游的时刻
   ttfb = 0; // 首字节耗时（ms），按站点的画像就靠它
   targetBytes = 0; // 目标流量（字节，0 = 按模式默认）：决定「传完一个请求」要算多少流量
   /** 目标站点是否托管在 CF 上（决定中继只能用非 CF 出口） */
-  cf = false; // 目标站点是否托管在 CF 上（决定中继只能用非 CF 出口）
+  cf = false;
   /** 调试用：`?rx=<ip>` 强制这一条连接走指定中继（只给诊断脚本用，正常流量留空） */
   forceRelayIp = "";
   directFail = false; // 直连阶段 0 字节关闭过（用于"直连对照"）
@@ -104,6 +104,55 @@ export class Connection {
     this.ipTag = ipTag || "";
   }
 
+  /**
+   * 功能：本连接累计的背压毫秒（结算要算 pStall 的分子）。
+   * @returns {number} 毫秒
+   */
+  get stallMs(): number {
+    return this.flow.stallMs;
+  }
+
+  /**
+   * 功能：上一次采样时的累计背压毫秒（结算用它算窗口内占比）。
+   * @returns {number} 毫秒
+   */
+  get stallMark(): number {
+    return this.win.stallMark;
+  }
+
+  /**
+   * 功能：节点级窗口的起点时刻（0 表示还没建立起点）。
+   * @returns {number} 毫秒时间戳
+   */
+  get sampleAt(): number {
+    return this.win.at;
+  }
+
+  /**
+   * 功能：起点时刻的累计下行字节（结算按它算窗口字节）。
+   * @returns {number} 字节
+   */
+  get sampleDown(): number {
+    return this.win.down;
+  }
+
+  /**
+   * 功能：上一次真的交出节点级样本的时刻（0 表示还没交过）。
+   * @returns {number} 毫秒时间戳
+   */
+  get lastEmit(): number {
+    return this.win.lastEmit;
+  }
+
+  /** 已经写出过几次站点级样本；写过就不再让「一生平均」覆盖它 */
+  get siteEmitted(): number {
+    return this.win.siteEmitted;
+  }
+
+  set siteEmitted(n: number) {
+    this.win.siteEmitted = n;
+  }
+
   /** 上行字节（不做采样，只要计数） */
   onUp(n: number): void {
     this.up += n;
@@ -119,18 +168,14 @@ export class Connection {
     try {
       const now = Date.now();
       // 两级采样：节点级（决定分数）与站点级（决定「这个站点走哪个节点快」）
-      this.sampleWindow(now);
-      this.siteWindow(now);
+      this.sampleNode(now);
+      this.sampleSite(now);
       // 第一次 tick 只建立窗口起点，不产生样本（否则第一段速率会把建连耗时算进去）
-      if (!this.sampleAt) {
-        this.sampleAt = now;
-        this.sampleDown = this.down;
-        this.stallMark = this.stallMs;
-      }
+      if (!this.win.at) this.win.begin(now, this.down, this.stallMs);
 
       // 先把这段时间的字节结算给 PEND，再看客户端收不收得动
       this.flush(false);
-      return await this.backpressure(ws);
+      return await this.flow.gate(ws, this.sock);
     } catch (e) {
       logErr("tick: " + errMsg(e), this.node || "");
       return true; // 统计出错绝不影响数据面
@@ -142,24 +187,16 @@ export class Connection {
    * @param {number} now 当前毫秒时间
    * @returns {void}
    */
-  private sampleWindow(now: number): void {
-    // 采样窗口：至少 800ms 才结算一次（tick 可能比这更密）。
-    // 两次结算的间隔从 15 秒降到 5 秒：一次十几秒的大文件下载原来只够结算一个样本，
-    // 带宽估计长期停在中继先验上，tput 模式分不出「这条中继有 2MB/s」还是「只有 200KB/s」。
-    const dt = now - this.sampleAt;
-    if (!this.sampleAt || dt < 800 || now - this.lastEmit < 5000) return;
-    const bytes = this.down - this.sampleDown;
-    if (this.node && bytes >= SAMPLE_MIN_BYTES) {
-      // 窗口里一半以上时间在背压 = 瓶颈在客户端，这个样本不代表节点能力
-      const w = this.takeWeight(bytes, dt, stalledWindow(this.stallMs, this.stallMark, dt) ? 0.3 : 1);
-      if (w > 0) {
-        this.lastEmit = now;
-        this.emitSpeed(bytes, dt, w);
-      }
-    }
-    this.sampleAt = now;
-    this.sampleDown = this.down;
-    this.stallMark = this.stallMs;
+  private sampleNode(now: number): void {
+    // 直连连接没有节点可记：窗口照常推进（由 SampleWindow 负责），只是不出样本
+    const win = this.win.node(now, this.down, this.stallMs);
+    if (!win || !this.node) return;
+    // 窗口里一半以上时间在背压 = 瓶颈在客户端，这个样本按 0.3 折价（不代表节点能力）
+    const w = this.takeWeight(win.bytes, win.elapsedMs, this.win.stalled(win.elapsedMs, this.stallMs) ? 0.3 : 1);
+    // 权重 0 说明这条连接的贡献额度用完了：不记 lastEmit，否则后面更长的窗口会被一起饿掉
+    if (!w) return;
+    this.win.emitted(now);
+    this.emitSpeed(win.bytes, win.elapsedMs, w);
   }
 
   /**
@@ -167,25 +204,11 @@ export class Connection {
    * @param {number} now 当前毫秒时间
    * @returns {void}
    */
-  private siteWindow(now: number): void {
+  private sampleSite(now: number): void {
+    // 直连连接没有「站点 × 节点」可言：站点窗口只在走节点时才有意义
     if (!this.node || !this.host) return;
-    // 直连连接没有「站点 × 节点」可言，第一次进窗口只记起点
-    if (!this.siteAt) {
-      this.siteAt = now;
-      this.siteDown = this.down;
-      return;
-    }
-    // 60 秒一个窗口：长连接（看视频）不必等到结束才有第一个站点级样本
-    if (now - this.siteAt < 60000) return;
-    const sb = this.down - this.siteDown;
-    const sdt = now - this.siteAt;
-    // 256KB 以下不报：小响应用「一生平均」算出的速率会反向排序（D5）
-    if (sb >= 262144) {
-      this.emitSite(sb, sdt);
-      this.siteEmitted++;
-    }
-    this.siteAt = now;
-    this.siteDown = this.down;
+    const win = this.win.site(now, this.down);
+    if (win) this.emitSite(win.bytes, win.elapsedMs);
   }
 
   /**
@@ -211,38 +234,13 @@ export class Connection {
     hostNodeMark(this.host, this.node, { bps: Math.round((bytes * 1000) / dt), bytes });
   }
 
-  /** 客户端收不动时暂停读上游；超时或爆缓冲则主动断 */
+  /**
+   * 功能：客户端收不动时暂停读上游；超时或爆缓冲则主动断（实现在 `ClientFlow`）。
+   * @param {WebSocketLike} ws 客户端连接
+   * @returns {Promise<boolean>} 假表示这条连接应当中止
+   */
   async backpressure(ws: WebSocketLike): Promise<boolean> {
-    const buffered = ws.bufferedAmount || 0;
-    if (buffered <= WS_BUFFER_LIMIT) return true;
-
-    const t0 = Date.now();
-    // 超限之后不立刻断：客户端可能只是瞬时抖动，给它 60 秒的恢复窗口
-    const deadline = t0 + WS_STALL_MS;
-    // 每 10ms 看一次：ws 关了说明客户端彻底走了（cut）；
-    // 缓冲涨到 16MB 上限或等满 60 秒则判定真卡死（stall）——两种情况都主动断，别让一个连接拖住整个 isolate
-    while ((ws.bufferedAmount || 0) > WS_BUFFER_LIMIT) {
-      if (ws.readyState !== WS_OPEN) {
-        // 这里是「客户端自己走了」，不是节点断流：必须记 ccut。
-        // 记成 cut 会把客户端切网/关标签算到节点头上 —— cut 是「节点中途断流」的计数器，
-        // 两者混在一起时 panel 的可用性会被客户端行为拉低（同 7.124 的短路类缺陷：测的是别的对象）。
-        cnt("ccut");
-        closeQuietly(this.sock);
-        return false;
-      }
-      if ((ws.bufferedAmount || 0) > WS_MAX_BUFFER || Date.now() > deadline) {
-        cnt("stall");
-        this.stallMs += Date.now() - t0;
-        try {
-          ws.close(1011, "stall");
-        } catch (e) {}
-        closeQuietly(this.sock);
-        return false;
-      }
-      await new Promise((r) => setTimeout(r, 10));
-    }
-    this.stallMs += Date.now() - t0;
-    return true;
+    return this.flow.gate(ws, this.sock);
   }
 
   /**
