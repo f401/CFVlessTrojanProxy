@@ -11370,6 +11370,118 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   W.S.hostRankCache.clear();
 }
 
+// ---- 第 342 组：上行字节流是一个对象，三种收尾各自一个方法 ----
+{
+  const srcWs342 = fs.readFileSync("src/proxy/ws-in.ts", "utf8").replace(/\r\n/g, "\n");
+  ok("[342] 上行流是导出类", typeof W.UploadStream === "function");
+  ok(
+    "[342] 入口只剩一行委托",
+    /export function wsToStream\(ws: WebSocketLike, earlyData: string\): ReadableStream<Uint8Array> \{\n  return new UploadStream\(ws, earlyData\)\.stream;\n\}/.test(
+      srcWs342,
+    ),
+  );
+  for (const name342 of ["bind", "push", "emit", "overflow", "shut", "abort", "feedEarly", "decode"]) {
+    ok(`[342] 方法齐备 ${name342}`, new RegExp(`\\n  private ${name342}\\(`).test(srcWs342));
+  }
+  ok("[342] 上限仍是 8MB", W.WS_UP_QUEUE_MAX === 8 * 1024 * 1024);
+  ok("[342] 积压计数进类、模块级没有 let", !/^let /m.test(srcWs342) && srcWs342.includes("private queued = 0;"));
+  ok("[342] 超限关 1013", srcWs342.includes('this.clientSocket.close(1013, "slow upstream")'));
+  ok(
+    "[342] 读端取消时停止收包",
+    /cancel: \(\) => \{\n {8}this\.live = false;\n {6}\}/.test(srcWs342),
+  );
+
+  /** 功能：造一个能记账的假 WS（只实现 addEventListener 与 close）。 */
+  const mkWs342 = () => {
+    const h = { message: [], close: [], error: [] };
+    const closed = [];
+    return {
+      h,
+      closed,
+      addEventListener: (t, fn) => {
+        h[t].push(fn);
+      },
+      close: (code, reason) => {
+        closed.push({ code, reason });
+      },
+      fire(t, ev) {
+        for (const fn of h[t]) fn(ev);
+      },
+    };
+  };
+  /** 功能：把字节解成字符串。 */
+  const text342 = (u8) => new TextDecoder().decode(u8);
+
+  // ① 早期数据（握手带上的首包）先入流
+  {
+    const ws = mkWs342();
+    const r = W.wsToStream(ws, "aGVsbG8=").getReader();
+    const first = await r.read();
+    eq("[342] 早期数据先入流", text342(first.value), "hello");
+    r.releaseLock();
+  }
+  // ② 纯文本帧按 UTF-8、ws2 帧（首字节 0x02 + base64）按二进制、ArrayBuffer 原样
+  {
+    const ws = mkWs342();
+    const r = W.wsToStream(ws, "").getReader();
+    ws.fire("message", { data: "abc" });
+    eq("[342] 文本帧按 UTF-8", text342((await r.read()).value), "abc");
+    ws.fire("message", { data: "\u0002" + btoa("xy") });
+    eq("[342] ws2 帧解 base64", text342((await r.read()).value), "xy");
+    ws.fire("message", { data: new Uint8Array([1, 2]).buffer });
+    eq("[342] 二进制帧原样", Array.from((await r.read()).value).join(","), "1,2");
+    ws.fire("close", {});
+    eq("[342] 关闭后读到 EOF", (await r.read()).done, true);
+    r.releaseLock();
+  }
+  // ③ 客户端正常关闭 → 读端 EOF，且之后的数据不再入队
+  {
+    const ws = mkWs342();
+    const r = W.wsToStream(ws, "").getReader();
+    ws.fire("close", {});
+    ws.fire("message", { data: "late" });
+    eq("[342] 关闭后的消息不再入队", (await r.read()).done, true);
+    r.releaseLock();
+  }
+  // ④ 客户端异常 → 读端拿到错误
+  {
+    const ws = mkWs342();
+    const r = W.wsToStream(ws, "").getReader();
+    ws.fire("error", { error: new Error("boom342") });
+    let err342 = null;
+    try {
+      await r.read();
+    } catch (e) {
+      err342 = e;
+    }
+    ok("[342] 异常透给读端", !!err342 && String(err342.message).includes("boom342"));
+    r.releaseLock();
+  }
+  // ⑤ 积压超过上限 → 关连接（1013）+ 读端报超限
+  {
+    const ws = mkWs342();
+    const r = W.wsToStream(ws, "").getReader();
+    ws.fire("message", { data: new Uint8Array(9 * 1024 * 1024).buffer });
+    let over342 = null;
+    try {
+      await r.read();
+    } catch (e) {
+      over342 = e;
+    }
+    ok("[342] 超限让读端报错", !!over342 && String(over342.message).includes("overflow"));
+    eq("[342] 超限按 1013 关连接", ws.closed.length === 1 ? ws.closed[0].code : -1, 1013);
+    r.releaseLock();
+  }
+  // ⑥ 早期数据不是合法 base64 时静默丢弃，不炸整条连接
+  {
+    const ws = mkWs342();
+    const r = W.wsToStream(ws, "!!!notb64").getReader();
+    ws.fire("message", { data: "ok342" });
+    eq("[342] 坏早期数据只是被丢掉", text342((await r.read()).value), "ok342");
+    r.releaseLock();
+  }
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
