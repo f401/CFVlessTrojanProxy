@@ -8,20 +8,24 @@
 // 1) 连续两次才判死：单次失败可能只是本 isolate 这一瞬间的网络抖动。
 // 2) 30 分钟自动复活：否则坏一次就永久出局（v7.86 的 `PROBE_BAD_TTL` 是同一课）。
 // 3) 判死只由「连接层」触发：`down > 0` 的连接永远不算 dead，哪怕它是 4 字节拒绝页。
+//
+// 表本体、待上报队列、有界化、ack/nack 纪律全部来自基类 `FactTable`（见它的文件头）；
+// 这里只实现「一次失败怎么记账」与「什么样的行才算判死」。
 import { cnt } from "../core/counter";
 import { DEAD_TTL } from "./commitfact";
+import { FactTable, type TimedRow } from "./fact-table";
 
 /** 判死需要连续失败几次 */
 export const DEAD_N = 2;
 /** 表上限 */
 export const DEAD_MAX = 256;
+/** 每批上行上限：与 `blk`/`dns` 同档（`/meter/add` 的车身要小） */
+const DEAD_BATCH = 60;
 
 /** 一行失败记录 */
-export interface DeadRow {
+export interface DeadRow extends TimedRow {
   /** 连续失败次数 */
   n: number;
-  /** 最后一次失败时间 */
-  at: number;
 }
 
 /** 上报用的行 */
@@ -40,11 +44,47 @@ export interface DeadWire {
  * 与 `ps` 的分工：`ps` 说「能连上，但过不了这个站点」；`dead` 说「连都连不上」。
  * 前者只折价，后者才允许把候选挪到队尾（不是删除，见 `policy` 的 `stick` 分区）。
  */
-export class DeadFacts {
-  private rows = new Map<string, DeadRow>();
-  private pend = new Map<string, DeadRow>();
-  // 这一批真正发出去的行（键 → 发出时的 at）：ack 只清它们，见 ack() 的注释
-  private sent = new Map<string, number>();
+export class DeadFacts extends FactTable<DeadRow, DeadWire> {
+  /** @returns {number} 复活期（基类用它判过期） */
+  protected get ttlMs(): number {
+    return DEAD_TTL;
+  }
+
+  /** @returns {number} 表上限 */
+  protected get maxRows(): number {
+    return DEAD_MAX;
+  }
+
+  /** @returns {number} 每批上行上限 */
+  protected get batchMax(): number {
+    return DEAD_BATCH;
+  }
+
+  /**
+   * 功能：一行编成线格式。
+   * @param {string} key 中继 IP
+   * @param {DeadRow} row 行
+   * @returns {DeadWire} 线格式
+   */
+  protected toWire(key: string, row: DeadRow): DeadWire {
+    return { i: key, n: row.n, at: row.at };
+  }
+
+  /**
+   * 功能：线格式解码成一行（坏行返回 null）。
+   * @param {DeadWire} wire 线格式
+   * @returns {{ key: string; row: DeadRow } | null} 解出来的行
+   */
+  protected parseWire(wire: DeadWire): { key: string; row: DeadRow } | null {
+    // 远端行逐条校验：地址必须是字符串、时间与批数必须是有限数 —— 坏行整条跳过，
+    // 不能让一个 undefined 的时间戳把「谁已经判死」这件事写坏
+    if (!wire || typeof wire.i !== "string" || !wire.i) return null;
+    const at = Number(wire.at);
+    const n = Number(wire.n);
+    if (!Number.isFinite(at) || !Number.isFinite(n)) return null;
+    // 批数夹在 1..9：远端可能给出 0（没意义）或很大的值（面板读起来失真）
+    return { key: wire.i, row: { n: Math.max(1, Math.min(9, n)), at } };
+  }
 
   /**
    * 功能：记录一次连接层结果。
@@ -56,17 +96,16 @@ export class DeadFacts {
   note(ip: string, ok: boolean, now = Date.now()): void {
     if (!ip) return;
     if (ok) {
-      if (this.rows.delete(ip)) cnt("deadClear");
+      // 连上了就把失败计数清掉；清掉一行也算一次观测（面板要能看出「康复」）
+      if (this.forget(ip)) cnt("deadClear");
       return;
     }
-    const cur = this.rows.get(ip);
-    // 已经过了复活期就从头数：否则「上次坏一次」和「这次坏一次」会被拼成两次
-    const n = cur && now - cur.at <= DEAD_TTL ? cur.n + 1 : 1;
-    const row: DeadRow = { n, at: now };
-    this.rows.set(ip, row);
-    this.pend.set(ip, row);
+    // `get` 会把过期的行就地删掉 ⇒ 过了复活期就自然从头数：
+    // 「上次坏一次」与「这次坏一次」不会被拼成两次连续失败
+    const cur = this.get(ip, now);
+    const n = cur ? cur.n + 1 : 1;
+    this.put(ip, { n, at: now }, now);
     cnt("deadNote");
-    if (this.rows.size > DEAD_MAX) this.drop(now);
   }
 
   /**
@@ -76,73 +115,9 @@ export class DeadFacts {
    * @returns {boolean} true 表示应挪到候选队尾
    */
   isDead(ip: string, now = Date.now()): boolean {
-    const r = this.rows.get(ip);
-    if (!r) return false;
-    if (now - r.at > DEAD_TTL) return false;
-    return r.n >= DEAD_N;
-  }
-
-  /**
-   * 功能：导出待上报增量（未 ack 前重发等于重试）。
-   * @returns {DeadWire[]} 最多 60 行
-   */
-  delta(): DeadWire[] {
-    const out: DeadWire[] = [];
-    for (const [i, r] of this.pend) {
-      out.push({ i, n: r.n, at: r.at });
-      this.sent.set(i, r.at);
-      if (out.length >= 60) break;
-    }
-    return out;
-  }
-
-  /** 功能：上报成功。@returns {void} */
-  ack(): void {
-    // 只清这一批真正发出去的行：delta() 有上限（本表最多 60 行），一次清空全部 pending 会让
-    // 超出上限的行既没发出去、也不再重发 —— 证据就这样永久丢了（v7.143 修）。
-    // 只在值没变新时才清：delta 与 ack 之间可能又记了一条更新的观测，那条还没发过。
-    for (const [k, at] of this.sent) {
-      const cur = this.pend.get(k);
-      if (cur && cur.at <= at) this.pend.delete(k);
-    }
-    this.sent.clear();
-  }
-
-  /** 功能：上报失败（丢弃待发，事实本身保留）。@returns {void} */
-  nack(): void {
-    this.sent.clear();
-    // 保留 pending：上报失败时下一轮 delta() 会把同一批原样再给一次（重发 = 重试，幂等靠 at）。
-    // 清掉它就等于「这条证据从此不会送到 DO」—— 与 v8 §3 的 pending 语义相反（只有 ack 才清）。
-  }
-
-  /**
-   * 功能：合并远端事实 —— 只认更新时间的行，且只并「已经判死」的行（失败一次不算事实）。
-   * @param {DeadWire[]} rows 远端行
-   * @returns {number} 合并条数
-   */
-  load(rows: DeadWire[]): number {
-    let n = 0;
-    // 远端行逐条校验：地址必须是字符串、时间与批数必须是有限数 —— 坏行整条跳过，
-
-    // 不能让一个 undefined 的时间戳把「谁已经判死」这件事写坏。
-
-    for (const r of rows) {
-      if (!r || typeof r.i !== "string") continue;
-      const at = Number(r.at);
-      const cntN = Number(r.n);
-      if (!Number.isFinite(at) || !Number.isFinite(cntN)) continue;
-      // 只认更新的观测：本地已有的行更晚就保留（同一中继的「判死」不该被旧行回滚）。
-
-      const cur = this.rows.get(r.i);
-      if (cur && cur.at >= at) continue;
-      // 批数夹在 1..9：远端可能给出 0（没意义）或很大的值（面板读起来失真）。
-
-      this.rows.set(r.i, { n: Math.max(1, Math.min(9, cntN)), at });
-      n += 1;
-    }
-    // 合并完再限界：批量灌入时先删一轮比逐条判更快，也避免中间态超上限。
-    if (this.rows.size > DEAD_MAX) this.drop(0);
-    return n;
+    const row = this.get(ip, now);
+    // get 已经把过期行删掉了，这里只剩「连续失败够不够」这一件事
+    return !!row && row.n >= DEAD_N;
   }
 
   /**
@@ -151,34 +126,9 @@ export class DeadFacts {
    * @returns {Array<{ i: string; n: number; at: number; dead: boolean }>} 快照
    */
   snap(now = Date.now()): Array<{ i: string; n: number; at: number; dead: boolean }> {
-    const out: Array<{ i: string; n: number; at: number; dead: boolean }> = [];
-    for (const [i, r] of this.rows) out.push({ i, n: r.n, at: r.at, dead: now - r.at <= DEAD_TTL && r.n >= DEAD_N });
+    const out = this.entries(now).map(([i, row]) => ({ i, n: row.n, at: row.at, dead: row.n >= DEAD_N }));
     out.sort((a, b) => b.at - a.at);
     return out.slice(0, 12);
-  }
-
-  /** 功能：清空（单测用）。@returns {void} */
-  clear(): void {
-    this.rows.clear();
-    this.pend.clear();
-    this.sent.clear();
-  }
-
-  /**
-   * 功能：容量淘汰 —— 先扔已过复活期的行，再按时间扔最旧的。
-   * @param {number} now 当前时间（0 表示只做容量淘汰）
-   * @returns {void}
-   */
-  private drop(now: number): void {
-    if (now > 0) {
-      for (const [i, r] of this.rows) if (now - r.at > DEAD_TTL) this.rows.delete(i);
-    }
-    if (this.rows.size <= DEAD_MAX) return;
-    const keys = [...this.rows.entries()].sort((a, b) => a[1].at - b[1].at);
-    for (const [i] of keys) {
-      if (this.rows.size <= DEAD_MAX) break;
-      this.rows.delete(i);
-    }
   }
 }
 

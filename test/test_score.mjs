@@ -97,10 +97,8 @@ const policyAll = () =>
   ["src/route/policy.ts", "src/route/policy-rank.ts", "src/route/policy-cf.ts"]
     .map((f) => fs.readFileSync(f, "utf8")).join("\n");
 
-/** 功能：把挑路的四段源码（编排 / 类型 / 画像 / 偏好）合并成一段文本，源码锁读它。 */
-const pickAll = () =>
-  ["src/px/pickpath.ts", "src/px/pick-types.ts", "src/px/pick-site.ts", "src/px/pick-pref.ts", "src/px/pick-ready.ts"]
-    .map((f) => fs.readFileSync(f, "utf8")).join("\n");
+/** 功能：把挑路的源码合并成一段文本，源码锁读它（四个类现在同在一个文件里）。 */
+const pickAll = () => fs.readFileSync("src/px/pickpath.ts", "utf8");
 const eq = (n, a, b) => {
   // want 是 undefined / 函数，或拿到的东西是函数时，序列化比较会两边都变成 undefined，
   // 断言永远为真（v7.150 修的空断言：删掉某函数后，旧锁其实一直没在测）。
@@ -7730,8 +7728,10 @@ const pkg266 = JSON.parse(fs.readFileSync("package.json", "utf8"));
 eq("package.json 有 body 别名", pkg266.scripts && pkg266.scripts.body, "node tools/body-audit.mjs --max 0");
 const dead266 = fs.readFileSync("src/route/deadfacts.ts", "utf8");
 const dns266 = fs.readFileSync("src/route/dnsfacts.ts", "utf8");
+const base266 = fs.readFileSync("src/route/fact-table.ts", "utf8");
 ok("死亡事实的 load 写了体内步骤", dead266.includes("坏行整条跳过") && dead266.includes("批数夹在 1..9"));
-ok("出口族事实的 load 写了体内步骤", dns266.includes("三件事任一不成立就整条跳过") && dns266.includes("更晚的观测胜出"));
+ok("出口族事实的 load 写了体内步骤", base266.includes("三件事任一不成立就整条跳过") && base266.includes("更晚的观测胜出"));
+ok("两张表都不再自己实现 load/ack/nack", !dead266.includes("  load(") && !dns266.includes("  load("));
 ok("自证探针已清理", !fs.existsSync("src/__probe-body.ts"));
 
 
@@ -8904,43 +8904,31 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
 }
 
 
-// ---- [296] 挑路的四件事各自成文件：编排 / 类型 / 池子就绪 / 画像 / 偏好 ----
-console.log("\n[296] 挑路拆成编排、池子就绪、站点画像、偏好过滤四层");
+// ---- [296] 挑路的四段生命周期收在同一个文件里：编排 / 池子就绪 / 站点画像 / 偏好过滤 ----
+console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自负责一段");
 {
   const pickSrc = fs.readFileSync("src/px/pickpath.ts", "utf8");
-  const typeSrc = fs.readFileSync("src/px/pick-types.ts", "utf8");
-  const readySrc = fs.readFileSync("src/px/pick-ready.ts", "utf8");
-  const siteSrc = fs.readFileSync("src/px/pick-site.ts", "utf8");
-  const prefSrc = fs.readFileSync("src/px/pick-pref.ts", "utf8");
 
-  // 编排层只做「什么时候问谁」，不再自己算画像与偏好
-  ok("pickpath 只做编排（≤150 行，且不含抽样与画像调用）", pickSrc.split("\n").length <= 150 && !pickSrc.includes("pickThom("), `len=${pickSrc.split("\n").length}`);
-  ok("pickpath 有 region/current/pick 三个入口", pickSrc.includes("async region(") && pickSrc.includes("async current(") && pickSrc.includes("  pick("));
-  ok("pickpath 的 pick 一行委托给 SITE", pickSrc.includes("return SITE.pick(env, mode, st);"));
-  ok("pickpath 不再自己抽样", !pickSrc.includes("pickThom("));
-  ok("pickpath 不再自己拉池子", !pickSrc.includes("ensurePool(env)") && pickSrc.includes("await ensureReady(env);"));
-  ok("pickpath 不再自己读站点画像", !pickSrc.includes("hostRank(") && !pickSrc.includes("hostUntried("));
+  // 文件数：四个曾经拆出去的文件都不在了（用户要求：减少文件数、增加类数）
+  const gone = ["pick-types", "pick-ready", "pick-site", "pick-pref"].filter((n) => fs.existsSync(`src/px/${n}.ts`));
+  eq("四个曾经拆出去的文件已并回 pickpath", gone.join(","), "");
 
-  // 类型层只有形状
-  ok("pick-types 只有 PickState 一个形状", typeSrc.includes("export interface PickState") && !typeSrc.includes("class ") && !typeSrc.includes("function "));
+  // 一个文件里要有四个单元：形状 + 三个类 + 一个就绪函数 + 三个单例
+  ok("一个文件里四个单元齐备", pickSrc.includes("export interface PickState") && pickSrc.includes("export class PickPath") && pickSrc.includes("export class SitePick") && pickSrc.includes("export class PathPrefs") && pickSrc.includes("export async function ensureReady("));
+  ok("单例都还在（PICK / SITE / PATHS）", pickSrc.includes("export const PICK = new PickPath();") && pickSrc.includes("export const SITE = new SitePick();") && pickSrc.includes("export const PATHS = new PathPrefs();"));
+  ok("文件头写清为什么合在一起", pickSrc.includes("为什么是一个文件四个类"));
 
-  // 池子就绪层：唯一的「会等」的地方
-  ok("pick-ready 导出 ensureReady", readySrc.includes("export async function ensureReady("));
-  ok("pick-ready 的等待有上限", readySrc.includes("700"));
-  ok("pick-ready 起搏不 await", !readySrc.includes("await seedAlive("));
-  ok("pick-ready 是唯一读 ensurePool 的地方", pickSrc.split("ensurePool(").length - 1 === 0 && readySrc.includes("ensurePool(env)"));
+  // 编排仍然只做编排：抽样与画像调用只在画像那一段里
+  ok("pick 四行内委托给 SITE", /pick\([^)]*\)[^{]*\{[^}]*return SITE\.pick\(/.test(pickSrc));
+  ok("编排走 ensureReady 而不是自己拉池子", pickSrc.includes("await ensureReady(env);"));
+  ok("池子等待有上限", pickSrc.includes("700"));
+  ok("起搏不 await", !pickSrc.includes("await seedAlive("));
 
-  // 画像层：站点偏好 + 抽样 + 溢出 + 兜底
-  ok("pick-site 有 SitePick 与单例", siteSrc.includes("export class SitePick") && siteSrc.includes("export const SITE = new SitePick();"));
-  ok("pick-site 负责抽样与溢出", siteSrc.includes("pickThom(") && siteSrc.includes("private spill(") && siteSrc.includes("private leastBad("));
-  ok("pick-site 不碰判定层偏好", !siteSrc.includes("HOOK."));
-
-  // 偏好层：只读不写，且要拿到站点上下文
-  ok("pick-pref 有 PathPrefs 与单例", prefSrc.includes("export class PathPrefs") && prefSrc.includes("export const PATHS = new PathPrefs();"));
-  ok("pick-pref 七个入口齐备", ["vetoed(", "byPrefer(", "nonCfFirst(", "byNonCf(", "rescan(", "chanOpen(", "byChan("].every((f) => prefSrc.includes(f)));
-  ok("pick-pref 的站点否决需要 host 参数", prefSrc.includes("vetoed(host: string, key: string)") && prefSrc.includes("byNonCf(host: string"));
-  ok("pick-pref 不自己抽样", !prefSrc.includes("pickThom("));
-  ok("pick-pref 不写连接状态", !prefSrc.includes("st.node ="));
+  // 画像段与偏好段的边界仍然成立（同一文件里靠「谁调用谁」分，而不是靠目录分）
+  ok("画像段负责抽样与溢出", pickSrc.includes("pickThom(") && pickSrc.includes("private spill(") && pickSrc.includes("private leastBad("));
+  ok("偏好段七个入口齐备", ["vetoed(", "byPrefer(", "nonCfFirst(", "byNonCf(", "rescan(", "chanOpen(", "byChan("].every((f) => pickSrc.includes(f)));
+  ok("偏好段的站点否决需要 host 参数", pickSrc.includes("vetoed(host: string, key: string)") && pickSrc.includes("byNonCf(host: string"));
+  ok("偏好段不自己抽样", !pickSrc.slice(pickSrc.indexOf("export class PathPrefs")).includes("pickThom("));
 
   // 行为面：三个单例都在，且「没有站点上下文时不否决任何通道」
   ok("三个单例就位", W.SITE instanceof W.SitePick && W.PATHS instanceof W.PathPrefs && W.PICK instanceof W.PickPath);
