@@ -3762,9 +3762,9 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   // 主路径给 connect() 包了 2.5 秒上限，补救链没有：客户端已经等了两三秒，再挂死等于直接放弃。
   const fSrc = fs.readFileSync("src/proxy/fallback.ts", "utf8");
   const aSrc = fs.readFileSync("src/proxy/attacher.ts", "utf8");
-  ok("换节点重试也给 connect() 加了超时", fSrc.includes("withTimeout(pk, CONNECT_MS)"));
+  ok("换节点重试也走带预算的拨号器", fSrc.includes("SOCKET_DIALER.open(") && !fSrc.includes("withTimeout(pk, CONNECT_MS)"));
   ok("换节点失败要给这条候选记一笔（否则一直被挑回来）", fSrc.includes("nsFail(alt)"));
-  ok("超时迟到成功的 socket 会被关掉（fallback）", fSrc.includes("pk.then((s) =>"));
+  ok("超时迟到成功的 socket 由拨号器关掉（fallback 不再自己写）", !fSrc.includes("pk.then((s) =>") && fSrc.includes("SOCKET_DIALER"));
   const iRel = aSrc.indexOf("releaseAll(conn)");
   const iSet = aSrc.indexOf("conn.sock = sock;");
   ok("递归重试前先释放上一跳的 socket 与写锁", iRel >= 0 && iSet > iRel);
@@ -3779,7 +3779,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   // 地区是硬要求，挂死不能靠「等客户端放弃」；失败也不能记到目标站头上。
   const rgSrc = fs.readFileSync("src/proxy/region.ts", "utf8");
   const ssSrc = fs.readFileSync("src/proxy/session.ts", "utf8");
-  eq("地区分流的两条拨号都加了 2.5 秒上限", (rgSrc.match(/withTimeout\(/g) || []).length, 2);
+  eq("地区分流的两条拨号都走同一个拨号器", (rgSrc.match(/SOCKET_DIALER\.open\(/g) || []).length, 2);
   eq("地区分流里不再有裸 connect（超时迟到成功的 socket 必须有人关）", (rgSrc.match(/await connect\(/g) || []).length, 0);
   ok("同一个节点一次失败只罚一次（否则冷却跳两档）", rgSrc.includes("conn.node !== failed"));
   ok("地区失败单独计数，不混进「目标不可达」", ssSrc.includes('cnt("rgFail")') && W.S.cntKeys.includes("rgFail"));
@@ -7787,5 +7787,22 @@ ok("首包上限确实比数据面短", W.FIRST_UP_MS < W.UP_STALL_MS);
   ok("注册表是独立模块且有类文档", regSrc271.includes("class TransportRegistry") && regSrc271.includes("功能：按名字保存"));
 }
 
+// ===== 272. 建连预算与「迟到关闭」收敛成一个类 =====
+// 四处各自写过 Promise.resolve(connect(...)) + withTimeout + 迟到关闭；漏掉后半段就会
+// 让免费计划那 6 个并发 connect() 名额被死连接吃掉（7.86 的坑）。
+ok("拨号器类存在", typeof W.SocketDialer === "function");
+ok("默认预算就是 CONNECT_MS", new W.SocketDialer().budgetMs === W.CONNECT_MS);
+ok("预算可以按需收窄（诊断路径用）", new W.SocketDialer(80).budgetMs === 80);
+ok("共用实例的预算也是 CONNECT_MS", W.SOCKET_DIALER.budgetMs === W.CONNECT_MS);
+ok("共用实例是单例（同一份预算）", W.SOCKET_DIALER instanceof W.SocketDialer);
+const sdSrc272 = fs.readFileSync("src/proxy/socket-dialer.ts", "utf8");
+ok("open() 用 this.budgetMs 兜超时", sdSrc272.includes("withTimeout(pending, this.budgetMs)"));
+ok("超时后关掉迟到 socket", sdSrc272.includes("socket.close()"));
+ok("注释写明了为什么必须关", sdSrc272.includes("6 个并发"));
+const fbSrc272 = fs.readFileSync("src/proxy/fallback.ts", "utf8");
+ok("补救链改用 SOCKET_DIALER", fbSrc272.includes("SOCKET_DIALER.open(") && !fbSrc272.includes("Promise.resolve(connect("));
+const rgSrc272 = fs.readFileSync("src/proxy/region.ts", "utf8");
+ok("地区分流改用 SOCKET_DIALER", rgSrc272.includes("SOCKET_DIALER.open(") && !rgSrc272.includes("Promise.resolve(connect("));
+ok("地区分流的两条候选都走同一个拨号器", rgSrc272.split("SOCKET_DIALER.open(").length - 1 === 2);
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

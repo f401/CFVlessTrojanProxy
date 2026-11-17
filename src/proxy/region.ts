@@ -1,8 +1,7 @@
 import type { Socket } from "cloudflare:sockets";
-import { connect } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 import { nsFail } from "../nodes/stat";
-import { CONNECT_MS, withTimeout } from "../core/util";
+import { SOCKET_DIALER } from "./socket-dialer";
 import { SEL } from "../px/selector";
 import { checkTarget } from "./dial";
 
@@ -37,31 +36,26 @@ export class RegionPicker {
       return null;
     }
     let failed = ""; // 已经记过失败的那个节点：同一次失败只罚一次
-    // 与 Dialer.open 同一个口径：connect() 自己没有超时，挂死会让客户端一直干等
-    const pk = Promise.resolve(connect({ hostname: p.h, port: p.p }));
+    // 建连预算与「迟到关闭」都交给 SOCKET_DIALER（与 Dialer.open 同一个口径）
     try {
-      const sock = await withTimeout(pk, CONNECT_MS);
+      const sock = await SOCKET_DIALER.open(p.h, p.p);
       conn.via = "node";
       conn.retried = true;
       return sock;
     } catch {
-      // 超时迟到成功的 socket 也要关掉，否则白占免费计划的并发 connect 名额
-      void pk.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 没连上 */ });
       // 同国家再试一个，仍然失败就结束（不跨地区）
       nsFail(conn.node); // 冷却坏节点，否则下一条连接还会撞同一个
       failed = conn.node;
       const alt = await SEL.region(env, region, mode, conn.node);
       if (alt && !checkTarget(alt.h, alt.p)) {
         conn.node = alt.h + ":" + alt.p;
-        const pk2 = Promise.resolve(connect({ hostname: alt.h, port: alt.p }));
         try {
-          const sock2 = await withTimeout(pk2, CONNECT_MS);
+          const sock2 = await SOCKET_DIALER.open(alt.h, alt.p);
           conn.via = "node";
           conn.retried = true;
           return sock2;
         } catch {
-          // 超时迟到成功的 socket 也要关掉，否则白占并发名额
-          void pk2.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 没连上 */ });
+          // 这一条也失败：落到下面的“都没有可用节点”分支
         }
       }
       // 只在换了节点才再罚一次：没有备选时 conn.node 还是刚罚过的那一个，

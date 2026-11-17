@@ -1,6 +1,5 @@
-import { connect } from "cloudflare:sockets";
 import { nextNode, nsFail } from "../nodes/score";
-import { CONNECT_MS, withTimeout } from "../core/util";
+import { SOCKET_DIALER } from "./socket-dialer";
 import { logErr } from "../nodes/metrics";
 import { isCfIp } from "../core/net";
 import { checkTarget } from "./dial";
@@ -43,19 +42,15 @@ export async function dialAnother(
     // 与主路径（Dialer.open → Selector.current → HOOK.chanPref）同一个口径：这个站点到这个中继
     // 已经被实测判为封锁的，别再花 2.5 秒拨一次 —— 走到补救链时客户端已经等了两三秒。
     if (HOOK.chanPref && HOOK.chanPref(host, st.host) === 2) continue;
-    // 与 Dialer.open 的主路径同一个口径：connect() 自己没有超时，挂死的中继会把请求拖到
-    // 客户端放弃为止。补救链更怕这个——走到这里时客户端已经等了两三秒。
-    const pk = Promise.resolve(connect({ hostname: host, port }));
+    // 建连预算与「迟到关闭」都交给 SOCKET_DIALER：补救链更怕挂死——走到这里客户端已经等了两三秒。
     try {
-      const s = await withTimeout(pk, CONNECT_MS);
+      const socket = await SOCKET_DIALER.open(host, port);
       st.node = alt;
       st.via = "node";
       st.pxTries = (st.pxTries || 1) + 1;
       logErr(`retry another node ${alt}`, tag || "");
-      return s;
+      return socket;
     } catch (e) {
-      // 超时之后 connect 仍可能迟到成功：不关掉就会把免费计划的 6 个并发名额慢慢吃掉。
-      void pk.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 本来就没连上 */ });
       nsFail(alt); // 这条候选连不上：冷却它，下一轮别再挑回来
     }
   }

@@ -64,6 +64,7 @@ export {
 export { nsOf, pxGet, flushPx, noteProbe, probeBadSkip, bumpProbeBad, sweepProbeBad } from "./px/pool";
 export { POOL, Pool } from "./px/pool";
 export { DIALER, Dialer } from "./proxy/dialer";
+export { SOCKET_DIALER, SocketDialer } from "./proxy/socket-dialer";
 export { ATTACHER, Attacher } from "./proxy/attacher";
 export { REGION, RegionPicker } from "./proxy/region";
 export { spdSnapshot } from "./core/node-snapshot";
