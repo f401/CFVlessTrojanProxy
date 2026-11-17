@@ -11,7 +11,7 @@ import { S } from "../core/state";
 import { shadowRate } from "../core/util";
 import { hostKey, hostRank, hostUntried } from "../nodes/metrics";
 import { cnt } from "../core/counter";
-import { bestFor, candsFor, costOf, isBlack, isFrozen, nsGet, usable } from "../nodes/score";
+import { bestFor, candsFor, costOf, isBlack, isFrozen, usable, STATS } from "../nodes/score";
 import { pickThom } from "./ts";
 import { relayIpOf } from "../core/http80";
 import { HOOK } from "../core/hook";
@@ -144,7 +144,7 @@ export class SitePick {
       if (!hm || hm.size < 3) {
         const t0 = hostUntried(host, m);
         if (t0) {
-          nsGet(t0).lastTry = Date.now();
+          STATS.nsGet(t0).lastTry = Date.now();
           if (st) {
             st.hostTrial = true;
             st.node = t0;

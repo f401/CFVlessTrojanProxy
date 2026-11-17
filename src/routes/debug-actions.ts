@@ -2,7 +2,7 @@ import { errMsg } from "../core/util";
 import { S } from "../core/state";
 import { json } from "../edge/respond";
 import { adminOnly } from "../edge/auth";
-import { nsGet } from "../nodes/score";
+import { STATS } from "../nodes/score";
 import { commitPool, flushPx, pxSet } from "../px/pool";
 import { EXTRA_HOSTS, refillPool } from "../px/probe";
 import { restoreUsage } from "../store/index";
@@ -65,7 +65,7 @@ export class DebugActions {
     if (!/^[0-9a-zA-Z.\-]+:\d+$/.test(want)) return json({ ok: false, error: "格式应为 host:port" });
     await pxSet(c.env, { cur: want });
     // 把这条节点的惩罚清掉：手动指定的语义就是「我就要用这条，别拿历史失败拦我」
-    const stat = nsGet(want);
+    const stat = STATS.nsGet(want);
     stat.blackUntil = 0;
     stat.freeUntil = 0;
     stat.streak = 0;

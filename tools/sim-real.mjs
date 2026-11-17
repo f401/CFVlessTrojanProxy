@@ -223,7 +223,7 @@ function reset() {
 
 function install(n, isNew = false) {
   S.alive.set(n.key, { h: n.id, p: 443, cc: n.cc, ms: Math.round(n.probeTcp + n.tls) });
-  const s = W.nsGet(n.key);
+  const s = W.STATS.nsGet(n.key);
   s.tcp = n.probeTcp;
   s.tls = n.tls;
   s.at = NOW;
@@ -253,10 +253,10 @@ async function request(n, mode, size, siteShare, jitter) {
   // 与 Connection.flush 一致：dt>=50 且（dt>=300 或 ≥1MB）
   if (size >= 32 * K && dur >= 50 && (dur >= 300 || size >= MB)) {
     const w = Math.min(1, size / (512 * K)) * Math.min(1, dur / 1000);
-    if (w > 0) W.nsSpeed(n.key, bps, size, ENV, Math.min(4, w));
+    if (w > 0) W.STATS.nsSpeed(n.key, bps, size, ENV, Math.min(4, w));
   }
-  W.nsOk(n.key, 0, 0);
-  W.nsLatency(n.key, rtt);
+  W.STATS.nsOk(n.key, 0, 0);
+  W.STATS.nsLatency(n.key, rtt);
   return { ok: true };
 }
 
@@ -273,8 +273,8 @@ function cron(probeFail) {
   const rest = pool.filter((n) => !must.has(n.key)).slice(0, restN);
   for (const n of [...pool.filter((n) => must.has(n.key)), ...rest]) {
     // 死掉的节点探活必须失败，否则 seed 会把死节点当好的传播出去
-    if (n.down || rnd() < n.pFail * 0.4 * probeFail) W.nsProbeFail(n.key);
-    else W.nsProbe(n.key, (n.probeTcp + n.tls) * (0.9 + rnd() * 0.2), n.probeTcp, n.tls);
+    if (n.down || rnd() < n.pFail * 0.4 * probeFail) W.STATS.nsProbeFail(n.key);
+    else W.STATS.nsProbe(n.key, (n.probeTcp + n.tls) * (0.9 + rnd() * 0.2), n.probeTcp, n.tls);
   }
   W.SEL.afterScan(ENV);
 }

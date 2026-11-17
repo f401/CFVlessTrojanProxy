@@ -118,21 +118,21 @@ const reset = () => {
 const node = (k, patch = {}) => {
   const i = k.lastIndexOf(":");
   S.alive.set(k, { h: k.slice(0, i), p: Number(k.slice(i + 1)) || 443, cc: "", ms: 100 });
-  Object.assign(W.nsGet(k), patch);
+  Object.assign(W.STATS.nsGet(k), patch);
 };
 
 /* ---------- 1. 直方图分位 ---------- */
 reset();
-eq("空直方图 p50", W.pcts(W.nsGet("x:1")).p50, 0);
-eq("空直方图 p90", W.pcts(W.nsGet("x:1")).p90, 0);
+eq("空直方图 p50", W.pcts(W.STATS.nsGet("x:1")).p50, 0);
+eq("空直方图 p90", W.pcts(W.STATS.nsGet("x:1")).p90, 0);
 
-const s1 = W.nsGet("h1:443");
+const s1 = W.STATS.nsGet("h1:443");
 s1.hist[7] = 10; // 2 MB/s 桶
 const q1 = W.pcts(s1);
 ok("单桶 p50 落在 2MB 附近", q1.p50 > 1.4e6 && q1.p50 < 2.9e6, q1.p50);
 ok("单桶 cap ≤ p50*2.5", q1.cap <= q1.p50 * 2.5 + 1, `${q1.cap} vs ${q1.p50}`);
 
-const s2 = W.nsGet("h2:443");
+const s2 = W.STATS.nsGet("h2:443");
 s2.hist[4] = 9;
 s2.hist[10] = 1; // 256KB ×9 + 16MB ×1
 const q2 = W.pcts(s2);
@@ -244,20 +244,20 @@ node("seed:443", { tcp: 50 });
 eq("无本地样本时用固定先验", Math.round(W.scoreParts("seed:443", "tput").e10Ms), Math.round((10 * 1048576 / W.SC.PRIOR_BPS) * 1000));
 {
   // 一条 512KB、1 秒的本地窗口：capBps 立刻由本地样本给出，confB 仍不够（要 3 个有效窗口 + 3MiB）
-  W.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
+  W.STATS.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
   const p = W.scoreParts("seed:443", "tput");
   ok("本地样本决定 capBps", p.capBps >= 400 * 1024, String(p.capBps));
   eq("单条短样本不构成高置信度", p.confB, 0);
-  W.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
-  W.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
+  W.STATS.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
+  W.STATS.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
   ok("3 个有效窗口后 nEff 达标", W.scoreParts("seed:443", "tput").nEff >= 3, String(W.scoreParts("seed:443", "tput").nEff));
 }
 
 /* ---------- 3. 门槛与过滤 ---------- */
 reset();
-eq("无样本 avail = 0.5", W.availOf(W.nsGet("z:443")), 0.5);
+eq("无样本 avail = 0.5", W.availOf(W.STATS.nsGet("z:443")), 0.5);
 {
-  const s = W.nsGet("z2:443");
+  const s = W.STATS.nsGet("z2:443");
   s.okW = 1;
   s.failW = 5;
   ok("1 成功 5 失败 → avail < 0.75", W.availOf(s) < 0.75, W.availOf(s));
@@ -288,9 +288,9 @@ eq(
 );
 // 空关闭计数必须跟着半衰期衰减，否则老账永远赖着，节点一旦攒够 5 次就被永久排除
 {
-  const se = W.nsGet("e:443");
+  const se = W.STATS.nsGet("e:443");
   se.at = Date.now() - 12 * 3600e3; // 两个半衰期
-  W.nsEmptyClose("e:443", true); // 触发衰减后再 +1
+  W.STATS.nsEmptyClose("e:443", true); // 触发衰减后再 +1
   ok("空关闭计数按半衰期衰减", se.eCloseP > 2 && se.eCloseP < 2.6, String(se.eCloseP));
   eq("衰减后不再可疑", W.emptyCloseSuspect("e:443"), false);
 }
@@ -311,7 +311,7 @@ eq(
   eq("地区无节点返回 null", await W.SEL.region({}, "JP", "lat"), null);
   eq("nextNode 按国家过滤", W.nextNode("lat", "", "US"), "us1:443");
   eq("nextNode 避开后无同国节点", W.nextNode("lat", "us1:443", "US"), "");
-  W.nsFail("de1:443");
+  W.STATS.nsFail("de1:443");
   const deCold = await W.SEL.region({}, "DE", "lat");
   eq("地区跳过冷却节点", deCold && deCold.h + ":" + deCold.p, "de2:443");
 }
@@ -461,7 +461,7 @@ node("rf:443", {});
 S.pxFailSeen = 1;
 S.pxFailMem = 2;
 await W.SEL.resetFail({}, "rf:443");
-eq("resetFail 不重复记成功", W.nsGet("rf:443").okW, 0);
+eq("resetFail 不重复记成功", W.STATS.nsGet("rf:443").okW, 0);
 eq("resetFail 清零记忆", S.pxFailMem, 0);
 
 reset();
@@ -621,7 +621,7 @@ eq("命中偏好不算试探", st1.hostTrial, false);
 // 冻结的节点不能出现在站点排行里
 W.freezeNode("fast:443");
 eq("冻结节点被跳过", W.hostRank("site.test", "tput")[0].k, "slow:443");
-W.nsGet("fast:443").freeUntil = 0;
+W.STATS.nsGet("fast:443").freeUntil = 0;
 
 // 冷启动：新域名第一次一定挑一个没试过的节点
 reset();
@@ -792,11 +792,11 @@ eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1
 
 /* ---------- 11. v2.1：风险先验 / 不跨 isolate / 自适应探索 ---------- */
 reset();
-eq("无样本 pFailRisk = 0.1（不加不确定性溢价）", W.pFailOf(W.nsGet("fresh:443")), 0.1);
+eq("无样本 pFailRisk = 0.1（不加不确定性溢价）", W.pFailOf(W.STATS.nsGet("fresh:443")), 0.1);
 
 {
   // v6.35：seed 只传候选名单，没有可靠性伪计数 —— 失败率先验只由本地样本决定
-  const s = W.nsGet("seedrel:443");
+  const s = W.STATS.nsGet("seedrel:443");
   s.failW = 1;
   const p = W.pFailOf(s);
   ok("一次失败就把风险先验抬到 0.1 以上", p > 0.1, String(p));
@@ -805,7 +805,7 @@ eq("无样本 pFailRisk = 0.1（不加不确定性溢价）", W.pFailOf(W.nsGet(
 }
 
 {
-  const s = W.nsGet("oneok:443");
+  const s = W.STATS.nsGet("oneok:443");
   s.okW = 1;
   const p = W.pFailOf(s);
   ok("第一条成功不额外惩罚", p <= 0.101, String(p));
@@ -854,7 +854,7 @@ const c30 = W.candsFor("lat");
 eq("30 个候选全部返回", c30.length, 30);
 ok("大规模下启用了排行缓存", W.S.rankCache.t > 0);
 // 排行缓存按模式各算各的：曾经两模式共用 t，tput 重算会给 lat 续命（实际有效期 40 s）
-W.invalidateRank();
+W.STATS.invalidateRank();
 eq("缓存起点：30 个候选", W.candsFor("lat").length, 30);
 W.S.rankCache.t = Date.now(); // 全局戳是新的……
 W.S.rankCache.at = { lat: Date.now() - 25000, tput: Date.now() }; // ……但 lat 那条是 25 秒前算的
@@ -867,7 +867,7 @@ eq("lat 缓存新鲜就复用（不白算）", W.candsFor("lat").length, 31);
 // 线上 alive 实测就是 18 个：低于 CAND_CACHE_MIN(24)，排行全程现算
 reset();
 for (let i = 0; i < 18; i++) node(`n18-${i}:443`, { tcp: 60 + i, okW: 10 });
-W.invalidateRank();
+W.STATS.invalidateRank();
 eq("18 个候选全部返回", W.candsFor("lat").length, 18);
 eq("18 个节点（线上实测值）不启用排行缓存", W.S.rankCache.t, 0);
 
@@ -883,8 +883,8 @@ eq("探活结果按原因分类", W.S.probeWhy, { err: 1, notTls: 1, noCf: 1, ok
 reset();
 node("wide:443", { tcp: 60, okW: 10 });
 node("narrow:443", { tcp: 60, okW: 10 });
-W.nsSpeed("wide:443", 20 * 1048576, 1048576, {}, 1);
-W.nsSpeed("narrow:443", 1 * 1048576, 1048576, {}, 1);
+W.STATS.nsSpeed("wide:443", 20 * 1048576, 1048576, {}, 1);
+W.STATS.nsSpeed("narrow:443", 1 * 1048576, 1048576, {}, 1);
 ok(
   "lat：同延迟下窄带宽节点分数更高",
   W.costOf("wide:443", "lat") + 50 < W.costOf("narrow:443", "lat"),
@@ -894,9 +894,9 @@ ok(
 /* 探活高估（420ms）要能被真实样本（80ms）纠正，否则这种节点永远翻不了身 */
 reset();
 node("shy2:443", { tcp: 420, okW: 10 });
-W.nsLatency("shy2:443", 80);
+W.STATS.nsLatency("shy2:443", 80);
 ok("lat：探活高估被真实样本纠正", W.scoreParts("shy2:443", "lat").latencyMs < 200, Math.round(W.scoreParts("shy2:443", "lat").latencyMs));
-W.nsGet(c30[0].k).blackUntil = Date.now() + 60000;
+W.STATS.nsGet(c30[0].k).blackUntil = Date.now() + 60000;
 eq(
   "缓存之外仍会过滤黑名单",
   W.candsFor("lat").some((x) => x.k === c30[0].k),
@@ -953,8 +953,8 @@ W.hostNodeMark("site-seed.test", "hpb:443", { bps: 2 * 1048576 });
 reset();
 for (let i = 0; i < 20; i++) {
   node(`sn${i}:443`, {});
-  W.nsGet(`sn${i}:443`).bytesDown = i * 1024 * 1024;
-  W.nsGet(`sn${i}:443`).trafficOkW = i + 1;
+  W.STATS.nsGet(`sn${i}:443`).bytesDown = i * 1024 * 1024;
+  W.STATS.nsGet(`sn${i}:443`).trafficOkW = i + 1;
 }
 const snapN = W.spdSnapshot();
 ok("快照包含流量最大的节点", !!snapN["sn19:443"], Object.keys(snapN).join(","));
@@ -967,33 +967,33 @@ eq("latN = 探活 + 成功连接", W.scoreParts("ln:443", "lat").latN, 8);
 /* ---------- 13. 归因 / 负载 / 快速窗口 / 站点门槛 ---------- */
 reset();
 {
-  const s = W.nsGet("sitefail:443");
+  const s = W.STATS.nsGet("sitefail:443");
   const beforeFail = s.failW,
     beforeBlack = s.blackUntil;
-  W.nsSiteFail("sitefail:443");
+  W.STATS.nsSiteFail("sitefail:443");
   ok("站点失败只加 0.2 全局权重", Math.abs(s.failW - beforeFail - 0.2) < 1e-9, String(s.failW));
   eq("站点失败不进冷却阶梯", s.blackUntil, beforeBlack);
   W.S.rankCache.t = 12345;
-  W.nsSiteFail("sitefail:443");
+  W.STATS.nsSiteFail("sitefail:443");
   eq("站点失败不再清空全局排行缓存", W.S.rankCache.t, 12345);
 }
 
 reset();
 node("fk:443", {});
-const sfk = W.nsGet("fk:443");
-W.nsOk("fk:443", 0, 0);
-W.nsFail("fk:443");
-W.nsFail("fk:443");
+const sfk = W.STATS.nsGet("fk:443");
+W.STATS.nsOk("fk:443", 0, 0);
+W.STATS.nsFail("fk:443");
+W.STATS.nsFail("fk:443");
 ok("10 分钟窗口内 2 次失败会抬高近期风险", W.pFailFast(sfk) > 0.15, String(W.pFailFast(sfk)));
 ok("总分用 max(慢, 快)", W.scoreParts("fk:443", "lat").pFailRisk >= W.pFailFast(sfk));
 
 reset();
 {
-  const s = W.nsGet("flap:443");
+  const s = W.STATS.nsGet("flap:443");
   s.winAt = Date.now();
   s.winOk = 2;
   s.winFail = 3;
-  W.nsFail("flap:443");
+  W.STATS.nsFail("flap:443");
   ok("抖动（窗口内成败参半）触发 5 分钟冷却", s.blackUntil - Date.now() > 4 * 60000, String(s.blackUntil - Date.now()));
 }
 
@@ -1125,7 +1125,7 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
   node("fr:443", {});
   W.freezeNode("fr:443");
   eq("冻结生效", W.isFrozen("fr:443"), true);
-  W.nsOk("fr:443", 0, 0);
+  W.STATS.nsOk("fr:443", 0, 0);
   eq("成功连接解除冻结", W.isFrozen("fr:443"), false);
 }
 
@@ -1137,7 +1137,7 @@ S.pxFailSeen = 0;
 await W.SEL.bumpFail({}, "tput", "tr:443", true);
 eq("影子失败不进全局失败记忆", S.pxFailMem, 0);
 eq("影子失败不置失败标志", S.pxFailSeen, 0);
-eq("影子失败仍记节点失败", W.nsGet("tr:443").failW >= 1, true);
+eq("影子失败仍记节点失败", W.STATS.nsGet("tr:443").failW >= 1, true);
 eq("影子失败冻结节点", W.isFrozen("tr:443"), true);
 
 // 灾备快照不能用 |0：>2^31 的用量会溢出成负数/0
@@ -1173,10 +1173,10 @@ eq("影子失败冻结节点", W.isFrozen("tr:443"), true);
 // 新失败不能把已有的长冷却缩短
 reset();
 {
-  const s = W.nsGet("cd:443");
+  const s = W.STATS.nsGet("cd:443");
   const until = Date.now() + 10 * 60000;
   s.blackUntil = until;
-  W.nsFail("cd:443");
+  W.STATS.nsFail("cd:443");
   ok("失败不缩短已有冷却", s.blackUntil >= until, String(s.blackUntil - Date.now()));
   s.freeUntil = Date.now() + 60 * 60000;
   W.freezeNode("cd:443");
@@ -1393,8 +1393,8 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
 
 /* ---------- 探活不能灌水面板成功率 ---------- */
 {
-  const s = W.nsGet("probe-only:443");
-  W.nsProbe("probe-only:443", 50, 40, 10);
+  const s = W.STATS.nsGet("probe-only:443");
+  W.STATS.nsProbe("probe-only:443", 50, 40, 10);
   eq("探活不增加 ok", s.ok, 0);
   eq("探活仍记延迟样本", s.probeSamples, 1);
   W.S.nstat.delete("probe-only:443");
@@ -1424,7 +1424,7 @@ S.alive.get("rde2:443").cc = "DE";
 eq("可疑节点进不了全局候选", W.candsFor("lat").some((x) => x.k === "rde1:443"), false);
 const rOk = await W.SEL.region({}, "DE", "lat");
 eq("地区选路跳过可疑节点", rOk && rOk.h + ":" + rOk.p, "rde2:443");
-W.nsFail("rde2:443"); // 冷却 → 硬排除
+W.STATS.nsFail("rde2:443"); // 冷却 → 硬排除
 const rLast = await W.SEL.region({}, "DE", "lat");
 eq("地区只剩可疑节点时仍返回（硬要求，不返回 null）", rLast && rLast.h + ":" + rLast.p, "rde1:443");
 
@@ -1442,11 +1442,11 @@ W.S.inflight.clear();
 
 // 快失败窗口：9 分钟前的 4 次成功不能把刚刚的 3 次失败稀释成"健康"
 reset();
-const ffx = W.nsGet("ffx:443");
-for (let i = 0; i < 4; i++) W.nsOk("ffx:443", 50, 10);
+const ffx = W.STATS.nsGet("ffx:443");
+for (let i = 0; i < 4; i++) W.STATS.nsOk("ffx:443", 50, 10);
 ffx.winAt -= 9 * 60000;
 ffx.at -= 9 * 60000;
-for (let i = 0; i < 3; i++) W.nsFail("ffx:443");
+for (let i = 0; i < 3; i++) W.STATS.nsFail("ffx:443");
 ok("旧成功不按次数稀释新失败", W.pFailFast(ffx) > 0.27, String(W.pFailFast(ffx)));
 ok("旧成功同时被时间权重压掉", ffx.winOk < 1, String(ffx.winOk));
 
@@ -1476,16 +1476,16 @@ eq("6 小时没切换才轮换", S.curs.lat, "sc2:443");
 // 真实首字节回流：探活快、实际慢的节点不能按探活算延迟
 reset();
 node("liar:443", { tcp: 25, tls: 40, okW: 5 });
-W.nsLatency("liar:443", 420);
+W.STATS.nsLatency("liar:443", 420);
 ok("真实首字节远慢于探活 → 按真实值算", W.scoreParts("liar:443", "lat").latencyMs > 300, String(W.scoreParts("liar:443", "lat").latencyMs));
 reset();
 node("honest:443", { tcp: 60, tls: 40, okW: 5 });
-W.nsLatency("honest:443", 130);
+W.STATS.nsLatency("honest:443", 130);
 ok("真实首字节与探活接近 → 不触发", W.scoreParts("honest:443", "lat").latencyMs < 200, String(W.scoreParts("honest:443", "lat").latencyMs));
 
 // —— 单层抽样：未测节点被抽到，测过且差的节点退场 ——
 reset();
-W.invalidateRank();
+W.STATS.invalidateRank();
 node("k1:443", { tcp: 60, okW: 40 });
 node("k2:443", { tcp: 400, okW: 40 });
 node("k3:443", { tcp: 70 });
@@ -1494,7 +1494,7 @@ node("k3:443", { tcp: 70 });
   for (let i = 0; i < 400; i++) {
     const k = W.SEL.pick({ pxShadow: 0 }, "lat", { host: "" });
     hit[k] = (hit[k] || 0) + 1;
-    W.nsOk(k, 0, 0); // 真实连接成功 → 样本 +1，乐观面随之收缩
+    W.STATS.nsOk(k, 0, 0); // 真实连接成功 → 样本 +1，乐观面随之收缩
   }
   ok("未测节点拿到探索流量", (hit["k3:443"] || 0) > 0, JSON.stringify(hit));
   ok("测过且慢的节点基本退场", (hit["k2:443"] || 0) <= 2, JSON.stringify(hit));
@@ -1506,8 +1506,8 @@ node("k3:443", { tcp: 70 });
 // 算出来 pStall=0.34（真实占比 0.0007），单次卡顿白送 800+ ms，还会踩中 +400 的重罚档。
 reset();
 node("ps:443", { tcp: 100 });
-for (let i = 0; i < 100; i++) W.nsStall("ps:443", 0, 30000);
-W.nsStall("ps:443", 2000, 5000);
+for (let i = 0; i < 100; i++) W.STATS.nsStall("ps:443", 0, 30000);
+W.STATS.nsStall("ps:443", 2000, 5000);
 const psV = W.scoreParts("ps:443", "lat").pStall;
 ok("pStall 按连接总时长稀释", psV < 0.01, psV.toFixed(5));
 ok("pStall 没被抹平（2 秒卡顿还在）", psV > 0.0001, psV.toFixed(5));
@@ -1516,7 +1516,7 @@ ok("pStall 没被抹平（2 秒卡顿还在）", psV > 0.0001, psV.toFixed(5));
 // 早先直读 s.capBps，而直方图衰减是等比缩放（分位不变）→ 一周前测到的 16MB/s 永久少算 70ms。
 reset();
 node("xf:443", { tcp: 100, okW: 20 });
-const xf = W.nsGet("xf:443");
+const xf = W.STATS.nsGet("xf:443");
 xf.hist[7] = 100;
 xf.sumW = 100;
 xf.sumW2 = 100;
@@ -1534,7 +1534,7 @@ ok("新鲜样本按实测带宽折算", xfNew < 12, xfNew.toFixed(1));
 // 早先探索排在 Thompson 之后，lat 模式只要有已测节点就 return：
 // pxShadow=0.5、10 个节点、1000 次 pick 仍然 100% 打同一个节点，池子里除王者外一个样本都没有。
 reset();
-W.invalidateRank();
+W.STATS.invalidateRank();
 node("ex1:443", { tcp: 60, okW: 200 });
 node("ex2:443", { tcp: 70 });
 node("ex3:443", { tcp: 80 });
@@ -1542,14 +1542,14 @@ const exHit = new Set();
 for (let i = 0; i < 400; i++) {
   const k = W.SEL.pick({ pxShadow: 0.5 }, "lat", { host: "" });
   exHit.add(k);
-  W.nsOk(k, 0, 0); // 真实连接成功 → 样本 +1，乐观面随样本收缩
+  W.STATS.nsOk(k, 0, 0); // 真实连接成功 → 样本 +1，乐观面随样本收缩
 }
 ok("延迟模式影子采样可达", exHit.size > 1, [...exHit].join(","));
 ok("延迟模式大多数请求仍走王者", exHit.has("ex1:443"), [...exHit].join(","));
 
 // —— 回归：吞吐模式也走同一套抽样，不再"粘滞游标" ——
 reset();
-W.invalidateRank();
+W.STATS.invalidateRank();
 node("tp1:443", { tcp: 60, okW: 20 });
 node("tp2:443", { tcp: 80, okW: 20 });
 const tpHit = new Set();
@@ -1560,32 +1560,32 @@ ok("吞吐模式两个候选都抽得到", tpHit.size > 1, [...tpHit].join(","))
 // —— CUSUM 变点：一条怪样本不动，连续两条大跳立刻冻结 ——
 reset();
 node("cu1:443", { tcp: 100, pSum: 100, msLocal: 100 });
-W.nsLatency("cu1:443", 400);
-ok("延迟变点：单条慢样本不冻结", !W.nsGet("cu1:443").freeUntil, String(W.nsGet("cu1:443").freeUntil || 0));
-W.nsLatency("cu1:443", 400);
-ok("延迟变点：连续两条大跳立刻冻结", W.nsGet("cu1:443").freeUntil > Date.now(), String(W.nsGet("cu1:443").freeUntil - Date.now()));
+W.STATS.nsLatency("cu1:443", 400);
+ok("延迟变点：单条慢样本不冻结", !W.STATS.nsGet("cu1:443").freeUntil, String(W.STATS.nsGet("cu1:443").freeUntil || 0));
+W.STATS.nsLatency("cu1:443", 400);
+ok("延迟变点：连续两条大跳立刻冻结", W.STATS.nsGet("cu1:443").freeUntil > Date.now(), String(W.STATS.nsGet("cu1:443").freeUntil - Date.now()));
 
 // —— CUSUM 吞吐：带宽崩塌后 cap 立刻掉下来，老直方图不再拖一周 ——
 reset();
 node("cb1:443", { tcp: 60 });
-for (let i = 0; i < 3; i++) W.nsSpeed("cb1:443", 8 * 1048576, 512 * 1024, {});
-const capBoom = W.nsGet("cb1:443").capBps;
-W.nsSpeed("cb1:443", 512 * 1024, 512 * 1024, {});
-const capBust = W.nsGet("cb1:443").capBps;
+for (let i = 0; i < 3; i++) W.STATS.nsSpeed("cb1:443", 8 * 1048576, 512 * 1024, {});
+const capBoom = W.STATS.nsGet("cb1:443").capBps;
+W.STATS.nsSpeed("cb1:443", 512 * 1024, 512 * 1024, {});
+const capBust = W.STATS.nsGet("cb1:443").capBps;
 ok("吞吐变点：崩塌样本立刻改写 capBps", capBoom > 4 * 1048576 && capBust < 1048576, `${capBoom} -> ${capBust}`);
 
 // —— 稳健抖动：一条 5 秒的怪连接不该把抖动抬到秒级（MAD，不是方差）——
 reset();
 node("jt1:443", { tcp: 100 });
-for (let i = 0; i < 5; i++) W.nsLatency("jt1:443", 100);
+for (let i = 0; i < 5; i++) W.STATS.nsLatency("jt1:443", 100);
 const jit0 = W.scoreParts("jt1:443", "lat").jitMs;
-W.nsLatency("jt1:443", 5000);
+W.STATS.nsLatency("jt1:443", 5000);
 const jit1 = W.scoreParts("jt1:443", "lat").jitMs;
 ok("抖动对单条离群连接不敏感", jit1 < 400, `${jit0.toFixed(1)} -> ${jit1.toFixed(1)}`);
 
 // —— S 参数化：小对象看延迟，批量看带宽 ——
 reset();
-W.invalidateRank();
+W.STATS.invalidateRank();
 const now0 = Date.now();
 node("za:443", { tcp: 60, pSum: 60, msLocal: 60, okW: 20, capBps: 4 * 1048576, lastSampleAt: now0 });
 node("zb:443", { tcp: 120, pSum: 120, msLocal: 120, okW: 20, capBps: 20 * 1048576, lastSampleAt: now0 });
@@ -1604,7 +1604,7 @@ ok("pick 会把目标流量传进打分", pickI === "za:443" && pickB === "zb:44
 // —— 兜底：全池都在冷却时也必须给出节点 ——
 // 返回空串会让 session 直接 cnt("dead")，哪怕池子里还有节点只是暂时被罚
 reset();
-W.invalidateRank();
+W.STATS.invalidateRank();
 node("fb1:443", { tcp: 60, okW: 20, blackUntil: Date.now() + 600000 });
 node("fb2:443", { tcp: 80, okW: 20, blackUntil: Date.now() + 60000 });
 const fbPick = W.SEL.pick({ pxShadow: 0 }, "lat", { host: "" });
@@ -1617,13 +1617,13 @@ ok("冻结节点排在冷却节点之后", fbPick2 === "fb2:443", fbPick2);
 // 失败阶梯跟池子大小走：小池子首档 10 s，大池子 60 s
 reset();
 for (let i = 0; i < 6; i++) node("sm" + i + ":443", { tcp: 100 });
-W.nsFail("sm0:443");
-const blSmall = W.nsGet("sm0:443").blackUntil - Date.now();
+W.STATS.nsFail("sm0:443");
+const blSmall = W.STATS.nsGet("sm0:443").blackUntil - Date.now();
 ok("小池子失败首档 ≈10 秒", blSmall > 8000 && blSmall < 12000, blSmall);
 reset();
 for (let i = 0; i < 20; i++) node("bg" + i + ":443", { tcp: 100 });
-W.nsFail("bg0:443");
-const blBig = W.nsGet("bg0:443").blackUntil - Date.now();
+W.STATS.nsFail("bg0:443");
+const blBig = W.STATS.nsGet("bg0:443").blackUntil - Date.now();
 ok("大池子失败首档 ≈60 秒", blBig > 55000 && blBig < 65000, blBig);
 
 // 连接观测按节点聚合（n/ok/p50/p95），不再是一条连接一行
@@ -1638,7 +1638,7 @@ ok("聚合后的下行字节累加", cl.length === 1 && cl[0].dn === 4096, cl.le
 /* ---------- 28. 大池分片重建（2000 候选不再有 4 ms 尖峰） ---------- */
 reset();
 for (let i = 0; i < 1300; i++) node(`b${i}:443`, { tcp: 50 + i, okW: 10 });
-W.invalidateRank();
+W.STATS.invalidateRank();
 const br1 = W.candsFor("lat");
 ok("大池分片：首片就能给出候选", br1.length > 0 && br1.length <= 128, String(br1.length));
 eq("大池分片：每片只推进 128 个", W.S.rankCache.step.lat.pos, 128);
@@ -3727,24 +3727,24 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
 // ── 第 155 组：空关闭的门槛只该在「跨过那一条」上生效 ──
 {
   W.S.hostRankCache.clear();
-  for (let i2 = 0; i2 < 4; i2 += 1) W.nsEmptyClose("ec.test:443", true);
+  for (let i2 = 0; i2 < 4; i2 += 1) W.STATS.nsEmptyClose("ec.test:443", true);
   const ecs = W.S.nstat.get("ec.test:443");
   W.S.hostRankCache.set("a.example", { t: 1, v: [] });
-  W.nsEmptyClose("ec.test:443", true);   // 第 5 条：这一条把计数推过门槛
+  W.STATS.nsEmptyClose("ec.test:443", true);   // 第 5 条：这一条把计数推过门槛
   ok("跨过门槛那一条会作废站点排行缓存", !W.S.hostRankCache.has("a.example"));
   ok("门槛就是 5 次", Math.round(ecs.eCloseP) >= 5);
   W.S.hostRankCache.set("b.example", { t: 1, v: [] });
-  W.nsEmptyClose("ec.test:443", true);   // 第 6 条：已经跨过，不该再清
+  W.STATS.nsEmptyClose("ec.test:443", true);   // 第 6 条：已经跨过，不该再清
   ok("跨过之后再空关闭不再清缓存（eCloseP 按 6 小时半衰期挂着，每次清等于关掉缓存）", W.S.hostRankCache.has("b.example"));
   ok("计数继续累加", Math.round(ecs.eCloseP) >= 6);
   W.S.hostRankCache.set("c.example", { t: 1, v: [] });
-  W.nsEmptyClose("ec.test:443", false);
+  W.STATS.nsEmptyClose("ec.test:443", false);
   ok("直连腿的空关闭不清站点排行", W.S.hostRankCache.has("c.example"));
 }
 // 探活只累加样本数与 tcp/tls 的 EWMA，不写真实首字节的矩
 {
-  W.nsProbe("pr.test:443", 120, 90, 30);
-  W.nsProbe("pr.test:443", 130, 95, 35);
+  W.STATS.nsProbe("pr.test:443", 120, 90, 30);
+  W.STATS.nsProbe("pr.test:443", 130, 95, 35);
   const prs = W.S.nstat.get("pr.test:443");
   eq("探活只累加样本数", prs.probeSamples, 2);
   ok("探活不写首字节矩（否则会给还没承载流量的节点白加抖动罚）", prs.pSum === 0 && prs.pSumSq === 0);
@@ -3760,8 +3760,8 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   const mk = (k) => { const i = k.lastIndexOf(":"); W.S.alive.set(k, { h: k.slice(0, i), p: Number(k.slice(i + 1)) || 443, cc: "", ms: 100 }); };
   mk("1.1.1.1:443");
   mk("2.2.2.2:443");
-  W.nsGet("1.1.1.1:443").tcp = 40;
-  W.nsGet("2.2.2.2:443").tcp = 200;
+  W.STATS.nsGet("1.1.1.1:443").tcp = 40;
+  W.STATS.nsGet("2.2.2.2:443").tcp = 200;
   W.hostNodeMark("1.1.1.1:443", "retry.test", true, 120);
   const env = { proxyip: "auto" };
   const a1 = await W.SEL.current(env, "tput", null, "retry.test", false);
@@ -3828,14 +3828,14 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   const fSrc = fs.readFileSync("src/proxy/fallback.ts", "utf8");
   const aSrc = fs.readFileSync("src/proxy/attacher.ts", "utf8");
   ok("换节点重试也走带预算的拨号器", fSrc.includes("SOCKET_DIALER.open(") && !fSrc.includes("withTimeout(pk, CONNECT_MS)"));
-  ok("换节点失败要给这条候选记一笔（否则一直被挑回来）", fSrc.includes("nsFail(alt)"));
+  ok("换节点失败要给这条候选记一笔（否则一直被挑回来）", fSrc.includes("STATS.nsFail(alt)"));
   ok("超时迟到成功的 socket 由拨号器关掉（fallback 不再自己写）", !fSrc.includes("pk.then((s) =>") && fSrc.includes("SOCKET_DIALER"));
   const iRel = aSrc.indexOf("releaseAll(conn)");
   const iSet = aSrc.indexOf("conn.sock = sock;");
   ok("递归重试前先释放上一跳的 socket 与写锁", iRel >= 0 && iSet > iRel);
   ok("IPv6 兜底也有建连预算（走拨号器）", aSrc.includes("SOCKET_DIALER.open(expandV6(v6), port)") && !aSrc.includes("connect({ hostname: expandV6(v6)"));
   ok("proxyip 兜底也有建连预算（走拨号器）", aSrc.includes("SOCKET_DIALER.open(px.host, px.port)") && !aSrc.includes("Promise.resolve(connect("));
-  ok("proxyip 连不上要给中继记账", aSrc.includes('nsFail(px.host + ":" + px.port)'));
+  ok("proxyip 连不上要给中继记账", aSrc.includes('STATS.nsFail(px.host + ":" + px.port)'));
   ok("死条件 !px || st.retried 已经删掉（只判代码行，注释里可以留历史）", !/if \(!px \|\| st\.retried\)/.test(aSrc));
 }
 {
@@ -4312,19 +4312,19 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
   const pSrc = scanAll();
   eq(
     "pool.ts 里没有任何 nsLatency 调用（探活 RTT 不是真实首字节）",
-    (pSrc.match(/^\s*nsLatency\(/gm) || []).length,
+    (pSrc.match(/^\s*STATS\.nsLatency\(/gm) || []).length,
     0,
   );
   ok(
     "探活仍然把样本写进统计（nsProbe）：② 与 ②b 复测合并进 probeInto 后剩三处调用",
-    (pSrc.match(/^\s*nsProbe\(/gm) || []).length >= 3,
+    (pSrc.match(/^\s*STATS\.nsProbe\(/gm) || []).length >= 3,
     true,
   );
   const pk = "11.9.9.9:443";
   W.S.nstat.delete(pk);
-  W.nsProbe(pk, 40, 38, 2);
-  W.nsProbe(pk, 44, 40, 4);
-  const st175 = W.nsGet(pk);
+  W.STATS.nsProbe(pk, 40, 38, 2);
+  W.STATS.nsProbe(pk, 44, 40, 4);
+  const st175 = W.STATS.nsGet(pk);
   eq("探活只累加样本数", st175.probeSamples, 2);
   ok(
     "探活不写首字节矩（pSum 仍是 0）",
@@ -4565,8 +4565,8 @@ console.log("\n191a) 站点失败的记账路径");
   S.pxFailSeen = 0;
   await W.SEL.softFail("sfa:443");
   await W.SEL.bumpFail({}, "tput", "sfb:443", false, "site");
-  const fa = W.nsGet("sfa:443");
-  const fb = W.nsGet("sfb:443");
+  const fa = W.STATS.nsGet("sfa:443");
+  const fb = W.STATS.nsGet("sfb:443");
   eq("softFail 与 kind=site 的权重一致", Math.round(fb.failW * 10), Math.round(fa.failW * 10));
   ok("站点失败只记 0.2 的站责", fa.failW > 0.1 && fa.failW < 0.3, String(fa.failW));
   eq("站点失败不进全局失败记忆", S.pxFailMem, 0);
@@ -5474,7 +5474,7 @@ try {
     eq("超时记 ustall", Number(W.S.cnt.ustall || 0) - before, 1);
     eq("超时关掉 socket", sock.closed, 1);
     ok("超时后不再往死连接写", c.dead === true);
-    ok("超时归因到中继节点", Number(W.nsGet("203.0.113.211:443").failW || 0) > 0);
+    ok("超时归因到中继节点", Number(W.STATS.nsGet("203.0.113.211:443").failW || 0) > 0);
   }
   // 直连黑洞：没有节点可罚，计数与断开照做
   {
@@ -5482,10 +5482,10 @@ try {
     const sock = mkSock211();
     c.sock = sock;
     c.writer = { write: () => new Promise(() => {}) };
-    const fw = Number(W.nsGet("203.0.113.212:443").failW || 0);
+    const fw = Number(W.STATS.nsGet("203.0.113.212:443").failW || 0);
     await c.upWrite(new Uint8Array(16), 40);
     eq("直连黑洞也关 socket", sock.closed, 1);
-    eq("直连黑洞不罚池子里的节点", Number(W.nsGet("203.0.113.212:443").failW || 0), fw);
+    eq("直连黑洞不罚池子里的节点", Number(W.STATS.nsGet("203.0.113.212:443").failW || 0), fw);
   }
   // 正常写：不计 ustall、不关 socket
   {
@@ -5524,7 +5524,7 @@ try {
     W.S.alive.set(h + ":443", { h, p: 443, cc: "", ms: 100 });
   }
   W.S.candN = 0;
-  W.invalidateRank();
+  W.STATS.invalidateRank();
   W.candsFor("lat");
   eq("切片中途不写 candN（旧代码会把 128 当池子大小）", W.S.candN, 0);
   let calls212 = 1;
@@ -5542,7 +5542,7 @@ try {
   W.S.alive.clear();
   for (const [k212, v212] of bak212) W.S.alive.set(k212, v212);
   W.S.candN = bakN212;
-  W.invalidateRank();
+  W.STATS.invalidateRank();
 }
 
 // ---- 第 213 组：站点冷启动的影子试探（lastTry 只写不读）+ 节点统计里的僵尸字段 ----
@@ -5560,14 +5560,14 @@ try {
   setup213();
   const a213 = W.hostUntried(g213host, "lat");
   ok("影子试探先给全局排行第一名", Boolean(a213), a213);
-  W.nsGet(a213).lastTry = Date.now();
+  W.STATS.nsGet(a213).lastTry = Date.now();
   const b213 = W.hostUntried(g213host, "lat");
   ok("刚试过的节点不会被第二条并发请求立刻再选一次", b213 !== a213, a213 + " / " + b213);
   ok("换到的是另一条真实候选", g213keys.includes(b213), b213);
-  W.nsGet(a213).lastTry = Date.now() - 60000;
+  W.STATS.nsGet(a213).lastTry = Date.now() - 60000;
   eq("过了窗口期可以再用它", W.hostUntried(g213host, "lat"), a213);
   setup213();
-  for (const k of g213keys) W.nsGet(k).lastTry = Date.now();
+  for (const k of g213keys) W.STATS.nsGet(k).lastTry = Date.now();
   const c213 = W.hostUntried(g213host, "lat");
   ok("全都在窗口内时退回一条，不能返回空串", Boolean(c213), c213);
   W.S.alive = new Map([[g213keys[0], { h: "10.213.0.1", p: 443, cc: "HK" }]]);
@@ -5582,16 +5582,16 @@ try {
   ok("节点统计里不再有 eCloseD（只写不读）", !stCode.includes("eCloseD"));
   ok("影子试探的窗口常量进了 SC", fs.readFileSync("src/core/const.ts", "utf8").includes("UNTRIED_GAP: 20000"));
   ok("untried 会读 lastTry", metricsAll().includes("SC.UNTRIED_GAP"));
-  ok("selector 仍在返回前记 lastTry", pickAll().includes("nsGet(t0).lastTry = Date.now();"));
+  ok("selector 仍在返回前记 lastTry", pickAll().includes("STATS.nsGet(t0).lastTry = Date.now();"));
   ok("直连空关闭的全局计数保留", fs.readFileSync("src/proxy/attacher.ts", "utf8").includes('cnt("eCloseD")'));
   ok("类型里也没有 eCloseD", !fs.readFileSync("types/app.d.ts", "utf8").includes("eCloseD"));
   const k213 = "10.213.9.9:443";
   W.S.nstat.delete(k213);
-  W.nsEmptyClose(k213, false);
+  W.STATS.nsEmptyClose(k213, false);
   const r213 = W.S.nstat.get(k213);
   eq("直连空关闭不增加中转侧的计数", r213.eCloseP, 0);
   ok("节点统计里没有 eCloseD 这个键", !Object.prototype.hasOwnProperty.call(r213, "eCloseD"));
-  W.nsEmptyClose(k213, true);
+  W.STATS.nsEmptyClose(k213, true);
   eq("中转空关闭会加一", W.S.nstat.get(k213).eCloseP, 1);
   W.S.nstat.delete(k213);
 }
@@ -7279,7 +7279,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 }
 // ── 第 254 组：统计层字段改成语义名（纯内存结构，与线协议无关） ────────────
 {
-  const z254 = W.nsGet("zero254.test:443");
+  const z254 = W.STATS.nsGet("zero254.test:443");
   eq("统计行有 probeSamples", typeof z254.probeSamples, "number");
   eq("统计行有 probeFails", typeof z254.probeFails, "number");
   eq("统计行有 trafficOkW", typeof z254.trafficOkW, "number");
@@ -7290,22 +7290,22 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   eq("旧短名 tS 已消失", "tS" in z254, false);
   eq("旧短名 cusB 已消失", "cusB" in z254, false);
 
-  W.nsProbe("probe254.test:443", 40, 30, 10);
-  W.nsProbe("probe254.test:443", 42, 31, 11);
-  const p254 = W.nsGet("probe254.test:443");
+  W.STATS.nsProbe("probe254.test:443", 40, 30, 10);
+  W.STATS.nsProbe("probe254.test:443", 42, 31, 11);
+  const p254 = W.STATS.nsGet("probe254.test:443");
   eq("两次探活累加 probeSamples", p254.probeSamples, 2);
   eq("探活不写首字节矩", p254.pSum, 0);
 
-  W.nsOk("ok254.test:443", 0, 0);
-  const o254 = W.nsGet("ok254.test:443");
+  W.STATS.nsOk("ok254.test:443", 0, 0);
+  const o254 = W.STATS.nsGet("ok254.test:443");
   eq("真实成功累加 trafficOkW", o254.trafficOkW, 1);
 
-  W.nsFail("fail254.test:443");
-  const f254 = W.nsGet("fail254.test:443");
+  W.STATS.nsFail("fail254.test:443");
+  const f254 = W.STATS.nsGet("fail254.test:443");
   eq("真实失败累加 trafficFailW", f254.trafficFailW, 1);
 
   // 衰减必须一起作用（effView 是只读投影，衰减在两处共用同一套换算）
-  const d254 = W.nsGet("decay254.test:443");
+  const d254 = W.STATS.nsGet("decay254.test:443");
   d254.trafficOkW = 8; d254.probeSamples = 8; d254.at = Date.now() - W.SC.HL * 2;
   const v254 = W.effView(d254);
   eq("effView 暴露的是 probeSamples 而不是旧名", "probeSamples" in v254 && !("pN" in v254), true);
@@ -8299,7 +8299,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok("门面不再列候选", !facadeSrc.includes("candsFor("), "");
   ok("门面不再自写 IP 解析", !facadeSrc.includes("relayIpOf("), "");
   ok("门面不再动游标", !facadeSrc.includes("S.curs"), "");
-  ok("门面不再记样本", !facadeSrc.includes("nsGet("), "");
+  ok("门面不再记样本", !facadeSrc.includes("STATS.nsGet("), "");
   // 职责边界：换节点只由 Rotation 判，FailBook 调它而不是自己判
   ok("failbook 用 ROTATION.maybeSwitch", failSrc.includes("ROTATION.maybeSwitch("), "");
   ok("failbook 不再 this.maybeSwitch", !failSrc.includes("this.maybeSwitch("), "");
@@ -8355,11 +8355,15 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok("四段归位到同一个文件", ["src/nodes/stat-types.ts", "src/nodes/stat-table.ts", "src/nodes/stat-view.ts", "src/nodes/stat-observe.ts"].every((f) => !fs.existsSync(f)), "");
   ok("类型与常量仍在", src.includes("export interface EffView") && src.includes("export const ZERO_STAT") && src.includes("export const TEN_MB") && src.includes("export const EMPTY_CLOSE_BAD"), "");
   ok("表本体持有类与单例", src.includes("export class NodeStatsTable {") && src.includes("export const STATS = new NodeStatsTable();"), "");
-  ok("表本体只留取条目与打缓存两个方法", src.includes("  nsGet(k: string)") && src.includes("  invalidateRank()") && !src.includes("  nsOk(k: string)"), "");
-  ok("两个同名薄包装仍在", src.includes("export function nsGet(k: string): NodeStats {") && src.includes("export function invalidateRank(): void {"), "");
+  ok("表本体自己管「取条目 / 打缓存 / 九个写入」", src.includes("  nsGet(k: string): NodeStats {") && src.includes("  invalidateRank() {") && src.includes("  nsOk(k: string, tcp: number, tls: number) {"), "");
+  ok(
+      "十一个同名转发都已删除",
+      ["nsOk", "nsProbe", "nsProbeFail", "nsFail", "nsSiteFail", "nsSpeed", "nsStall", "nsLatency", "nsEmptyClose", "nsGet", "invalidateRank"].every((f) => !new RegExp("^export function " + f + "\\(", "m").test(src)),
+      "",
+    );
   ok("派生层七个纯函数都在", ["nsDecay", "ageFactor", "effView", "pFailFast", "pFailOf", "availOf", "pStallOf"].every((f) => src.includes(`export function ${f}(`)), "");
-  ok("观测层九个写入都在", ["nsOk", "nsProbe", "nsProbeFail", "nsFail", "nsSiteFail", "nsSpeed", "nsStall", "nsLatency", "nsEmptyClose"].every((f) => src.includes(`export function ${f}(`)), "");
-  ok("观测层经表单例取条目、不自己碰 S.nstat", src.includes("STATS.nsGet(") && !noComment(src).includes("S.nstat["), "");
+  ok("九个写入都是类方法", ["nsOk", "nsProbe", "nsProbeFail", "nsFail", "nsSiteFail", "nsSpeed", "nsStall", "nsLatency", "nsEmptyClose"].every((f) => src.includes(`  ${f}(`)), "");
+  ok("写入全部经 this.nsGet 取条目、不自己碰 S.nstat", (src.match(/this\.nsGet\(/g) || []).length >= 9 && !noComment(src).includes("S.nstat["), "");
   ok("这一层只有 NodeStatsTable 一个类", (src.match(/^export class /gm) || []).length === 1, "");
   // 行为面：常量与写入仍然照旧（用独立键，避免与别的组互相污染）
   eq("TEN_MB 仍是 10MB", W.TEN_MB, 10 * 1048576);
@@ -8367,12 +8371,12 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   eq("表单例可判定", W.STATS instanceof W.NodeStatsTable, true);
   eq("零值条目的样本数为 0", W.ZERO_STAT.probeSamples, 0);
   const k282 = "stat282.probe:443";
-  W.nsFail(k282);
-  ok("失败后进入冷却", W.nsGet(k282).blackUntil > Date.now(), "");
-  ok("冷却被记成失败一笔", W.effView(W.nsGet(k282)).failW > 0, "");
-  W.nsOk(k282, 12, 30);
-  eq("成功清零冷却", W.nsGet(k282).blackUntil, 0);
-  ok("成功留下 tcp 样本", W.nsGet(k282).tcp > 0, "");
+  W.STATS.nsFail(k282);
+  ok("失败后进入冷却", W.STATS.nsGet(k282).blackUntil > Date.now(), "");
+  ok("冷却被记成失败一笔", W.effView(W.STATS.nsGet(k282)).failW > 0, "");
+  W.STATS.nsOk(k282, 12, 30);
+  eq("成功清零冷却", W.STATS.nsGet(k282).blackUntil, 0);
+  ok("成功留下 tcp 样本", W.STATS.nsGet(k282).tcp > 0, "");
 }
 
 
@@ -8483,7 +8487,7 @@ eq("策略是否生效是只读属性", W.POLICY.enabled, W.SC.POLICY > 0);
   ok("结算流水线是独立的类 + 单例", settleSrc286.includes("export class ConnSettle") && settleSrc286.includes("export const SETTLE = new ConnSettle();"), "");
   ok("结算只读结构化视图（不 import Connection）", settleSrc286.includes("export interface SettleView") && !settleSrc286.includes("Connection }"), "");
   ok("结算入口只有 close / pend 两条", settleSrc286.includes("close(v: SettleView): void") && settleSrc286.includes("pend(v: SettleView): void"), "");
-  ok("连接本体不再自己结算节点分数", !connSrc286.includes("nsOk(") && !connSrc286.includes("nsStall(") && !connSrc286.includes("markSeedDirty("), "");
+  ok("连接本体不再自己结算节点分数", !connSrc286.includes("STATS.nsOk(") && !connSrc286.includes("STATS.nsStall(") && !connSrc286.includes("markSeedDirty("), "");
   ok("连接本体不再自己记 PEND 账", !connSrc286.includes("statBump(") && !connSrc286.includes("scheduleFlush("), "");
   ok("flush 只负责调度结算", connSrc286.includes("SETTLE.close(this)") && connSrc286.includes("SETTLE.pend(this)"), "");
   ok("通道证据也搬进结算", !connSrc286.includes("HOOK.traffic") && settleSrc286.includes("HOOK.traffic"), "");
@@ -8553,7 +8557,7 @@ console.log("\n[287] 判定表只有一个文件：类型、表本体、单例�
   W.freezeNode("g288:443");
   ok("冻结后立即不可用", W.usable("g288:443") === false && W.isFrozen("g288:443") === true, "");
   W.S.alive.delete("g288:443");
-  W.invalidateRank();
+  W.STATS.invalidateRank();
 }
 
 // 第 289 组：「站点 × 中继」成功率事实按「形状 / 先验 / 待发队列 / 表本体 / 门面」拆开（7.289）
@@ -8633,17 +8637,17 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   const alv = fs.readFileSync("src/px/scan-alive.ts", "utf8");
   const hou = fs.readFileSync("src/px/scan-house.ts", "utf8");
   eq("编排层仍然导出 PoolScan", orche.includes("export class PoolScan"), true);
-  eq("编排层不自己探活", orche.includes("probeProxy(") || orche.includes("probeSni(") || orche.includes("nsProbe("), false);
+  eq("编排层不自己探活", orche.includes("probeProxy(") || orche.includes("probeSni(") || orche.includes("STATS.nsProbe("), false);
   eq("编排层不直接写存活表", orche.includes("S.alive.set("), false);
   eq("编排层不超过 120 行", orche.split(/\r?\n/).length <= 120, true);
   eq("探活批处理带上了合并后的候选键", batch.includes("splitRelay(key, 443)"), true);
   eq("探活批处理按 PROBE_CONC 切段", batch.includes("chunks(keys, SC.PROBE_CONC)"), true);
   eq("探活结果继承 NodeEntry 形状", batch.includes("export interface ProbeHit extends NodeEntry"), true);
   eq("新候选执行器独立成类", prb.includes("export class ScanProbe"), true);
-  eq("新候选执行器负责进存活表", prb.includes("S.alive.set(") && prb.includes("nsProbe("), true);
-  eq("新候选执行器不看存活节点失败", prb.includes("nsProbeFail("), false);
+  eq("新候选执行器负责进存活表", prb.includes("S.alive.set(") && prb.includes("STATS.nsProbe("), true);
+  eq("新候选执行器不看存活节点失败", prb.includes("STATS.nsProbeFail("), false);
   eq("复测执行器独立成类", alv.includes("export class ScanAlive"), true);
-  eq("复测执行器记探活失败", alv.includes("nsProbeFail("), true);
+  eq("复测执行器记探活失败", alv.includes("STATS.nsProbeFail("), true);
   eq("复测执行器不自己切段", alv.includes("splitRelay("), false);
   eq("复测执行器只管两档入参", alv.includes("probeInto(keys: string[], failCounts: boolean)"), true);
   eq("收尾执行器独立成类", hou.includes("export class ScanHouse"), true);
@@ -8872,6 +8876,47 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("源健康快照是对象", typeof W.SOURCES.snap() === "object");
   ok("三个旧入口在测试窗口里也拿不到", [W.decide, W.shadow, W.policyOn, W.srcRank, W.srcNote, W.srcHealth].every((f) => f === undefined));
 }
+
+/* 302：九个写入挂在 NodeStatsTable 上，十一个同名转发全删（7.302） */
+{
+  const src302 = fs.readFileSync("src/nodes/stat.ts", "utf8");
+  const writes = ["nsEmptyClose", "nsOk", "nsProbe", "nsProbeFail", "nsFail", "nsSiteFail", "nsSpeed", "nsStall", "nsLatency"];
+  ok(
+    "九个写入都是类方法（签名缩进两格）",
+    writes.every((f) => new RegExp("\\n  " + f + "\\(", "m").test(src302)),
+    true,
+  );
+  ok(
+    "不再有同名模块函数",
+    writes.every((f) => !new RegExp("export function " + f + "\\(", "m").test(src302)) &&
+      !/^export function (nsGet|invalidateRank)\(/m.test(src302),
+    true,
+  );
+  ok("取条目与打缓存仍是类方法", src302.includes("  nsGet(k: string): NodeStats {") && src302.includes("  invalidateRank() {"), true);
+  ok("派生层仍是纯函数（不读 S）", /export function effView\(s: NodeStats/m.test(src302) && /export function pStallOf\(s: NodeStats/m.test(src302), true);
+  ok("写入方法一律经 this.nsGet 取条目", (src302.match(/this\.nsGet\(/g) || []).length >= 9, true);
+  eq("单例仍然是 TypeScript 里那个类", W.STATS instanceof W.NodeStatsTable, true);
+  ok("测试窗口只剩单例、没有转发", typeof W.STATS.nsOk === "function" && W.nsOk === undefined, true);
+
+  // 行为面：写入走单例后仍然累加同一张表
+  const k302 = "13.7.7.7:443";
+  W.S.nstat.delete(k302);
+  W.STATS.nsOk(k302, 120, 80);
+  W.STATS.nsFail(k302);
+  W.STATS.nsSiteFail(k302);
+  W.STATS.nsStall(k302, 500, 2000);
+  const row302 = W.STATS.nsGet(k302);
+  eq(
+    "成功 1 次、失败 1 次 + 站点失败 0.2 次（各自进 fail 与 failW）",
+    [row302.ok, Math.round(row302.fail * 10) / 10, Math.round(row302.failW * 10) / 10],
+    [1, 1.2, 1.2],
+  );
+  eq("卡顿样本原样进表", [row302.stallMs, row302.runMs], [500, 2000]);
+  ok("失败留下冷却（blackUntil > now）", row302.blackUntil > Date.now(), true);
+  W.STATS.nsLatency(k302, 300);
+  ok("首字节样本写进矩", row302.pSum > 0 && row302.msLocal > 0, true);
+}
+
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

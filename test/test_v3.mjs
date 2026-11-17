@@ -663,7 +663,7 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
 {
   const keys = [];
   for (let i = 0; i < 70; i++) keys.push(`n${i}:443`);
-  for (const k of keys) W.nsGet(k);
+  for (const k of keys) W.STATS.nsGet(k);
   eq("nsOf 默认最多 64 条", Object.keys(W.nsOf(keys)).length, 64);
   eq("nsOf 可放开到全部", Object.keys(W.nsOf(keys, 70)).length, 70);
   for (const k of keys) W.S.nstat.delete(k);
@@ -671,9 +671,9 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
 
 /* ---------- nsOk 必须推进 at（否则衰减基准永远停在旧时刻） ---------- */
 {
-  const s = W.nsGet("at-check:443");
+  const s = W.STATS.nsGet("at-check:443");
   s.at = Date.now() - 1000;
-  W.nsOk("at-check:443", 50, 20);
+  W.STATS.nsOk("at-check:443", 50, 20);
   ok("nsOk 更新 at", Date.now() - s.at < 500, String(Date.now() - s.at));
   W.S.nstat.delete("at-check:443");
 }

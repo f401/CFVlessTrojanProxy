@@ -4,7 +4,7 @@ import { SC } from "../core/const";
 import { S } from "../core/state";
 import { json } from "../edge/respond";
 import { hostRank, logErr } from "../nodes/metrics";
-import { costOf, invalidateRank, scoreParts } from "../nodes/score";
+import { costOf, scoreParts, STATS } from "../nodes/score";
 import { nodeSnapGet } from "../store/index";
 import { cronScan, nsOf, pxGet } from "../px/pool";
 import { POOL_SOURCES, SOURCES } from "../px/probe";
@@ -86,7 +86,7 @@ export async function proxyip(c: UserCtx): Promise<Response> {
     S.hostNode.clear();
     S.hostDirect.clear();
     S.hostRankCache.clear();
-    invalidateRank();
+    STATS.invalidateRank();
     S.candN = 0;
     return json({ ok: true, alive: 0, curs: S.curs });
   }

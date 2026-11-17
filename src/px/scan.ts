@@ -6,7 +6,7 @@
 
 import { S } from "../core/state";
 import { logErr } from "../nodes/metrics";
-import { invalidateRank } from "../nodes/score";
+import { STATS } from "../nodes/score";
 import { pxGet, sweepProbeBad } from "./alive";
 import { POOL_TTL_MS, refillPool } from "./probe";
 import { commitPool, ensurePool } from "./poolgen";
@@ -56,7 +56,7 @@ export class PoolScan {
     // 裁剪动过存活表时，站点排行与分片排序里可能还留着刚被删的节点
     if (this.house.prune(this.pool)) {
       S.hostRankCache.clear();
-      invalidateRank();
+      STATS.invalidateRank();
     }
     // 国家码只影响展示与地区分组，放在裁剪之后（被裁掉的节点不必再查一次）
     await this.house.countries();

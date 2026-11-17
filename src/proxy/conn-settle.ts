@@ -4,7 +4,7 @@ import { hostDirectMark, hostNodeMark } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { FO } from "../core/firstobs";
 import { LAT } from "../core/latobs";
-import { nsLatency, nsOk, nsSpeed, nsStall } from "../nodes/score";
+import { STATS } from "../nodes/score";
 import { markSeedDirty } from "../px/seed";
 import { S } from "../core/state";
 import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";
@@ -119,7 +119,7 @@ export class ConnSettle {
     ) {
       const w = v.takeWeight(bytes, dt, stalledWindow(v.stallMs, v.stallMark, dt) ? 0.3 : 1);
       if (w > 0) {
-        nsSpeed(v.node, (bytes * 1000) / dt, bytes, v.env, w);
+        STATS.nsSpeed(v.node, (bytes * 1000) / dt, bytes, v.env, w);
         cnt("tput");
       }
     }
@@ -136,7 +136,7 @@ export class ConnSettle {
     // 原来只在"这条连接卡过"时才累加 runMs，等于把分母缩成"卡过的那几条连接的时长"：
     // 一条 5 秒连接卡 2 秒 → pStall 0.34（真实占比 0.001），单次卡顿白送 800+ ms 分，
     // 还会踩中 pStall>0.25 的 +400 重罚档，节点一晚上翻不了身。
-    nsStall(v.node, v.stallMs, Math.max(1000, Date.now() - v.startedAt));
+    STATS.nsStall(v.node, v.stallMs, Math.max(1000, Date.now() - v.startedAt));
   }
 
   /**
@@ -193,7 +193,7 @@ export class ConnSettle {
     // 早先只有失败才记账（nsFail），成功只走 SEL.resetFail()，而那里
     // 第一行就是 `if (!S.pxFailSeen) return` —— 健康节点永远 n=0，
     // 面板显示"一个连接都没有"，可用性门槛也永远不触发。
-    if (v.node && !v.failed && v.down > 0) nsOk(v.node, 0, 0);
+    if (v.node && !v.failed && v.down > 0) STATS.nsOk(v.node, 0, 0);
     this.relayRates(v);
     this.channelEvidence(v);
     this.siteProfile(v);
@@ -249,7 +249,7 @@ export class ConnSettle {
    */
   private siteProfile(v: SettleView): void {
     // 真实首字节回流：探活只能证明连得上，转发快不快只有这条路径知道
-    if (v.node && v.ttfb > 0) nsLatency(v.node, v.ttfb);
+    if (v.node && v.ttfb > 0) STATS.nsLatency(v.node, v.ttfb);
     if (!v.host) return;
     if (!v.node) {
       hostDirectMark(v.host, !v.failed && v.down > 0);

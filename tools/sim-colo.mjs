@@ -96,7 +96,7 @@ function save() {
 
 function install(n, colo) {
   S.alive.set(n.key, { h: n.id, p: 443, cc: "", ms: Math.round(rttOf(colo, n)) });
-  const s = W.nsGet(n.key);
+  const s = W.STATS.nsGet(n.key);
   s.at = NOW;
 }
 
@@ -124,10 +124,10 @@ function request(colo, mode, size) {
     if (size >= 32 * 1024 && dur >= 50 && (dur >= 300 || size >= MB)) {
       const bps = size / (dur / 1000);
       const w = Math.min(1, size / (512 * 1024)) * Math.min(1, dur / 1000);
-      if (w > 0) W.nsSpeed(k, bps, size, ENV, Math.min(4, w));
+      if (w > 0) W.STATS.nsSpeed(k, bps, size, ENV, Math.min(4, w));
     }
-    W.nsOk(k, 0, 0);
-    W.nsLatency(k, rtt);
+    W.STATS.nsOk(k, 0, 0);
+    W.STATS.nsLatency(k, rtt);
   }
   // 上帝视角：本地最优 / 别的机房最优
   let best = Infinity,
@@ -149,8 +149,8 @@ function request(colo, mode, size) {
 
 function cron(colo) {
   for (const n of pool) {
-    if (rnd() < n.pFail * 0.4) W.nsProbeFail(n.key);
-    else W.nsProbe(n.key, rttOf(colo, n) * (0.9 + 0.2 * rnd()), n.tcp, 40);
+    if (rnd() < n.pFail * 0.4) W.STATS.nsProbeFail(n.key);
+    else W.STATS.nsProbe(n.key, rttOf(colo, n) * (0.9 + 0.2 * rnd()), n.tcp, 40);
   }
   SEL.afterScan(ENV);
 }

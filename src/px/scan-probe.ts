@@ -5,7 +5,7 @@
 
 import { SC } from "../core/const";
 import { S } from "../core/state";
-import { nsProbe } from "../nodes/score";
+import { STATS } from "../nodes/score";
 import { bumpProbeBad, noteProbe, probeBadSkip } from "./alive";
 import { keyOf } from "./const";
 import { type ProbeHit, probeBatch } from "./probe-batch";
@@ -119,7 +119,7 @@ export class ScanProbe {
         cc: x.cc || S.alive.get(k)?.cc || "",
         ms: x.ms,
       });
-      nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
+      STATS.nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
     }
   }
 }

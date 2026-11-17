@@ -2,7 +2,7 @@ import type { Socket } from "cloudflare:sockets";
 import { errMsg } from "../core/util";
 import { hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
-import { nsFail, nsSpeed } from "../nodes/score";
+import { STATS } from "../nodes/score";
 import { S } from "../core/state";
 import { UP_STALL_MS, closeQuietly, releaseAll, withTimeout } from "../core/util";
 import { SETTLE } from "./conn-settle";
@@ -220,7 +220,7 @@ export class Connection {
    */
   private emitSpeed(bytes: number, dt: number, w: number): void {
     // 权重必须先过 `takeWeight` 的封顶逻辑，否则慢节点的 e10 会被短窗口刷偏
-    nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
+    STATS.nsSpeed(this.node, (bytes * 1000) / dt, bytes, this.env, w);
     cnt("tput");
   }
 
@@ -273,7 +273,7 @@ export class Connection {
     // 这是节点问题不是站点问题：只有「走中继」时才有节点可罚，直连目标黑洞不该记到池子头上
     cnt("ustall");
     if (this.via === "node" && this.node) {
-      nsFail(this.node);
+      STATS.nsFail(this.node);
       logErr("up stall " + this.node, this.node);
     } else logErr("up stall direct", this.host || "");
     this.dead = true; // 后续分片不再往这条死连接上写

@@ -3,7 +3,7 @@
 // 三段的差别只在「谁被选中」与「失败要不要记账」，探活动作本身由 `probe-batch.ts` 收口。
 
 import { S } from "../core/state";
-import { candsFor, nsProbe, nsProbeFail } from "../nodes/score";
+import { candsFor, STATS } from "../nodes/score";
 import { noteProbe } from "./alive";
 import { probeBatch, probeOne } from "./probe-batch";
 
@@ -26,7 +26,7 @@ export class ScanAlive {
     for (const { k, r } of rows) {
       noteProbe(r);
       if (r && !r.bad) {
-        nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
+        STATS.nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
         // 复测结果比历史更慢时不要把存活表里的延迟改大：这里只做「拉回来」
         const a = S.alive.get(k);
         if (a && r.ms < (a.ms || 1e9)) a.ms = r.ms;
@@ -86,12 +86,12 @@ export class ScanAlive {
     for (const { k, r } of rows) {
       noteProbe(r);
       if (r && !r.bad) {
-        nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
+        STATS.nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
         // 存活表里的 `ms` 就是面板与池子裁剪用的「实测延迟」，成功即覆盖
         const a = S.alive.get(k);
         if (a) a.ms = r.ms;
       } else if (failCounts) {
-        nsProbeFail(k);
+        STATS.nsProbeFail(k);
       }
     }
   }

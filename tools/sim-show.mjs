@@ -53,7 +53,7 @@ const costOf = (n, size) => (n.pf >= 1 ? Infinity : (rttOf(n) + (size / (n.bw * 
 
 const install = (n) => {
   S.alive.set(n.key, { h: n.id, p: 443, cc: "", ms: Math.round(n.probe + n.tls) });
-  const s = W.nsGet(n.key);
+  const s = W.STATS.nsGet(n.key);
   s.tcp = n.probe;
   s.tls = n.tls;
   s.at = NOW;
@@ -72,15 +72,15 @@ function reset() {
   S.lastSwitch = { lat: 0, tput: 0 };
   S.switchHits = { lat: [], tput: [] };
   S.inflight.clear();
-  W.invalidateRank();
+  W.STATS.invalidateRank();
   for (const n of NODES) install(n);
 }
 
 function cron() {
   for (const n of NODES) {
     if (NOW < n.born) continue;
-    if (rnd() < n.pf * 0.4) W.nsProbeFail(n.key);
-    else W.nsProbe(n.key, (n.probe + n.tls) * (0.95 + 0.1 * rnd()), n.probe, n.tls);
+    if (rnd() < n.pf * 0.4) W.STATS.nsProbeFail(n.key);
+    else W.STATS.nsProbe(n.key, (n.probe + n.tls) * (0.95 + 0.1 * rnd()), n.probe, n.tls);
   }
   W.SEL.afterScan(ENV);
 }
@@ -117,10 +117,10 @@ function run(mode, hours) {
       // 采样口径与线上一致：字节 / 墙钟（stall 也算在分母里）
       const bps = size / (dur / 1000);
       const w = Math.min(1, size / (512 * 1024)) * Math.min(1, dur / 1000);
-      if (w > 0) W.nsSpeed(k, bps, size, ENV, Math.min(4, w));
-      if (n.stall) W.nsStall(k, n.stall * dur, dur);
-      W.nsOk(k, 0, 0);
-      W.nsLatency(k, rtt);
+      if (w > 0) W.STATS.nsSpeed(k, bps, size, ENV, Math.min(4, w));
+      if (n.stall) W.STATS.nsStall(k, n.stall * dur, dur);
+      W.STATS.nsOk(k, 0, 0);
+      W.STATS.nsLatency(k, rtt);
     }
     ratio += costOf(n, size) / oracle();
     if (n.id === "fast") best1++;
@@ -145,7 +145,7 @@ for (const mode of ["lat", "tput"]) {
   );
   const rows = live
     .map((n) => {
-      const s = W.nsGet(n.key);
+      const s = W.STATS.nsGet(n.key);
       const p = W.scoreParts(n.key, mode);
       const h = r.hits.get(n.id) || 0;
       const c = h ? r.costSum.get(n.id) / h : 0;

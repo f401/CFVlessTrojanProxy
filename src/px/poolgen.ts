@@ -2,7 +2,7 @@ import { errMsg } from "../core/util";
 
 import { S } from "../core/state";
 import { logErr } from "../nodes/metrics";
-import { invalidateRank } from "../nodes/score";
+import { STATS } from "../nodes/score";
 import { kvGetStrict, kvSet } from "../store/index";
 import { PX_TTL, SEED_KEY } from "./const";
 import { POOL_MAX } from "./probe";
@@ -29,7 +29,7 @@ export async function ensurePool(env: Env) {
       // 截断到当前上限：KV 里的池子可能比配置的 POOL_MAX 大（上限被调小过）
       S.pool = v.slice(0, POOL_MAX);
       S.poolGen = gen;
-      invalidateRank();
+      STATS.invalidateRank();
     }
   } catch (e) {
     // 读失败与「还没有池子」在调用方看来都是空池，但前者要留证据：
@@ -84,7 +84,7 @@ export async function commitPool(env: Env, fresh: PoolEntry[], allowShrink = fal
   }
   S.pool = fresh;
   S.poolGen = gen;
-  invalidateRank();
+  STATS.invalidateRank();
   S.poolBuilt = Date.now();
   S.seed.poolGen = gen;
   // 第二阶段：把锚点写回 seed。写失败时新池子只活在本 isolate 里（冷启动会退回旧代际），

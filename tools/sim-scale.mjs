@@ -65,7 +65,7 @@ function reset() {
 function install(pool) {
   for (const n of pool) {
     S.alive.set(n.key, { h: n.id, p: 443, cc: n.cc, ms: n.probeTcp + n.tls });
-    const s = W.nsGet(n.key);
+    const s = W.STATS.nsGet(n.key);
     s.tcp = n.probeTcp;
     s.tls = n.tls;
     s.at = NOW;
@@ -85,13 +85,13 @@ async function request(n) {
   }
   const bytes = 0.2 * MB;
   const dur = rttOf(n) + (bytes / (n.bw * MB)) * 1000;
-  W.nsSpeed(n.key, bytes / (dur / 1000), bytes, ENV, Math.min(1, dur / 1000));
-  W.nsOk(n.key, 0, 0);
-  W.nsLatency(n.key, rttOf(n));
+  W.STATS.nsSpeed(n.key, bytes / (dur / 1000), bytes, ENV, Math.min(1, dur / 1000));
+  W.STATS.nsOk(n.key, 0, 0);
+  W.STATS.nsLatency(n.key, rttOf(n));
 }
 
 function cron(pool) {
-  for (const n of pool) W.nsProbe(n.key, (n.probeTcp + n.tls) * 1.0, n.probeTcp, n.tls);
+  for (const n of pool) W.STATS.nsProbe(n.key, (n.probeTcp + n.tls) * 1.0, n.probeTcp, n.tls);
   W.SEL.afterScan(ENV);
 }
 

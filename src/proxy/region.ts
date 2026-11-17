@@ -1,6 +1,6 @@
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
-import { nsFail } from "../nodes/stat";
+import { STATS } from "../nodes/stat";
 import { SOCKET_DIALER } from "./socket-dialer";
 import { SEL } from "../px/selector";
 import { checkTarget } from "./dial";
@@ -44,7 +44,7 @@ export class RegionPicker {
       return sock;
     } catch {
       // 同国家再试一个，仍然失败就结束（不跨地区）
-      nsFail(conn.node); // 冷却坏节点，否则下一条连接还会撞同一个
+      STATS.nsFail(conn.node); // 冷却坏节点，否则下一条连接还会撞同一个
       failed = conn.node;
       const alt = await SEL.region(env, region, mode, conn.node);
       if (alt && !checkTarget(alt.h, alt.p)) {
@@ -60,7 +60,7 @@ export class RegionPicker {
       }
       // 只在换了节点才再罚一次：没有备选时 conn.node 还是刚罚过的那一个，
       // 再调一次 nsFail 会让它的 streak 跳两档（小池子里一节冷却直接变成十分钟）。
-      if (conn.node && conn.node !== failed) nsFail(conn.node);
+      if (conn.node && conn.node !== failed) STATS.nsFail(conn.node);
       onFail(`地区 ${region} 节点连接失败`);
       return null;
     }

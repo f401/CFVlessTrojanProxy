@@ -4,7 +4,7 @@
 import { SC } from "../core/const";
 import { logErr } from "../nodes/metrics";
 import { pxPolicy } from "./probe";
-import { bestFor, freezeNode, isBlack, isFrozen, nsFail, nsSiteFail } from "../nodes/score";
+import { bestFor, freezeNode, isBlack, isFrozen, STATS } from "../nodes/score";
 import { S } from "../core/state";
 import { ROTATION } from "./rotation";
 
@@ -26,7 +26,7 @@ export class FailBook {
   // 失败分三档：影子连接失败只冻结它自己；
   // 真连接失败先记全局（pFail 立刻上升），再决定「回滚到上一个」还是「重新排第一」
     if (!k) return;
-    nsFail(k);
+    STATS.nsFail(k);
     // 影子连接只贡献一个样本，失败就冻结，别让它继续占探索名额
     if (trial) {
       freezeNode(k);
@@ -66,14 +66,14 @@ export class FailBook {
   /** 只记一次全局失败，不动游标也不冻结（站点级试探失败用） */
   async softFail(k: string) {
     // 站点级试探失败：只轻记全局，不动主游标
-    if (k) nsSiteFail(k);
+    if (k) STATS.nsSiteFail(k);
   }
 
   /** 记一次失败；连续到阈值就换节点。兼容旧调用。 */
   async bumpFail(env: Env, mode: Mode, k: string, trial: boolean, kind: "node" | "site" = "node") {
     if (kind === "site") {
       // 目标站侧的问题：不推进失败计数、不换全局游标，只轻记节点
-      if (k) nsSiteFail(k);
+      if (k) STATS.nsSiteFail(k);
       return;
     }
     const node = k || S.curs[mode === "lat" ? "lat" : "tput"] || S.curs.tput || S.curs.lat || "";

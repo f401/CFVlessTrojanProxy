@@ -3,7 +3,7 @@
 import { SC } from "../core/const";
 import { S } from "../core/state";
 import { isCfIp } from "../core/net";
-import { nsProbe } from "../nodes/score";
+import { STATS } from "../nodes/score";
 import { chunks, probeProxy } from "./probe";
 import { bumpProbeBad, ensurePool, noteProbe, probeBadSkip } from "./pool";
 
@@ -41,7 +41,7 @@ export async function seedAlive(env: Env, n = SC.PROBE_CONC): Promise<number> {
       // 成倍的延迟回归 —— nsLatency 里的 CUSUM 立刻越线，把这个刚起搏出来的中继冻结 60 秒，
       // 而冷启动时它恰恰是唯一能用的那条。排序并不缺这个数：优先延迟读 a.ms（上一行的 ms），
       // tcp/tls 由 nsProbe 记。
-      nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
+      STATS.nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
       got++;
     }
   }

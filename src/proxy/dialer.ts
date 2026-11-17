@@ -10,7 +10,7 @@ import { cnt } from "../core/counter";
 import { CONNECT_MS, closeQuietly, withTimeout } from "../core/util";
 import { dropExpired, trimAged } from "../core/hostmem";
 import { logErr } from "../nodes/metrics";
-import { nsFail } from "../nodes/stat";
+import { STATS } from "../nodes/stat";
 import { SEL } from "../px/selector";
 import { refreshCfHttp } from "./cfverdict";
 import { checkTarget, dial, dial4, isCfHost, isV6Literal, parseProxyIp } from "./dial";
@@ -141,7 +141,7 @@ export class Dialer {
           // 超时之后 connect 仍可能迟到成功：必须把它关掉，否则免费计划 6 个并发 connect 名额
           // 会被「已经超时、但真的连上了」的连接慢慢吃掉（现象是后面所有请求都失败）。
           void pk.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 本来就没连上 */ });
-          nsFail(key); // 中转本身连不上：冷却它，下一条换个候选试
+          STATS.nsFail(key); // 中转本身连不上：冷却它，下一条换个候选试
           // 连接层事实（v8 §3 的 dead）：没有任何 HTTP 状态行，与业务 403 物理上不可混淆
           HOOK.deadNote?.(p.host, false);
         }

@@ -1,4 +1,4 @@
-import { nextNode, nsFail } from "../nodes/score";
+import { nextNode, STATS } from "../nodes/score";
 import { SOCKET_DIALER } from "./socket-dialer";
 import { logErr } from "../nodes/metrics";
 import { isCfIp } from "../core/net";
@@ -51,7 +51,7 @@ export async function dialAnother(
       logErr(`retry another node ${alt}`, tag || "");
       return socket;
     } catch (e) {
-      nsFail(alt); // 这条候选连不上：冷却它，下一轮别再挑回来
+      STATS.nsFail(alt); // 这条候选连不上：冷却它，下一轮别再挑回来
     }
   }
   return null;

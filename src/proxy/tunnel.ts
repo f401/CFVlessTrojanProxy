@@ -1,7 +1,7 @@
 import type { Socket } from "cloudflare:sockets";
 import { WS_OPEN, closeQuietly, errMsg, safeSend, toU8 } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
-import { invalidateRank, nsDecay, nsGet, nsSiteFail } from "../nodes/score";
+import { nsDecay, STATS } from "../nodes/score";
 import { cnt } from "../core/counter";
 import { S } from "../core/state";
 import type { Connection } from "./connection";
@@ -91,11 +91,11 @@ export function pipeBack(
           cnt("cut");
           if (st.node) {
             if (st.siteFail) {
-              nsSiteFail(st.node); // 站点侧：只轻记
+              STATS.nsSiteFail(st.node); // 站点侧：只轻记
             } else {
               // 中途断流是节点问题：只记 trafficFailW 的话 pFail/可用性完全看不到，
               // 节点过了 60 秒冻结又原样回到候选表。加 0.5 次失败权重（不走阶梯）。
-              const sn = nsGet(st.node),
+              const sn = STATS.nsGet(st.node),
                 now = Date.now();
               nsDecay(sn, now);
               sn.failW = (sn.failW || 0) + 0.5;
@@ -105,7 +105,7 @@ export function pipeBack(
               if (!st.hostTrial) {
                 sn.freeUntil = Math.max(sn.freeUntil || 0, now + 60000);
                 S.hostRankCache.clear(); // 站点排行不能继续推荐刚断流的节点
-                invalidateRank();
+                STATS.invalidateRank();
               }
               sn.at = now;
             }
