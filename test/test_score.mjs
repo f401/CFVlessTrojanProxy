@@ -10036,6 +10036,93 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("[327] 两轮之后账本空", W.S.pend.size, 0);
 }
 
+// ── 328 用户表装配是"四张互相引用的结构 + 两条来源顺序"，收进 UserIndex ──
+{
+  const protoSrc = fs.readFileSync("src/proxy/protocol.ts", "utf8").replace(/\r\n/g, "\n");
+  const luBody = (() => {
+    const i = protoSrc.indexOf("export async function loadUsers(");
+    const j = protoSrc.indexOf("\n}\n", i);
+    return i < 0 || j < 0 ? "" : protoSrc.slice(i, j);
+  })();
+  // 装配器本身
+  ok("[328] 用户表装配器是一个导出类", /export class UserIndex\b/.test(protoSrc));
+  for (const m of ["fromEnv", "fromManaged", "add", "result"]) {
+    ok(`[328] UserIndex 有 ${m}()`, new RegExp(`\\n  ${m}\\(`).test(protoSrc));
+  }
+  // 闭包搬走了：loadUsers 里不该再有内联的 hashOf/add 定义
+  ok("[328] loadUsers 不再内联 hashOf", !luBody.includes("const hashOf"));
+  ok("[328] loadUsers 不再内联 add", !luBody.includes("const add ="));
+  ok("[328] loadUsers 用装配器", luBody.includes("new UserIndex()"));
+  // 顺序是口径：env 先、托管后
+  ok("[328] 先并 env 再并托管", luBody.indexOf("fromEnv(env)") < luBody.indexOf("fromManaged(managed)"));
+  ok("[328] 非法 id 在 add 里被挡掉", /RE_UUID\.test\(id\)/.test(protoSrc));
+
+  // 行为面：直接构一个装配器，喂三种来源
+  if (typeof W.UserIndex === "function") {
+    const uidA = "11111111-2222-3333-4444-555555555555";
+    const uidB = "66666666-7777-8888-9999-aaaaaaaaaaaa";
+    const ownerList = (auth) => [...auth.trojan.values()].sort();
+
+
+    // ① 单密码模式：一个公共密码给所有 env 用户
+    const one = new W.UserIndex();
+    one.fromEnv({ uuid: uidA, trojan: "pub" });
+    const aOne = one.result(true);
+    ok("[328] 单密码：env 用户启用", aOne.uuids.has(uidA));
+    eq("[328] 单密码：只有一条用户", aOne.list.length, 1);
+    eq("[328] 单密码：密码映射指向本人", ownerList(aOne).join(","), uidA);
+
+    // ② 多密码模式：每个用户自己的密码
+    const two = new W.UserIndex();
+    two.fromEnv({ uuid: `${uidA},${uidB}`, trojan: `${uidA}:p1,${uidB}:p2` });
+    const aTwo = two.result(true);
+    eq("[328] 多密码：两位用户都在", aTwo.uuids.size, 2);
+    ok("[328] 多密码：A 拿到自己的 owner", ownerList(aTwo).includes(uidA));
+    ok("[328] 多密码：B 拿到自己的 owner", ownerList(aTwo).includes(uidB));
+
+    // ③ 共享密码只留一个稳定 owner（后加载的不许顶掉前面的）
+    const share = new W.UserIndex();
+    share.fromEnv({ uuid: `${uidA},${uidB}`, trojan: "same" });
+    const aShare = share.result(true);
+    eq("[328] 共享密码只留一个 owner", aShare.trojan.size, 1);
+    eq("[328] 共享密码归先加载的那位", ownerList(aShare).join(","), uidA);
+
+    // ④ 托管记录最后写，能覆盖 env 的启用状态
+    const over = new W.UserIndex();
+    over.fromEnv({ uuid: uidA, trojan: "pub" });
+    over.fromManaged([{ id: uidA, pwd: "pub", note: "面板", enabled: false }]);
+    const aOver = over.result(true);
+    ok("[328] 托管禁用能盖掉 env 的启用", aOver.uuids.has(uidA) === false);
+    eq("[328] 托管禁用后密码映射也撤掉", aOver.trojan.size, 0);
+    ok("[328] 记下这是托管用户", Boolean(aOver.list[0].managed));
+
+    // ⑤ 非法 id 忽略，不让它进表
+    const bad = new W.UserIndex();
+    bad.add("not-a-uuid", "x", "坏", true, false);
+    eq("[328] 非 UUID 不用户表", bad.result(true).list.length, 0);
+  } else {
+    ok("[328] UserIndex 未导出到测试窗口", false, "src/test-surface.ts 需要导出 UserIndex");
+  }
+
+  // ⑥ KV 读失败：env 用户仍然在，且 ok 为假（上层据此缩短缓存）
+  W.S.usersCache = { v: null, t: 0 };
+  W.S.usersSig = "";
+  const failEnv = {
+    uuid: "11111111-2222-3333-4444-555555555555",
+    trojan: "pub",
+    STATS: {
+      get: async () => {
+        throw new Error("kv down");
+      },
+    },
+  };
+  const aFail = await W.loadUsers(failEnv);
+  ok("[328] KV 读失败仍给出 env 用户", aFail.uuids.has("11111111-2222-3333-4444-555555555555"));
+  eq("[328] KV 读失败时 ok 为假", aFail.ok, false);
+  W.S.usersCache = { v: null, t: 0 };
+  W.S.usersSig = "";
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

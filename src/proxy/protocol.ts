@@ -8,9 +8,150 @@ export const USERS_TTL = 300000; // 面板改动最多 5 分钟生效（把 KV �
 export const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
- * 加载用户表：把 env 里的 uuid/trojan（secret）与 KV 托管用户合并，结果缓存 5 分钟。
- * @param {object} env Worker 环境（读 uuid / uuids / trojan / STATS）
- * @returns {Promise<{list: Array, uuids: Set<string>, trojan: Map<string,string>}>} 用户表与两套鉴权索引
+ * 功能：用户表装配器：把 env 里的 `uuid`/`trojan` 与 KV 托管用户合并成一张表。
+ *
+ * 为什么值得成类：装配过程要同时维护四张互相引用的结构（按 id 索引、启用集合、
+ * 密码摘要 → owner、输出顺序表），而「共享密码归谁」与「托管记录能否覆盖 env 的启用状态」
+ * 这两条口径完全由加入顺序决定。散在一条 102 行函数里，任何人想改其中一条都要通读全部。
+ */
+export class UserIndex {
+  /** 按 id 索引：同一 id 后写覆盖前写的 note / enabled / managed */
+  private readonly byId = new Map<string, UserRec>();
+  /** 启用用户的 id 集合：鉴权第一道门，登出/禁用要立刻从这里消失 */
+  private readonly enabledIds = new Set<string>();
+  /** 密码摘要 → 该密码的稳定 owner（共享密码只认一个） */
+  private readonly owners = new Map<string, string>();
+  /** 装配结果：按加入顺序，面板与订阅都依赖这个顺序 */
+  readonly list: UserRec[] = [];
+
+  /**
+   * 功能：算密码摘要（共享密码的索引键，不是口令本身）。
+   * @param pwd 明文密码
+   * @returns sha224 的十六进制串
+   */
+  private hash(pwd: string): string {
+    return toHex(sha224Bytes(enc.encode(pwd)));
+  }
+
+  /**
+   * 功能：登记一个密码的 owner；共享密码只保留一个稳定 owner。
+   *
+   * 为什么不让后加载的顶掉前面的：env 里两位用户贴了同一个密码时，
+   * 谁后写谁就成了 owner，面板与订阅会随加载顺序抖动。
+   * @param id 用户 id
+   * @param pwd 明文密码
+   * @returns 无
+   */
+  private setOwner(id: string, pwd: string): void {
+    const h = this.hash(pwd);
+    const cur = this.owners.get(h);
+    if (!cur || cur === id) {
+      this.owners.set(h, id);
+      return;
+    }
+    // 已有 owner 且它还启用着 ⇒ 保留它；否则转给当前这个
+    const owner = this.byId.get(cur);
+    if (!owner || !owner.enabled) this.owners.set(h, id);
+  }
+
+  /**
+   * 功能：撤销某个 id 自己的密码映射；共享密码要转给另一个启用用户。
+   * @param id 用户 id
+   * @returns 无
+   */
+  private dropOwner(id: string): void {
+    for (const [h, uid] of this.owners) {
+      if (uid !== id) continue;
+      // 共享密码：先找到另一个启用且密码摘要相同的用户接过去
+      const other = this.list.find((x) => x.id !== id && x.enabled && x.pwd && this.hash(x.pwd) === h);
+      if (other) this.owners.set(h, other.id);
+      else this.owners.delete(h);
+    }
+  }
+
+  /**
+   * 功能：把一个用户并进表里（env 与托管两条来源都走这里）。
+   * @param id 用户 id（必须是 UUID，否则忽略）
+   * @param pwd 明文密码
+   * @param note 备注
+   * @param enabled 是否启用
+   * @param managed 是否来自面板托管
+   * @returns 无
+   */
+  add(id: string, pwd?: string, note?: string, enabled?: boolean, managed?: boolean): void {
+    if (!RE_UUID.test(id)) return;
+    let rec = this.byId.get(id);
+    if (!rec) {
+      rec = { id, pwd: "", note: note || "", enabled: enabled !== false, managed: !!managed };
+      this.list.push(rec);
+      this.byId.set(id, rec);
+    } else {
+      if (note && !rec.note) rec.note = note;
+      if (managed) rec.managed = true;
+      rec.enabled = enabled !== false; // 托管记录最后写，必须能覆盖 env 的启用状态
+    }
+    // 换密码要先撤销旧映射，否则旧摘要会一直指向这个用户
+    if (pwd) {
+      if (rec.pwd && rec.pwd !== pwd) this.dropOwner(id);
+      rec.pwd = pwd;
+    }
+    if (rec.enabled) {
+      this.enabledIds.add(id);
+      if (rec.pwd) this.setOwner(id, rec.pwd);
+    } else {
+      this.enabledIds.delete(id);
+      this.dropOwner(id);
+    }
+  }
+
+  /**
+   * 功能：并进环境变量里的用户（`uuid`/`uuids` 与 `trojan` 的单密码/多密码两种写法）。
+   * @param env Worker 环境
+   * @returns 无
+   */
+  fromEnv(env: Env): void {
+    const rawIds = String(env.uuids || env.uuid || "");
+    rawIds.split(",").forEach((x) => this.add(x.trim().toLowerCase(), "", "env", true, false));
+    const rawTrojan = secretPwd(env);
+    if (rawTrojan && !rawTrojan.includes(":")) {
+      // 单密码模式：一个公共密码，给所有 env 用户用
+      rawIds.split(",").forEach((x) => this.add(x.trim().toLowerCase(), rawTrojan, "env", true, false));
+      return;
+    }
+    // 多密码模式：user_uuid:password,user_uuid:password（没有冒号的项忽略）
+    rawTrojan.split(",").forEach((pair) => {
+      const i = pair.indexOf(":");
+      if (i < 0) return;
+      this.add(pair.slice(0, i).trim().toLowerCase(), pair.slice(i + 1).trim(), "env", true, false);
+    });
+  }
+
+  /**
+   * 功能：并进面板托管的用户（最后写，因此能覆盖 env 的启用状态）。
+   * @param rows KV 里的托管用户
+   * @returns 无
+   */
+  fromManaged(rows: Partial<UserRec>[]): void {
+    for (const m of rows) {
+      if (!m || !m.id) continue;
+      this.add(String(m.id).toLowerCase(), m.pwd, m.note || "", m.enabled !== false, true);
+    }
+  }
+
+  /**
+   * 功能：导出鉴权表（用户列表 + 启用 id 集合 + 密码 owner 表）。
+   * @param readOk 这次 KV 读成功了吗（false 时上层会把缓存缩短到 1 分钟）
+   * @returns 用户表与两套鉴权索引
+   */
+  result(readOk: boolean): Auth {
+    return { uuids: this.enabledIds, trojan: this.owners, list: this.list, ok: readOk };
+  }
+}
+
+/**
+ * 功能：加载用户表：把 env 里的 uuid/trojan（secret）与 KV 托管用户合并，结果缓存 5 分钟。
+ * @param env Worker 环境（读 uuid / uuids / trojan / STATS）
+ * @returns 用户表与两套鉴权索引
  */
 export async function loadUsers(env: Env): Promise<Auth> {
   const sig = `${env.uuids || env.uuid || ""}|${secretPwd(env)}`;
@@ -31,86 +172,11 @@ export async function loadUsers(env: Env): Promise<Auth> {
     return S.usersCache.v;
   }
 
-  const uuids = new Set<string>();
-  const trojan = new Map<string, string>();
-  const list: UserRec[] = [];
-  const byId = new Map<string, UserRec>();
-  const hashOf = (pwd: string) => toHex(sha224Bytes(enc.encode(pwd)));
-
-  /** 共享密码只保留一个稳定 owner；不要让后加载的用户把前面的顶掉 */
-  const setTrojan = (id: string, pwd: string) => {
-    const h = hashOf(pwd);
-    const cur = trojan.get(h);
-    if (!cur || cur === id) {
-      trojan.set(h, id);
-      return;
-    }
-    const owner = byId.get(cur);
-    if (!owner || !owner.enabled) trojan.set(h, id);
-  };
-
-  /** 只撤销该 id 自己的映射；如果密码是多人共享的，转给另一个启用用户 */
-  const delTrojanFor = (id: string) => {
-    for (const [h, uid] of trojan) {
-      if (uid !== id) continue;
-      const other = list.find((x) => x.id !== id && x.enabled && x.pwd && hashOf(x.pwd) === h);
-      if (other) trojan.set(h, other.id);
-      else trojan.delete(h);
-    }
-  };
-
-  const add = (id: string, pwd?: string, note?: string, enabled?: boolean, managedFlag?: boolean) => {
-    if (!RE_UUID.test(id)) return;
-    let rec = byId.get(id);
-    if (!rec) {
-      rec = { id, pwd: "", note: note || "", enabled: enabled !== false, managed: !!managedFlag };
-      list.push(rec);
-      byId.set(id, rec);
-    } else {
-      if (note && !rec.note) rec.note = note;
-      if (managedFlag) rec.managed = true;
-      rec.enabled = enabled !== false; // 托管记录最后写，必须能覆盖 env 的启用状态
-    }
-    if (pwd) {
-      if (rec.pwd && rec.pwd !== pwd) delTrojanFor(id);
-      rec.pwd = pwd;
-    }
-    if (rec.enabled) {
-      uuids.add(id);
-      if (rec.pwd) setTrojan(id, rec.pwd);
-    } else {
-      uuids.delete(id);
-      delTrojanFor(id);
-    }
-  };
-
-  // 1) 环境变量里的用户
-  String(env.uuids || env.uuid || "")
-    .split(",")
-    .forEach((x) => add(x.trim().toLowerCase(), "", "env", true, false));
-
-  const rawTrojan = secretPwd(env);
-  if (rawTrojan && !rawTrojan.includes(":")) {
-    // 单密码模式：一个公共密码，给所有 env 用户用
-    String(env.uuids || env.uuid || "")
-      .split(",")
-      .forEach((x) => add(x.trim().toLowerCase(), rawTrojan, "env", true, false));
-  } else {
-    // 多密码模式：user_uuid:password,user_uuid:password
-    rawTrojan.split(",").forEach((pair) => {
-      const i = pair.indexOf(":");
-      if (i < 0) return;
-      add(pair.slice(0, i).trim().toLowerCase(), pair.slice(i + 1).trim(), "env", true, false);
-    });
-  }
-
-  // 2) 面板管理的用户
-  for (const m of managed) {
-    if (!m || !m.id) continue;
-    add(String(m.id).toLowerCase(), m.pwd, m.note || "", m.enabled !== false, true);
-  }
-
-  const out = { uuids, trojan, list, ok: readOk };
+  // 装配顺序是口径：env 先、托管后（托管记录必须能覆盖 env 的启用状态）
+  const index = new UserIndex();
+  index.fromEnv(env);
+  index.fromManaged(managed);
+  const out = index.result(readOk);
   S.usersCache = { v: out, t: readOk ? Date.now() : Date.now() - USERS_TTL + 60000 };
   return out;
 }
