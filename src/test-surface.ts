@@ -38,6 +38,9 @@ export { EMPTY_CLOSE_BAD, NodeStatsTable, STATS, TEN_MB, ZERO_STAT } from "./nod
 export { SC } from "./core/const";
 export { SEL } from "./px/selector";
 export { dwellOf } from "./px/selector";
+export { PICK, PickPath } from "./px/pickpath";
+export { SITE, SitePick } from "./px/pick-site";
+export { PATHS, PathPrefs } from "./px/pick-pref";
 export { SEEDS } from "./px/seed";
 export { Connection } from "./proxy/connection";
 export { CAGG_MAX, ConnSettle, SETTLE, type SettleView } from "./proxy/conn-settle";

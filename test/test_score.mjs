@@ -97,6 +97,10 @@ const policyAll = () =>
   ["src/route/policy.ts", "src/route/policy-rank.ts", "src/route/policy-cf.ts"]
     .map((f) => fs.readFileSync(f, "utf8")).join("\n");
 
+/** 功能：把挑路的四段源码（编排 / 类型 / 画像 / 偏好）合并成一段文本，源码锁读它。 */
+const pickAll = () =>
+  ["src/px/pickpath.ts", "src/px/pick-types.ts", "src/px/pick-site.ts", "src/px/pick-pref.ts", "src/px/pick-ready.ts"]
+    .map((f) => fs.readFileSync(f, "utf8")).join("\n");
 const eq = (n, a, b) => {
   // want 是 undefined / 函数，或拿到的东西是函数时，序列化比较会两边都变成 undefined，
   // 断言永远为真（v7.150 修的空断言：删掉某函数后，旧锁其实一直没在测）。
@@ -5598,7 +5602,7 @@ try {
   ok("节点统计里不再有 eCloseD（只写不读）", !stCode.includes("eCloseD"));
   ok("影子试探的窗口常量进了 SC", fs.readFileSync("src/core/const.ts", "utf8").includes("UNTRIED_GAP: 20000"));
   ok("untried 会读 lastTry", metricsAll().includes("SC.UNTRIED_GAP"));
-  ok("selector 仍在返回前记 lastTry", fs.readFileSync("src/px/pickpath.ts", "utf8").includes("nsGet(t0).lastTry = Date.now();"));
+  ok("selector 仍在返回前记 lastTry", pickAll().includes("nsGet(t0).lastTry = Date.now();"));
   ok("直连空关闭的全局计数保留", fs.readFileSync("src/proxy/attacher.ts", "utf8").includes('cnt("eCloseD")'));
   ok("类型里也没有 eCloseD", !fs.readFileSync("types/app.d.ts", "utf8").includes("eCloseD"));
   const k213 = "10.213.9.9:443";
@@ -7286,7 +7290,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 
 // ── 253) 改名必须两端同名（本轮自伤一次，锁住它） ──
 {
-  const sel253 = fs.readFileSync("src/px/pickpath.ts", "utf8");
+  const sel253 = pickAll();
   const con253 = fs.readFileSync("src/proxy/connection.ts", "utf8");
   ok("选路读的是 targetBytes", sel253.includes("(st && st.targetBytes) || 0"), "");
   ok("连接上确实有 targetBytes", con253.includes("targetBytes = 0;"), "");
@@ -7484,9 +7488,9 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   eq("ipOf 与 relayIpOf 同源（方括号）", ipOf("[2a06:98c0::103]:443"), relayIpOf("[2a06:98c0::103]:443"));
   eq("ipOf 无冒号不吃字符", ipOf("1.2.3.4"), "1.2.3.4");
   // 源码锁：选路里不能再有本地那份 slice(0, lastIndexOf(":")) 解析
-  const selSrc = fs.readFileSync("src/px/pickpath.ts", "utf8");
+  const selSrc = pickAll();
   ok("selector 不再自写 IP 解析", !selSrc.includes('k.slice(0, k.lastIndexOf(":"))'));
-  ok("selector 用 relayIpOf", selSrc.includes("cp(relayIpOf(first), host)") && selSrc.includes("cp(relayIpOf(x.k), host)"));
+  ok("selector 用 relayIpOf", selSrc.includes("cp(relayIpOf(key), host)") && selSrc.includes("cp(relayIpOf(x.k), host)"));
   const rhSrc = fs.readFileSync("src/route/relay-health.ts", "utf8");
   ok("relay-health 的 ipOf 委托 relayIpOf", rhSrc.includes("return relayIpOf(node);"));
   ok("relay-health 不再自己拆冒号", !rhSrc.includes('node.lastIndexOf(":")'));
@@ -8897,6 +8901,51 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   const gone = { bufferedAmount: 1e9, readyState: 3, send() {}, close() {} };
   eq("客户端已断开时门禁返回假", await flow.gate(gone, null), false);
   eq("走的路径记 ccut 不记 stall", (W.S.cnt.ccut || 0) > 0 && !(W.S.cnt.stall || 0), true);
+}
+
+
+// ---- [296] 挑路的四件事各自成文件：编排 / 类型 / 池子就绪 / 画像 / 偏好 ----
+console.log("\n[296] 挑路拆成编排、池子就绪、站点画像、偏好过滤四层");
+{
+  const pickSrc = fs.readFileSync("src/px/pickpath.ts", "utf8");
+  const typeSrc = fs.readFileSync("src/px/pick-types.ts", "utf8");
+  const readySrc = fs.readFileSync("src/px/pick-ready.ts", "utf8");
+  const siteSrc = fs.readFileSync("src/px/pick-site.ts", "utf8");
+  const prefSrc = fs.readFileSync("src/px/pick-pref.ts", "utf8");
+
+  // 编排层只做「什么时候问谁」，不再自己算画像与偏好
+  ok("pickpath 只做编排（≤150 行，且不含抽样与画像调用）", pickSrc.split("\n").length <= 150 && !pickSrc.includes("pickThom("), `len=${pickSrc.split("\n").length}`);
+  ok("pickpath 有 region/current/pick 三个入口", pickSrc.includes("async region(") && pickSrc.includes("async current(") && pickSrc.includes("  pick("));
+  ok("pickpath 的 pick 一行委托给 SITE", pickSrc.includes("return SITE.pick(env, mode, st);"));
+  ok("pickpath 不再自己抽样", !pickSrc.includes("pickThom("));
+  ok("pickpath 不再自己拉池子", !pickSrc.includes("ensurePool(env)") && pickSrc.includes("await ensureReady(env);"));
+  ok("pickpath 不再自己读站点画像", !pickSrc.includes("hostRank(") && !pickSrc.includes("hostUntried("));
+
+  // 类型层只有形状
+  ok("pick-types 只有 PickState 一个形状", typeSrc.includes("export interface PickState") && !typeSrc.includes("class ") && !typeSrc.includes("function "));
+
+  // 池子就绪层：唯一的「会等」的地方
+  ok("pick-ready 导出 ensureReady", readySrc.includes("export async function ensureReady("));
+  ok("pick-ready 的等待有上限", readySrc.includes("700"));
+  ok("pick-ready 起搏不 await", !readySrc.includes("await seedAlive("));
+  ok("pick-ready 是唯一读 ensurePool 的地方", pickSrc.split("ensurePool(").length - 1 === 0 && readySrc.includes("ensurePool(env)"));
+
+  // 画像层：站点偏好 + 抽样 + 溢出 + 兜底
+  ok("pick-site 有 SitePick 与单例", siteSrc.includes("export class SitePick") && siteSrc.includes("export const SITE = new SitePick();"));
+  ok("pick-site 负责抽样与溢出", siteSrc.includes("pickThom(") && siteSrc.includes("private spill(") && siteSrc.includes("private leastBad("));
+  ok("pick-site 不碰判定层偏好", !siteSrc.includes("HOOK."));
+
+  // 偏好层：只读不写，且要拿到站点上下文
+  ok("pick-pref 有 PathPrefs 与单例", prefSrc.includes("export class PathPrefs") && prefSrc.includes("export const PATHS = new PathPrefs();"));
+  ok("pick-pref 七个入口齐备", ["vetoed(", "byPrefer(", "nonCfFirst(", "byNonCf(", "rescan(", "chanOpen(", "byChan("].every((f) => prefSrc.includes(f)));
+  ok("pick-pref 的站点否决需要 host 参数", prefSrc.includes("vetoed(host: string, key: string)") && prefSrc.includes("byNonCf(host: string"));
+  ok("pick-pref 不自己抽样", !prefSrc.includes("pickThom("));
+  ok("pick-pref 不写连接状态", !prefSrc.includes("st.node ="));
+
+  // 行为面：三个单例都在，且「没有站点上下文时不否决任何通道」
+  ok("三个单例就位", W.SITE instanceof W.SitePick && W.PATHS instanceof W.PathPrefs && W.PICK instanceof W.PickPath);
+  ok("空站点时一律不否决", W.PATHS.vetoed("", "203.0.113.9:443") === false);
+  ok("空站点时通道判据也放行", W.PATHS.chanOpen("", "203.0.113.9:443") === true);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

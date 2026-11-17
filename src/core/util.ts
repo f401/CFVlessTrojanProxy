@@ -6,7 +6,7 @@
 // 1) 对外导出面不变（六十多个调用点零改动，「行为不变」由测试证明）；
 // 2) `VERSION` 仍然只有这一处真源（`doc-audit` 与发版脚本都读它）。
 
-export const VERSION = "7.295";
+export const VERSION = "7.296";
 
 export * from "./bytes";
 export * from "./concurrency";
