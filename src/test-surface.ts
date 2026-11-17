@@ -110,6 +110,18 @@ export { runCron } from "./routes/cron";
 export { proxyip } from "./routes/proxyip";
 export { debug } from "./routes/debug";
 export { METER_PROBES, DebugMeterProbes } from "./routes/debug-meter";
+export {
+  BENCH,
+  DIAGONE,
+  DebugBench,
+  DebugDiag,
+  DebugNets,
+  DebugProbe,
+  DebugTf,
+  NETS,
+  PROBES,
+  TFPROBES,
+} from "./routes/debug-nets";
 export { renderStatsHtml } from "./views/panel";
 export { statsNodeRows } from "./nodes/stats-rows";
 export { randomPwd } from "./edge/auth";

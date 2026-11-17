@@ -36,8 +36,34 @@ const metricsAll = () =>
     .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
     .join("\n");
 
+/**
+ * 会拨号的诊断分支五段源码拼在一起：`debug-nets.ts`（门面）/ `debug-net-bench.ts`（出口测速）/
+ * `debug-net-diag.ts`（站点诊断）/ `debug-net-probe.ts`（三个直接拨号的探针）/ `debug-net-tf.ts`（借 DO 跑 tunnelfetch）。
+ * v7.294 把 344 行的 `debug-nets.ts` 按「花哪种预算」拆开，源码锁改成「在整个测网模块里存在」。
+ * @returns {string} 五段源码
+ */
+const netsAll = () =>
+  [
+    "src/routes/debug-nets.ts",
+    "src/routes/debug-net-bench.ts",
+    "src/routes/debug-net-diag.ts",
+    "src/routes/debug-net-probe.ts",
+    "src/routes/debug-net-tf.ts",
+  ]
+    .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
+    .join("\n");
+
 const debugAll = () =>
-  ["src/routes/debug.ts", "src/routes/debug-tables.ts", "src/routes/debug-nets.ts", "src/routes/debug-actions.ts"]
+  [
+    "src/routes/debug.ts",
+    "src/routes/debug-tables.ts",
+    "src/routes/debug-nets.ts",
+    "src/routes/debug-net-bench.ts",
+    "src/routes/debug-net-diag.ts",
+    "src/routes/debug-net-probe.ts",
+    "src/routes/debug-net-tf.ts",
+    "src/routes/debug-actions.ts",
+  ]
     .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
     .join("\n");
 import * as W from "./_bundle.mjs";
@@ -7669,7 +7695,7 @@ eq("拆地址：空串回默认端口", W.splitRelay("", 443).join("|"), "|443")
 eq("拆地址：方括号无端口", W.splitRelay("[2a06:98c0::103]", 443).join("|"), "2a06:98c0::103|443");
 
 // 五处调用点都改走同一份实现
-ok("调试探针不再内联拆地址", !debugAll().includes('lastIndexOf(":")') && debugAll().includes("const [ph, pp] = splitRelay(pr, 443);"));
+ok("调试探针不再内联拆地址", !netsAll().includes('lastIndexOf(":")') && netsAll().includes("const [ph, pp] = splitRelay(pr, 443);"));
 ok("池子探活不再内联拆地址", !scanAll().includes('lastIndexOf(":")') && scanAll().includes("splitRelay(key, 443)"));
 ok("名单打包不再内联拆地址", !code265("src/px/seed.ts").includes("k.slice(0, i)") && code265("src/px/seed.ts").includes("splitRelay(k, 443)"));
 ok("订阅渲染不再内联拆地址", !code265("src/views/sub.ts").includes('lastIndexOf(":")') && code265("src/views/sub.ts").includes("const [ip] = splitRelay(k, 443);"));
@@ -7731,7 +7757,7 @@ ok("policy 用 St.Reachable 过滤判定行", srcPol267.includes("v.state !== St
 ok("prefs 用 St.Reachable/St.Blocked 分栏", srcPref267.includes("x.state === St.Reachable") && srcPref267.includes("x.state >= St.Blocked"), "");
 ok("prefs 的 chan() 用 St.Reachable", srcPref267.includes("if (state === St.Reachable) return 0;"), "");
 ok("verdictsync 用 St.Blocked", srcVs267.includes("if (v.state < St.Blocked) continue;"), "");
-ok("debug 的中继封锁列表用 St.Blocked", srcDbg267.includes("|| v.state < St.Blocked) continue;"), "");
+ok("debug 的中继封锁列表用 St.Blocked", netsAll().includes("|| v.state < St.Blocked) continue;"), "");
 
 // 门禁在位且真会红（行为由 .tmp-sim 自证，这里锁存在性）
 const gate267 = fs.readFileSync("tools/check-names.mjs", "utf8");
@@ -8141,14 +8167,15 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
 /* ---------- 第 278 组：诊断路由的 DO 读取与 v6 建连都走唯一入口 ---------- */
 {
   const aSrc278 = debugAll();
+  const aNets278 = netsAll();
   const cli278 = fs.readFileSync("src/store/meter-client.ts", "utf8");
   // 计数点唯一：`S.doCalls` 只在 `doFetch` 里自增，所以任何绕过它的 stub.fetch 都会让 /health 少记一块
   ok("debug.ts 不再直接取 METER 存根", !/env\.METER\.get\(/.test(aSrc278));
-  ok("debug.ts 六条 DO 读取全走 doFetch", (aSrc278.match(/doFetch\(/g) || []).length === 6);
+  ok("诊断模块六条 DO 读取全走 doFetch", (debugAll().match(/doFetch\(/g) || []).length === 6);
   ok("debug.ts 不再自己拼 connect", !/connect\(\{/.test(aSrc278));
   ok("debug.ts 不再引用 CONNECT_MS", !aSrc278.includes("CONNECT_MS"));
   ok("debug.ts 不再导入 cloudflare:sockets", !aSrc278.includes("cloudflare:sockets"));
-  ok("debug.ts 的 v6 建连走拨号器", aSrc278.includes("SOCKET_DIALER.open(expandV6(out.aaaa), 443)"));
+  ok("debug.ts 的 v6 建连走拨号器", aNets278.includes("SOCKET_DIALER.open(expandV6(out.aaaa), 443)"));
   ok("doFetch 仍是唯一自增点", (cli278.match(/S\.doCalls \+= 1;/g) || []).length === 1);
 
   // 行为面：三条诊断读取各要真的把子请求记进 S.doCalls（旧代码在这三条上恒为 0）
@@ -8376,7 +8403,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   const g = "283";
   const orch = fs.readFileSync("src/routes/debug.ts", "utf8");
   const tabs = fs.readFileSync("src/routes/debug-tables.ts", "utf8");
-  const nets = fs.readFileSync("src/routes/debug-nets.ts", "utf8");
+  const nets = netsAll();
   const acts = fs.readFileSync("src/routes/debug-actions.ts", "utf8");
   // 编排层只按固定顺序调用三个组件，自己不再读任何参数：这条锁防的是「拆完之后又往编排里塞逻辑」
   ok(`[${g}] 编排层不再自己判断参数`, !orch.includes("searchParams.get(\"dd\")") && !orch.includes("searchParams.get(\"bench\")"));
@@ -8759,6 +8786,54 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   box3.push("b|1.1.1.1", { n: 3, at: 9 });
   box3.ack();
   eq("ack 只清发出时那一版，新观测留着", box3.delta().map((r) => r.at), [9]);
+}
+
+/* ---------- 第 294 组：会拨号的诊断分支按「花哪种预算」拆成四个组件 ---------- */
+{
+  const g = 294;
+  const fac = fs.readFileSync("src/routes/debug-nets.ts", "utf8");
+  const bench = fs.readFileSync("src/routes/debug-net-bench.ts", "utf8");
+  const diag = fs.readFileSync("src/routes/debug-net-diag.ts", "utf8");
+  const probe = fs.readFileSync("src/routes/debug-net-probe.ts", "utf8");
+  const tf = fs.readFileSync("src/routes/debug-net-tf.ts", "utf8");
+  const all = fac + bench + diag + probe + tf;
+
+  // 门面只派发：不自己拨号、不自己读 DO、不自己量吞吐
+  eq(`[${g}] 门面不超过 100 行`, fac.split("\n").length <= 100, true);
+  eq(
+    `[${g}] 门面七个分支全是委托`,
+    ["BENCH.bench", "DIAGONE.diag", "PROBES.rawProbe", "PROBES.http", "TFPROBES.tfb", "TFPROBES.tf", "PROBES.host"].every(
+      (x) => fac.includes(`return ${x}(`),
+    ),
+    true,
+  );
+  ok(`[${g}] 门面自己不拨号也不读 DO`, !fac.includes("SOCKET_DIALER.open(") && !fac.includes("doFetch(") && !fac.includes("connect({"));
+
+  // 四个组件各自只花一种预算
+  ok(`[${g}] 测速组件不占 connect 名额`, !bench.includes("SOCKET_DIALER") && !bench.includes("connect({"));
+  ok(`[${g}] 测速有 20 秒中止与 64KB–32MB 夹取`, bench.includes("}, 20000);") && bench.includes("64 * 1024") && bench.includes("32 * 1024 * 1024"));
+  ok(`[${g}] 诊断组件不自己建连（探活走 probeSni）`, !diag.includes("SOCKET_DIALER.open(") && diag.includes("probeSni(a.h, a.p, diagHost)"));
+  ok(`[${g}] 诊断读的是 blk2 而不是旧封锁表`, diag.includes('doFetch(env, id, "https://meter/vt")') && diag.includes("r.at + BLK_TTL - now2"));
+  eq(`[${g}] 探针组件三个入口`, ["async rawProbe(", "async http(", "async host("].every((x) => probe.includes(x)), true);
+  ok(`[${g}] 探针组件只用拨号器与唯一拆地址实现`, probe.includes("splitRelay(pr, 443)") && probe.includes("SOCKET_DIALER.open(expandV6(out.aaaa), 443)") && !probe.includes("connect({"));
+  eq(`[${g}] 真握手组件的两级上限`, ["20000,", "withTimeout(r.json(), 5000)"].every((x) => tf.includes(x)), true);
+  eq(`[${g}] 两个组件各自先过管理员检查`, [tf, probe].map((t) => t.split("await adminOnly(c)").length - 1), [2, 1]);
+
+  // 单例与行为：四个组件各一个实例，门面把这四个实例接着用
+  eq(`[${g}] 四个组件各导出单例`, ["export const BENCH", "export const DIAGONE", "export const PROBES", "export const TFPROBES"].every((x) => all.includes(x)), true);
+  ok(`[${g}] 门面单例仍是同一个类`, W.NETS instanceof W.DebugNets && W.BENCH instanceof W.DebugBench && W.PROBES instanceof W.DebugProbe);
+  eq(`[${g}] 没给参数时测速分支直接回落`, await W.NETS.bench(new URL("https://x.invalid/debug")), null);
+  eq(`[${g}] 没给参数时探活分支直接回落`, await W.NETS.rawProbe(new URL("https://x.invalid/debug")), null);
+  // 域名格式不对时诊断不拨号、直接报错（这也是「先校验再花钱」的最小证据）
+  const badCtx = {
+    request: new Request("https://x.invalid/debug?diag=bad host"),
+    url: new URL("https://x.invalid/debug?diag=bad%20host"),
+    env: {},
+    id: "u294",
+    exec: { waitUntil() {}, passThroughOnException() {} },
+  };
+  const badResp = await W.NETS.diag(badCtx, badCtx.url);
+  eq(`[${g}] 域名不合法时诊断直接报错`, ((await badResp.json()) || {}).ok, false);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
