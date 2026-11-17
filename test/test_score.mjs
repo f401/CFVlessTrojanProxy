@@ -16,10 +16,12 @@ const storeSrc = () =>
  * v7.282 把这层一分为四，源码锁改成「在整个 stat 模块里存在」，避免以后每次挪文件都要改一批断言。
  * @returns {string} 五段源码
  */
-const statAll = () =>
-  ["src/nodes/stat.ts", "src/nodes/stat-types.ts", "src/nodes/stat-table.ts", "src/nodes/stat-view.ts", "src/nodes/stat-observe.ts"]
-    .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
-    .join("\n");
+/**
+ * 节点统计这一层的源码：类型、表本体、派生视图、九类观测现在都在 `src/nodes/stat.ts` 一个文件里
+ * （v7.297 把 7.282 拆出去的四段合了回来 —— 它们没有各自独立的生命周期）。
+ * @returns {string} 这一层的源码
+ */
+const statAll = () => fs.readFileSync("src/nodes/stat.ts", "utf8");
 
 /**
  * 诊断路由四段源码拼在一起：`debug.ts`（编排）/ `debug-tables.ts`（只读表）/ `debug-nets.ts`（会拨号的测量）/ `debug-actions.ts`（会改状态的写）。
@@ -42,29 +44,20 @@ const metricsAll = () =>
  * v7.294 把 344 行的 `debug-nets.ts` 按「花哪种预算」拆开，源码锁改成「在整个测网模块里存在」。
  * @returns {string} 五段源码
  */
-const netsAll = () =>
-  [
-    "src/routes/debug-nets.ts",
-    "src/routes/debug-net-bench.ts",
-    "src/routes/debug-net-diag.ts",
-    "src/routes/debug-net-probe.ts",
-    "src/routes/debug-net-tf.ts",
-  ]
-    .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
-    .join("\n");
+/**
+ * 会拨号的诊断分支：门面、测速、站点诊断、三个探针、判定批与真握手五个类现在都在
+ * `src/routes/debug-nets.ts` 一个文件里（v7.297 合回）。
+ * @returns {string} 这一层的源码
+ */
+const netsAll = () => fs.readFileSync("src/routes/debug-nets.ts", "utf8");
 
+/**
+ * 整条调试路由的源码：编排（`debug.ts`）+ 只读表 + 会拨号的测量（`debug-nets.ts`）+ 会改状态的写。
+ * @returns {string} 四段源码
+ */
 const debugAll = () =>
-  [
-    "src/routes/debug.ts",
-    "src/routes/debug-tables.ts",
-    "src/routes/debug-nets.ts",
-    "src/routes/debug-net-bench.ts",
-    "src/routes/debug-net-diag.ts",
-    "src/routes/debug-net-probe.ts",
-    "src/routes/debug-net-tf.ts",
-    "src/routes/debug-actions.ts",
-  ]
-    .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
+  ["src/routes/debug.ts", "src/routes/debug-tables.ts", "src/routes/debug-nets.ts", "src/routes/debug-actions.ts"]
+    .map((f) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : ""))
     .join("\n");
 import * as W from "./_bundle.mjs";
 import { webcrypto } from "node:crypto";
@@ -5553,7 +5546,7 @@ try {
   eq("扫完整轮才写 candN", W.S.candN, N212);
   ok("整轮确实是分片扫的", calls212 > 1, "calls=" + calls212);
   const ts212 = fs.readFileSync("src/px/ts.ts", "utf8");
-  const sc212 = fs.readFileSync("src/nodes/score-cands.ts", "utf8");
+  const sc212 = fs.readFileSync("src/nodes/score.ts", "utf8");
   ok("pickThom 的分母是存活表大小", ts212.includes("const nPool = S.alive.size ||"), "");
   ok("候选表只在扫完时写 candN", sc212.includes("if (st.pos >= st.keys.length) S.candN = st.ok;"), "");
   ok("注释写明不能用 candN 当池子大小", ts212.includes("只反映「已经扫过的那一段」"), "");
@@ -8364,28 +8357,21 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   eq("非法覆盖回落默认", JSON.stringify(W.pxPolicy({ pxFailMax: "0", pxForceAt: "-1" })), JSON.stringify({ fail: 3, force: 5 }));
 }
 
-// ──────────────────────────────── 第 282 组：节点统计一分为四（类型 / 表 / 派生 / 观测）────────────────────────────────
+// ──────────────────────────────── 第 282 组：节点统计这一层的四件事都在一个文件里（v7.297 合回）────────────────────────────────
 {
-  const facade = fs.readFileSync("src/nodes/stat.ts", "utf8");
-  const types = fs.readFileSync("src/nodes/stat-types.ts", "utf8");
-  const table = fs.readFileSync("src/nodes/stat-table.ts", "utf8");
-  const view = fs.readFileSync("src/nodes/stat-view.ts", "utf8");
-  const obs = fs.readFileSync("src/nodes/stat-observe.ts", "utf8");
+  const src = fs.readFileSync("src/nodes/stat.ts", "utf8");
   const noComment = (s) => s.split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*") && !l.trim().startsWith("/*")).join("\n");
-  // 门面只做再导出
-  ok("门面不再定义函数或类", !facade.includes("export function ") && !facade.includes("export class "), "");
-  eq("门面四个来源各一行", ["stat-types", "stat-table", "stat-view", "stat-observe"].filter((m) => facade.includes(`"${"./" + m}"`)).length, 4);
-  ok("门面不超过 12 行", facade.split("\n").length <= 12, String(facade.split("\n").length));
-  // 四块各就各位
-  ok("类型层只有类型与常量", types.includes("export interface EffView") && types.includes("export const ZERO_STAT") && types.includes("export const TEN_MB") && types.includes("export const EMPTY_CLOSE_BAD"), "");
-  ok("类型层不碰 S", !noComment(types).includes("S."), "");
-  ok("表层持有类与单例", table.includes("export class NodeStatsTable {") && table.includes("export const STATS = new NodeStatsTable();"), "");
-  ok("表层只留取条目与打缓存两个方法", table.includes("  nsGet(k: string)") && table.includes("  invalidateRank()") && !table.includes("  nsOk(k: string)"), "");
-  ok("表层保留两个同名薄包装", table.includes("export function nsGet(k: string): NodeStats {") && table.includes("export function invalidateRank(): void {"), "");
-  ok("派生层全是纯函数且不碰 S", !noComment(view).includes("S.") && ["nsDecay", "ageFactor", "effView", "pFailFast", "pFailOf", "availOf", "pStallOf"].every((f) => view.includes(`export function ${f}(`)), "");
-  ok("观测层九个写入都在", ["nsOk", "nsProbe", "nsProbeFail", "nsFail", "nsSiteFail", "nsSpeed", "nsStall", "nsLatency", "nsEmptyClose"].every((f) => obs.includes(`export function ${f}(`)), "");
-  ok("观测层经表单例取条目、不自己碰 S.nstat", obs.includes("STATS.nsGet(") && !obs.includes("S.nstat"), "");
-  ok("观测层不含 class", !obs.includes("export class "), "");
+  // 7.282 曾把这层一分为四（类型 / 表 / 派生 / 观测），7.297 按「减少文件数、增加类数」合回一个文件：
+  // 四段没有各自独立的生命周期，拆开只是把 import 搬了个位置。
+  ok("四段归位到同一个文件", ["src/nodes/stat-types.ts", "src/nodes/stat-table.ts", "src/nodes/stat-view.ts", "src/nodes/stat-observe.ts"].every((f) => !fs.existsSync(f)), "");
+  ok("类型与常量仍在", src.includes("export interface EffView") && src.includes("export const ZERO_STAT") && src.includes("export const TEN_MB") && src.includes("export const EMPTY_CLOSE_BAD"), "");
+  ok("表本体持有类与单例", src.includes("export class NodeStatsTable {") && src.includes("export const STATS = new NodeStatsTable();"), "");
+  ok("表本体只留取条目与打缓存两个方法", src.includes("  nsGet(k: string)") && src.includes("  invalidateRank()") && !src.includes("  nsOk(k: string)"), "");
+  ok("两个同名薄包装仍在", src.includes("export function nsGet(k: string): NodeStats {") && src.includes("export function invalidateRank(): void {"), "");
+  ok("派生层七个纯函数都在", ["nsDecay", "ageFactor", "effView", "pFailFast", "pFailOf", "availOf", "pStallOf"].every((f) => src.includes(`export function ${f}(`)), "");
+  ok("观测层九个写入都在", ["nsOk", "nsProbe", "nsProbeFail", "nsFail", "nsSiteFail", "nsSpeed", "nsStall", "nsLatency", "nsEmptyClose"].every((f) => src.includes(`export function ${f}(`)), "");
+  ok("观测层经表单例取条目、不自己碰 S.nstat", src.includes("STATS.nsGet(") && !noComment(src).includes("S.nstat["), "");
+  ok("这一层只有 NodeStatsTable 一个类", (src.match(/^export class /gm) || []).length === 1, "");
   // 行为面：常量与写入仍然照旧（用独立键，避免与别的组互相污染）
   eq("TEN_MB 仍是 10MB", W.TEN_MB, 10 * 1048576);
   eq("空关闭门槛仍是 5", W.EMPTY_CLOSE_BAD, 5);
@@ -8548,43 +8534,32 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   eq("清站点把该目标的行全删掉", W.vAll("rt287.example").length, 0);
   W.vClear();
 }
-// 第 288 组：371 行的 score.ts 拆成「代价 / 健康度 / 候选表」三层后，职责边界必须只有一种读法（7.288）
+// 第 288 组：评分这一层的三层（代价 / 健康度 / 候选表）都在一个文件里，且没有空壳类（7.288 拆分 → 7.297 合回）
 {
-  const facSrc = fs.readFileSync("src/nodes/score.ts", "utf8");
-  const healthSrc = fs.readFileSync("src/nodes/score-health.ts", "utf8");
-  const costSrc = fs.readFileSync("src/nodes/score-cost.ts", "utf8");
-  const candSrc = fs.readFileSync("src/nodes/score-cands.ts", "utf8");
-  ok("门面只做再导出（≤14 行）", facSrc.split("\n").length <= 14, String(facSrc.split("\n").length));
-  ok("门面转出三块",
-    ["score-health", "score-cost", "score-cands"].every((m) => facSrc.includes(`export * from "./${m}"`)), "");
-  ok("门面不再定义任何一个函数", !/export function /.test(facSrc), "");
+  const src = fs.readFileSync("src/nodes/score.ts", "utf8");
+  ok("三块归位到同一个文件", ["src/nodes/score-health.ts", "src/nodes/score-cost.ts", "src/nodes/score-cands.ts"].every((f) => !fs.existsSync(f)), "");
   // 空壳类：一个字段都没有、方法全在读 S —— 按 AGENTS.md 的约定不该存在
   ok("空壳类 Scorer 已删除", W.Scorer === undefined && W.SCORER === undefined, "");
-  ok("三个模块都不再出现 class Scorer",
-    [facSrc, healthSrc, costSrc, candSrc].every((t) => !t.includes("class Scorer")), "");
-  // 健康度层只读 S.nstat：写出这六个判断，不碰 alive/候选表
+  ok("文件里不再出现 class Scorer", !src.includes("class Scorer"), "");
+  // 健康度层只读 S.nstat：写出这六个判断，不碰候选表
   ok("健康度层有六个判断",
     ["export function isBlack", "export function isFrozen", "export function freezeNode",
       "export function suspectOf", "export function emptyCloseSuspect", "export function usable"]
-      .every((n) => healthSrc.includes(n)), "");
-  ok("健康度层不引用候选表", !healthSrc.includes("rankedCands") && !healthSrc.includes("candsFor"), "");
+      .every((n) => src.includes(n)), "");
   // 代价层是纯计算：两个入口 + 一个分解类型
-  ok("代价层只有两个函数",
-    (costSrc.match(/^export function /gm) || []).length === 2, "");
-  ok("代价层不引用候选表", !costSrc.includes("rankedCands") && !costSrc.includes("CAND_"), "");
-  // 候选表层依赖另两层，并把 CAND_* 收成私有常量（外部不该知道 224/64/128 这些数）
+  ok("代价层只有两个函数", (src.match(/^export function (scoreParts|costOf)\(/gm) || []).length === 2, "");
+  // 候选表层把 CAND_* 收成私有常量（外部不该知道 224/64/128 这些数）
   ok("候选表层四个入口齐备",
     ["export function rankedCands", "export function candsFor", "export function nextNode", "export function bestFor"]
-      .every((n) => candSrc.includes(n)), "");
-  ok("候选表层不再导出 CAND_ 常量", !/export const CAND_/.test(candSrc), "");
-  ok("候选表层依赖代价层与健康度层",
-    candSrc.includes('from "./score-cost"') && candSrc.includes('from "./score-health"'), "");
+      .every((n) => src.includes(n)), "");
+  ok("候选表常量不再导出", !/export const CAND_/.test(src), "");
+  ok("这一层不定义类", !/^export class /m.test(src), "");
   // 行为面：门面转发仍然指向真实实现
-  ok("门面 scoreParts 仍能算分解", typeof W.scoreParts("g288:443", "lat").score === "number", "");
+  ok("scoreParts 仍能算分解", typeof W.scoreParts("g288:443", "lat").score === "number", "");
   W.S.alive.set("g288:443", { h: "g288", p: 443, cc: "", ms: 120 });
-  ok("门面 candsFor 仍看得到存活表", W.candsFor("lat").some((r) => r.k === "g288:443"), "");
-  ok("门面 bestFor 返回存活表里的键", typeof W.bestFor("lat") === "string" && W.bestFor("lat").length > 0, W.bestFor("lat"));
-  ok("门面 usable 认可用", W.usable("g288:443") === true, "");
+  ok("candsFor 仍看得到存活表", W.candsFor("lat").some((r) => r.k === "g288:443"), "");
+  ok("bestFor 返回存活表里的键", typeof W.bestFor("lat") === "string" && W.bestFor("lat").length > 0, W.bestFor("lat"));
+  ok("usable 认可用", W.usable("g288:443") === true, "");
   W.freezeNode("g288:443");
   ok("冻结后立即不可用", W.usable("g288:443") === false && W.isFrozen("g288:443") === true, "");
   W.S.alive.delete("g288:443");
@@ -8791,52 +8766,27 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   eq("ack 只清发出时那一版，新观测留着", box3.delta().map((r) => r.at), [9]);
 }
 
-/* ---------- 第 294 组：会拨号的诊断分支按「花哪种预算」拆成四个组件 ---------- */
+/* ---------- 第 294 组：会拨号的诊断分支按「花哪种预算」分成五个类，但都在一个文件里（v7.297 合回） ---------- */
 {
-  const g = 294;
-  const fac = fs.readFileSync("src/routes/debug-nets.ts", "utf8");
-  const bench = fs.readFileSync("src/routes/debug-net-bench.ts", "utf8");
-  const diag = fs.readFileSync("src/routes/debug-net-diag.ts", "utf8");
-  const probe = fs.readFileSync("src/routes/debug-net-probe.ts", "utf8");
-  const tf = fs.readFileSync("src/routes/debug-net-tf.ts", "utf8");
-  const all = fac + bench + diag + probe + tf;
-
-  // 门面只派发：不自己拨号、不自己读 DO、不自己量吞吐
-  eq(`[${g}] 门面不超过 100 行`, fac.split("\n").length <= 100, true);
-  eq(
-    `[${g}] 门面七个分支全是委托`,
-    ["BENCH.bench", "DIAGONE.diag", "PROBES.rawProbe", "PROBES.http", "TFPROBES.tfb", "TFPROBES.tf", "PROBES.host"].every(
-      (x) => fac.includes(`return ${x}(`),
-    ),
-    true,
-  );
-  ok(`[${g}] 门面自己不拨号也不读 DO`, !fac.includes("SOCKET_DIALER.open(") && !fac.includes("doFetch(") && !fac.includes("connect({"));
-
-  // 四个组件各自只花一种预算
-  ok(`[${g}] 测速组件不占 connect 名额`, !bench.includes("SOCKET_DIALER") && !bench.includes("connect({"));
-  ok(`[${g}] 测速有 20 秒中止与 64KB–32MB 夹取`, bench.includes("}, 20000);") && bench.includes("64 * 1024") && bench.includes("32 * 1024 * 1024"));
-  ok(`[${g}] 诊断组件不自己建连（探活走 probeSni）`, !diag.includes("SOCKET_DIALER.open(") && diag.includes("probeSni(a.h, a.p, diagHost)"));
-  ok(`[${g}] 诊断读的是 blk2 而不是旧封锁表`, diag.includes('doFetch(env, id, "https://meter/vt")') && diag.includes("r.at + BLK_TTL - now2"));
-  eq(`[${g}] 探针组件三个入口`, ["async rawProbe(", "async http(", "async host("].every((x) => probe.includes(x)), true);
-  ok(`[${g}] 探针组件只用拨号器与唯一拆地址实现`, probe.includes("splitRelay(pr, 443)") && probe.includes("SOCKET_DIALER.open(expandV6(out.aaaa), 443)") && !probe.includes("connect({"));
-  eq(`[${g}] 真握手组件的两级上限`, ["20000,", "withTimeout(r.json(), 5000)"].every((x) => tf.includes(x)), true);
-  eq(`[${g}] 两个组件各自先过管理员检查`, [tf, probe].map((t) => t.split("await adminOnly(c)").length - 1), [2, 1]);
-
-  // 单例与行为：四个组件各一个实例，门面把这四个实例接着用
-  eq(`[${g}] 四个组件各导出单例`, ["export const BENCH", "export const DIAGONE", "export const PROBES", "export const TFPROBES"].every((x) => all.includes(x)), true);
-  ok(`[${g}] 门面单例仍是同一个类`, W.NETS instanceof W.DebugNets && W.BENCH instanceof W.DebugBench && W.PROBES instanceof W.DebugProbe);
-  eq(`[${g}] 没给参数时测速分支直接回落`, await W.NETS.bench(new URL("https://x.invalid/debug")), null);
-  eq(`[${g}] 没给参数时探活分支直接回落`, await W.NETS.rawProbe(new URL("https://x.invalid/debug")), null);
-  // 域名格式不对时诊断不拨号、直接报错（这也是「先校验再花钱」的最小证据）
-  const badCtx = {
-    request: new Request("https://x.invalid/debug?diag=bad host"),
-    url: new URL("https://x.invalid/debug?diag=bad%20host"),
-    env: {},
-    id: "u294",
-    exec: { waitUntil() {}, passThroughOnException() {} },
-  };
-  const badResp = await W.NETS.diag(badCtx, badCtx.url);
-  eq(`[${g}] 域名不合法时诊断直接报错`, ((await badResp.json()) || {}).ok, false);
+  const src = fs.readFileSync("src/routes/debug-nets.ts", "utf8");
+  ok("四个组件文件已合回", ["src/routes/debug-net-bench.ts", "src/routes/debug-net-diag.ts", "src/routes/debug-net-probe.ts", "src/routes/debug-net-tf.ts"].every((f) => !fs.existsSync(f)), "");
+  // 五个类各自负责一段：门面 + 测速 + 站点诊断 + 三个探针 + 判定批/真握手
+  ok("五个类都在同一个文件里",
+    ["export class DebugNets", "export class DebugBench", "export class DebugDiag", "export class DebugProbe", "export class DebugTf"]
+      .every((n) => src.includes(n)), "");
+  ok("五个单例都在",
+    ["const NETS = new DebugNets();", "const BENCH = new DebugBench();", "const DIAGONE = new DebugDiag();",
+      "const PROBES = new DebugProbe();", "const TFPROBES = new DebugTf();"]
+      .every((n) => src.includes(n)), "");
+  ok("上下文类型只声明一次", (src.match(/type DebugCtx = /g) || []).length === 1, "");
+  // 只有两个类要管理员：改动状态的那两个分支（判定批与真握手不写状态，但会花 DO 的 CPU）
+  ok("需要管理员的入口都过了 adminOnly", (src.match(/await adminOnly\(c\)/g) || []).length >= 2, "");
+  ok("门面七行全是委托", (src.match(/return (BENCH|DIAGONE|PROBES|TFPROBES)\./g) || []).length === 7, String((src.match(/return (BENCH|DIAGONE|PROBES|TFPROBES)\./g) || []).length));
+  // 行为面：无参数时测速与原始探活都返回 null（不拨号、不花钱）
+  const u0 = new URL("https://x.test/debug");
+  eq("测速缺参返回 null", await W.BENCH.bench(u0), null);
+  eq("原始探活缺参返回 null", await W.PROBES.rawProbe(u0), null);
+  ok("单例可判定", W.NETS instanceof W.DebugNets && W.BENCH instanceof W.DebugBench, "");
 }
 
 

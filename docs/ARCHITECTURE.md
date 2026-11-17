@@ -209,9 +209,9 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 
 | 类 | 文件 | 独占的可变状态 |
 | --- | --- | --- |
-| `NodeStatsTable`（`STATS`） | `src/nodes/stat-table.ts` | 只有「按 host:port 取条目」与「打掉排行缓存」两件事 |
-| `stat-view`（无类，纯函数） | `src/nodes/stat-view.ts` | 衰減、视图、失败概率、可用性、卡顿概率：只吃 `NodeStats`、不碰 `S` |
-| `stat-observe`（无类，纯函数） | `src/nodes/stat-observe.ts` | 成功 / 探活 / 失败 / 站点失败 / 带宽 / 卡顿 / 首字节 / 空关闭八类观测写入 |
+| `NodeStatsTable` | `src/nodes/stat.ts` | STATS 单例与 `NodeStatsTable` 的读写入口（类型/派生/观测同在一个文件） |
+| `stat-view` | `src/nodes/stat.ts` | 派生视图（`effView`/`pFailOf`/`availOf` 等纯函数，同文件） |
+| `stat-observe` | `src/nodes/stat.ts` | 九类观测写入（`nsOk`/`nsFail`/`nsLatency`…，同文件） |
 | `Store` / `Seal` | `src/store/store.ts`、`crypto.ts` | KV 写入节流、AES 密钥缓存 |
 | 快照读写（自由函数 `writeSnap` / `getSnap` / `flushSnap`） | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存（无跨请求状态要独占，所以没有类） |
 | `PendingLedger`（`PEND`） | `src/store/pend.ts` | 待上报账本、自适应退避与 flush 定时器 |
@@ -270,10 +270,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `DebugMeterProbes` | `src/routes/debug-meter.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
 | `DebugTables` | `src/routes/debug-tables.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：只读表、不拨号、不改状态 |
 | `DebugNets` | `src/routes/debug-nets.ts` | 会对外拨号的诊断分支门面：七个分支在四个组件里，这里只按「只读 → 测速 → 诊断 → 探活 → 抓源 → 钉住 → 明文 HTTP → 判定批 → 真握手 → 回填 → seed → 兜底」的顺序派发（顺序变了，`?diag=x&refill=1` 会先花一次抓源） |
-| `DebugBench`（`BENCH`） | `src/routes/debug-net-bench.ts` | 出口测速：Worker → 源站的真实吞吐（20 秒中止、`bytes` 夹 64KB–32MB）；只花一次子请求，不占 `connect()` 名额 |
-| `DebugDiag`（`DIAGONE`） | `src/routes/debug-net-diag.ts` | 站点诊断：真实样本 → 可选主动探活（`probeSni`，占 `connect()` 名额）→ CF 托管判定 → 判定表里的中继 → 可选 `?do=1` 的 DO 快照（读 `blk2`，不是 7.124 后就没有生产者的旧封锁表） |
-| `DebugProbe`（`PROBES`） | `src/routes/debug-net-probe.ts` | 三个直接拨号的探针：原始 ClientHello（`splitRelay` 认 `[v6]:port`）、明文 HTTP（6 秒上限）、IPv6 可达性（走 `SocketDialer` 借建连预算，不再自己抄一遍） |
-| `DebugTf`（`TFPROBES`） | `src/routes/debug-net-tf.ts` | 借计量 DO 的 CPU 走 `tunnelfetch`：判定批（`runTfb`）与单次真握手（`doFetch(env, "tf-probe", …)`，20 秒 + 5 秒两级上限） |
+| `DebugBench` | `src/routes/debug-nets.ts` | 出口测速（花 fetch 子请求，同文件） |
+| `DebugDiag` | `src/routes/debug-nets.ts` | 站点诊断（读样本免费、主动探活占 `connect()`，同文件） |
+| `DebugProbe` | `src/routes/debug-nets.ts` | 三个探针：原始 ClientHello / 明文 HTTP / IPv6 可达性（同文件） |
+| `DebugTf` | `src/routes/debug-nets.ts` | 判定批与真握手（子请求 + DO CPU，同文件） |
 | `DebugActions` | `src/routes/debug-actions.ts` | 会改状态的诊断操作（refill/cur/restore/seed）：全部先过 `adminOnly`，都会写 KV 或 DO |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表 |
 | `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
