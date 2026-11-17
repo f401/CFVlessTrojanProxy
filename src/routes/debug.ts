@@ -11,7 +11,7 @@ import { BLK_TTL } from "../route/commitfact";
 import { DEAD } from "../route/deadfacts";
 import { EG } from "../route/egfacts";
 import { FACTS } from "../route/factsstore";
-import { prefsJson } from "../route/prefs";
+import { PREFS } from "../route/prefs";
 import { PS } from "../route/psfacts";
 import { HEALTH } from "../route/relay-health";
 import { REL_SAMPLE_TTL, RELPERF } from "../route/relperf";
@@ -186,7 +186,7 @@ export class DebugTables {
    */
   private prefsRows(q: URLSearchParams): Response | null {
     if (q.get("prefs") !== "1") return null;
-    return json({ prefs: prefsJson(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });
+    return json({ prefs: PREFS.json(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });
   }
 
   /**

@@ -266,7 +266,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `CapFacts` | `src/route/capfacts.ts` | 吞吐容量表（相对池内中位数的容量比，带噪声门） |
 | `FactShadow` | `src/route/factshadow.ts` | 事实写入决策器的影子统计（% 形，不参与决策） |
 | `RelPerfTable` | `src/route/relperf.ts` | 站点 × 中继的实测性能表（首字节 / 吞吐，只有 ≥1 MB 的样本才记吞吐） |
-| `Prefs`（`PREFS`） | `src/route/prefs.ts` | 判定表折成「能打通 / 打不通」两栏，兼供 `chanPref` |
+| `Prefs`（`PREFS`） | `src/route/prefs.ts` | 判定表折成「能打通 / 打不通」两栏（`of` / `chan` / `json`）；调用点直接用这三个方法，7.349 起不再有 `prefsOf`/`chanPref`/`prefsJson` 三个转发函数（`HOOK.chanPref` 槽位仍注册到 `PREFS.chan`） |
 | `LatObs` | `src/core/obs.ts` | 首字节 / 总耗时 / 抖动三类窗口统计器 |
 | `FirstObs` | `src/core/obs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
 | `Attacher` | `src/proxy/attacher.ts` | 上游挂载与补救链：`run()` 只装配，收尾交给 `onClose()`；中转再试一条 / IPv6 兜底 / proxyip 三段各一方法 |

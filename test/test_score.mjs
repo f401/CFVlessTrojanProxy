@@ -1829,14 +1829,14 @@ W.VT.clear();
 // 第 39 组：节点偏好表（站点 × 通道的「能通 / 打不通」两栏）
 {
   W.VT.clear();
-  eq("没测过的通道不降权（未知 = 1）", W.chanPref("9.9.9.1", "a.com"), 1);
-  eq("不传站点一律「未知」：通配行已经不存在", W.chanPref("9.9.9.1"), 1);
+  eq("没测过的通道不降权（未知 = 1）", W.PREFS.chan("9.9.9.1", "a.com"), 1);
+  eq("不传站点一律「未知」：通配行已经不存在", W.PREFS.chan("9.9.9.1"), 1);
   W.VT.setState("a.com", "r:9.9.9.2", 1, 1);
-  eq("实测能打通的通道 = 0", W.chanPref("9.9.9.2", "a.com"), 0);
-  eq("别的站点看不到这条证据", W.chanPref("9.9.9.2", "b.com"), 1);
+  eq("实测能打通的通道 = 0", W.PREFS.chan("9.9.9.2", "a.com"), 0);
+  eq("别的站点看不到这条证据", W.PREFS.chan("9.9.9.2", "b.com"), 1);
   W.VT.setState("a.com", "r:9.9.9.3", 2, 1);
-  eq("实测打不通的通道 = 2", W.chanPref("9.9.9.3", "a.com"), 2);
-  const pf = W.prefsJson(20);
+  eq("实测打不通的通道 = 2", W.PREFS.chan("9.9.9.3", "a.com"), 2);
+  const pf = W.PREFS.json(20);
   eq("偏好表能打通一栏含该通道", pf.ok.some((x) => x.channel === "r:9.9.9.2"), true);
   eq("偏好表打不通一栏含该通道", pf.bad.some((x) => x.channel === "r:9.9.9.3"), true);
   W.VT.clear();
@@ -1847,15 +1847,15 @@ W.VT.clear();
   W.VT.clear();
   const ch = { kind: "r", ip: "9.9.9.7" };
   W.recordBlock({ target: "x.com", chan: ch, down: 700, ok: false });
-  eq("小响应立刻判该通道被拒", W.chanPref("9.9.9.7", "x.com"), 2);
-  eq("别的站点不受牵连", W.chanPref("9.9.9.7", "y.com"), 1);
+  eq("小响应立刻判该通道被拒", W.PREFS.chan("9.9.9.7", "x.com"), 2);
+  eq("别的站点不受牵连", W.PREFS.chan("9.9.9.7", "y.com"), 1);
   W.recordPass({ target: "x.com", chan: ch, down: 40000, ok: true });
-  eq("大响应回来就解除", W.chanPref("9.9.9.7", "x.com"), 0);
+  eq("大响应回来就解除", W.PREFS.chan("9.9.9.7", "x.com"), 0);
   W.VT.clear();
   const ch2 = { kind: "r", ip: "9.9.9.8" };
   W.VT.set("x.com", "r:9.9.9.8", 200, 40, 1);
   W.recordBlock({ target: "x.com", chan: ch2, down: 700, ok: false });
-  eq("probe 确认过能通的通道不被小响应当掉", W.chanPref("9.9.9.8", "x.com"), 0);
+  eq("probe 确认过能通的通道不被小响应当掉", W.PREFS.chan("9.9.9.8", "x.com"), 0);
   W.VT.clear();
 }
 // 第 41 组：差分复核链路已删除（免费计划单次 userland TLS 握手就超 CPU 预算，实测 1102）
@@ -7619,7 +7619,7 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   eq("偏好行不再用 at 这个短名", "at" in row, false);
   eq("能打通的通道 state 是 1", row.state, 1);
   eq("打不通的通道 state 是 2", (pf.bad[0] || {}).state, 2);
-  const json263 = W.prefsJson(10);
+  const json263 = W.PREFS.json(10);
   eq("JSON 出口也用新名", Object.keys(json263.ok[0] || {}).sort().join(","), "channel,state,updatedAt");
   const src263 = fs.readFileSync("src/route/prefs.ts", "utf8");
   ok("源码里偏好行是语义名", src263.includes("channel: string;") && src263.includes("updatedAt: number;"), src263.slice(0, 0));
@@ -7731,14 +7731,14 @@ const host267 = "enum267.test";
 // 行为面：prefs 的两栏与 chan() 的三态都在枚举口径下成立
 W.VT.setState(host267, "r:10.9.9.1", ST.Reachable, 1);
 W.VT.setState(host267, "r:10.9.9.2", ST.Blocked, 1);
-const rows267 = W.prefsOf(host267, 40);
+const rows267 = W.PREFS.of(host267, 40);
 eq("可用的那条落在 ok 栏", rows267.ok.length, 1);
 eq("打不通的那条落在 bad 栏", rows267.bad.length, 1);
 eq("ok 栏的 state 就是 St.Reachable", rows267.ok[0].state, ST.Reachable);
 eq("bad 栏的 state 就是 St.Blocked", rows267.bad[0].state, ST.Blocked);
-eq("chanPref 对可用中继回 0", W.chanPref("10.9.9.1", host267), 0);
-eq("chanPref 对判死中继回 2", W.chanPref("10.9.9.2", host267), 2);
-eq("chanPref 对没测过的中继回 1（未知不惩罚）", W.chanPref("10.9.9.3", host267), 1);
+eq("chanPref 对可用中继回 0", W.PREFS.chan("10.9.9.1", host267), 0);
+eq("chanPref 对判死中继回 2", W.PREFS.chan("10.9.9.2", host267), 2);
+eq("chanPref 对没测过的中继回 1（未知不惩罚）", W.PREFS.chan("10.9.9.3", host267), 1);
 
 // 源码锁：四个消费端都改走枚举
 const srcPol267 = fs.readFileSync("src/route/policy.ts", "utf8");
@@ -11615,6 +11615,52 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     eq("连接正文里没有裸单例调用", /(?<![.\w])SETTLE\./.test(connSrc348.split("export class Connection")[1] || ""), false);
     ok("两个入口仍是 close / pend", typeof W.ConnSettle.prototype.close === "function" && typeof W.ConnSettle.prototype.pend === "function", "");
     ok("测试窗口里没有模块级实例", W.SETTLE === undefined, "");
+  }
+
+  // ---- 第 349 组：偏好视图的三个薄包装退场（7.349） ----
+  // 判据：`prefsOf`/`chanPref`/`prefsJson` 与 7.300–7.303 删掉的那批是同一个形状 ——
+  // 一行转发到 `PREFS` 的同名方法，读代码时要跳一次才知道「偏好」到底是谁在算。
+  {
+    const prefsSrc349 = fs.readFileSync("src/route/prefs.ts", "utf8");
+    const wiring349 = fs.readFileSync("src/route/policy-wiring.ts", "utf8");
+    const debugSrc349 = fs.readFileSync("src/routes/debug.ts", "utf8");
+    ok(
+      "349·prefs 里不再有 prefsOf/chanPref/prefsJson 三个转发",
+      !/export const (prefsOf|chanPref|prefsJson) =/.test(prefsSrc349),
+      prefsSrc349.split("\n").filter((l) => /export const (prefsOf|chanPref|prefsJson)/.test(l)).join(" | "),
+    );
+    eq("349·仍导出唯一实例 PREFS", /export const PREFS = new Prefs\(\);/.test(prefsSrc349), true);
+    ok("349·策略注册直接用 PREFS 的方法", wiring349.includes("=> PREFS.chan(ip, host)") && !wiring349.includes("chanPref(ip, host)"), "");
+    ok("349·?prefs=1 直接用 PREFS.json(60)", debugSrc349.includes("PREFS.json(60)") && !debugSrc349.includes("prefsJson("), "");
+    // 全仓不再有「转发函数」的调用形态（`chanPref(` 只剩 HOOK 槽位上的 `HOOK.chanPref(`）
+    // 本组自带遍历（`walk` 是别的组块作用域里的辅助函数，这里取不到）
+    const walk349 = (d, acc = []) => {
+      for (const e349 of fs.readdirSync(d, { withFileTypes: true })) {
+        const full349 = d + "/" + e349.name;
+        if (e349.isDirectory()) walk349(full349, acc);
+        else if (e349.name.endsWith(".ts")) acc.push(full349);
+      }
+      return acc;
+    };
+    const all349 = walk349("src").map((f) => fs.readFileSync(f, "utf8")).join("\n");
+    eq("349·src 里不再调用 prefsOf()", all349.split("prefsOf(").length - 1, 0);
+    eq("349·src 里不再调用 prefsJson()", all349.split("prefsJson(").length - 1, 0);
+    eq("349·src 里只有策略注册那一处直接走 PREFS.chan()", all349.split("PREFS.chan(").length - 1, 1);
+    // 行为：三个入口仍然可用，语义与删包装前一致
+    W.VT.clear();
+    eq("349·没测过的通道不降权（未知 = 1）", W.PREFS.chan("9.9.9.1", "p349.com"), 1);
+    eq("349·不传站点一律「未知」", W.PREFS.chan("9.9.9.1"), 1);
+    W.VT.setState("p349.com", "r:9.9.9.2", 1, 1);
+    eq("349·实测能打通 = 0", W.PREFS.chan("9.9.9.2", "p349.com"), 0);
+    eq("349·别的站点看不到这条证据", W.PREFS.chan("9.9.9.2", "q349.com"), 1);
+    W.VT.setState("p349.com", "r:9.9.9.3", 2, 1);
+    eq("349·实测打不通 = 2", W.PREFS.chan("9.9.9.3", "p349.com"), 2);
+    const j349 = W.PREFS.json(20);
+    eq("349·json 的总数是两栏之和", j349.n, j349.ok.length + j349.bad.length);
+    const o349 = W.PREFS.of("p349.com", 5);
+    ok("349·of 的两栏都不超过 limit", o349.ok.length <= 5 && o349.bad.length <= 5, `${o349.ok.length}/${o349.bad.length}`);
+    ok("349·测试窗口只留 PREFS", W.PREFS !== undefined && W.prefsOf === undefined && W.chanPref === undefined && W.prefsJson === undefined, "");
+    W.VT.clear();
   }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

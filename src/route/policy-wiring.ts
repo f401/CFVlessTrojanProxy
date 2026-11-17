@@ -10,7 +10,7 @@ import { HEALTH } from "./relay-health";
 import { JUDGE } from "./judge";
 import { VT } from "./verdict";
 import { vtAck, vtDelta, vtNack, vtLoad } from "./verdictsync";
-import { chanPref } from "./prefs";
+import { PREFS } from "./prefs";
 import { relNote } from "./relperf";
 import { DEAD } from "./deadfacts";
 import { CAP } from "./capfacts";
@@ -98,7 +98,7 @@ export class PolicyWiring {
       if (ok) VT.set(host, "r:" + ip, 200, ms, 1);
     };
     HOOK.prefer = (host: string, ip: string): boolean => policy.prefer(host, ip);
-    HOOK.chanPref = (ip: string, host = ""): number => chanPref(ip, host);
+    HOOK.chanPref = (ip: string, host = ""): number => PREFS.chan(ip, host);
     HOOK.win = (host: string): { d: boolean; r: boolean } => policy.win(host);
     HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => relNote(host, ip, ttfb, kbs);
     HOOK.capNote = (ip: string, kbs: number): void => { CAP.note(ip, kbs); };

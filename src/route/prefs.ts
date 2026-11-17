@@ -66,9 +66,13 @@ export class Prefs {
   }
 }
 
-/** 进程内唯一偏好视图（判定表的只读投影） */
+// 进程内唯一偏好视图（判定表的只读投影）。调用点直接用 `PREFS.of/chan/json`：
+// 7.349 起 `prefsOf`/`chanPref`/`prefsJson` 三个转发函数已删除，与 7.303 同一条判据。
+//
+/**
+ * 功能：进程内唯一的偏好视图实例（判定表的只读投影）。
+ * @returns 无（模块级常量）
+ */
+
 export const PREFS = new Prefs();
 
-export const prefsOf = (host = "", limit = 40) => PREFS.of(host, limit);
-export const chanPref = (ip: string, host: string) => PREFS.chan(ip, host);
-export const prefsJson = (limit = 40) => PREFS.json(limit);
