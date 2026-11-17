@@ -10621,6 +10621,109 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   }
 }
 
+// —— 第 333 组：控制页与订阅的 81 行 switch 变成 SubscriptionRoutes 类 ——
+{
+  const srcSub333 = fs.readFileSync("src/routes/subscription.ts", "utf8").replace(/\r\n/g, "\n");
+  /**
+   * 功能：按签名切出一段函数/方法的源码（到下一个两格收尾的 `}` 为止）。
+   * @param sig 签名行的一部分
+   * @returns 源码片段；找不到返回空串
+   */
+  const body333 = (sig) => {
+    const at = srcSub333.indexOf(sig);
+    if (at < 0) return "";
+    const rest = srcSub333.slice(at);
+    const end = rest.search(/\n  \}\n/);
+    return end < 0 ? rest : rest.slice(0, end);
+  };
+
+  ok("SubscriptionRoutes 是导出类", /export class SubscriptionRoutes \{/.test(srcSub333));
+  const entry333 = srcSub333.slice(srcSub333.indexOf("export async function subscription("));
+  ok(
+    "入口只剩一行委托",
+    entry333.includes("return new SubscriptionRoutes(c).run(kind);") && entry333.slice(0, entry333.indexOf("\n}")).split("\n").length <= 4,
+  );
+  const run333 = body333("async run(kind: string)");
+  ok("run 按 FEEDS 分派并留 404 兜底", run333.includes("if (FEEDS[kind]) return this.feed(kind);") && run333.includes("status: 404"));
+
+  const feeds333 = srcSub333.slice(srcSub333.indexOf("const FEEDS"), srcSub333.indexOf("};", srcSub333.indexOf("const FEEDS")));
+  eq("三条格式 + 三个口令变体都在表里", (feeds333.match(/^  \w+:/gm) || []).length, 6);
+  ok(
+    "三种格式各登记一次渲染器与响应体类型",
+    feeds333.includes('clash", json: false') && feeds333.includes('singbox", json: true') && feeds333.includes('links", json: false'),
+  );
+
+  const page333 = body333("private async page()");
+  ok(
+    "控制页只取用量与存活表两次往返",
+    page333.includes("Promise.all([readStats(env, id), aliveList(env)])") && page333.includes("PAGES.panel(") && page333.includes("CSP_STATIC"),
+  );
+  ok("控制页不再取池子的当前中继（白付一次往返）", !page333.includes("px:cur") && !page333.includes("SEL.current("));
+
+  const feed333 = body333("private async feed(");
+  ok("三种订阅共用一条渲染路径", feed333.includes("SUBVIEW.render(") && feed333.includes("subHeaders(env, s)") && feed333.includes("spec.json ?"));
+  eq("三种格式不再各抄一份渲染", (srcSub333.match(/SUBVIEW\.render\(/g) || []).length, 1);
+  eq("用量头只在这一条路径上挂（两个响应分支各一次）", (srcSub333.match(/subHeaders\(/g) || []).length, 2);
+
+  const stats333 = body333("private async stats()");
+  ok("JSON 分支零额外往返（拿不到存活表也不读快照）", !stats333.includes("aliveList(") && !stats333.includes("nodeSnapGet("));
+  const statsHtml333 = body333("private async statsHtml(");
+  ok(
+    "HTML 明细才并跨 isolate 快照",
+    statsHtml333.includes("aliveList(env)") && statsHtml333.includes("nodeSnapGet(env, id)") && statsHtml333.includes("nsOf(") && statsHtml333.includes("statsNodeRows("),
+  );
+
+  // 行为面：构造一个最小 UserCtx（不绑 KV、不绑 DO，用量落在「零」上）
+  const env333 = { uuid: "4241b903-8d39-4a17-8f4c-bb33b1630c33", pwd: "pw", adminKey: "k333" };
+  /**
+   * 功能：造一个最小用户上下文。
+   * @param kind 路由种类
+   * @returns UserCtx 形状的对象
+   */
+  const ctx333 = (kind) => ({
+    request: new Request("https://e333.example/" + kind),
+    env: env333,
+    ctx: { waitUntil() {}, passThroughOnException() {} },
+    url: new URL("https://e333.example/?k=k333"),
+    host: "e333.example",
+    seg: [kind],
+    first: kind,
+    auth: { ok: true, list: [], trojan: new Map(), uuids: new Set(), byId: new Map() },
+    pageKey: "k333",
+    keyOk: true,
+    cf: {},
+    id: "4241b903-8d39-4a17-8f4c-bb33b1630c33",
+    learned: {},
+    regions: [],
+  });
+
+  const unknown333 = await W.subscription(ctx333("bogus"), "bogus");
+  eq("未知种类仍然 404", unknown333.status, 404);
+
+  const cl333 = await W.subscription(ctx333("cl"), "cl");
+  const clBody333 = await cl333.text();
+  eq("clash 订阅是纯文本", cl333.headers.get("content-type"), "text/plain;charset=utf-8");
+  ok("clash 订阅带 proxies 与策略组", clBody333.includes("proxies:") && clBody333.includes("proxy-groups:"));
+
+  const sb333 = await W.subscription(ctx333("sb"), "sb");
+  const sbBody333 = await sb333.text();
+  eq("sing-box 订阅是 JSON", sb333.headers.get("content-type"), "application/json;charset=utf-8");
+  ok("sing-box 订阅可解析且带 outbounds", Array.isArray(JSON.parse(sbBody333).outbounds));
+
+  const ty333 = await W.subscription(ctx333("ty"), "ty");
+  const tyText333 = Buffer.from((await ty333.text()).trim(), "base64").toString("utf8");
+  ok("明文链接订阅是 base64 且解出 vless 链接", tyText333.includes("vless://"), tyText333.slice(0, 40));
+
+  const st333 = await W.subscription(ctx333("stats"), "stats");
+  const stBody333 = JSON.parse(await st333.text());
+  ok("用量 JSON 带 id 与四个计数", stBody333.id === ctx333("stats").id && stBody333.up === 0 && stBody333.down === 0 && stBody333.conns === 0);
+
+  const pg333 = await W.subscription(ctx333("page"), "page");
+  const pgBody333 = await pg333.text();
+  eq("控制页是 HTML", pg333.headers.get("content-type"), "text/html;charset=utf-8");
+  ok("控制页带用量分区", pgBody333.includes("用量"), String(pgBody333.length));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

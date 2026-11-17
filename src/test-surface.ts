@@ -108,6 +108,7 @@ export { doFetch, meterGet } from "./store/meter-client";
 export { runCron } from "./routes/cron";
 export { ProxyipView, proxyip } from "./routes/proxyip";
 export { AdminView, admin } from "./routes/admin";
+export { SubscriptionRoutes, subscription } from "./routes/subscription";
 export { debug, DEBUG, DebugActions, DebugMeterProbes, DebugTables, DebugSuite } from "./routes/debug";
 export {
   BENCH,
