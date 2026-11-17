@@ -260,8 +260,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `FactShadow` | `src/route/factshadow.ts` | 事实写入决策器的影子统计（% 形，不参与决策） |
 | `RelPerfTable` | `src/route/relperf.ts` | 站点 × 中继的实测性能表（首字节 / 吞吐，只有 ≥1 MB 的样本才记吞吐） |
 | `Prefs`（`PREFS`） | `src/route/prefs.ts` | 判定表折成「能打通 / 打不通」两栏，兼供 `chanPref` |
-| `LatObs` | `src/core/latobs.ts` | 首字节 / 总耗时 / 抖动三类窗口统计器 |
-| `FirstObs` | `src/core/firstobs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
+| `LatObs` | `src/core/obs.ts` | 首字节 / 总耗时 / 抖动三类窗口统计器 |
+| `FirstObs` | `src/core/obs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
 | `Attacher` | `src/proxy/attacher.ts` | 上游挂载与补救链：中转再试一条 → IPv6 兜底 → proxyip → 放弃 |
 | `ConnSettle`（`SETTLE`） | `src/proxy/conn-settle.ts` | 一条连接结束时的结算流水线：收尾采样 → pStall 占比 → 节点观测聚合 → 首眼观测（含站点画像与通道证据）→ PEND 记账；只读 `SettleView`，状态仍归 `Connection` |
 | `SampleWindow` | `src/proxy/connection.ts` | 一条连接的两个采样窗口边界（节点级 800ms 窗口 / 5 秒出样本间隔 / 站点级 60 秒）：窗口太短或间隔未到都不推进起点，小样本只推进起点不交样本 |
@@ -275,7 +275,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `DebugTf` | `src/routes/debug-nets.ts` | 判定批与真握手（子请求 + DO CPU，同文件） |
 | `DebugActions` | `src/routes/debug.ts` | 会改状态的诊断操作（refill/cur/restore/seed）：全部先过 `adminOnly`，都会写 KV 或 DO |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表 |
-| `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
+| `SubscriptionView` / `PageView` | `src/views/sub.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
 
 自由函数集中在 `src/core/{util,net,hist,quota,hosts,hostmem,http80,table,enums,types,facts,hook,state,const,counter,lock,latobs,firstobs,node-snapshot,transport}.ts`（编解码 / SHA-224 / WS / 超时 / 并发 / 环境解析 / 协议名 / 错误文本都在 `util.ts` 一个文件里，7.290 起不再拆分）、`src/proxy/protocol.ts`、`src/views/{html,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。

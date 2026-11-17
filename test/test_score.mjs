@@ -7251,7 +7251,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   ok("连接用 forceRelayIp", csSrc.includes("forceRelayIp = \"\";"), "");
   ok("连接用 startedAt", csSrc.includes("startedAt = Date.now();"), "");
 
-  const foSrc = fs.readFileSync("src/core/firstobs.ts", "utf8");
+  const foSrc = fs.readFileSync("src/core/obs.ts", "utf8");
   ok("首次观测计数叫 samples", foSrc.includes("private samples = 0;"), "");
   const fsSrc = fs.readFileSync("src/route/factshadow.ts", "utf8");
   ok("影子的计数也叫 samples", fsSrc.includes("private samples = 0;"), "");
@@ -7363,10 +7363,10 @@ for (let i = 0; i < 10; i++) total256c += st256c.takeWeight(512 * 1024, 1000);
 ok("不打折时额度用完就不再给样本", Math.abs(total256c - W.SC.CONN_W_CAP) < 1e-6, `total=${total256c}`);
 const st256d = new W.Connection(env256, { waitUntil() {}, passThroughOnException() {} }, W.Mode.Throughput, "1.1.1.1");
 eq("负折扣不会让权重变成负数", st256d.takeWeight(512 * 1024, 1000, -5), 0);
-const csrc256 = ["src/proxy/connection.ts", "src/proxy/conn-settle.ts", "src/proxy/conn-sample.ts"].map((f) => fs.readFileSync(f, "utf8")).join("\n");
+const csrc256 = ["src/proxy/connection.ts", "src/proxy/conn-settle.ts"].map((f) => fs.readFileSync(f, "utf8")).join("\n");
 eq("两处调用都把折扣一起传进去", csrc256.split("? 0.3 : 1)").length - 1, 2);
 ok("调用点不再自己乘 0.3", !csrc256.includes("w *= 0.3"), "");
-ok("封顶按报出的量计", fs.readFileSync("src/proxy/conn-sample.ts", "utf8").includes("Math.min(room, raw * clamped)"), "");
+ok("封顶按报出的量计", fs.readFileSync("src/proxy/conn-settle.ts", "utf8").includes("Math.min(room, raw * clamped)"), "");
 // ── 第 257 组：「按插入序」判据做成门禁（棘轮）────────────────────────────
 // 这条判据背后是 7.177 / 7.181 / 7.187 / 7.215 / 7.224 五条缺陷：插入序切片切到最旧的那批，
 // 或 Map.set 不移动位置导致「淘汰 = 删最热的键」。现在三处允许点都写了理由，新增一处就红。
@@ -8500,7 +8500,7 @@ eq("策略是否生效是只读属性", W.POLICY.enabled, W.SC.POLICY > 0);
   // 而热路径每 512KB 只做「加字节 → 比阈值」。两者混在一个 420 行的类里时，看不出哪个字段只在这里被读。
   const connSrc286 = fs.readFileSync("src/proxy/connection.ts", "utf8");
   const settleSrc286 = fs.readFileSync("src/proxy/conn-settle.ts", "utf8");
-  const sampSrc286 = fs.readFileSync("src/proxy/conn-sample.ts", "utf8");
+  const sampSrc286 = fs.readFileSync("src/proxy/conn-settle.ts", "utf8");
   ok("结算流水线是独立的类 + 单例", settleSrc286.includes("export class ConnSettle") && settleSrc286.includes("export const SETTLE = new ConnSettle();"), "");
   ok("结算只读结构化视图（不 import Connection）", settleSrc286.includes("export interface SettleView") && !settleSrc286.includes("Connection }"), "");
   ok("结算入口只有 close / pend 两条", settleSrc286.includes("close(v: SettleView): void") && settleSrc286.includes("pend(v: SettleView): void"), "");
@@ -8508,7 +8508,8 @@ eq("策略是否生效是只读属性", W.POLICY.enabled, W.SC.POLICY > 0);
   ok("连接本体不再自己记 PEND 账", !connSrc286.includes("statBump(") && !connSrc286.includes("scheduleFlush("), "");
   ok("flush 只负责调度结算", connSrc286.includes("SETTLE.close(this)") && connSrc286.includes("SETTLE.pend(this)"), "");
   ok("通道证据也搬进结算", !connSrc286.includes("HOOK.traffic") && settleSrc286.includes("HOOK.traffic"), "");
-  ok("采样换算是纯函数模块（不碰 S）", !sampSrc286.includes("core/state") && sampSrc286.includes("export function sampleWeight") && sampSrc286.includes("export function stalledWindow") && sampSrc286.includes("export function kbsOf"), "");
+  const sampBlock286 = sampSrc286.slice(sampSrc286.indexOf("export const SAMPLE_STD_BYTES"), sampSrc286.indexOf("export const CAGG_MAX"));
+  ok("采样换算是纯函数（不读 S、不计数、不 await）", !sampBlock286.includes("S.") && !sampBlock286.includes("cnt(") && !sampBlock286.includes("await ") && sampBlock286.includes("export function sampleWeight") && sampBlock286.includes("export function stalledWindow") && sampBlock286.includes("export function kbsOf"), "采样换算块必须是纯函数");
   eq("权重封顶：额度用完就是 0", W.sampleWeight(W.SC.CONN_W_CAP, 512 * 1024, 1000), 0);
   ok("权重封顶：折扣在封顶之前生效", Math.abs(W.sampleWeight(W.SC.CONN_W_CAP - 0.1, 512 * 1024, 1000, 0.3) - 0.1) < 1e-6, "");
   eq("负折扣夹成 0", W.sampleWeight(0, 512 * 1024, 1000, -5), 0);
@@ -9070,7 +9071,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
 {
   const subCommon = fs.readFileSync("src/views/sub-common.ts", "utf8");
   const subSrc308 = fs.readFileSync("src/views/sub.ts", "utf8");
-  const subviewSrc = fs.readFileSync("src/views/subview.ts", "utf8");
+  const subviewSrc = fs.readFileSync("src/views/sub.ts", "utf8");
   const exists = (f) => { try { fs.statSync(f); return true; } catch { return false; } };
   eq("sub-links.ts 已合并", exists("src/views/sub-links.ts"), false);
   eq("sub-singbox.ts 已合并", exists("src/views/sub-singbox.ts"), false);
@@ -9079,8 +9080,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("合并后的文件仍受 560 行上限约束", subCommon.split(/\r?\n/).length <= 560, "sub-common 超长");
   eq("sub.ts 从 sub-common 再导出 singbox", subSrc308.includes('export { renderSingbox } from "./sub-common";'), true);
   eq("sub.ts 从 sub-common 再导出 links", subSrc308.includes('export { renderLinks } from "./sub-common";'), true);
-  eq("subview 从 sub-common 取 singbox", subviewSrc.includes('import { renderSingbox } from "./sub-common";'), true);
-  eq("subview 从 sub-common 取 links", subviewSrc.includes('import { renderLinks } from "./sub-common";'), true);
+  eq("sub.ts 从 sub-common 转出 singbox", subviewSrc.includes('export { renderSingbox } from "./sub-common";'), true);
+  eq("sub.ts 从 sub-common 转出 links", subviewSrc.includes('export { renderLinks } from "./sub-common";'), true);
 
   // 行为面：三个格式都还能渲染出来，而且和 SUBVIEW 的分发结果逐字相同
   const env308 = { uuid: "4241b903-8d39-4a17-8f4c-bb33b1630c33", nodes: "", pwd: "tj-308" };
@@ -9179,6 +9180,74 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   const w = win.node(20000, 307200, 0);
   ok("10 秒 300KB 出样本", Boolean(w) && w.bytes === 307200 && w.elapsedMs === 10000, JSON.stringify(w));
 }
+
+  // 第 311 组：三族合并（观测汇总 / 结算与换算 / 订阅视图分派）——文件更少、能力一位不少
+  {
+    const missing311 = [
+      "src/core/firstobs.ts",
+      "src/core/latobs.ts",
+      "src/core/node-snapshot.ts",
+      "src/proxy/conn-sample.ts",
+      "src/views/subview.ts",
+    ].filter((f) => fs.existsSync(f));
+    eq("五份被并掉的文件都不在了", missing311, []);
+    const obs311 = fs.readFileSync("src/core/obs.ts", "utf8");
+    ok(
+      "观测汇总里有首字节、延迟分布与速度快照",
+      obs311.includes("export class FirstObs") &&
+        obs311.includes("export class LatObs") &&
+        obs311.includes("export function spdSnapshot") &&
+        obs311.includes("export const FO = new FirstObs();") &&
+        obs311.includes("export const LAT = new LatObs();"),
+      "obs.ts 必须同时住着 FirstObs / LatObs / spdSnapshot",
+    );
+    ok(
+      "观测汇总写清「探活 RTT 不进这里」",
+      obs311.includes("探活 RTT 不进这里") && obs311.includes("CUSUM"),
+      "这条纪律被违反过三次，注释必须在文件头",
+    );
+    const settle311 = fs.readFileSync("src/proxy/conn-settle.ts", "utf8");
+    ok(
+      "结算文件里也有采样换算",
+      settle311.includes("export const SAMPLE_STD_BYTES") &&
+        settle311.includes("export function stalledWindow") &&
+        settle311.includes("export function kbsOf") &&
+        settle311.includes("export function sampleWeight") &&
+        settle311.includes("export const SETTLE = new ConnSettle();"),
+      "conn-settle.ts 必须同时住着换算与结算",
+    );
+    const sub311 = fs.readFileSync("src/views/sub.ts", "utf8");
+    ok(
+      "订阅视图分派与 clash 渲染同住一个文件",
+      sub311.includes("export class SubscriptionView") &&
+        sub311.includes("export const SUBVIEW = new SubscriptionView();") &&
+        sub311.includes("export function renderClash"),
+      "sub.ts 必须同时住着 renderClash 与 SubscriptionView",
+    );
+    ok(
+      "三种格式的渲染入口都能拿到",
+      typeof W.renderClash === "function" && typeof W.renderSingbox === "function" && typeof W.renderLinks === "function",
+      "三个渲染入口",
+    );
+    const files311 = fs.readdirSync("src", { recursive: true }).filter((f) => String(f).endsWith(".ts")).length;
+    ok("文件数降到 118 以内", files311 <= 118, `实际 ${files311}`);
+    ok(
+      "三个观测单例都还在",
+      W.FO instanceof W.FirstObs && W.LAT instanceof W.LatObs && typeof W.spdSnapshot === "function",
+      "观测单例",
+    );
+    // 行为面：延迟分布的百分位仍然按窗口算，首字节分类仍然记账
+    W.LAT.clear();
+    W.FO.clear();
+    W.FO.note(60000);
+    W.LAT.note(true, 800);
+    W.LAT.note(false, 0);
+    const foSnap311 = W.FO.snap();
+    const latSnap311 = W.LAT.snap();
+    eq("首字节分类记了一次整页", foSnap311.page, 1);
+    eq("延迟分布把成功与失败各记一条", latSnap311.n, 2);
+    eq("延迟分布的 p50 就是那条成功样本", latSnap311.p50, 800);
+  }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

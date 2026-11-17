@@ -39,7 +39,7 @@ export {
   edgeCount,
 } from "./views/sub";
 export { regionEntries } from "./views/sub-common";
-export { SUBVIEW, SubscriptionView } from "./views/subview";
+export { SUBVIEW, SubscriptionView } from "./views/sub";
 export { ROUTES, RouteTable } from "./routes/table";
 export { PAGES, PageView } from "./views/pageview";
 export { loadRtt, rttLearn, rttMark } from "./nodes/metrics";
@@ -57,7 +57,7 @@ export { SEEDS } from "./px/seed";
 export { Connection } from "./proxy/connection";
 export { CAGG_MAX, ConnSettle, SETTLE, type SettleView } from "./proxy/conn-settle";
 export { FLOW_TICK_MS, NODE_EMIT_GAP_MS, NODE_WIN_MS, SITE_WIN_MS, SampleWindow, ClientFlow } from "./proxy/connection";
-export { SAMPLE_MIN_BYTES, SAMPLE_STD_BYTES, SITE_MIN_BYTES, TRANSFER_ENOUGH, kbsOf, sampleWeight, stalledWindow } from "./proxy/conn-sample";
+export { SAMPLE_MIN_BYTES, SAMPLE_STD_BYTES, SITE_MIN_BYTES, TRANSFER_ENOUGH, kbsOf, sampleWeight, stalledWindow } from "./proxy/conn-settle";
 export {
   pFailFast,
   pcts,
@@ -87,7 +87,6 @@ export { SOCKET_DIALER, SocketDialer } from "./proxy/socket-dialer";
 export { METER_DIAGNOSTICS, MeterDiagnostics } from "./store/meter-diagnostics";
 export { ATTACHER, Attacher } from "./proxy/attacher";
 export { REGION, RegionPicker } from "./proxy/region";
-export { spdSnapshot } from "./core/node-snapshot";
 export { cnt, cntDelta, cntUnsend, cntView } from "./core/counter";
 export { CRONLOCK, CronLock } from "./core/lock";
 export {
@@ -160,8 +159,7 @@ export { FACT_ALL, factList, factOn, factParse } from "./route/factflags";
 export { factMul } from "./route/factmul";
 export { PS, PS_BATCH, PS_TTL, PsFacts, psPrior } from "./route/psfacts";
 export { DEAD, DEAD_N, DeadFacts } from "./route/deadfacts";
-export { FO, FirstObs, FO_GRAY, FO_LIMIT, FO_PAGE } from "./core/firstobs";
-export { LAT, LatObs } from "./core/latobs";
+export { FO, FirstObs, FO_GRAY, FO_LIMIT, FO_PAGE, LAT, LatObs, spdSnapshot } from "./core/obs";
 export { DNS, DnsFacts, DNS_TTL } from "./route/dnsfacts";
 export { BLK, BLK_BATCH, BLK_DELTA_MAX, BLK_GAP, BLK_MIN, BLK_PEN, BlkFacts } from "./route/blkfacts";
 export { FACT_TTL, PAGE_ABS, mergeAt, mergeBlk } from "./core/facts";

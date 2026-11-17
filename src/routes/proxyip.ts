@@ -11,7 +11,7 @@ import { POOL_SOURCES, SOURCES } from "../px/probe";
 import { SEL } from "../px/selector";
 import { cnt, cntView } from "../core/counter";
 import { CRONLOCK } from "../core/lock";
-import { spdSnapshot } from "../core/node-snapshot";
+import { spdSnapshot } from "../core/obs";
 import { regionListAsync } from "../px/regions";
 import { PEND } from "../store/index";
 import { adminOnly } from "../edge/auth";

@@ -3,7 +3,7 @@ import { HOOK } from "../core/hook";
 import { SC } from "../core/const";
 import { cnt, cntDelta, cntUnsend } from "../core/counter";
 import { eachLimit } from "../core/util";
-import { spdSnapshot } from "../core/node-snapshot";
+import { spdSnapshot } from "../core/obs";
 import { doFetch } from "./meter-client";
 
 /* PEND 缓冲：连接侧只记增量，30 秒一批推给 Meter DO */

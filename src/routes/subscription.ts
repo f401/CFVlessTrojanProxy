@@ -6,7 +6,7 @@ import { PAGES } from "../views/pageview";
 import { fmtBytes } from "../views/html";
 import { effectiveQuota, subHeaders } from "../core/quota";
 import { trojanPasswordOf } from "../views/sub";
-import { SUBVIEW } from "../views/subview";
+import { SUBVIEW } from "../views/sub";
 import { readStats, nodeSnapGet } from "../store/index";
 import { statsNodeRows } from "../nodes/stats-rows";
 import { aliveList, nsOf } from "../px/pool";

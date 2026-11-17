@@ -19,7 +19,7 @@ const NEED = [
   { sym: "isDead", own: "src/route/deadfacts.ts", why: "选路读取判死" },
   { sym: "BLK.note", own: "src/route/blkfacts.ts", why: "封锁事实的写入点" },
   { sym: "blkPen", own: "src/route/blkfacts.ts", why: "选路读取封锁" },
-  { sym: "FO.note", own: "src/core/firstobs.ts", why: "冷启动观测写入点" },
+  { sym: "FO.note", own: "src/core/obs.ts", why: "冷启动观测写入点" },
   { sym: "DNS.penOf", own: "src/route/dnsfacts.ts", why: "选路读取 AAAA 事实" },
   { sym: "probeFam", own: "src/proxy/dial.ts", why: "AAAA 探测的生产调用点" },
   { sym: "egDerive", own: "src/route/egfacts.ts", why: "出口族推导的生产调用点（judge.onTraffic）" },

@@ -5,7 +5,7 @@ import { cnt } from "../core/counter";
 import { STATS } from "../nodes/score";
 import { S } from "../core/state";
 import { SETTLE } from "./conn-settle";
-import { sampleWeight, SAMPLE_MIN_BYTES, SITE_MIN_BYTES, stalledWindow } from "./conn-sample";
+import { sampleWeight, SAMPLE_MIN_BYTES, SITE_MIN_BYTES, stalledWindow } from "./conn-settle";
 
 // ---- 并入自 sample-window.ts ----
 /** 节点级采样窗口的最小长度：tick 可能比这更密（每次 tick 都结算会把短窗口算成低带宽） */
@@ -494,7 +494,7 @@ export class Connection {
   /**
    * 本次窗口应贡献多少直方图权重。
    * 512KB / 1s 是"一个标准样本"；短窗口或小样本按比例降权，单连接累计封顶。
-   * 换算规则在 `./conn-sample.ts` 的 `sampleWeight`，这里只负责把结果记进 `sampleW`。
+   * 换算规则在 `./conn-settle.ts` 的 `sampleWeight`，这里只负责把结果记进 `sampleW`。
    */
   takeWeight(bytes: number, dt: number, factor = 1): number {
     const use = sampleWeight(this.sampleW, bytes, dt, factor);
