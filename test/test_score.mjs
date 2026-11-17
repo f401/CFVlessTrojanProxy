@@ -10,6 +10,17 @@ const storeSrc = () =>
     .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
     .join("\n");
 
+/**
+ * 节点统计层五段源码拼在一起：`stat.ts`（门面）、`stat-types.ts`（类型与上限）、`stat-table.ts`（表本体）、
+ * `stat-view.ts`（纯派生）、`stat-observe.ts`（观测写入）。
+ * v7.282 把这层一分为四，源码锁改成「在整个 stat 模块里存在」，避免以后每次挪文件都要改一批断言。
+ * @returns {string} 五段源码
+ */
+const statAll = () =>
+  ["src/nodes/stat.ts", "src/nodes/stat-types.ts", "src/nodes/stat-table.ts", "src/nodes/stat-view.ts", "src/nodes/stat-observe.ts"]
+    .map((p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : ""))
+    .join("\n");
+
 import * as W from "./_bundle.mjs";
 import { webcrypto } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -3685,7 +3696,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   eq("探活只累加样本数", prs.probeSamples, 2);
   ok("探活不写首字节矩（否则会给还没承载流量的节点白加抖动罚）", prs.pSum === 0 && prs.pSumSq === 0);
   ok("探活会更新 tcp 的 EWMA", prs.tcp > 0);
-  ok("门槛判断写成「跨过那一条」", fs.readFileSync("src/nodes/stat.ts", "utf8").includes("before < EMPTY_CLOSE_BAD"));
+  ok("门槛判断写成「跨过那一条」", statAll().includes("before < EMPTY_CLOSE_BAD"));
 }
 // 拨号重试必须换一条：选择器的确定性路径在同一秒内两次返回同一条
 {
@@ -4653,7 +4664,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   W.vClear();
 
   // ② 没人读的代价先验常量已删除（代价先验由 score.ts 自己算，两份会分叉）
-  const srcStat = fs.readFileSync("src/nodes/stat.ts", "utf8");
+  const srcStat = statAll();
   eq("stat.ts 不再有 E10_PRIOR 死导出", srcStat.includes("E10_PRIOR"), false);
   ok("TEN_MB 仍导出（score/metrics 都在用）", srcStat.includes("export const TEN_MB"), "TEN_MB 定义没了");
 
@@ -5512,7 +5523,7 @@ try {
   W.S.alive = oldAlive;
   W.S.rankCache = oldRank;
 
-  const stSrc = fs.readFileSync("src/nodes/stat.ts", "utf8");
+  const stSrc = statAll();
   const stCode = stSrc.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\/\/.*$/, "")).join("\n");
   ok("节点统计里不再有 eCloseD（只写不读）", !stCode.includes("eCloseD"));
   ok("影子试探的窗口常量进了 SC", fs.readFileSync("src/core/const.ts", "utf8").includes("UNTRIED_GAP: 20000"));
@@ -7246,7 +7257,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   eq("effView 暴露的是 probeSamples 而不是旧名", "probeSamples" in v254 && !("pN" in v254), true);
   ok("平移两个半衰期后 probeSamples 约剩 1/4", Math.abs(v254.probeSamples - 2) < 0.3, String(v254.probeSamples));
 
-  const statSrc = fs.readFileSync("src/nodes/stat.ts", "utf8");
+  const statSrc = statAll();
   ok("stat.ts 不再出现旧字段名", !/\btS\b|\bpN\b|\bcusB\b/.test(statSrc));
   const typesSrc = fs.readFileSync("types/app.d.ts", "utf8");
   ok("类型声明也改成新名", typesSrc.includes("trafficOkW") && !/\btS:/.test(typesSrc));
@@ -8276,6 +8287,42 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   eq("阈值默认 3 / 5", JSON.stringify(W.pxPolicy({})), JSON.stringify({ fail: 3, force: 5 }));
   eq("阈值可被 env 覆盖", JSON.stringify(W.pxPolicy({ pxFailMax: "4", pxForceAt: "7" })), JSON.stringify({ fail: 4, force: 7 }));
   eq("非法覆盖回落默认", JSON.stringify(W.pxPolicy({ pxFailMax: "0", pxForceAt: "-1" })), JSON.stringify({ fail: 3, force: 5 }));
+}
+
+// ──────────────────────────────── 第 282 组：节点统计一分为四（类型 / 表 / 派生 / 观测）────────────────────────────────
+{
+  const facade = fs.readFileSync("src/nodes/stat.ts", "utf8");
+  const types = fs.readFileSync("src/nodes/stat-types.ts", "utf8");
+  const table = fs.readFileSync("src/nodes/stat-table.ts", "utf8");
+  const view = fs.readFileSync("src/nodes/stat-view.ts", "utf8");
+  const obs = fs.readFileSync("src/nodes/stat-observe.ts", "utf8");
+  const noComment = (s) => s.split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*") && !l.trim().startsWith("/*")).join("\n");
+  // 门面只做再导出
+  ok("门面不再定义函数或类", !facade.includes("export function ") && !facade.includes("export class "), "");
+  eq("门面四个来源各一行", ["stat-types", "stat-table", "stat-view", "stat-observe"].filter((m) => facade.includes(`"${"./" + m}"`)).length, 4);
+  ok("门面不超过 12 行", facade.split("\n").length <= 12, String(facade.split("\n").length));
+  // 四块各就各位
+  ok("类型层只有类型与常量", types.includes("export interface EffView") && types.includes("export const ZERO_STAT") && types.includes("export const TEN_MB") && types.includes("export const EMPTY_CLOSE_BAD"), "");
+  ok("类型层不碰 S", !noComment(types).includes("S."), "");
+  ok("表层持有类与单例", table.includes("export class NodeStatsTable {") && table.includes("export const STATS = new NodeStatsTable();"), "");
+  ok("表层只留取条目与打缓存两个方法", table.includes("  nsGet(k: string)") && table.includes("  invalidateRank()") && !table.includes("  nsOk(k: string)"), "");
+  ok("表层保留两个同名薄包装", table.includes("export function nsGet(k: string): NodeStats {") && table.includes("export function invalidateRank(): void {"), "");
+  ok("派生层全是纯函数且不碰 S", !noComment(view).includes("S.") && ["nsDecay", "ageFactor", "effView", "pFailFast", "pFailOf", "availOf", "pStallOf"].every((f) => view.includes(`export function ${f}(`)), "");
+  ok("观测层九个写入都在", ["nsOk", "nsProbe", "nsProbeFail", "nsFail", "nsSiteFail", "nsSpeed", "nsStall", "nsLatency", "nsEmptyClose"].every((f) => obs.includes(`export function ${f}(`)), "");
+  ok("观测层经表单例取条目、不自己碰 S.nstat", obs.includes("STATS.nsGet(") && !obs.includes("S.nstat"), "");
+  ok("观测层不含 class", !obs.includes("export class "), "");
+  // 行为面：常量与写入仍然照旧（用独立键，避免与别的组互相污染）
+  eq("TEN_MB 仍是 10MB", W.TEN_MB, 10 * 1048576);
+  eq("空关闭门槛仍是 5", W.EMPTY_CLOSE_BAD, 5);
+  eq("表单例可判定", W.STATS instanceof W.NodeStatsTable, true);
+  eq("零值条目的样本数为 0", W.ZERO_STAT.probeSamples, 0);
+  const k282 = "stat282.probe:443";
+  W.nsFail(k282);
+  ok("失败后进入冷却", W.nsGet(k282).blackUntil > Date.now(), "");
+  ok("冷却被记成失败一笔", W.effView(W.nsGet(k282)).failW > 0, "");
+  W.nsOk(k282, 12, 30);
+  eq("成功清零冷却", W.nsGet(k282).blackUntil, 0);
+  ok("成功留下 tcp 样本", W.nsGet(k282).tcp > 0, "");
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

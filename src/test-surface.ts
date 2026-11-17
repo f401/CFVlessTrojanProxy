@@ -28,6 +28,7 @@ export { PAGES, PageView } from "./views/pageview";
 export { loadRtt, rttLearn, rttMark } from "./nodes/metrics";
 export { subHeaders, effectiveQuota } from "./core/quota";
 export { S } from "./core/state";
+export { EMPTY_CLOSE_BAD, NodeStatsTable, STATS, TEN_MB, ZERO_STAT } from "./nodes/stat";
 export { SC } from "./core/const";
 export { SEL } from "./px/selector";
 export { dwellOf } from "./px/selector";

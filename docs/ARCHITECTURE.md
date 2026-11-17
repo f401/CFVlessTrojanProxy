@@ -10,7 +10,7 @@ core/     const util net state quota 无业务依赖：常量 / 工具 / 目标�
 store/    index kv crypto         适配器：KV / 加密 / 快照 / 计量 / Meter DO
           snapshot pend stats
           meter-client meter
-nodes/    stat score metrics       节点域：统计原语、评分与候选表、画像与看板行
+nodes/    stat stat-types stat-table stat-view stat-observe score metrics  节点域：统计（表 / 派生 / 观测）、评分、画像与看板行
 px/       pool poolgen poolsrc rawprobe geo failpolicy seed selector pickpath rotation failbook 中转域：候选池、抓取源、探活、选择器
           const regions              共享常量 / 地区列表（打破 pool 互引）
 proxy/    protocol dial session     数据面：协议、拨号、会话
@@ -206,7 +206,9 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 
 | 类 | 文件 | 独占的可变状态 |
 | --- | --- | --- |
-| `NodeStatsTable`（`STATS`） | `src/nodes/stat.ts` | 每节点的权重、样本矩、CUSUM、快速失败窗口 |
+| `NodeStatsTable`（`STATS`） | `src/nodes/stat-table.ts` | 只有「按 host:port 取条目」与「打掉排行缓存」两件事 |
+| `stat-view`（无类，纯函数） | `src/nodes/stat-view.ts` | 衰減、视图、失败概率、可用性、卡顿概率：只吃 `NodeStats`、不碰 `S` |
+| `stat-observe`（无类，纯函数） | `src/nodes/stat-observe.ts` | 成功 / 探活 / 失败 / 站点失败 / 带宽 / 卡顿 / 首字节 / 空关闭八类观测写入 |
 | `Scorer`（`SCORER`） | `src/nodes/score.ts` | 排行缓存、黑名单/冻结表、可用性判断 |
 | `Store` / `Seal` | `src/store/store.ts`、`crypto.ts` | KV 写入节流、AES 密钥缓存 |
 | 快照读写（自由函数 `writeSnap` / `getSnap` / `flushSnap`） | `src/store/snapshot.ts` | 用量快照的合并写与 TTL 缓存（无跨请求状态要独占，所以没有类） |
