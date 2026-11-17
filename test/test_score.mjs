@@ -1978,7 +1978,7 @@ eq("nsOf 空列表返回空表", Object.keys(W.POOL.nsOf([], 5)).length, 0);
 ok("Dialer 是类实例且有 open()", typeof W.DIALER === "object" && typeof W.DIALER.open === "function", "DIALER");
 ok("Dialer 与 Connection 解耦（不持有 session 状态）", typeof W.Dialer === "function", "Dialer");
 // ═══ 第 49 组：RegionPicker（P5-2）═══
-ok("RegionPicker 是类实例且可 open()", typeof W.REGION === "object" && typeof W.REGION.open === "function", "REGION");
+ok("RegionPicker 已是会话持有的组件（模块级实例 7.346 起消失）", W.REGION === undefined && typeof W.RegionPicker.prototype.open === "function", "REGION");
 ok("RegionPicker 可构造", typeof W.RegionPicker === "function", "RegionPicker");
 // ═══ 第 50 组：Attacher（P5-4）═══
 ok("Attacher 是类实例且可 run()", typeof W.ATTACHER === "object" && typeof W.ATTACHER.run === "function", "ATTACHER");
@@ -11544,6 +11544,41 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   ok("[345] 空站点不否决", W.PICK.paths.vetoed("", "203.0.113.9:443") === false);
   ok("[345] 空站点通道放行", W.PICK.paths.chanOpen("", "203.0.113.9:443") === true);
 }
+  // ═══ 第 346 组：地区挑选器由会话自己持有（7.346）═══
+  {
+    const sessSrc346 = fs.readFileSync("src/proxy/session.ts", "utf8");
+    const regSrc346 = fs.readFileSync("src/proxy/region.ts", "utf8");
+    ok("[346] 地区挑选器不再是模块级单例", W.REGION === undefined && !regSrc346.includes("export const REGION"));
+    ok("[346] 它仍是可构造的类（能力没丢）", typeof W.RegionPicker === "function" && typeof W.RegionPicker.prototype.open === "function");
+    ok("[346] 会话用字段持有它",
+      sessSrc346.includes("private readonly regionPicker = new RegionPicker();"));
+    ok("[346] 地区分流走字段而不是模块全局",
+      sessSrc346.includes("await this.regionPicker.open(") && !sessSrc346.includes("REGION.open("));
+    ok("[346] 会话里只剩这一个 region 相关字段",
+      (sessSrc346.match(/new RegionPicker\(\)/g) || []).length === 1);
+    // 第 318 组的假 socket 声明在那个块里，这里给自己一份最小的（构造期只要 accept/close 存在）
+    class FakeWS346 {
+      constructor() {
+        this.readyState = 1;
+        this.bufferedAmount = 0;
+      }
+      accept() {}
+      send() {}
+      close() {}
+    }
+    globalThis.WebSocketPair = class {
+      constructor() {
+        this[0] = new FakeWS346();
+        this[1] = new FakeWS346();
+      }
+    };
+    const ps346 = new W.ProxySession(new Request("https://edge.test/x?rg=hk"), {}, {});
+    const ps346b = new W.ProxySession(new Request("https://edge.test/x?rg=jp"), {}, {});
+    ok("[346] 每个会话拿到自己的实例（不再是共享单例）",
+      ps346.regionPicker instanceof W.RegionPicker && ps346b.regionPicker instanceof W.RegionPicker);
+    eq("[346] 两个会话的挑选器互不相同", ps346.regionPicker === ps346b.regionPicker, false);
+    eq("[346] 实例上没有 open 之外的多余状态", typeof ps346.regionPicker.open, "function");
+  }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

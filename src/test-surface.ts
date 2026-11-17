@@ -91,7 +91,7 @@ export { DIALER, Dialer } from "./proxy/dialer";
 export { SOCKET_DIALER, SocketDialer } from "./proxy/socket-dialer";
 export { METER_DIAGNOSTICS, MeterDiagnostics } from "./store/meter-diagnostics";
 export { ATTACHER, Attacher } from "./proxy/attacher";
-export { REGION, RegionPicker } from "./proxy/region";
+export { RegionPicker } from "./proxy/region";
 export { cnt, cntDelta, cntUnsend, cntView } from "./core/counter";
 export { CRONLOCK, CronLock } from "./core/lock";
 export {

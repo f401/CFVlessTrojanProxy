@@ -6,7 +6,7 @@ import { wsToStream } from "./ws-in";
 import { logErr, rttLearn } from "../nodes/metrics";
 import { checkTarget, parseProxyIp } from "./dial";
 import { DIALER } from "./dialer";
-import { REGION } from "./region";
+import { RegionPicker } from "./region";
 import { handleDns } from "./dns";
 import { ATTACHER } from "./attacher";
 import { dialAnother } from "./fallback";
@@ -39,6 +39,9 @@ export class ProxySession {
   private readonly rxPin: string;
   private readonly ipTag: string;
   private readonly ipRegion: string | null;
+  // 地区钉住（`?rg=`）时的挑选器：只有 dialRegion 一个分支用它，所以挂在这个会话上，
+  // 而不是留成模块级单例（7.346 起 —— 模块级实例在门面上看不出「谁在用」）。
+  private readonly regionPicker = new RegionPicker();
   // 用户表在 run() 里才读（ctor 只解析参数、不碰 KV）；给一份空表让类型成立，
   // 真实值一定在首帧到达之前就绪。
   private users: Auth = { uuids: new Set<string>(), trojan: new Map<string, string>(), list: [] };
@@ -269,7 +272,7 @@ export class ProxySession {
       logErr(`region ${this.ipRegion}: ${msg}`, host);
       this.hangUp(1011, msg);
     };
-    const picked = await REGION.open({ env: this.env, mode: this.mode, region: this.ipRegion || "", conn: st, onFail: failRegion });
+    const picked = await this.regionPicker.open({ env: this.env, mode: this.mode, region: this.ipRegion || "", conn: st, onFail: failRegion });
     return picked || null;
   }
 
