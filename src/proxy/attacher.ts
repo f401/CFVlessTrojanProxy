@@ -1,17 +1,17 @@
 import type { Socket } from "cloudflare:sockets";
-import { connect } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 import { S } from "../core/state";
 import { SC } from "../core/const";
 import { trimAged } from "../core/hostmem";
 import { cnt } from "../core/counter";
-import { CONNECT_MS, FIRST_UP_MS, closeQuietly, releaseAll, withTimeout, WS_OPEN } from "../core/util";
+import { FIRST_UP_MS, closeQuietly, releaseAll, WS_OPEN } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
 import { nsEmptyClose, nsFail } from "../nodes/stat";
 import { SEL } from "../px/selector";
 import { kickFlush } from "../store/pend";
 import { checkTarget, expandV6, isV6Literal, parseProxyIp } from "./dial";
 import { dialAnother } from "./fallback";
+import { SOCKET_DIALER } from "./socket-dialer";
 import { pipeBack } from "./tunnel";
 
 export interface AttachOpts {
@@ -33,6 +33,26 @@ export interface AttachOpts {
  */
 export class Attacher {
   /**
+   * 功能：关掉客户端 WS，并吞掉「已经关了」的异常。
+   *
+   * 为什么要收成一处：补救链上有五个放弃点（首包回完 / 换节点也不通 / 直连无候选 /
+   * proxyip 被策略拦 / proxyip 连不上），每一处在关客户端时都要区分关闭码与原因。
+   * 以前每处各写一个 `try { close } catch (e) {}`，改原因字符串时容易只改一半。
+   * @param {WebSocketLike} clientSocket 客户端连接
+   * @param {number} code 关闭码（1000 正常结束 / 1011 上游不可用）
+   * @param {string} reason 关闭原因（会出现在 `/logs` 里，用来区分是哪一跳放弃的）
+   * @returns {void}
+   */
+  private endClient(clientSocket: WebSocketLike, code: number, reason: string): void {
+    // close() 在已经关闭的连接上会抛：这是唯一该吞掉的异常，其他错误要显形
+    try {
+      clientSocket.close(code, reason);
+    } catch {
+      /* 客户端已经走了 */
+    }
+  }
+
+  /**
    * 把已建立的 `sock` 挂到客户端 WS 上；0 字节关闭时按补救链继续，直到成功或放弃。
    */
   async run(o: AttachOpts, sock: Socket): Promise<void> {
@@ -46,7 +66,7 @@ export class Attacher {
     conn.headerSent = false;
     conn.tAttach = Date.now(); // 首字节耗时从这里起算
     conn.ttfb = 0;
-// 首包写也要有上限：黑洞中继接了连接却不读，write 永不返回，而客户端已经等在首字节上
+    // 首包写也要有上限：黑洞中继接了连接却不读，write 永不返回，而客户端已经等在首字节上
     if (payload.length) await conn.upWrite(payload, FIRST_UP_MS);
 
     pipeBack(sock, clientSocket, conn, async (gotData) => {
@@ -61,9 +81,7 @@ export class Attacher {
         rttMark(conn.id, conn.ipTag, false);
       }
       if (gotData) {
-        try {
-          clientSocket.close(1000, "done");
-        } catch (e) {}
+        this.endClient(clientSocket, 1000, "done");
         return;
       }
 
@@ -88,9 +106,7 @@ export class Attacher {
         // 站点级试探与普通站点失败在这里是同一件事：只轻记节点（nsSiteFail），
         // 不动全局失败记忆、也不冻结。原来那个 if/else 的两条分支调的其实是同一个函数。
         await SEL.softFail(conn.node);
-        try {
-          clientSocket.close(1000, "done");
-        } catch (e) {}
+        this.endClient(clientSocket, 1000, "done");
         return;
       }
 
@@ -103,17 +119,16 @@ export class Attacher {
         for (const raw of String(env.cfIpv6).split(",")) {
           const v6 = raw.trim();
           if (!v6) continue;
-          // 与主路径同一个口径：connect() 自己没有超时，挂死会把客户端拖到放弃
-          const p6 = Promise.resolve(connect({ hostname: expandV6(v6), port }));
+          // 建连预算与「迟到关闭」都交给拨号器：这两条补救建连以前和主路径各写一遍，
+          // 谁漏掉后半段都不会有门禁变红，只会静默吃掉并发名额（7.86）。
           try {
             logErr(`empty close -> retry via IPv6 ${v6}`, host);
-            const s6 = await withTimeout(p6, CONNECT_MS);
+            const s6 = await SOCKET_DIALER.open(expandV6(v6), port);
             conn.via = "v6";
             await this.run(o, s6);
             return;
           } catch (e) {
-            // 超时迟到成功的 socket 也要关掉，否则白占并发名额
-            void p6.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 没连上 */ });
+            // 这条候选不通就换下一个：迟到成功的 socket 已经由拨号器关掉了
           }
         }
       }
@@ -127,9 +142,7 @@ export class Attacher {
         kickFlush(env, conn.id);
         cnt("eCloseD"); // 直连空关闭：目标站的问题，不算节点
         nsEmptyClose(conn.node, false);
-        try {
-          clientSocket.close(1000, "done");
-        } catch (e) {}
+        this.endClient(clientSocket, 1000, "done");
         return;
       }
       conn.retried = true;
@@ -142,25 +155,18 @@ export class Attacher {
       trimAged(S.needPx, SC.PX_MAX);
       logErr(`empty close -> proxyip ${px.host}`, host);
       if (checkTarget(px.host, px.port)) {
-        try {
-          clientSocket.close(1011, "proxyip blocked");
-        } catch (e) {}
+        this.endClient(clientSocket, 1011, "proxyip blocked");
         return;
       }
-      // 与主路径同一个口径：connect() 自己没有超时，挂死会把客户端拖到放弃
-      const p3 = Promise.resolve(connect({ hostname: px.host, port: px.port }));
       try {
-        const s3 = await withTimeout(p3, CONNECT_MS);
+        const s3 = await SOCKET_DIALER.open(px.host, px.port);
         conn.node = px.host + ":" + px.port;
         conn.via = "node";
         await this.run(o, s3);
       } catch (e) {
         // 池子里能解析、但连不上：必须给这条中继记账，否则选择器会一直把它挑回来
         nsFail(px.host + ":" + px.port);
-        void p3.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 没连上 */ });
-        try {
-          clientSocket.close(1011, "proxyip failed");
-        } catch (err) {}
+        this.endClient(clientSocket, 1011, "proxyip failed");
       }
     });
   }

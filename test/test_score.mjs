@@ -3768,8 +3768,8 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   const iRel = aSrc.indexOf("releaseAll(conn)");
   const iSet = aSrc.indexOf("conn.sock = sock;");
   ok("递归重试前先释放上一跳的 socket 与写锁", iRel >= 0 && iSet > iRel);
-  ok("IPv6 兜底也有超时", aSrc.includes("withTimeout(p6, CONNECT_MS)"));
-  ok("proxyip 兜底也有超时", aSrc.includes("withTimeout(p3, CONNECT_MS)"));
+  ok("IPv6 兜底也有建连预算（走拨号器）", aSrc.includes("SOCKET_DIALER.open(expandV6(v6), port)") && !aSrc.includes("connect({ hostname: expandV6(v6)"));
+  ok("proxyip 兜底也有建连预算（走拨号器）", aSrc.includes("SOCKET_DIALER.open(px.host, px.port)") && !aSrc.includes("Promise.resolve(connect("));
   ok("proxyip 连不上要给中继记账", aSrc.includes('nsFail(px.host + ":" + px.port)'));
   ok("死条件 !px || st.retried 已经删掉（只判代码行，注释里可以留历史）", !/if \(!px \|\| st\.retried\)/.test(aSrc));
 }
@@ -8041,6 +8041,42 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   }
   eq("落盘失败会抛出去（呼叫方据此重试）", threw276, true);
   eq("落盘失败后内存里的用量回到 0", m276.ledger.usage.up, 0);
+}
+
+
+// —— 第 277 组：Attacher 的补救建连与「关客户端」各自只留一处实现 ——
+{
+  const aSrc277 = fs.readFileSync("src/proxy/attacher.ts", "utf8");
+  // 结构：两处补救建连都走拨号器，不再自己拼 connect / withTimeout
+  eq("补救建连都走同一个拨号器", (aSrc277.match(/SOCKET_DIALER\.open\(/g) || []).length, 2);
+  ok("attacher 不再直接 connect", !aSrc277.includes("connect({") && !aSrc277.includes("Promise.resolve(connect("));
+  ok("attacher 不再自带建连超时", !aSrc277.includes("withTimeout(") && !aSrc277.includes("CONNECT_MS"));
+  ok("socket 模块只留类型导入", aSrc277.includes('import type { Socket } from "cloudflare:sockets";') && !aSrc277.includes('import { connect } from "cloudflare:sockets"'));
+  // 结构：关客户端只剩一处实现，五个放弃点都调它
+  eq("关客户端只有一处 close", (aSrc277.match(/clientSocket\.close\(/g) || []).length, 1);
+  eq("五个放弃点都走 endClient", (aSrc277.match(/this\.endClient\(clientSocket,/g) || []).length, 5);
+  ok("endClient 是私有方法", aSrc277.includes("private endClient(clientSocket: WebSocketLike, code: number, reason: string): void"));
+  // 历史自伤：首包那条注释曾被脚本顶到第 0 列（块内层级读起来是断的）
+  ok("没有第 0 列的注释行", !/^\/\//m.test(aSrc277));
+  // 行为：close 抛错要吞掉，正常时把关闭码与原因原样传下去
+  ok("endClient 存在", typeof W.ATTACHER.endClient === "function");
+  const seen = [];
+  const fakeOk = { readyState: 1, close: (code, reason) => seen.push([code, reason]) };
+  let threw = false;
+  try {
+    W.ATTACHER.endClient(fakeOk, 1011, "proxyip failed");
+  } catch (e) {
+    threw = true;
+  }
+  ok("endClient 把关闭码与原因原样传下去", !threw && seen.length === 1 && seen[0][0] === 1011 && seen[0][1] === "proxyip failed");
+  const fakeGone = { readyState: 3, close: () => { throw new Error("already closed"); } };
+  let threw2 = false;
+  try {
+    W.ATTACHER.endClient(fakeGone, 1000, "done");
+  } catch (e) {
+    threw2 = true;
+  }
+  ok("客户端已经走了也不会抛出来", !threw2);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
