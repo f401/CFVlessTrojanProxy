@@ -2018,7 +2018,7 @@ ok("未知子路径返回 undefined（404）", W.ROUTES.route("nope") === undefi
   W.VT.clear();
 }
 // ═══ 第 54 组：PageView（P6-3）═══
-ok("PageView 是类实例且两个视图都在（panel / stats）", typeof W.PAGES === "object" && ["panel", "stats"].every((k) => typeof W.PAGES[k] === "function"), "PAGES");
+ok("PageView 是类实例且两个视图都在（panel / stats）", typeof W.PageView === "function" && ["panel", "stats"].every((k) => typeof W.PageView.prototype[k] === "function") && W.PAGES === undefined, "PAGES 单例已退场（7.353）");
 ok("登录页与管理页的三个渲染入口搬到 admin.ts", ["renderLogin", "renderAdmin", "renderAdminHint"].every((k) => typeof W[k] === "function"), "admin html");
 ok("PageView 可构造", typeof W.PageView === "function", "PageView");
 // ═══ 第 55 组：整池被判死时的比例兜底（P6-4）═══
@@ -5212,7 +5212,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
     expire: "长期",
     policy: "滞回 15%",
   };
-  const html = W.PAGES.panel(env, url, "u1", "panel.example.com", "k", info);
+  const html = new W.PageView().panel(env, url, "u1", "panel.example.com", "k", info);
   ok("面板渲染出当前节点行", html.includes("当前节点 · 吞吐优先"), "");
   ok("面板里没有 undefined", html.includes("undefined") === false, "");
   ok("存活条数进了页面", html.includes("3"), "");
@@ -10683,7 +10683,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   const page333 = body333("private async page()");
   ok(
     "控制页只取用量与存活表两次往返",
-    page333.includes("Promise.all([readStats(env, id), aliveList(env)])") && page333.includes("PAGES.panel(") && page333.includes("CSP_STATIC"),
+    page333.includes("Promise.all([readStats(env, id), aliveList(env)])") && page333.includes("this.pages.panel(") && page333.includes("CSP_STATIC") && !page333.includes("PAGES.panel("),
   );
   ok("控制页不再取池子的当前中继（白付一次往返）", !page333.includes("px:cur") && !page333.includes("SEL.current("));
 
@@ -11750,6 +11750,39 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   ok("352·旧单例在窗口里已消失", W.METER_DIAGNOSTICS === undefined);
   ok("352·端点对象的字段就是分派器", new W.MeterEndpoints(new W.MeterState(), state352, async () => {}).diagnostics instanceof W.MeterDiagnostics);
 }
+{
+  // ---- 第 353 组：页面视图由路由对象自己持有，模块级 PAGES 退场 ----
+  const panelSrc353 = fs.readFileSync("src/views/panel.ts", "utf8");
+  const subSrc353 = fs.readFileSync("src/routes/subscription.ts", "utf8");
+  const walk353 = (dir) => {
+    const out = [];
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = dir + "/" + e.name;
+      if (e.isDirectory()) out.push(...walk353(p));
+      else if (e.name.endsWith(".ts")) out.push(p);
+    }
+    return out;
+  };
+  const allSrc353 = walk353("src").map((p) => fs.readFileSync(p, "utf8")).join("\n");
+  ok("[353] 视图模块不再导出模块级单例", !panelSrc353.includes("export const PAGES = new PageView();"), "panel.ts 里还有单例");
+  ok("[353] 视图模块仍导出 PageView 类", panelSrc353.includes("export class PageView {"), "");
+  ok("[353] 路由按类名引入视图", subSrc353.includes('import { PageView, fmtBytes } from "../views/panel";'), "");
+  ok("[353] 路由对象持有视图实例", subSrc353.includes("private readonly pages = new PageView();"), "");
+  ok("[353] 两处渲染都走字段", subSrc353.split("this.pages.").length - 1 >= 2 && !/[^.]\bPAGES\./.test(subSrc353), "还有裸 PAGES. 调用");
+  ok("[353] 全仓没有模块级 PAGES 单例", !allSrc353.includes("export const PAGES ="), "src/ 里还有");
+  ok("[353] 窗口里 PAGES 已退场", W.PAGES === undefined, "W.PAGES 仍在");
+  ok("[353] 窗口里 PageView 可直接构造", typeof W.PageView === "function" && typeof new W.PageView().panel === "function" && typeof new W.PageView().stats === "function", "");
+  ok("[353] 两个视图实例互不相同（无共享状态）", new W.PageView() !== new W.PageView(), "");
+  ok("[353] 独立实例仍能渲染面板与统计", (() => {
+    const v = new W.PageView();
+    const env = { uuid: "u353", pwd: "p353" };
+    const url = new URL("https://s353.example/u353/page");
+    const panel = v.panel(env, url, "u353", "s353.example", "k353", null);
+    const stats = v.stats({ env, id: "u353", stats: { up: 0, down: 0, conns: 0 }, learned: {}, nodeRows: [], errs: [] });
+    return panel.includes("<!doctype") && stats.includes("<!doctype");
+  })(), "渲染不出来");
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

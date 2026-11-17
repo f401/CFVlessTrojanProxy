@@ -2,7 +2,7 @@ import { P_T, shadowRate } from "../core/util";
 import { S } from "../core/state";
 import { dwellOf } from "../px/selector";
 import { SC } from "../core/const";
-import { PAGES, fmtBytes } from "../views/panel";
+import { PageView, fmtBytes } from "../views/panel";
 import { effectiveQuota, subHeaders } from "../core/quota";
 import { SUBVIEW, trojanPasswordOf } from "../views/sub";
 import type { SubKind } from "../views/sub";
@@ -51,6 +51,13 @@ const FEEDS: Record<string, { fmt: SubKind; json: boolean }> = {
  */
 export class SubscriptionRoutes {
   private readonly c: UserCtx;
+  /**
+   * 页面视图：控制页与统计页的 HTML 都从这一个对象出。
+   *
+   * 7.353 前它是模块级 `PAGES`（无状态的单例），由队列/路由持有之后，「谁渲染了页面」
+   * 在 `SubscriptionRoutes` 里就能读到，不必跳到 `panel.ts` 的尾部找实例。
+   */
+  private readonly pages = new PageView();
 
   /**
    * 功能：记下这次请求的上下文（构造期不做任何 I/O）。
@@ -104,7 +111,7 @@ export class SubscriptionRoutes {
         `滞回 15% · 驻留 ${Math.round(Math.min(dwellOf(env, "lat"), dwellOf(env, "tput")) / 60000)} 分钟 · ` +
         `每小时最多 ${SC.BUDGET} 次切换 · 影子 ${Math.round(shadowRate(env) * 100)}%`,
     };
-    return html(PAGES.panel(env, url, id, host, pageKey, info), 200, { "content-security-policy": CSP_STATIC });
+    return html(this.pages.panel(env, url, id, host, pageKey, info), 200, { "content-security-policy": CSP_STATIC });
   }
 
   /**
@@ -167,6 +174,6 @@ export class SubscriptionRoutes {
     const nodeRows = statsNodeRows(alive, nsMap);
     // 错误环只留最近 20 条并倒序：面板上一次刷屏会把更早的挤压掉，那是刻意的
     const errs = S.errs.slice(-20).reverse();
-    return html(PAGES.stats({ env, id, stats: s, learned, nodeRows, errs }));
+    return html(this.pages.stats({ env, id, stats: s, learned, nodeRows, errs }));
   }
 }

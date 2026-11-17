@@ -278,7 +278,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `DebugTables` | `src/routes/debug.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：`read()` 只按固定顺序编排，每个分支一个方法、只认自己那个参数键（`?blk=` 等自己取参数、自己拼载荷）；只读表、不拨号、不改状态，`&do=1` 时只有 `healthRows()` 与 `connRows()` 会多一次 DO 往返 |
 | `ProxyipView` | `src/routes/proxyip.ts` | `/proxyip` 的六个方法：只读报表（`?day`、`?src`）、两个管理员动作（`?reset` 清表、`?refresh` 跑一轮探活）、默认视图分三段——`liveRows()` 并内存表与跨 isolate 快照并按模式排序、`explain()` 只在 `?why=1` 时算画像与分项、`poolReport()` 只拼字段 |
 | `AdminView`（`admin` 门面） | `src/routes/admin.ts` | `/admin` 的四个分支各占一个方法：登出只清 cookie、登录做挑战-应答与限速、用户操作要读改写整份托管用户表（`cur.ok === false` 时必须拒绝，否则会把缺失用户整份删掉）、面板按用户数扇出 DO 往返并被 `ADMIN_STATS_MAX` 截断 |
-| `SubscriptionRoutes`（`subscription` 门面） | `src/routes/subscription.ts` | 控制页与订阅：`page()` 读用量 + 存活表两次往返、`feed(kind)` 把 clash / sing-box / 明文链接三种格式收成一条路（差别只有渲染器与 content-type，见 `FEEDS` 表）、`stats()` 的 JSON 分支零额外往返、`statsHtml()` 才并跨 isolate 快照 |
+| `SubscriptionRoutes`（`subscription` 门面） | `src/routes/subscription.ts` | 控制页与订阅：`page()` 读用量 + 存活表两次往返、`feed(kind)` 把 clash / sing-box / 明文链接三种格式收成一条路（差别只有渲染器与 content-type，见 `FEEDS` 表）、`stats()` 的 JSON 分支零额外往返、`statsHtml()` 才并跨 isolate 快照；页面视图 `PageView` 由它自己持有（7.353 起，不再有模块级 `PAGES`） |
 | `ProxySession` | `src/proxy/session.ts` | WebSocket 数据面的会话对象：握手 / 首帧解析 / 拨号（地区与补救两条路）/ 收尾各一个方法；`?rg=` 用的 `RegionPicker` 由它自己持有（7.346 起，不再有模块级 `REGION`） |
 | `UploadStream` | `src/proxy/ws-in.ts` | 客户端 → 上游的上行字节流：积压计数、超限关连接（1013）、正常关闭与异常各自收尾；`wsToStream()` 只是 `new UploadStream(ws, early).stream` |
 | `UserIndex` | `src/proxy/protocol.ts` | 用户表装配器：env（`uuid`/`uuids`、`trojan` 单密码与 `user:pass` 多密码）与 KV 托管用户合成一张表，维护「启用 id 集合」与「密码摘要 → 稳定 owner」；托管记录最后写，因此能覆盖 env 的启用状态 |
@@ -289,7 +289,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `DebugTf` | `src/routes/debug-nets.ts` | 判定批与真握手（子请求 + DO CPU，同文件） |
 | `DebugActions` | `src/routes/debug.ts` | 会改状态的诊断操作（refill/cur/restore/seed）：全部先过 `adminOnly`，都会写 KV 或 DO |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表 |
-| `SubscriptionView` / `PageView` / `PanelView` | `src/views/sub.ts`、`src/views/panel.ts` | 三种订阅格式与面板渲染（`PanelView` 六个分区各一方法、样式抽成 `PANEL_CSS`） |
+| `SubscriptionView` / `PageView` / `PanelView` | `src/views/sub.ts`、`src/views/panel.ts` | 三种订阅格式与面板渲染（`PanelView` 六个分区各一方法、样式抽成 `PANEL_CSS`；`PageView` 无字段，7.353 起由 `SubscriptionRoutes` 自己持有实例，模块级 `PAGES` 已撤） |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
 
 自由函数集中在 `src/core/{util,net,hist,quota,hosts,hostmem,http80,table,enums,types,facts,hook,state,const,counter,lock,latobs,firstobs,node-snapshot,transport}.ts`（编解码 / SHA-224 / WS / 超时 / 并发 / 环境解析 / 协议名 / 错误文本都在 `util.ts` 一个文件里，7.290 起不再拆分；SHA-224 内部按「补位 `sha224Pad()` / 展开 `sha224Words()` / 压缩 `sha224Mix()`」三步各自成函数，7.338 起）、`src/proxy/protocol.ts`、`src/views/{html,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。
