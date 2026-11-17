@@ -57,66 +57,109 @@ export function statBump(id: string, up: number, down: number, isNewConn?: boole
 
 /**
  * 功能：读用量：合并持久值 + 本地增量 + 待上报增量。
+ *
+ * 三层优先级：Meter DO（全网络唯一账本）→ KV 快照（没绑 METER 时）→ 本地即时视图。
+ * 只有 DO 那一层会额外做一次「DO 被重置就从 KV 回填」，回填结果要原样报给面板
+ * （`persisted`/`seed`），否则「回填失败」与「这个人真没用过流量」长得一模一样。
  * @param env 环境变量
  * @param id 用户 id
- * @returns {up, down, conns, first, last}
+ * @returns {up, down, conns, todayUp, todayDown, firstSeen, lastSeen, backend, persisted, seed}
  */
 export async function readStats(env: Env, id: string) {
   const local = S.stats.get(id) || { up: 0, down: 0, conns: 0, first: 0, last: 0 };
-  const p = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
+  const pend = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
+  const total = await meterGet(env, id);
+  if (!total) return kvView(env, id, local);
+  const seed = await seedFromSnap(env, id, total);
+  return doView(id, seed.total, pend, local, seed.seed);
+}
 
-  // 首选：Meter DO（全网络唯一帐本，不存在丢更新）
-  let doTotal = await meterGet(env, id);
-
-  // DO 被重置过（重建脚本会把命名空间一起删掉）→ 用 KV 快照回填一次
-  let seed: "ok" | "fail" | "none" = "none";
-  if (doTotal && !(doTotal.up || doTotal.down || doTotal.conns)) {
-    const snap = await usageSnapGet(env);
-    const s = snap && snap.users && snap.users[id];
-    if (s) {
-      // DO 里是空的、KV 快照里却有这个人的历史用量 ⇒ 正处在「DO 被重置」这个状态上。
-      // 回填失败时必须留痕：否则面板把 999 显示成 0，而且和「这个用户真的没用过流量」
-      // 完全同形（7.244 的 /proxyip?day=1、7.243 的快照写失败都是这一族）。
-      try {
-        const r = await doFetch(env, id, "https://meter/seed", { method: "POST", body: JSON.stringify(s) });
-        if (r.ok) {
-          doTotal = await r.json();
-          S.meterCache.set(id, { v: doTotal, t: Date.now() });
-          seed = "ok";
-        } else {
-          seed = "fail";
-          cnt("statsSeedFail");
-        }
-      } catch (e) {
-        seed = "fail";
-        cnt("statsSeedFail");
-      }
+/**
+ * 功能：DO 被重置过（重建脚本会把命名空间一起删掉）时，用 KV 快照回填一次。
+ *
+ * 判据是「DO 里是空的、KV 快照里却有这个人的历史用量」—— 只在这一个状态上回填。
+ * 回填失败必须留痕（`statsSeedFail` + `seed: "fail"`），否则面板把 999 显示成 0，
+ * 而且和「这个用户真的没用过流量」完全同形（7.243/7.244 是同一族）。
+ * @param env 环境变量
+ * @param id 用户 id
+ * @param total 当前 DO 读数（只有空账本才会回填）
+ * @returns 回填后的 DO 读数，以及回填结果（`ok` 成功 / `fail` 失败 / `none` 不需要回填）
+ */
+async function seedFromSnap(
+  env: Env,
+  id: string,
+  total: NonNullable<Awaited<ReturnType<typeof meterGet>>>,
+): Promise<{ total: NonNullable<Awaited<ReturnType<typeof meterGet>>>; seed: "ok" | "fail" | "none" }> {
+  if (total.up || total.down || total.conns) return { total, seed: "none" };
+  const snap = await usageSnapGet(env);
+  const row = snap && snap.users && snap.users[id];
+  if (!row) return { total, seed: "none" };
+  try {
+    const r = await doFetch(env, id, "https://meter/seed", { method: "POST", body: JSON.stringify(row) });
+    if (!r.ok) {
+      cnt("statsSeedFail");
+      return { total, seed: "fail" };
     }
+    // 回填成功：DO 现在返回的是「历史 + 0」，顺手把缓存刷成同一个值
+    const next = await r.json();
+    S.meterCache.set(id, { v: next, t: Date.now() });
+    return { total: next, seed: "ok" };
+  } catch (e) {
+    cnt("statsSeedFail");
+    return { total, seed: "fail" };
   }
+}
 
-  if (doTotal) {
-    // "今日"必须真的按今天算：当天没有任何流量时，DO 里的 d 还停在昨天，
-    // dU/dD 也是昨天的数；直接展示会让面板把昨天当今天。
-    const day = new Date().toISOString().slice(0, 10);
-    const sameDay = !doTotal.d || doTotal.d === day; // 老数据没有 d 字段，按当天处理
-    return {
-      id,
-      up: (doTotal.up || 0) + p.up,
-      down: (doTotal.down || 0) + p.down,
-      conns: (doTotal.conns || 0) + p.conns,
-      // 当日量 = DO 里的当日累计 + 还没推上去的增量
-      todayUp: (sameDay ? doTotal.dU || 0 : 0) + p.up,
-      todayDown: (sameDay ? doTotal.dD || 0 : 0) + p.down,
-      firstSeen: doTotal.first || local.first || null,
-      lastSeen: Math.max(doTotal.ts || 0, local.last) || null,
-      isolateLocal: { up: local.up, down: local.down, conns: local.conns },
-      backend: "do",
-      persisted: seed !== "fail",
-      seed,
-    };
-  }
+/**
+ * 功能：把 DO 的总账、待上报增量与本 isolate 的即时增量合成一份用量视图。
+ *
+ * "今日"必须真的按今天算：当天没有任何流量时 DO 里的 `d` 还停在昨天，`dU`/`dD`
+ * 也是昨天的数，直接展示会让面板把昨天当今天。
+ * @param id 用户 id
+ * @param total DO 里的总量
+ * @param pend 待上报增量（还没进 DO 的那部分）
+ * @param local 本 isolate 的即时增量
+ * @param seed 回填结果（`fail` 时 `persisted` 为 false）
+ * @returns 面板/订阅用的一份用量
+ */
+function doView(
+  id: string,
+  total: NonNullable<Awaited<ReturnType<typeof meterGet>>>,
+  pend: { up: number; down: number; conns: number },
+  local: { up: number; down: number; conns: number; first: number; last: number },
+  seed: "ok" | "fail" | "none",
+) {
+  const day = new Date().toISOString().slice(0, 10);
+  const sameDay = !total.d || total.d === day; // 老数据没有 d 字段，按当天处理
+  return {
+    id,
+    up: (total.up || 0) + pend.up,
+    down: (total.down || 0) + pend.down,
+    conns: (total.conns || 0) + pend.conns,
+    // 当日量 = DO 里的当日累计 + 还没推上去的增量
+    todayUp: (sameDay ? total.dU || 0 : 0) + pend.up,
+    todayDown: (sameDay ? total.dD || 0 : 0) + pend.down,
+    firstSeen: total.first || local.first || null,
+    lastSeen: Math.max(total.ts || 0, local.last) || null,
+    isolateLocal: { up: local.up, down: local.down, conns: local.conns },
+    backend: "do",
+    persisted: seed !== "fail",
+    seed,
+  };
+}
 
-  // 回退：KV 快照（没绑 METER 时）
+/**
+ * 功能：没绑 METER 时的回退视图 —— KV 快照 + 本 isolate 的即时增量。
+ *
+ * 快照本身就是「当日」口径（`flushSnap` 跨天会重置），所以今日量就是总量。
+ * @param env 环境变量
+ * @param id 用户 id
+ * @param local 本 isolate 的即时增量
+ * @returns 面板/订阅用的一份用量
+ */
+async function kvView(env: Env, id: string, local: { up: number; down: number; conns: number; first: number; last: number }) {
+  // 读失败与「没有这条记录」在面板上是同一个 0，但 `persisted` 必须如实反映
+  // （这里读不到就报 false，让调用方知道这是回退值而不是账本值）
   let stored = null;
   if (env.STATS) {
     try {
@@ -132,7 +175,7 @@ export async function readStats(env: Env, id: string) {
     up: (base.up || 0) + local.up,
     down: (base.down || 0) + local.down,
     conns: (base.conns || 0) + local.conns,
-    // 没绑 DO 时，快照本身就是"当日"口径（flushSnap 跨天会重置）
+    // 没绑 DO 时，快照本身就是「当日」口径（flushSnap 跨天会重置）
     todayUp: (base.up || 0) + local.up,
     todayDown: (base.down || 0) + local.down,
     firstSeen: base.first || local.first || null,
@@ -143,4 +186,3 @@ export async function readStats(env: Env, id: string) {
     seed: "none" as const,
   };
 }
-

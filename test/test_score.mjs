@@ -6925,7 +6925,8 @@ const wsOf245 = (state = 1) => ({ readyState: state, bufferedAmount: 0, send() {
   const srcStats246 = fs.readFileSync("src/store/stats.ts", "utf8");
   eq("第246组·两处失败分支都计数", srcStats246.split('cnt("statsSeedFail")').length - 1, 2);
   eq("第246组·stats.ts 不再有裸空 catch", srcStats246.includes("} catch (e) {}"), false);
-  ok("第246组·成功分支标记 ok", srcStats246.includes('seed = "ok"'));
+  // 7.332 起成功分支是「回填函数返回 seed: "ok"」，判据意图不变：成功这条路必须能标出来
+  ok("第246组·成功分支标记 ok", srcStats246.includes('seed: "ok"'));
   const srcState246 = fs.readFileSync("src/core/state.ts", "utf8");
   ok("第246组·statsSeedFail 已登记 cntKeys", srcState246.includes('"statsSeedFail"'));
 }
@@ -10448,6 +10449,175 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     W.S.snapChecked = keep331.checked;
     W.S.snapBytes = keep331.bytes;
     W.S.snapBusy = keep331.busy;
+  }
+}
+
+// —— 第 332 组：用量视图的 82 行拆成「回填 / DO 视图 / KV 兜底」三块 ——
+{
+  const srcStats332 = fs.readFileSync("src/store/stats.ts", "utf8").replace(/\r\n/g, "\n");
+  /** 功能：按签名切出一段函数的源码（到下一个顶格收尾为止）。 */
+  const body332 = (sig) => {
+    const at = srcStats332.indexOf(sig);
+    if (at < 0) return "";
+    const rest = srcStats332.slice(at + sig.length);
+    const end = rest.search(/\n\}\n/);
+    return rest.slice(0, end < 0 ? rest.length : end);
+  };
+
+  const read332 = body332("export async function readStats(");
+  ok("readStats 只做编排（DO → 回填 → 视图 / KV 兜底）", [
+    "await meterGet(env, id)",
+    "if (!total) return kvView(env, id, local)",
+    "await seedFromSnap(env, id, total)",
+    "doView(id, seed.total, pend, local, seed.seed)",
+  ].every((x) => read332.includes(x)));
+  ok("readStats 自己不碰 KV 与 DO 端点", !read332.includes("usageSnapGet") && !read332.includes("doFetch(") && !read332.includes("getSnap("));
+  ok("readStats 收成十五行以内", read332.split("\n").filter((x) => x.trim()).length <= 15, String(read332.split("\n").filter((x) => x.trim()).length));
+
+  const seed332 = body332("async function seedFromSnap(");
+  ok("只在 DO 账本为空时才回填", seed332.includes("if (total.up || total.down || total.conns) return { total, seed: \"none\" };"));
+  ok("回填走 /meter/seed 并刷新缓存", seed332.includes('"https://meter/seed"') && seed332.includes("S.meterCache.set(id, { v: next, t: Date.now() })"));
+  eq("两处失败分支都计数（判据同第 246 组）", seed332.split('cnt("statsSeedFail")').length - 1, 2);
+
+  const do332 = body332("function doView(");
+  ok("今日口径按真实日期判", do332.includes("const sameDay = !total.d || total.d === day;"));
+  ok("非当天时今日量不带昨天的数", do332.includes("todayUp: (sameDay ? total.dU || 0 : 0) + pend.up") && do332.includes("todayDown: (sameDay ? total.dD || 0 : 0) + pend.down"));
+  ok("首次见到的兜底是本 isolate 的即时视图", do332.includes("firstSeen: total.first || local.first || null"));
+  ok("回填失败时不声称已落盘", do332.includes('persisted: seed !== "fail"'));
+
+  const kv332src = body332("async function kvView(");
+  ok("KV 兜底读快照且读失败退化成空表", kv332src.includes("await getSnap(env)") && kv332src.includes("stored = null;"));
+  ok("KV 兜底如实声明 backend 与 seed", kv332src.includes('backend: "kv"') && kv332src.includes('seed: "none" as const'));
+
+  // 行为面：一个会记账的 METER 桩 + 一个内存 KV
+  const kvMemo332 = new Map();
+  const kv332 = {
+    get: async (k) => (kvMemo332.has(k) ? kvMemo332.get(k) : null),
+    put: async (k, v) => {
+      kvMemo332.set(k, v);
+    },
+  };
+  let seedHits332 = 0;
+  let seedStatus332 = 200;
+  const meter332 = (total, opts = {}) => ({
+    // doFetch 走 `env.METER.get(env.METER.idFromName(id))`，桩里两件都要有
+    idFromName: (x) => x,
+    get: () => ({
+      fetch: async (url) => {
+        if (String(url).endsWith("/seed")) {
+          seedHits332 += 1;
+          if (opts.throw) throw new Error("do down");
+          return { ok: seedStatus332 < 400, status: seedStatus332, json: async () => ({ ...(opts.seeded || total) }) };
+        }
+        if (opts.throwGet) throw new Error("do down");
+        return { ok: true, status: 200, json: async () => ({ ...total }) };
+      },
+    }),
+  });
+  const kept332 = {
+    stats: [...W.S.stats.entries()],
+    pend: [...W.S.pend.entries()],
+    meterCache: [...W.S.meterCache.entries()],
+    cnt: W.S.cnt,
+    snapCache: W.S.snapCache,
+    ttl: W.S.meterCache ? W.S.meterCache.size : 0,
+  };
+  const ID332 = "id332";
+  const day332 = new Date().toISOString().slice(0, 10);
+
+  try {
+    // 先把历史用量写进 KV 灾备快照（走真实的 usageSnapWrite，封装与线上一致）
+    W.S.meterCache.clear();
+    W.S.stats.clear();
+    W.S.pend.clear();
+    const envHist332 = { STATS: kv332, METER: meter332({ up: 999, down: 888, conns: 7, d: day332, dU: 111, dD: 222, first: 100, ts: 200 }) };
+    await W.usageSnapWrite(envHist332, [{ id: ID332 }], 4);
+    ok("历史用量进了 KV 灾备快照", kvMemo332.size > 0, String(kvMemo332.size));
+
+    // ① DO 里已有用量：不回填，视图 = DO 总量 + 待上报增量
+    W.S.meterCache.clear();
+    W.S.stats.clear();
+    W.S.pend.clear();
+    W.S.pend.set(ID332, { up: 3, down: 4, conns: 1, isNew: false, at: 1 });
+    W.S.stats.set(ID332, { up: 5, down: 6, conns: 2, first: 7, last: 8 });
+    seedHits332 = 0;
+    const live332 = await W.readStats({ STATS: kv332, METER: meter332({ up: 10, down: 20, conns: 3, d: day332, dU: 1, dD: 2, first: 5, ts: 9 }) }, ID332);
+    eq("DO 有量时标记 seed = none", live332.seed, "none");
+    eq("DO 有量时不发回填请求", seedHits332, 0);
+    eq("总量 = DO + 待上报", live332.up, 13);
+    eq("后端标记为 do", live332.backend, "do");
+    eq("已落盘为真", live332.persisted, true);
+    eq("本 isolate 即时视图照旧透出", live332.isolateLocal.up, 5);
+
+    // ② DO 被重置（空账本）+ KV 里有历史：回填一次，数值来自快照
+    W.S.meterCache.clear();
+    W.S.pend.clear();
+    W.S.stats.clear();
+    seedHits332 = 0;
+    seedStatus332 = 200;
+    const back332 = await W.readStats(
+      { STATS: kv332, METER: meter332({ up: 0, down: 0, conns: 0, ts: 0 }, { seeded: { up: 999, down: 888, conns: 7, d: day332, dU: 111, dD: 222, first: 100, ts: 200 } }) },
+      ID332,
+    );
+    eq("空账本时发一次回填请求", seedHits332, 1);
+    eq("回填成功标记 ok", back332.seed, "ok");
+    eq("回填后累计用量来自快照", back332.up, 999);
+    eq("回填后当日用量来自快照", back332.todayUp, 111);
+
+    // ③ 回填 5xx：标记 fail、不声称已落盘
+    W.S.meterCache.clear();
+    seedStatus332 = 500;
+    const bad332 = await W.readStats({ STATS: kv332, METER: meter332({ up: 0, down: 0, conns: 0, ts: 0 }) }, ID332);
+    eq("回填 5xx 标记 fail", bad332.seed, "fail");
+    eq("回填 5xx 不声称已落盘", bad332.persisted, false);
+    seedStatus332 = 200;
+
+    // ④ 跨天：DO 里的当日量停在昨天，今日量不能带昨天的数
+    W.S.meterCache.clear();
+    W.S.pend.clear();
+    W.S.stats.clear();
+    W.S.pend.set(ID332, { up: 3, down: 4, conns: 1, isNew: false, at: 1 });
+    const stale332 = await W.readStats(
+      { STATS: kv332, METER: meter332({ up: 10, down: 20, conns: 3, d: "1970-01-01", dU: 777, dD: 666, first: 5, ts: 9 }) },
+      ID332,
+    );
+    eq("跨天后今日上行不带昨天", stale332.todayUp, 3);
+    eq("跨天后今日下行不带昨天", stale332.todayDown, 4);
+
+    // ⑤ 没绑 METER：走 KV 兜底（口径是「快照 + 本 isolate 即时增量」）
+    W.S.meterCache.clear();
+    W.S.pend.clear();
+    W.S.stats.clear();
+    W.S.stats.set(ID332, { up: 5, down: 6, conns: 2, first: 7, last: 8 });
+    // 清缓存不是赋 null：getSnap 会读 S.snapCache.v，null 会抛错并被 KV 兜底吞成「没有快照」
+    W.S.snapCache = { v: null, t: 0 };
+    const kvNoSnap332 = await W.readStats({ STATS: kv332 }, ID332);
+    eq("没有快照时 backend 仍是 kv", kvNoSnap332.backend, "kv");
+    eq("KV 兜底声明 seed = none", kvNoSnap332.seed, "none");
+    eq("没有快照时不声称已落盘", kvNoSnap332.persisted, false);
+    eq("没有快照时只报本 isolate 的增量", kvNoSnap332.up, 5);
+
+    // 真有一份快照时必须是「快照 + 本地增量」
+    W.S.stats.clear();
+    W.S.stats.set(ID332, { up: 40, down: 50, conns: 3, first: 100, last: 200 });
+    // 清缓存不是赋 null：getSnap 会读 S.snapCache.v，null 会抛错并被 KV 兜底吞成「没有快照」
+    W.S.snapCache = { v: null, t: 0 };
+    await W.flushSnap({ STATS: kv332 }, true);
+    // 清缓存不是赋 null：getSnap 会读 S.snapCache.v，null 会抛错并被 KV 兜底吞成「没有快照」
+    W.S.snapCache = { v: null, t: 0 };
+    W.S.stats.set(ID332, { up: 2, down: 1, conns: 1, first: 0, last: 300 });
+    const kvSnap332 = await W.readStats({ STATS: kv332 }, ID332);
+    eq("有快照时把快照与本地对加", kvSnap332.up, 42);
+    eq("有快照时标记已落盘", kvSnap332.persisted, true);
+  } finally {
+    W.S.stats.clear();
+    W.S.pend.clear();
+    W.S.meterCache.clear();
+    for (const [k, v] of kept332.stats) W.S.stats.set(k, v);
+    for (const [k, v] of kept332.pend) W.S.pend.set(k, v);
+    for (const [k, v] of kept332.meterCache) W.S.meterCache.set(k, v);
+    W.S.snapCache = kept332.snapCache;
+    if (kept332.cnt) W.S.cnt = kept332.cnt;
   }
 }
 
