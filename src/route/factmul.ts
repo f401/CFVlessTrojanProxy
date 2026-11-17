@@ -1,6 +1,6 @@
 import { EG } from "./egfacts";
-import { PS, psFactor } from "./psfacts";
-import { BLK, blkPen } from "./blkfacts";
+import { PS } from "./psfacts";
+import { BLK } from "./blkfacts";
 import { DNS } from "./dnsfacts";
 import { capFactor } from "./capfacts";
 
@@ -34,9 +34,9 @@ export function factMul(on: ReadonlySet<string>, host: string, ip: string, mode:
   let m = 1;
   m *= pick(on, "eg", EG.bias(ip, cf));
   m *= pick(on, "dns", DNS.penOf(host, EG.famOf(ip)));
-  m *= pick(on, "ps", psFactor(host, ip));
+  m *= pick(on, "ps", PS.factor(host, ip));
   m *= pick(on, "cap", capFactor(ip, mode));
-  m *= pick(on, "blk", blkPen(host, ip));
+  m *= pick(on, "blk", BLK.penOf(host, ip));
   return m;
 }
 

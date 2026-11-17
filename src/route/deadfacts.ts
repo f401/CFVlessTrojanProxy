@@ -135,23 +135,3 @@ export class DeadFacts extends FactTable<DeadRow, DeadWire> {
 /** 进程内唯一的「连不上」事实表 */
 export const DEAD = new DeadFacts();
 
-/**
- * 功能：薄包装 —— 记一次连接层结果。
- * @param {string} ip 中继 IP
- * @param {boolean} ok 是否连上
- * @param {number} now 记录时间
- * @returns {void}
- */
-export function deadNote(ip: string, ok: boolean, now = Date.now()): void {
-  DEAD.note(ip, ok, now);
-}
-
-/**
- * 功能：薄包装 —— 是否判死。
- * @param {string} ip 中继 IP
- * @param {number} now 当前时间
- * @returns {boolean} true 表示应挪到队尾
- */
-export function isDead(ip: string, now = Date.now()): boolean {
-  return DEAD.isDead(ip, now);
-}

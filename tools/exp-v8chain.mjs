@@ -63,9 +63,9 @@ ok("ps：连续失败后折价倍数变大（p 变小）", psAfter > psBefore, [
 // ── 3) dead：走 HOOK（真实接线），两次连不上就判死 ──────────────────────────
 ok("dead：HOOK.deadNote 已注册", typeof W.HOOK.deadNote === "function", typeof W.HOOK.deadNote);
 W.HOOK.deadNote(IP6, false);
-ok("dead：一次失败还不算死", !W.isDead(IP6, now));
+ok("dead：一次失败还不算死", !W.DEAD.isDead(IP6, now));
 W.HOOK.deadNote(IP6, false);
-ok("dead：两次连不上判死", W.isDead(IP6, now), true);
+ok("dead：两次连不上判死", W.DEAD.isDead(IP6, now), true);
 
 // ── 4) blk：真实入口喂三批 tiny + 管线自己记的整页对照 ───────────────────────
 // 每一批之前都要有一条「另一条通道出过整页」：对照的有效窗口只有 120 秒，而批次间隔 60 秒，
@@ -78,7 +78,7 @@ for (let b = 0; b < 3; b += 1) {
     W.JUDGE.onTraffic({ host: HOST, via: "node", node: IP4 + ":443", down: 737, ok: true, up: 120, life: 60, at });
   }
 }
-const pen = W.blkPen(HOST, IP4, now + 200000);
+const pen = W.BLK.penOf(HOST, IP4, now + 200000);
 ok("blk：三批确认后代价 ×6", pen === W.BLK_PEN, pen);
 ok("blk：表里有一行", W.BLK.snap(now + 200000).length === 1, W.BLK.snap(now + 200000));
 

@@ -410,13 +410,3 @@ export class BlkFacts {
 /** 进程内唯一实例 */
 export const BLK = new BlkFacts();
 
-/**
- * 功能：薄包装 —— 查询代价倍数。
- * @param {string} host 站点
- * @param {string} ip 出口 IP
- * @param {number} now 当前时间
- * @returns {number} 代价倍数
- */
-export function blkPen(host: string, ip: string, now = Date.now()): number {
-  return BLK.penOf(host, ip, now);
-}

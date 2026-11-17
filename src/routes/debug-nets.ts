@@ -9,7 +9,7 @@ import { cfHttpCode } from "../proxy/cfverdict";
 import { probeSni, probeProxy } from "../px/probe";
 import { aliveList } from "../px/pool";
 import { BLK_TTL } from "../route/commitfact";
-import { VT_TTL_MS, vAll, vState } from "../route/verdict";
+import { VT, VT_TTL_MS } from "../route/verdict";
 import { doFetch } from "../store/index";
 import { probeHttp80, splitRelay } from "../core/http80";
 import { adminOnly } from "../edge/auth";
@@ -174,7 +174,7 @@ export class DebugDiag {
     };
     // 该站点在中继上被判 blocked/dead 的条目（来自判定表，带来源与时间）
     const relayBlocked: Array<{ node: string; state: number; src: number; left: number }> = [];
-    for (const v of vAll()) {
+    for (const v of VT.all()) {
       if (!v.channel.startsWith("r:") || v.state < St.Blocked) continue;
       relayBlocked.push({
         node: v.channel.slice(2) + ":443",
@@ -269,7 +269,7 @@ export class DebugProbe {
       // 明文探测很便宜（connect + 读 ≤2KB），直接在请求路径做，不绕 DO（DO 那条会等 20s+ 才被重置）
       const out = await withTimeout(probeHttp80(hh, rr, pp), 6000);
       const chan = rr ? ({ kind: "r", ip: rr.split(":")[0] } as Chan) : DIRECT;
-      return json({ ok: true, probe: out, note: "diagnostic only", chan: chanKey(chan), state: vState(hh, chanKey(chan)) });
+      return json({ ok: true, probe: out, note: "diagnostic only", chan: chanKey(chan), state: VT.state(hh, chanKey(chan)) });
     } catch (e) {
       return json({ ok: false, error: errMsg(e) });
     }

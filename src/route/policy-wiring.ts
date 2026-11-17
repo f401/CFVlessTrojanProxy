@@ -8,11 +8,11 @@ import type { DecisionIn, DecisionOut, TrafficEvt } from "../core/hook";
 import { S } from "../core/state";
 import { HEALTH } from "./relay-health";
 import { JUDGE } from "./judge";
-import { vBad, vSet } from "./verdict";
+import { VT } from "./verdict";
 import { vtAck, vtDelta, vtNack, vtLoad } from "./verdictsync";
 import { chanPref } from "./prefs";
 import { relNote } from "./relperf";
-import { deadNote } from "./deadfacts";
+import { DEAD } from "./deadfacts";
 import { capNote } from "./capfacts";
 import { FACTS } from "./factsstore";
 import type { FactsDelta } from "./factsstore";
@@ -90,12 +90,12 @@ export class PolicyWiring {
     };
     HOOK.veto = (host: string, ip: string): boolean => {
       if (!ip) return false;
-      if (host && vBad(host, "r:" + ip)) return true;
+      if (host && VT.bad(host, "r:" + ip)) return true;
       // 中继本身快死了（连上就断/零字节）也换掉：这类中继会把 403 变成 timeout
       return HEALTH.score(ip) < 0.3;
     };
     HOOK.relayProbe = (host: string, ip: string, ok: boolean, ms: number): void => {
-      if (ok) vSet(host, "r:" + ip, 200, ms, 1);
+      if (ok) VT.set(host, "r:" + ip, 200, ms, 1);
     };
     HOOK.prefer = (host: string, ip: string): boolean => policy.prefer(host, ip);
     HOOK.chanPref = (ip: string, host = ""): number => chanPref(ip, host);
@@ -103,7 +103,7 @@ export class PolicyWiring {
     HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => relNote(host, ip, ttfb, kbs);
     HOOK.capNote = (ip: string, kbs: number): void => { capNote(ip, kbs); };
     HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
-    HOOK.deadNote = (ip: string, ok: boolean): void => deadNote(ip, ok);
+    HOOK.deadNote = (ip: string, ok: boolean): void => DEAD.note(ip, ok);
     HOOK.factsDelta = (): FactsDelta => FACTS.delta();
     // 之前没注册这个槽位 -> DecisionIn.facts 恒 undefined -> scoreOf 走 FULL_ON，
     // 也就是「facts 绑定只影响 /health 显示、不影响选路」。这是 check-wire 抓不到的接线洞

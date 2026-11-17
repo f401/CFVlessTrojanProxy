@@ -9,7 +9,7 @@
 // 生产侧从来没有任何减法 —— 等于在验证一条不存在的约束（六型里的「假仪表」）。
 import { SC } from "../core/const";
 import { S } from "../core/state";
-import { vAll } from "./verdict";
+import { VT } from "./verdict";
 import { DOH_ENDPOINTS } from "../proxy/dial";
 import { REFILL_MAX } from "../px/probe";
 import { RESTORE_MAX } from "../store/snapshot";
@@ -99,5 +99,5 @@ export function planRound(poolN: number, aliveN: number): Plan {
  */
 export function planView(poolN: number, aliveN: number): Plan & { verds: number; site: string } {
   const p = planRound(poolN, aliveN);
-  return { ...p, verds: vAll().length, site: S.site || "" };
+  return { ...p, verds: VT.all().length, site: S.site || "" };
 }

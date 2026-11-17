@@ -8,7 +8,7 @@ import { SC } from "../core/const";
 import { dropExpired, trimAged } from "../core/hostmem";
 import { TrafficEvt } from "../core/hook";
 import { Chan, DIRECT, chanKey } from "./channel";
-import { vBad } from "./verdict";
+import { VT } from "./verdict";
 import { recordBlock, recordPass, recordTraffic } from "./observe";
 import { cfHttpCode } from "../proxy/cfverdict";
 import { cnt } from "../core/counter";
@@ -242,7 +242,7 @@ export class Judge {
 
   /** 选路用：该通道是否被判死 */
   blocked(host: string, ip: string): boolean {
-    return vBad(host, "r:" + ip);
+    return VT.bad(host, "r:" + ip);
   }
 
   /**

@@ -2,7 +2,7 @@
 type RouteCtx = { env: Env };
 import { S } from "../core/state";
 import { withTimeout } from "../core/util";
-import { vAt, vSet, vSetState } from "./verdict";
+import { VT } from "./verdict";
 import { splitRelay } from "../core/http80";
 import { logErr } from "../nodes/metrics";
 /**
@@ -103,7 +103,7 @@ export function tfClass(rows: Array<{ ok: boolean; status?: number; bytes?: numb
  * 这是 rotate 的真正消费者 —— 全 4xx 时不写封禁，而是扩大采样面。
  */
 export function pickFresh(host: string, ips: string[], n: number): string[] {
-  const seen = (ip: string) => vAt(host, "r:" + ip);
+  const seen = (ip: string) => VT.at(host, "r:" + ip);
   const fresh = ips.filter((ip) => !seen(ip));
   const rest = ips.filter((ip) => seen(ip)).sort((a, b) => seen(a) - seen(b));
   // 全部没探过时，按 10 分钟一档轮转起点：否则小池子永远取数组前 n 条，"换出口"名存实亡
@@ -147,10 +147,10 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
   const mayBlock = tfBlockOk(prevTag, verdict);
   for (const row of rows) {
     const ip = splitRelay(row.relay, 443)[0];
-    if (verdict === "chan" && row.status === 403 && mayBlock) vSetState(host, ip === "direct" ? "d" : "r:" + ip, 2, 1);
+    if (verdict === "chan" && row.status === 403 && mayBlock) VT.setState(host, ip === "direct" ? "d" : "r:" + ip, 2, 1);
     // 正证据同样按 2xx/3xx 记（存真实状态码：判定表的 stateOf 本来就把 2xx/3xx 归成 ok）
     else if (row.ok && (row.status || 0) >= 200 && (row.status || 0) < 400)
-      vSet(host, ip === "direct" ? "d" : "r:" + ip, Number(row.status || 200), Number(row.ms || 0), 1);
+      VT.set(host, ip === "direct" ? "d" : "r:" + ip, Number(row.status || 200), Number(row.ms || 0), 1);
   }
   const escalate = tfEscalate(verdict);
   const tag = verdict + "/" + escalate;

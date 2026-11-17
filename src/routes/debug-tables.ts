@@ -8,10 +8,10 @@ import { DEAD } from "../route/deadfacts";
 import { EG } from "../route/egfacts";
 import { FACTS } from "../route/factsstore";
 import { prefsJson } from "../route/prefs";
-import { psSnap } from "../route/psfacts";
+import { PS } from "../route/psfacts";
 import { HEALTH } from "../route/relay-health";
 import { REL_SAMPLE_TTL, relSnap } from "../route/relperf";
-import { vAll } from "../route/verdict";
+import { VT } from "../route/verdict";
 import { clSnapshot, doFetch } from "../store/index";
 
 import type { RouteCtx } from "../edge/types";
@@ -41,7 +41,7 @@ export class DebugTables {
     // 站点 × 中继的成功率事实（本 isolate）：样本越多越可信，因子越靠近 1
     if (url.searchParams.get("pss")) {
       const host = String(url.searchParams.get("pss"));
-      return json({ host, rows: psSnap(host) });
+      return json({ host, rows: PS.snap(host) });
     }
     if (url.searchParams.get("eg")) return json({ rows: EG.snap() });
     if (url.searchParams.get("rt")) {
@@ -70,7 +70,7 @@ export class DebugTables {
       // 于是「扫描结果为空」和「根本没有扫描」在响应里长得一模一样（v7.154 删掉）。
       const plan = planView(S.pool.length, S.alive.size);
       const pol = { same: S.polSame, diff: S.polDiff, why: S.polWhy };
-      return json({ host: vtHost, table: vAll(), pol, plan, counters: cntView() });
+      return json({ host: vtHost, table: VT.all(), pol, plan, counters: cntView() });
     }
     // 站点偏好表：判定表按通道聚合后的「能打通 / 打不通」两栏
     if (url.searchParams.get("hl") === "1") {

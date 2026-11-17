@@ -2,6 +2,7 @@ import { FACT_TTL } from "../core/facts";
 import { EG } from "./egfacts";
 import { cnt } from "../core/counter";
 
+// 唯一写入口：`src/route/judge.ts` 的判定出口（`PS.note`）；读口是选路层的 `PS.factor` / `PS.bestOf`。
 // ---- 并入自 ps-types.ts ----
 // 「站点 × 中继」成功率事实的类型与刻度常量（v8 §5 的 `ps`）。
 //
@@ -404,56 +405,3 @@ export class PsFacts {
 /** 进程内唯一的成功率事实表 */
 export const PS = new PsFacts();
 
-/**
- * 功能：薄包装 —— 记一次观测（调用方只有 `src/route/judge.ts` 的判定出口）。
- * @param {string} host 目标站点
- * @param {string} ip 中继 IP
- * @param {boolean} ok 是否拿到完整响应
- * @param {number} now 观测时间
- * @returns {void}
- */
-export function psNote(host: string, ip: string, ok: boolean, now = Date.now()): void {
-  PS.note(host, ip, ok, now);
-}
-
-/**
- * 功能：薄包装 —— 历史成功率（供康复通道判断「这条通道曾经成过」）。
- * @param {string} host 目标站点
- * @param {string} ip 中继 IP
- * @param {number} now 当前时间
- * @returns {number} 0..1；-1 表示没有样本
- */
-export function psOk(host: string, ip: string, now = Date.now()): number {
-  return PS.okOf(host, ip, now);
-}
-
-/**
- * 功能：薄包装 —— 历史最好（供康复通道判断「曾经成过」）。
- * @param {string} host 目标站点
- * @param {string} ip 中继出口 IP
- * @param {number} now 当前时间（毫秒）
- * @returns 0..1；-1 表示没有样本
- */
-export function psBest(host: string, ip: string, now = Date.now()): number {
-  return PS.bestOf(host, ip, now);
-}
-
-/**
- * 功能：薄包装 —— 折价因子（供选路层调用）。
- * @param {string} host 目标站点
- * @param {string} ip 中继 IP
- * @param {number} now 当前时间
- * @returns {number} 0.5..2
- */
-export function psFactor(host: string, ip: string, now = Date.now()): number {
-  return PS.factor(host, ip, now);
-}
-
-/**
- * 功能：薄包装 —— 快照（供调试端点使用）。
- * @param {string} host 只看某个站点时传它的名字
- * @returns {Array<{ k: string; q: number; n: number; at: number; top: number }>} 快照
- */
-export function psSnap(host = ""): Array<{ k: string; q: number; n: number; at: number; top: number }> {
-  return PS.snap(host);
-}

@@ -3,7 +3,7 @@
 // 7.150 删掉了另外两条：probe 级（recordProbe，探测链在 7.69 整体移除后零调用点）
 // 与客户端回流（recordClient，订阅只有 url-test，客户端从不回传状态码）。
 import { Chan, chanKey } from "./channel";
-import { vSetState, vState, vSrc, vAt } from "./verdict";
+import { VT } from "./verdict";
 
 export interface TrafficEvt {
   target: string;
@@ -19,7 +19,7 @@ export interface TrafficEvt {
  */
 export function recordTraffic(e: TrafficEvt): void {
   const ck = chanKey(e.chan);
-  if (e.ok && e.down > 0 && vState(e.target, ck) === 0) vSetState(e.target, ck, 1, 0);
+  if (e.ok && e.down > 0 && VT.state(e.target, ck) === 0) VT.setState(e.target, ck, 1, 0);
 }
 
 /**
@@ -33,8 +33,8 @@ export function recordTraffic(e: TrafficEvt): void {
 export function recordBlock(e: TrafficEvt): void {
   const ck = chanKey(e.chan);
   // 1 小时内的好证据（整页/探测级）比一次小响应可信，不用它翻案
-  if (vState(e.target, ck) === 1 && vSrc(e.target, ck) >= 1 && Date.now() - vAt(e.target, ck) < 3600000) return;
-  vSetState(e.target, ck, 2, 1); // 差分证据可推翻流量级的 ok
+  if (VT.state(e.target, ck) === 1 && VT.srcOf(e.target, ck) >= 1 && Date.now() - VT.at(e.target, ck) < 3600000) return;
+  VT.setState(e.target, ck, 2, 1); // 差分证据可推翻流量级的 ok
 }
 
 /**
@@ -43,5 +43,5 @@ export function recordBlock(e: TrafficEvt): void {
  * @returns 无
  */
 export function recordPass(e: TrafficEvt): void {
-  vSetState(e.target, chanKey(e.chan), 1, 1); // 真拿到整页 = 与探测同级的好证据
+  VT.setState(e.target, chanKey(e.chan), 1, 1); // 真拿到整页 = 与探测同级的好证据
 }

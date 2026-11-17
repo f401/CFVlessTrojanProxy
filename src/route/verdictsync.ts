@@ -1,7 +1,7 @@
 // 判定表的跨 isolate 同步：只同步「强证据」（blocked/dead），带 30 分钟 TTL。
 // 目标 isolate 冷启动时拉一次，之后靠本地的记录增量回传，避免每请求都读 DO。
 import { S } from "../core/state";
-import { vAll, vImport, VT_TTL_MS } from "./verdict";
+import { VT, VT_TTL_MS } from "./verdict";
 import { HEALTH } from "./relay-health";
 import { FACTS, type FactsBody } from "./factsstore";
 import { EG } from "./egfacts";
@@ -28,7 +28,7 @@ export function vtDelta(): VtRow[] {
     if (bar <= 0 || p.t <= now) continue;
     out.push({ k, s: p.s, t: p.t });
   }
-  for (const v of vAll()) {
+  for (const v of VT.all()) {
     // 上限判断放在压入之前：写在压入之后时，`vtPend` 里已有 60 行就会返回 61 行
     // （与 7.161 修的 `delta()` 是同一个 shape，车身每多一行都超预算）
     if (out.length >= 60) break;
@@ -157,7 +157,7 @@ async function vtFetch(env: Env): Promise<void> {
     if (Array.isArray(jj.vt)) {
       // 过滤掉历史版本外发出去的通配封锁：它们已经在别的 isolate 里造成过大面积误封，重新导入只会复发。
       const rows = jj.vt.filter((r) => !r.k.startsWith("*|"));
-      vImport(rows);
+      VT.import(rows);
       cnt("vtDO", rows.length);
     }
     if (Array.isArray(jj.hl)) HEALTH.merge(jj.hl);

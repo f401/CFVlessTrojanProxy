@@ -2,7 +2,7 @@
 // 判定表里只有两种键：`d`（直连）与 `r:<ip>`（中继）。曾经还有 `*`（节点级通配）与 `e:<ip>`
 // （入口）两种：前者 7.57 把池子打薄后写入点全部删除、7.133 之后连写入入口都直接拒绝；后者随
 // 入口偏好表一起删除。这里只剩中继通道，读到 `*`/`e:` 的代码已经是死分支，一并去掉。
-import { vAll, vState } from "./verdict";
+import { VT } from "./verdict";
 import { St } from "../core/enums";
 
 /** 一条通道的偏好记录 */
@@ -31,7 +31,7 @@ export class Prefs {
    */
   of(host = "", limit = 40): { ok: PrefRow[]; bad: PrefRow[] } {
     const pick = new Map<string, PrefRow>();
-    for (const r of vAll()) {
+    for (const r of VT.all()) {
       if (host && r.target !== host) continue;
       const prev = pick.get(r.channel);
       if (!prev || r.updatedAt > prev.updatedAt) pick.set(r.channel, { channel: r.channel, state: r.state, updatedAt: r.updatedAt });
@@ -50,7 +50,7 @@ export class Prefs {
    */
   chan(ip: string, host: string): 0 | 1 | 2 {
     if (!ip || !host) return 1;
-    const state = vState(host, "r:" + ip);
+    const state = VT.state(host, "r:" + ip);
     if (state === St.Reachable) return 0;
     return state >= St.Blocked ? 2 : 1;
   }

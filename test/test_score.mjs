@@ -68,15 +68,8 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 let pass = 0,
   fail = 0;
-/** 功能：把判定表的门面、表本体与类型三份源码合并成一段文本（源码锁读它）。 */
-const verdictAll = () =>
-  [
-    "src/route/verdict.ts",
-    "src/route/verdict-table.ts",
-    "src/route/verdict-types.ts",
-  ]
-    .map((f) => fs.readFileSync(f, "utf8"))
-    .join("\n");
+/** 功能：读判定表的源码文本（合并成一个文件之后只剩这一份，源码锁读它）。 */
+const verdictAll = () => fs.readFileSync("src/route/verdict.ts", "utf8");
 /** 功能：把「站点 × 中继」成功率事实的五个文件合成一段文本（源码锁读它）。 */
 const psAll = () => fs.readFileSync("src/route/psfacts.ts", "utf8");
 /** 功能：把一轮池子维护的编排层与三个执行器的源码合并成一段文本（源码锁读它）。 */
@@ -1671,40 +1664,40 @@ ok("大池分片：表里仍有 CAND_KEEP 名", W.candsFor("lat").length >= 224,
   ok("CF 网段：IPv6/非法输入不命中", W.isCfIp("2001:db8::1") === false && W.isCfIp("") === false && W.isCfIp("104.16.0.256") === false);
 
 // 第 30 组：判定表（以 IP 为单位）
-W.vClear();
+W.VT.clear();
 const tg = "162.159.140.229";
 const chR = { kind: "r", ip: "45.136.117.194" };
 const chR2 = { kind: "r", ip: "185.253.117.147" };
 eq("直连通道的键是 d", W.chanKey(W.DIRECT), "d");
 eq("中继通道键带 IP", W.chanKey(chR), "r:45.136.117.194");
-eq("初始是 unknown", W.vState(tg, "d"), 0);
+eq("初始是 unknown", W.VT.state(tg, "d"), 0);
 W.recordTraffic({ target: tg, chan: W.DIRECT, down: 4096, ok: true });
-eq("流量成功只产生弱 ok", W.vState(tg, "d"), 1);
+eq("流量成功只产生弱 ok", W.VT.state(tg, "d"), 1);
 W.recordTraffic({ target: tg, chan: W.DIRECT, down: 0, ok: false });
-eq("流量失败不得把弱 ok 降级", W.vState(tg, "d"), 1);
-W.vSet(tg, "r:185.253.117.147", 403, 90, 1);
-eq("probe 403 记为 blocked", W.vState(tg, "r:185.253.117.147"), 2);
-ok("blocked 通道被判坏", W.vBad(tg, "r:185.253.117.147"));
-W.vSetState(tg, "r:185.253.117.147", 1, 0);
-eq("弱证据不能冲掉强证据的 blocked", W.vState(tg, "r:185.253.117.147"), 2);
-W.vSet(tg, "r:45.136.117.194", 0, 800, 1);
-eq("probe 连不上记为 dead", W.vState(tg, "r:45.136.117.194"), 3);
-  W.vSet("*", "r:185.253.117.147", 200, 60, 1);
-  ok("通配目标不落表", W.vAll().every((r) => r.target !== "*") && !W.vOk(tg, "r:185.253.117.147"));
+eq("流量失败不得把弱 ok 降级", W.VT.state(tg, "d"), 1);
+W.VT.set(tg, "r:185.253.117.147", 403, 90, 1);
+eq("probe 403 记为 blocked", W.VT.state(tg, "r:185.253.117.147"), 2);
+ok("blocked 通道被判坏", W.VT.bad(tg, "r:185.253.117.147"));
+W.VT.setState(tg, "r:185.253.117.147", 1, 0);
+eq("弱证据不能冲掉强证据的 blocked", W.VT.state(tg, "r:185.253.117.147"), 2);
+W.VT.set(tg, "r:45.136.117.194", 0, 800, 1);
+eq("probe 连不上记为 dead", W.VT.state(tg, "r:45.136.117.194"), 3);
+  W.VT.set("*", "r:185.253.117.147", 200, 60, 1);
+  ok("通配目标不落表", W.VT.all().every((r) => r.target !== "*") && !W.VT.ok(tg, "r:185.253.117.147"));
   const cw = W.cntView();
   ok("通配写入被计数（vwild）", (cw.vwild || 0) >= 1, String(cw.vwild));
-  W.vSet("*", "r:45.136.117.194", 200, 55, 1);
-  ok("没有通配回退：别的站点照旧是未知", !W.vOk("1.2.3.4", "r:45.136.117.194"));
+  W.VT.set("*", "r:45.136.117.194", 200, 55, 1);
+  ok("没有通配回退：别的站点照旧是未知", !W.VT.ok("1.2.3.4", "r:45.136.117.194"));
 eq("probe 级证据入口已删除（探测链 7.69 整体移除）", W.recordProbe, undefined);
 eq("客户端回流入口已删除（订阅只有 url-test，客户端从不回传状态码）", W.recordClient, undefined);
-W.vClear();
-eq("清空后表为空", W.vAll().length, 0);
+W.VT.clear();
+eq("清空后表为空", W.VT.all().length, 0);
 // 第 31 组：通道策略（影子）与子请求预算
 const rCtx = { host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5", "45.136.117.194"], legacyWantsRelay: true };
 eq("cf 目标优先挑可用的中继", W.decide(rCtx).chan.kind, "r");
 eq("v6 客户端 + cf 目标只走非 CF 中继", W.decide({ ...rCtx, clientV6: true }).chan.ip, "45.136.117.194");
 eq("普通目标走直连", W.decide({ ...rCtx, cfHost: false }).chan.kind, "d");
-W.vClear(); W.S.polSame = 0; W.S.polDiff = 0; W.S.polWhy = {};
+W.VT.clear(); W.S.polSame = 0; W.S.polDiff = 0; W.S.polWhy = {};
 W.shadow(rCtx);
 eq("影子模式统计一致", W.S.polSame, 1);
 W.shadow({ ...rCtx, legacyWantsRelay: false });
@@ -1728,45 +1721,45 @@ eq("生效后 v4 客户端不被硬规则改写", W.pxDecision(req4, "example.co
 ok("影子统计有累计", W.S.polSame + W.S.polDiff >= 3, String(W.S.polSame + W.S.polDiff));
 ok("原因分布有键", Object.keys(W.S.polWhy).length > 0, JSON.stringify(W.S.polWhy));
 // 第 33 组：判定表接入选路（veto）
-W.vClear();
-W.vSet("x.com", "r:" + "45.136.117.194", 403, 70, 1);
+W.VT.clear();
+W.VT.set("x.com", "r:" + "45.136.117.194", 403, 70, 1);
 ok("被判 blocked 的中继被 veto", W.HOOK.veto("x.com", "45.136.117.194") === true);
 ok("同站点未判过的中继不被 veto", W.HOOK.veto("x.com", "89.22.227.132") === false);
 ok("站点级判定不外溢到别的站点", W.HOOK.veto("y.com", "45.136.117.194") === false);
-W.vSet("*", "r:" + "89.22.227.132", 0, 900, 1);
+W.VT.set("*", "r:" + "89.22.227.132", 0, 900, 1);
 ok("通配判定不再生效：写不进表，也不会外溢到别的站点", W.HOOK.veto("y.com", "89.22.227.132") === false);
-W.vClear();
+W.VT.clear();
 ok("清空后不再 veto", W.HOOK.veto("x.com", "45.136.117.194") === false);
 // 第 34 组：连接证据钩子（traffic，差分判据）
-W.vClear(); W.S.needPx.clear(); W.S.smCnt.clear(); W.S.bigByHost.clear();
+W.VT.clear(); W.S.needPx.clear(); W.S.smCnt.clear(); W.S.bigByHost.clear();
 W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false, life: 800, up: 0 });
-eq("只有小响应时不判死（可能只是业务层 403）", W.vState("x.com", "r:45.136.117.194"), 0);
+eq("只有小响应时不判死（可能只是业务层 403）", W.VT.state("x.com", "r:45.136.117.194"), 0);
 ok("小响应按通道记进 smCnt（不再有复核队列，这条计数是它唯一的下游）", (W.S.smCnt.get("x.com|r:45.136.117.194") || 0) >= 1);
 W.HOOK.traffic({ host: "x.com", via: "node", node: "89.22.227.132:443", down: 90000, ok: true, life: 4000, up: 900 });
-eq("同一站点别的通道能打通 → 记为 ok", W.vState("x.com", "r:89.22.227.132"), 1);
+eq("同一站点别的通道能打通 → 记为 ok", W.VT.state("x.com", "r:89.22.227.132"), 1);
 W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false, life: 800, up: 0 });
-eq("有别的通道能打通 + 本通道两次小响应 → 判该通道被封", W.vState("x.com", "r:45.136.117.194"), 2);
+eq("有别的通道能打通 + 本通道两次小响应 → 判该通道被封", W.VT.state("x.com", "r:45.136.117.194"), 2);
 ok("判被封后设 needPx（下次优先中转）", (W.S.needPx.get("x.com") || 0) > Date.now());
 W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 90000, ok: true, life: 4000, up: 900 });
-eq("之后拿到大响应 → 解除误判", W.vState("x.com", "r:45.136.117.194"), 1);
+eq("之后拿到大响应 → 解除误判", W.VT.state("x.com", "r:45.136.117.194"), 1);
 
 // 第 35 组：判定表跨 isolate 同步（只同步强证据）
-W.vClear(); W.S.vtSent.clear();
-W.vSet("x.com", "r:" + "45.136.117.194", 403, 60, 1);
+W.VT.clear(); W.S.vtSent.clear();
+W.VT.set("x.com", "r:" + "45.136.117.194", 403, 60, 1);
 const dl = W.HOOK.vtDelta();
 eq("强证据进增量", dl.length, 1);
 eq("增量键是 target|chan", dl[0].k, "x.com|r:45.136.117.194");
 eq("增量里是 blocked", dl[0].s, 2);
 W.vtAck();
 eq("ack 之后同一证据不重复上报", W.HOOK.vtDelta().length, 0);
-W.vClear();
-eq("清空后本地为空", W.vAll().length, 0);
-W.vImport(dl);
-eq("远端强证据可导入", W.vState("x.com", "r:45.136.117.194"), 2);
+W.VT.clear();
+eq("清空后本地为空", W.VT.all().length, 0);
+W.VT.import(dl);
+eq("远端强证据可导入", W.VT.state("x.com", "r:45.136.117.194"), 2);
 ok("导入后 veto 生效", W.HOOK.veto("x.com", "45.136.117.194") === true);
-W.vSet("y.com", "r:" + "1.1.1.1", 200, 40, 1);
+W.VT.set("y.com", "r:" + "1.1.1.1", 200, 40, 1);
 ok("ok 证据不进增量", W.HOOK.vtDelta().every((r) => r.k !== "y.com|r:1.1.1.1"));
-W.vClear(); W.S.vtSent.clear();
+W.VT.clear(); W.S.vtSent.clear();
 // 第 36 组：策略分级（0 影子 / 1 只硬规则 / 2 全生效）
 reset(); node("n1:443", {});
 const reqV6 = new Request("https://x/", { headers: { "cf-connecting-ip": "2001:db8::1" } });
@@ -1784,7 +1777,7 @@ ok("level 2 无候选时回落原判断", W.pxDecision(reqV4, "y.com", false, fa
 eq("pickHosts 已删除", W.pickHosts, undefined);
 eq("SWEEP_COST 已删除", W.SWEEP_COST, undefined);
 eq("runRound 已删除", W.runRound, undefined);
-W.vClear();
+W.VT.clear();
 
 // 第 38 组：订阅侧入口条目与「按边缘实测 x」的组（客户端实测）
 {
@@ -1835,35 +1828,35 @@ W.vClear();
 
 // 第 39 组：节点偏好表（站点 × 通道的「能通 / 打不通」两栏）
 {
-  W.vClear();
+  W.VT.clear();
   eq("没测过的通道不降权（未知 = 1）", W.chanPref("9.9.9.1", "a.com"), 1);
   eq("不传站点一律「未知」：通配行已经不存在", W.chanPref("9.9.9.1"), 1);
-  W.vSetState("a.com", "r:9.9.9.2", 1, 1);
+  W.VT.setState("a.com", "r:9.9.9.2", 1, 1);
   eq("实测能打通的通道 = 0", W.chanPref("9.9.9.2", "a.com"), 0);
   eq("别的站点看不到这条证据", W.chanPref("9.9.9.2", "b.com"), 1);
-  W.vSetState("a.com", "r:9.9.9.3", 2, 1);
+  W.VT.setState("a.com", "r:9.9.9.3", 2, 1);
   eq("实测打不通的通道 = 2", W.chanPref("9.9.9.3", "a.com"), 2);
   const pf = W.prefsJson(20);
   eq("偏好表能打通一栏含该通道", pf.ok.some((x) => x.channel === "r:9.9.9.2"), true);
   eq("偏好表打不通一栏含该通道", pf.bad.some((x) => x.channel === "r:9.9.9.3"), true);
-  W.vClear();
+  W.VT.clear();
 }
 
 // 第 40 组：拿到 403 就学（不等 probe 确认）
 {
-  W.vClear();
+  W.VT.clear();
   const ch = { kind: "r", ip: "9.9.9.7" };
   W.recordBlock({ target: "x.com", chan: ch, down: 700, ok: false });
   eq("小响应立刻判该通道被拒", W.chanPref("9.9.9.7", "x.com"), 2);
   eq("别的站点不受牵连", W.chanPref("9.9.9.7", "y.com"), 1);
   W.recordPass({ target: "x.com", chan: ch, down: 40000, ok: true });
   eq("大响应回来就解除", W.chanPref("9.9.9.7", "x.com"), 0);
-  W.vClear();
+  W.VT.clear();
   const ch2 = { kind: "r", ip: "9.9.9.8" };
-  W.vSet("x.com", "r:9.9.9.8", 200, 40, 1);
+  W.VT.set("x.com", "r:9.9.9.8", 200, 40, 1);
   W.recordBlock({ target: "x.com", chan: ch2, down: 700, ok: false });
   eq("probe 确认过能通的通道不被小响应当掉", W.chanPref("9.9.9.8", "x.com"), 0);
-  W.vClear();
+  W.VT.clear();
 }
 // 第 41 组：差分复核链路已删除（免费计划单次 userland TLS 握手就超 CPU 预算，实测 1102）
 // 它在 7.69 删掉 subtls 时就只剩空壳：两个探测开关（PROBE_REQ / PROBE_RND）恒为 0 ⇒ 入队闸门恒假、
@@ -1876,7 +1869,7 @@ eq("状态里不再有复核队列", W.S.vtQ, undefined);
 eq("状态里不再有「最近一次复核结果」", W.S.vtLast, undefined);
 
 // 第 42 组：HTTP 状态码判据接进决策（状态码级证据，1 个请求即可学会）
-W.vClear(); W.S.cfHttp.clear();
+W.VT.clear(); W.S.cfHttp.clear();
 W.S.cfHttp.set("x.com", { code: 403, colo: "SOF", t: Date.now() });
 const d403 = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5"], legacyWantsRelay: false });
 ok("本出口 403 → 决策绕中继", d403.chan.kind === "r" && d403.why === "http403");
@@ -1885,13 +1878,13 @@ const d200 = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["
 // 本出口 fetch 的 200 只代表 CF 自己出得去，不代表隧道直连出得去（实测同一时刻 200 → 隧道 403），
 // 所以只有隧道直连自己有过成功证据时才省这一跳。
 eq("本出口 200 但隧道直连无证据 → 仍走已知可用中继", d200.chan.kind, "r");
-W.vSetState("x.com", "d", 1, 1);
+W.VT.setState("x.com", "d", 1, 1);
 const d200b = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["104.16.0.5"], legacyWantsRelay: false });
 ok("隧道直连有过成功证据 → 才省这一跳（direct-ok）", d200b.chan.kind === "d" && d200b.why === "direct-ok");
 W.S.cfHttp.clear();
 ok("没有状态码证据时不会强行推翻池子判断", W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: false }).chan.kind === "d");
 // 第 43 组：差分判据 —— 保护「正常的业务 403」
-W.vClear();
+W.VT.clear();
 W.S.needPx.clear();
 W.S.smCnt.clear();
 W.S.bigByHost.clear();
@@ -1899,47 +1892,47 @@ W.S.bigChan.clear();
 // 1) 没有基线时，小响应不判死任何通道（业务 403 与封锁页在此不可区分）
 W.HOOK.traffic({ host: "api.biz.com", via: "node", node: "9.9.9.9:443", down: 4000, ok: false, life: 900, up: 300 });
 W.HOOK.traffic({ host: "api.biz.com", via: "node", node: "9.9.9.9:443", down: 4000, ok: false, life: 900, up: 300 });
-eq("无基线的小响应不写判定（两次也不判）", W.vBad("api.biz.com", "r:9.9.9.9"), false);
+eq("无基线的小响应不写判定（两次也不判）", W.VT.bad("api.biz.com", "r:9.9.9.9"), false);
 ok("无基线时只学「下次优先中转」", (W.S.needPx.get("api.biz.com") || 0) > Date.now());
 // 2) A 通道拿到整页 → B 通道的小响应才判被封
 W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 60000, ok: true, life: 3000, up: 900 });
-eq("大响应建立基线", W.vState("x.com", "r:45.136.117.194"), 1);
+eq("大响应建立基线", W.VT.state("x.com", "r:45.136.117.194"), 1);
 W.HOOK.traffic({ host: "x.com", via: "node", node: "185.253.117.147:443", down: 4200, ok: false, life: 900, up: 300 });
-eq("差分成立 → 判该中继被封", W.vBad("x.com", "r:185.253.117.147"), true);
-eq("拿到整页的通道不受牵连", W.vBad("x.com", "r:45.136.117.194"), false);
+eq("差分成立 → 判该中继被封", W.VT.bad("x.com", "r:185.253.117.147"), true);
+eq("拿到整页的通道不受牵连", W.VT.bad("x.com", "r:45.136.117.194"), false);
 // 3) 同一通道「先整页、后小响应」不算差分（可能是站点自身行为变化）
-W.vClear();
+W.VT.clear();
 W.S.smCnt.clear();
 W.S.bigByHost.clear();
 W.S.bigChan.clear();
 W.HOOK.traffic({ host: "y.com", via: "node", node: "7.7.7.7:443", down: 60000, ok: true, life: 3000, up: 900 });
 W.HOOK.traffic({ host: "y.com", via: "node", node: "7.7.7.7:443", down: 4000, ok: false, life: 900, up: 300 });
-eq("同通道先大后小不判死", W.vBad("y.com", "r:7.7.7.7"), false);
+eq("同通道先大后小不判死", W.VT.bad("y.com", "r:7.7.7.7"), false);
 // 4) 中继假 200（nginx 默认页）攒够 3 次才判
-W.vClear();
+W.VT.clear();
 W.S.smCnt.clear();
 for (let i = 0; i < 3; i++) W.HOOK.traffic({ host: "z.com", via: "node", node: "6.6.6.6:443", down: 4300, ok: true, life: 900, up: 200 });
-eq("假 200 攒 3 次判该中继不可用", W.vBad("z.com", "r:6.6.6.6"), true);
+eq("假 200 攒 3 次判该中继不可用", W.VT.bad("z.com", "r:6.6.6.6"), true);
 // 第 44 组：1 次请求感知 + 站点自愈（判定只改路由，永不断路）
-W.vClear(); W.S.needPx.clear(); W.S.smCnt.clear(); W.S.bigByHost.clear(); W.S.bigChan.clear(); W.S.cfHttp.clear();
+W.VT.clear(); W.S.needPx.clear(); W.S.smCnt.clear(); W.S.bigByHost.clear(); W.S.bigChan.clear(); W.S.cfHttp.clear();
 // 1) 本出口 fetch 根路径 200（站点活着）+ 小响应 → 一次即判该通道被封
 W.S.cfHttp.set("x.com", { code: 200, colo: "VIE", t: Date.now() });
 W.HOOK.traffic({ host: "x.com", via: "node", node: "5.5.5.5:443", down: 4200, ok: false, life: 900, up: 300 });
-eq("1 次请求即可判定 IP 级封锁", W.vBad("x.com", "r:5.5.5.5"), true);
+eq("1 次请求即可判定 IP 级封锁", W.VT.bad("x.com", "r:5.5.5.5"), true);
 // 2) 站点自愈：所有中继都被判死时，决策仍给出中继，且该站点的结论被清空
-W.vClear();
+W.VT.clear();
 W.S.cfHttp.clear();
-W.vSetState("y.com", "r:1.1.1.1", 2, 1);
-W.vSetState("y.com", "d", 2, 1);
+W.VT.setState("y.com", "r:1.1.1.1", 2, 1);
+W.VT.setState("y.com", "d", 2, 1);
 const dHeal = W.decide({ host: "y.com", cfHost: true, clientV6: false, relays: ["1.1.1.1"], legacyWantsRelay: true });
 eq("没有通道可走时仍然给出中继（不断路）", dHeal.chan.kind, "r");
-eq("自愈后该站点的封禁结论被清掉", W.vBad("y.com", "r:1.1.1.1"), false);
+eq("自愈后该站点的封禁结论被清掉", W.VT.bad("y.com", "r:1.1.1.1"), false);
 // 3) 业务 403（站点根路径本身就不是 200）不会被单次判死
-W.vClear();
+W.VT.clear();
 W.S.smCnt.clear();
 W.S.cfHttp.set("api.biz.com", { code: 403, colo: "AMS", t: Date.now() });
 W.HOOK.traffic({ host: "api.biz.com", via: "node", node: "8.8.8.8:443", down: 4200, ok: false, life: 900, up: 300 });
-eq("业务 403 站点不被单次判死", W.vBad("api.biz.com", "r:8.8.8.8"), false);
+eq("业务 403 站点不被单次判死", W.VT.bad("api.biz.com", "r:8.8.8.8"), false);
 // ═══ 第 45 组：中继存活度 RelayHealth + 偏好视图 Prefs（OOP 化后的 P1 改动）═══
 W.HEALTH.clear();
 eq("未知中继是中性 0.5，不惩罚新节点", W.HEALTH.score("9.9.9.9"), 0.5);
@@ -1956,8 +1949,8 @@ W.HEALTH.note("7.7.7.7:443", 0, false);
 eq("快死的中继被 veto（把 timeout 变成换道）", W.HOOK.veto("x.com", "7.7.7.7"), true);
 eq("未知中继不被 veto", W.HOOK.veto("x.com", "6.6.6.6"), false);
 W.HEALTH.clear();
-W.vClear();
-W.vSetState("z.com", "r:5.5.5.5", 1, 1);
+W.VT.clear();
+W.VT.setState("z.com", "r:5.5.5.5", 1, 1);
 const pj = W.PREFS.json(10);
 ok("Prefs 类能给出两栏视图", Array.isArray(pj.ok) && Array.isArray(pj.bad) && pj.n >= 1, JSON.stringify(pj));
 eq("Prefs 能看到实测能打通的通道", W.PREFS.chan("5.5.5.5", "z.com"), 0);
@@ -2003,8 +1996,8 @@ ok("未知子路径返回 undefined（404）", W.ROUTES.route("nope") === undefi
 {
   const rndBak = Math.random;
   const c53 = { host: "x.com", cfHost: true, clientV6: false, relays: ["9.9.9.1", "9.9.9.2"], legacyWantsRelay: true };
-  W.vClear();
-  W.vSetState("x.com", "r:9.9.9.1", 2, 1);
+  W.VT.clear();
+  W.VT.setState("x.com", "r:9.9.9.1", 2, 1);
   Math.random = () => 0.01; // 命中 5% 复检
   const d1 = W.decide(c53);
   ok("被判死的通道会被 5% 概率复检", d1.why === "explore" && d1.chan.ip === "9.9.9.1", d1.why);
@@ -2012,30 +2005,30 @@ ok("未知子路径返回 undefined（404）", W.ROUTES.route("nope") === undefi
   const d2 = W.decide(c53);
   ok("不在复检时仍避开被判死的通道", d2.why !== "explore" && d2.chan.ip === "9.9.9.2", d2.why);
   // 复检成功后应恢复正常（探测级 ok）
-  W.vSetState("x.com", "r:9.9.9.1", 1, 1);
+  W.VT.setState("x.com", "r:9.9.9.1", 1, 1);
   const d3 = W.decide(c53);
-  ok("复检成功即解除封禁", W.vState("x.com", "r:9.9.9.1") === 1 && d3.why !== "explore", d3.why);
+  ok("复检成功即解除封禁", W.VT.state("x.com", "r:9.9.9.1") === 1 && d3.why !== "explore", d3.why);
   // 成功只代表「当时能通」：再次出现差分证据应能重新判死（否则一旦通过就再也不学）
-  W.vClear(); // 换一个干净场景：只有流量级的弱 ok
-  W.vSetState("x.com", "r:9.9.9.1", 1, 0); // 流量级 ok（弱证据）
-  W.vSetState("x.com", "r:9.9.9.2", 1, 1);
+  W.VT.clear(); // 换一个干净场景：只有流量级的弱 ok
+  W.VT.setState("x.com", "r:9.9.9.1", 1, 0); // 流量级 ok（弱证据）
+  W.VT.setState("x.com", "r:9.9.9.2", 1, 1);
   W.recordBlock({ target: "x.com", chan: { kind: "r", ip: "9.9.9.1" }, down: 800, ok: false });
-  ok("流量级的 ok 可被差分证据推翻", W.vState("x.com", "r:9.9.9.1") === 2, String(W.vState("x.com", "r:9.9.9.1")));
+  ok("流量级的 ok 可被差分证据推翻", W.VT.state("x.com", "r:9.9.9.1") === 2, String(W.VT.state("x.com", "r:9.9.9.1")));
   Math.random = rndBak;
-  W.vClear();
+  W.VT.clear();
 }
 // ═══ 第 54 组：PageView（P6-3）═══
 ok("PageView 是类实例且五个视图都在", typeof W.PAGES === "object" && ["panel", "stats", "login", "admin", "adminHint"].every((k) => typeof W.PAGES[k] === "function"), "PAGES");
 ok("PageView 可构造", typeof W.PageView === "function", "PageView");
 // ═══ 第 55 组：整池被判死时的比例兜底（P6-4）═══
 {
-  W.vClear();
+  W.VT.clear();
   const relays = ["7.7.7.1", "7.7.7.2", "7.7.7.3", "7.7.7.4"];
-  for (const ip of relays) W.vSetState("x.com", "r:" + ip, 2, 1);
+  for (const ip of relays) W.VT.setState("x.com", "r:" + ip, 2, 1);
   const d = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays, legacyWantsRelay: true });
   ok("整池判死时仍有可用通道", d.chan.kind !== "d" && relays.includes(d.chan.ip), d.why);
-  ok("只保留最近两条判死，其余被解除", relays.filter((ip) => W.vState("x.com", "r:" + ip) === 2).length <= 2, relays.map((ip) => W.vState("x.com", "r:" + ip)).join(","));
-  W.vClear();
+  ok("只保留最近两条判死，其余被解除", relays.filter((ip) => W.VT.state("x.com", "r:" + ip) === 2).length <= 2, relays.map((ip) => W.VT.state("x.com", "r:" + ip)).join(","));
+  W.VT.clear();
 }
 
   // 第 56 组：IP 级封锁探测的判定收敛（cht 分支无需真实 403 现场也能验）
@@ -2064,7 +2057,7 @@ ok("PageView 可构造", typeof W.PageView === "function", "PageView");
   
   // 第 59 组：rotate 的消费者 —— 换出口优先挑没探过的中继
   ok("没探过的一律优先（起点按 10 分钟轮转，但要满额且不重复）", (function () { const r = W.pickFresh("pf.z", ["pa", "pb", "pc"], 2); return r.length === 2 && new Set(r).size === 2; })());
-  W.vSetState("pf.test", "r:pa", 2, 1);
+  W.VT.setState("pf.test", "r:pa", 2, 1);
   ok("探过的排到后面", W.pickFresh("pf.test", ["pa", "pb", "pc"], 2).join(",") === "pb,pc");
   ok("已探过的不会被挤出上限外时仍可用", W.pickFresh("pf.test", ["pa"], 2).join(",") === "pa");
   
@@ -2258,8 +2251,8 @@ console.log("\n70) 增量上报");
   const b2 = v.delta();
   eq("计数形增量不会因 nack 而改写", JSON.stringify(b2[0]), JSON.stringify(b1[0]));
   // 判定表的强证据同样走 pending
-  W.vSet("ack.example.com", "r:203.0.113.7", 403, 120);
-  W.vSetState("ack.example.com", "r:203.0.113.7", 2, 1);
+  W.VT.set("ack.example.com", "r:203.0.113.7", 403, 120);
+  W.VT.setState("ack.example.com", "r:203.0.113.7", 2, 1);
   const vd1 = W.vtDelta().filter((x) => x.k.includes("ack.example.com"));
   ok("强证据进入增量", vd1.length === 1, String(vd1.length));
   const vd2 = W.vtDelta().filter((x) => x.k.includes("ack.example.com"));
@@ -2310,13 +2303,13 @@ console.log("\n72) 探活失败过期");
 console.log("\n73) 业务 4xx 不被误升级成封锁");
 {
   const ev = (o) => ({ host: "shop.example.com", cf: true, ok: true, down: 0, up: 0, life: 100, via: "node", node: "198.51.100.9:443", ...o });
-  W.vClear();
+  W.VT.clear();
   W.JUDGE.onTraffic(ev({ host: "api.example.com", down: 265 }));
-  eq("业务 403 不写站点级封锁", W.vBad("api.example.com", "r:198.51.100.9"), false);
-  eq("业务 403 不写通配封锁", W.vBad("*", "r:198.51.100.9"), false);
+  eq("业务 403 不写站点级封锁", W.VT.bad("api.example.com", "r:198.51.100.9"), false);
+  eq("业务 403 不写通配封锁", W.VT.bad("*", "r:198.51.100.9"), false);
   W.JUDGE.onTraffic(ev({ host: "www.example.com", down: 30000, node: "203.0.113.7:443" }));
   W.JUDGE.onTraffic(ev({ host: "www.example.com", down: 260, node: "198.51.100.9:443" }));
-  eq("差分成立也只做软降权（不写通配）", W.vBad("*", "r:198.51.100.9"), false);
+  eq("差分成立也只做软降权（不写通配）", W.VT.bad("*", "r:198.51.100.9"), false);
   eq("差分成立时软降权生效", W.JUDGE.negOn("www.example.com", "198.51.100.9"), true);
   eq("软降权 10 分钟后失效", W.JUDGE.negOn("www.example.com", "198.51.100.9", Date.now() + 601000), false);
 }
@@ -2328,14 +2321,14 @@ console.log("\n75) 正记忆优先复用");
   const a = "198.51.100.11";
   const b = "198.51.100.12";
   const t0 = Date.now();
-  W.vClear();
+  W.VT.clear();
   W.JUDGE.markPos(host, b, t0);
   eq("正记忆写入后命中", W.JUDGE.posOn(host, b, t0 + 1000), true);
   eq("正记忆 10 分钟后失效", W.JUDGE.posOn(host, b, t0 + 601000), false);
   W.JUDGE.markPos(host, b, Date.now());
   // 故意让「另一条」的证据更新：只按证据时间排序会选 a，只有正记忆能把 b 顶到队首
-  W.vSetState(host, "r:" + b, 1, 1);
-  W.vSetState(host, "r:" + a, 1, 1);
+  W.VT.setState(host, "r:" + b, 1, 1);
+  W.VT.setState(host, "r:" + a, 1, 1);
   const ctx = { host, cfHost: true, clientV6: false, relays: [a, b], legacyWantsRelay: true };
   eq("站点级选择优先正记忆中继", W.decide(ctx).chan.ip, b);
   eq("普通目标不受正记忆影响", W.decide({ ...ctx, cfHost: false }).chan.kind, "d");
@@ -2433,21 +2426,21 @@ console.log("\n76) 出口族事实（v8 的 eg）");
   eq("非 CF 站点的小页不判族", W.EG.famOf("198.51.100.6", t0 + 1000), 0);
   // ps 必须能记负样本：否则 factor=prior/p 恒 ≤1，失败信息一条也进不去
   W.PS.clear();
-  eq("没有样本时 ps 因子为 1", W.psFactor("neg.example.com", "198.51.100.7"), 1);
+  eq("没有样本时 ps 因子为 1", W.PS.factor("neg.example.com", "198.51.100.7"), 1);
   W.PS.note("neg.example.com", "198.51.100.7", false, Date.now());
-  ok("一次失败就让 ps 变贵（>1）", W.psFactor("neg.example.com", "198.51.100.7") > 1);
+  ok("一次失败就让 ps 变贵（>1）", W.PS.factor("neg.example.com", "198.51.100.7") > 1);
   W.PS.note("neg.example.com", "198.51.100.7", true, Date.now());
   W.PS.note("neg.example.com", "198.51.100.7", true, Date.now());
-  ok("连续成功把 ps 拉回（< 3）", W.psFactor("neg.example.com", "198.51.100.7") < 3);
+  ok("连续成功把 ps 拉回（< 3）", W.PS.factor("neg.example.com", "198.51.100.7") < 3);
   // eg-pin 不能挑一条刚判死的中继
   W.EG.clear(); W.DEAD.clear();
   // 客户端 v6 + CF 站点：只要本站点有新鲜的直连成功证据，仍然选直连（族不传递）
-  W.vSetState("v6c.example.com", "d", 1, 1);
+  W.VT.setState("v6c.example.com", "d", 1, 1);
   eq("v6 客户端 + CF 站点有直连证据 → direct-ok", W.decide({ host: "v6c.example.com", cfHost: true, clientV6: true, relays: ["203.0.113.21"], legacyWantsRelay: true }).why, "direct-ok");
-  W.vClear();
+  W.VT.clear();
   W.EG.note("198.51.100.8", 4, Date.now());
-  W.deadNote("198.51.100.8", false, Date.now());
-  W.deadNote("198.51.100.8", false, Date.now());
+  W.DEAD.note("198.51.100.8", false, Date.now());
+  W.DEAD.note("198.51.100.8", false, Date.now());
   eq("eg-pin 跳过已判死的 v4 出口（无存活中继时退直连）", W.decide({ host: "dead.example.com", cfHost: true, clientV6: false, relays: [], legacyWantsRelay: true }).why, "direct");
   W.EG.clear(); W.DEAD.clear();
   eq("非 CF 站点不做族分层（github/example 在 v6 上都能过）", T.bias("2001:db8::1", false, t0 + 1000), 1.05);
@@ -2573,18 +2566,18 @@ console.log("\n80) 站点 × 中继成功率（ps）：只折价、不剔候选"
   // 用真实时间：ps 表的读取按 Date.now() 判过期，注入过去的固定时间戳会让行立刻过期
   const t0 = Date.now();
   W.PS.clear();
-  eq("没有样本时因子恒为 1", W.psFactor(H, "203.0.113.9", t0), 1);
+  eq("没有样本时因子恒为 1", W.PS.factor(H, "203.0.113.9", t0), 1);
   eq("没有样本时 pOf 是 NaN", Number.isNaN(W.PS.pOf(H, "203.0.113.9", t0)), true);
-  W.psNote(H, "203.0.113.9", false, t0);
-  W.psNote(H, "203.0.113.9", false, t0 + 1000);
-  eq("两次失败后变贵（因子 > 1）", W.psFactor(H, "203.0.113.9", t0 + 1000) > 1, true);
-  W.psNote(H, "203.0.113.7", true, t0);
-  W.psNote(H, "203.0.113.7", true, t0 + 1000);
-  eq("两次成功后变便宜（因子 < 1）", W.psFactor(H, "203.0.113.7", t0 + 1000) < 1, true);
-  eq("按站点分开：别的站点没有样本", W.psFactor("other.example", "203.0.113.9", t0 + 1000), 1);
-  eq("45 分钟后当作没有样本", W.psFactor(H, "203.0.113.9", t0 + 46 * 60000), 1);
-  for (let i = 0; i < 40; i++) W.psNote(H, "203.0.113.11", false, t0 + i * 10);
-  const fw = W.psFactor(H, "203.0.113.11", t0 + 400);
+  W.PS.note(H, "203.0.113.9", false, t0);
+  W.PS.note(H, "203.0.113.9", false, t0 + 1000);
+  eq("两次失败后变贵（因子 > 1）", W.PS.factor(H, "203.0.113.9", t0 + 1000) > 1, true);
+  W.PS.note(H, "203.0.113.7", true, t0);
+  W.PS.note(H, "203.0.113.7", true, t0 + 1000);
+  eq("两次成功后变便宜（因子 < 1）", W.PS.factor(H, "203.0.113.7", t0 + 1000) < 1, true);
+  eq("按站点分开：别的站点没有样本", W.PS.factor("other.example", "203.0.113.9", t0 + 1000), 1);
+  eq("45 分钟后当作没有样本", W.PS.factor(H, "203.0.113.9", t0 + 46 * 60000), 1);
+  for (let i = 0; i < 40; i++) W.PS.note(H, "203.0.113.11", false, t0 + i * 10);
+  const fw = W.PS.factor(H, "203.0.113.11", t0 + 400);
   eq("折价因子不低于 0.5", fw >= 0.5, true);
   eq("折价因子不高于 2", fw <= 2, true);
   W.PS.clear();
@@ -2592,7 +2585,7 @@ console.log("\n80) 站点 × 中继成功率（ps）：只折价、不剔候选"
   eq("更旧的观测被忽略", W.PS.load([{ k: H + "|203.0.113.20", q: 250, n: 9, at: t0 - 5 }]), 0);
   eq("更新的观测覆盖", W.PS.load([{ k: H + "|203.0.113.20", q: 250, n: 9, at: t0 + 5 }]), 1);
   W.PS.clear();
-  W.psNote(H, "203.0.113.30", true, t0);
+  W.PS.note(H, "203.0.113.30", true, t0);
   eq("增量里有 1 行", W.PS.delta().length, 1);
   W.PS.ack();
   eq("ack 后增量清空", W.PS.delta().length, 0);
@@ -2602,10 +2595,10 @@ console.log("\n80) 站点 × 中继成功率（ps）：只折价、不剔候选"
   W.PS.clear();
   W.relNote(H, "203.0.113.5", 100, 0, t0);
   W.relNote(H, "203.0.113.6", 100, 0, t0);
-  W.psNote(H, "203.0.113.5", true, t0);
-  W.psNote(H, "203.0.113.5", true, t0 + 1);
-  W.psNote(H, "203.0.113.6", false, t0);
-  W.psNote(H, "203.0.113.6", false, t0 + 1);
+  W.PS.note(H, "203.0.113.5", true, t0);
+  W.PS.note(H, "203.0.113.5", true, t0 + 1);
+  W.PS.note(H, "203.0.113.6", false, t0);
+  W.PS.note(H, "203.0.113.6", false, t0 + 1);
   const d = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.6", "203.0.113.5"], legacyWantsRelay: true, mode: "tput" });
   eq("按站点的成功率历史选更靠前的那条", d.chan.ip, "203.0.113.5");
   const d2 = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.11"], legacyWantsRelay: true, mode: "tput" });
@@ -2620,24 +2613,24 @@ console.log("\n81) 中继「连不上」（dead）：唯一允许挪到队尾的
 {
   const now = Date.now();
   W.DEAD.clear();
-  eq("一次失败不算死", W.isDead("203.0.113.61", now), false);
-  W.deadNote("203.0.113.61", false, now);
-  eq("一次失败后仍不算死", W.isDead("203.0.113.61", now), false);
-  W.deadNote("203.0.113.61", false, now + 1000);
-  eq("连续两次失败 → 判死", W.isDead("203.0.113.61", now + 1000), true);
-  eq("30 分钟后再给机会", W.isDead("203.0.113.61", now + 31 * 60000), false);
-  W.deadNote("203.0.113.62", false, now);
-  W.deadNote("203.0.113.62", false, now + 1000);
-  W.deadNote("203.0.113.62", true, now + 2000);
-  eq("连上一次就复活（清零）", W.isDead("203.0.113.62", now + 2000), false);
+  eq("一次失败不算死", W.DEAD.isDead("203.0.113.61", now), false);
+  W.DEAD.note("203.0.113.61", false, now);
+  eq("一次失败后仍不算死", W.DEAD.isDead("203.0.113.61", now), false);
+  W.DEAD.note("203.0.113.61", false, now + 1000);
+  eq("连续两次失败 → 判死", W.DEAD.isDead("203.0.113.61", now + 1000), true);
+  eq("30 分钟后再给机会", W.DEAD.isDead("203.0.113.61", now + 31 * 60000), false);
+  W.DEAD.note("203.0.113.62", false, now);
+  W.DEAD.note("203.0.113.62", false, now + 1000);
+  W.DEAD.note("203.0.113.62", true, now + 2000);
+  eq("连上一次就复活（清零）", W.DEAD.isDead("203.0.113.62", now + 2000), false);
   W.DEAD.clear();
   eq("合并只收判死行（n<2 被丢）", W.DEAD.load([{ i: "203.0.113.63", n: 1, at: now }]), 1);
-  eq("合并后仍不算死（n=1）", W.isDead("203.0.113.63", now), false);
+  eq("合并后仍不算死（n=1）", W.DEAD.isDead("203.0.113.63", now), false);
   eq("更新的判死行会覆盖", W.DEAD.load([{ i: "203.0.113.63", n: 2, at: now + 5 }]), 1);
-  eq("合并后判死", W.isDead("203.0.113.63", now + 5), true);
+  eq("合并后判死", W.DEAD.isDead("203.0.113.63", now + 5), true);
   eq("更旧的行被忽略", W.DEAD.load([{ i: "203.0.113.63", n: 9, at: now }]), 0);
   W.DEAD.clear();
-  W.deadNote("203.0.113.64", false, now);
+  W.DEAD.note("203.0.113.64", false, now);
   eq("增量里有 1 行", W.DEAD.delta().length, 1);
   W.DEAD.ack();
   eq("ack 后增量清空", W.DEAD.delta().length, 0);
@@ -2649,12 +2642,12 @@ console.log("\n81) 中继「连不上」（dead）：唯一允许挪到队尾的
   W.relNote(H, "203.0.113.72", 200, 0, now);
   const d1 = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.72", "203.0.113.71"], legacyWantsRelay: true, mode: "tput" });
   eq("两条都健康时按排序取第一条", d1.chan.ip, "203.0.113.72");
-  W.deadNote("203.0.113.72", false, now);
-  W.deadNote("203.0.113.72", false, now + 1);
+  W.DEAD.note("203.0.113.72", false, now);
+  W.DEAD.note("203.0.113.72", false, now + 1);
   const d2 = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.72", "203.0.113.71"], legacyWantsRelay: true, mode: "tput" });
   eq("判死的挪到队尾，换另一条", d2.chan.ip, "203.0.113.71");
-  W.deadNote("203.0.113.71", false, now + 2);
-  W.deadNote("203.0.113.71", false, now + 3);
+  W.DEAD.note("203.0.113.71", false, now + 2);
+  W.DEAD.note("203.0.113.71", false, now + 3);
   const d3 = W.decide({ host: H, cfHost: true, clientV6: false, relays: ["203.0.113.72", "203.0.113.71"], legacyWantsRelay: true, mode: "tput" });
   eq("全池判死时仍返回候选（不返回空）", ["203.0.113.71", "203.0.113.72"].includes(d3.chan.ip), true);
   W.DEAD.clear();
@@ -2696,31 +2689,31 @@ console.log("\n83) 单 IP 封锁（blk）：三批 × 每批 3 次、只折价�
   const t0 = Date.now();
   W.BLK.clear();
   const feed = (host, ip, base) => { for (let b = 0; b < 3; b += 1) for (let k = 0; k < 3; k += 1) W.BLK.note({ host, ip, down: 737, peerBig: true, at: base + b * 61000 + k * 1000 }); };
-  eq("默认代价倍数是 1", W.blkPen("x.example", "203.0.113.81", t0), 1);
+  eq("默认代价倍数是 1", W.BLK.penOf("x.example", "203.0.113.81", t0), 1);
   eq("没有整页对照时不投票", W.BLK.note({ host: "x.example", ip: "203.0.113.81", down: 737, peerBig: false, at: t0 }), false);
-  eq("无对照仍不算封锁", W.blkPen("x.example", "203.0.113.81", t0), 1);
+  eq("无对照仍不算封锁", W.BLK.penOf("x.example", "203.0.113.81", t0), 1);
   // 一批只喂 2 次：这一批作废，不足以确认
   for (let k = 0; k < 2; k += 1) W.BLK.note({ host: "x.example", ip: "203.0.113.81", down: 737, peerBig: true, at: t0 + k * 1000 });
   W.BLK.note({ host: "x.example", ip: "203.0.113.81", down: 737, peerBig: true, at: t0 + 61000 });
-  eq("每批不足 3 次不算票", W.blkPen("x.example", "203.0.113.81", t0 + 61000), 1);
+  eq("每批不足 3 次不算票", W.BLK.penOf("x.example", "203.0.113.81", t0 + 61000), 1);
   W.BLK.clear();
   feed("x.example", "203.0.113.81", t0);
-  eq("三批 × 每批 3 次后代价 ×6", W.blkPen("x.example", "203.0.113.81", t0 + 122000), W.BLK_PEN);
-  eq("换个站点不受影响", W.blkPen("y.example", "203.0.113.81", t0 + 122000), 1);
-  eq("换个出口不受影响", W.blkPen("x.example", "203.0.113.82", t0 + 122000), 1);
-  eq("90 分钟后自动恢复", W.blkPen("x.example", "203.0.113.81", t0 + 122000 + 91 * 60000), 1);
+  eq("三批 × 每批 3 次后代价 ×6", W.BLK.penOf("x.example", "203.0.113.81", t0 + 122000), W.BLK_PEN);
+  eq("换个站点不受影响", W.BLK.penOf("y.example", "203.0.113.81", t0 + 122000), 1);
+  eq("换个出口不受影响", W.BLK.penOf("x.example", "203.0.113.82", t0 + 122000), 1);
+  eq("90 分钟后自动恢复", W.BLK.penOf("x.example", "203.0.113.81", t0 + 122000 + 91 * 60000), 1);
   // 反向证据：同通道刚出过整页就清零进度
   W.BLK.clear();
   feed("z.example", "203.0.113.83", t0);
   W.BLK.contra("z.example", "203.0.113.83");
-  eq("反向证据清掉了已确认的行", W.blkPen("z.example", "203.0.113.83", t0 + 122000), 1);
+  eq("反向证据清掉了已确认的行", W.BLK.penOf("z.example", "203.0.113.83", t0 + 122000), 1);
   // 站点级自愈 + 静默
   W.BLK.clear();
   const cands = ["203.0.113.91", "203.0.113.92"];
   for (const ip of cands) feed("s.example", ip, t0);
-  eq("两条候选都被判封锁", [W.blkPen("s.example", cands[0], t0 + 122000), W.blkPen("s.example", cands[1], t0 + 122000)], [W.BLK_PEN, W.BLK_PEN]);
+  eq("两条候选都被判封锁", [W.BLK.penOf("s.example", cands[0], t0 + 122000), W.BLK.penOf("s.example", cands[1], t0 + 122000)], [W.BLK_PEN, W.BLK_PEN]);
   eq("整池被写满触发自愈", W.BLK.sweep("s.example", cands, t0 + 130000), true);
-  eq("自愈后代价回到 1", W.blkPen("s.example", cands[0], t0 + 130000), 1);
+  eq("自愈后代价回到 1", W.BLK.penOf("s.example", cands[0], t0 + 130000), 1);
   eq("自愈后该站点静默中", W.BLK.muted("s.example", t0 + 130000), true);
   eq("静默期内不再写新行", W.BLK.note({ host: "s.example", ip: cands[0], down: 737, peerBig: true, at: t0 + 140000 }), false);
   eq("静默 30 分钟后解除", W.BLK.muted("s.example", t0 + 130000 + 31 * 60000), false);
@@ -2771,12 +2764,12 @@ console.log("\n85) 康复通道（v8 D12）");
   const host = "rehab.example.com";
   const A = "203.0.113.31", B = "203.0.113.32", C = "203.0.113.33";
   // B 历史上有过整页（成功率 1.0），但现在被排到最后（代价极高）
-  for (let i = 0; i < 6; i++) W.psNote(host, B, true);
+  for (let i = 0; i < 6; i++) W.PS.note(host, B, true);
   W.relNote(host, A, 200, 2000);
   W.relNote(host, C, 220, 1900);
   W.relNote(host, B, 9000, 20);
-  eq("历史成功率能读到", W.psOk(host, B) > 0.9, true);
-  eq("没样本返回 -1", W.psOk(host, A), -1);
+  eq("历史成功率能读到", W.PS.okOf(host, B) > 0.9, true);
+  eq("没样本返回 -1", W.PS.okOf(host, A), -1);
   const C2 = { host, cfHost: true, clientV6: false, relays: [A, B, C], legacyWantsRelay: true, mode: "tput" };
   let last = null;
   let hit = null;
@@ -2809,7 +2802,7 @@ console.log("\n86) commitFact 单一裁决：ps 由 judge 写入");
     cf: false,
     at: Date.now(),
   });
-  eq("中继腿拿到整页 → 写入 ps", W.psOk(host, ip) > 0.6, true);
+  eq("中继腿拿到整页 → 写入 ps", W.PS.okOf(host, ip) > 0.6, true);
   W.JUDGE.onTraffic({
     host,
     via: "direct",
@@ -2821,7 +2814,7 @@ console.log("\n86) commitFact 单一裁决：ps 由 judge 写入");
     cf: false,
     at: Date.now(),
   });
-  eq("直连腿不写站点×中继成功率", W.psOk(host, "d"), -1);
+  eq("直连腿不写站点×中继成功率", W.PS.okOf(host, "d"), -1);
   eq("两个事件各裁决一次（cfObs +2）", (W.cntView().cfObs || 0) - obs0, 2);
 }
 
@@ -2839,7 +2832,7 @@ console.log("\n86b) 密集 tiny 只留一条负样本（节流在判据里，不
   // 同一个中继 A 连续 5 条 tiny：只有第一条能记负样本（同一个键 60 秒内只写一条事实）
   for (let i = 0; i < 5; i += 1) W.JUDGE.onTraffic(mk(A, 737, false, t0 + 1000 + i * 200));
   eq("整页 1 条正样本 + 密集 tiny 只 1 条负样本", (W.cntView().psNote || 0) - p0, 2);
-  eq("负样本真的进了 ps（不是只记了计数）", W.psOk(host, "198.51.100.21") < 0.6, true);
+  eq("负样本真的进了 ps（不是只记了计数）", W.PS.okOf(host, "198.51.100.21") < 0.6, true);
 }
 
 
@@ -3173,14 +3166,14 @@ eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
   W.DNS.clear();
   const rh = "hist.example.com";
   const rip = "198.51.100.9";
-  eq("没样本时 psBest 返回 -1", W.psBest(rh, rip), -1);
+  eq("没样本时 psBest 返回 -1", W.PS.bestOf(rh, rip), -1);
   W.PS.note(rh, rip, true, Date.now());
-  eq("成过一次 → 历史最好是 100%", W.psBest(rh, rip) > 0.99, true);
+  eq("成过一次 → 历史最好是 100%", W.PS.bestOf(rh, rip) > 0.99, true);
   for (let i = 0; i < 6; i++) W.PS.note(rh, rip, false, Date.now());
-  eq("连败之后当前均值掉到 0.6 以下", W.psOk(rh, rip) < 0.6, true);
+  eq("连败之后当前均值掉到 0.6 以下", W.PS.okOf(rh, rip) < 0.6, true);
   // 本轮核心：康复通道给的是「再试一次」的机会，闸门必须问「曾经行过吗」，
   // 不是「现在还好吗」—— 后者恰恰是被降权那批通道最不可能满足的条件。
-  eq("但历史最好仍是 100%（康复通道还认它）", W.psBest(rh, rip) > 0.99, true);
+  eq("但历史最好仍是 100%（康复通道还认它）", W.PS.bestOf(rh, rip) > 0.99, true);
   // 7.143 起 sent 又回来了，但这次它**有读端**：ack() 靠它只清这一批真正发出去的行
   // （delta 有上限，一次清空整个 pending 会把超限的行丢掉）。这里锁住「发完即清」这个不变量。
   W.PS.clear();
@@ -3326,14 +3319,14 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   // 六条中继各有一条已确认的封锁行（等效于三批投票的结果，这里按上报格式直接灌表）
   W.BLK.load(rel.slice(0, 6).map((ip) => ({ k: H + "|" + ip, n: 3, at: t0 })));
   // 同一批中继在判定表里也已是「封锁」⇒ 它们从 usable 里消失，正是旧口径的病根
-  for (const ip of rel.slice(0, 6)) W.vSetState(H, "r:" + ip, 2, 1);
+  for (const ip of rel.slice(0, 6)) W.VT.setState(H, "r:" + ip, 2, 1);
   W.decide({ host: H, cfHost: false, clientV6: false, relays: rel, legacyWantsRelay: false });
   eq("整池 75% 有封锁行 ⇒ 触发站点级自愈", W.BLK.muted(H), true);
   eq("自愈把封锁行清掉：代价倍数回到 1", W.BLK.penOf(H, rel[0]), 1);
   // 反例：5/8 = 62.5% 不到 75%，不该自愈
   const H2 = "sweep2.example";
   W.BLK.load(rel.slice(0, 5).map((ip) => ({ k: H2 + "|" + ip, n: 3, at: t0 })));
-  for (const ip of rel.slice(0, 5)) W.vSetState(H2, "r:" + ip, 2, 1);
+  for (const ip of rel.slice(0, 5)) W.VT.setState(H2, "r:" + ip, 2, 1);
   W.decide({ host: H2, cfHost: false, clientV6: false, relays: rel, legacyWantsRelay: false });
   eq("只到 5/8 不触发自愈", W.BLK.muted(H2), false);
 }
@@ -3436,7 +3429,7 @@ ok("状态表里不再有 tsMem 的键", !Object.prototype.hasOwnProperty.call(W
   const rel = ["203.0.113.111", "203.0.113.112", "203.0.113.113", "203.0.113.114", "203.0.113.115", "203.0.113.116", "203.0.113.117", "203.0.113.118"];
   const t0 = Date.now();
   W.BLK.load(rel.slice(0, 6).map((ip) => ({ k: H + "|" + ip, n: 3, at: t0 })));
-  for (const ip of rel.slice(0, 6)) W.vSetState(H, "r:" + ip, 2, 1);
+  for (const ip of rel.slice(0, 6)) W.VT.setState(H, "r:" + ip, 2, 1);
   // 把随机数钉成 0，强制走「探索」那条早返回（Math.random() < 0.05 必然成立）
   const rnd = Math.random;
   Math.random = () => 0;
@@ -3638,11 +3631,11 @@ console.log("\n-- 中继健康表的合并口径与死出口（v7.161）");
 console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 行（v7.162）");
 {
   const T = "d.test", IP = "r:9.9.9.9";
-  W.vClear();
+  W.VT.clear();
   W.S.vtPend.clear();
   W.S.vtSent.clear();
   // state=3 是 dead（硬排除），比 blocked 更强：重试时必须原样带出去
-  W.vSetState(T, IP, 3, 1);
+  W.VT.setState(T, IP, 3, 1);
   const d1 = W.vtDelta();
   const row1 = d1.filter((r) => r.k === T + "|" + IP)[0];
   ok("state=3 的证据首次外发就是 3", !!row1 && row1.s === 3);
@@ -3657,10 +3650,10 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
 }
 {
   // 每批严格 ≤60 行：以前上限判断写在 push 之后，pending 满 60 时会返回 61 行
-  W.vClear();
+  W.VT.clear();
   W.S.vtPend.clear();
   W.S.vtSent.clear();
-  for (let i = 0; i < 100; i++) W.vSetState("cap" + i + ".test", "r:198.51.100.7", 2, 1);
+  for (let i = 0; i < 100; i++) W.VT.setState("cap" + i + ".test", "r:198.51.100.7", 2, 1);
   ok("一批最多 60 行判定证据", W.vtDelta().length === 60);
   ok("pending 已满时再要一批也不会多出一行", W.vtDelta().length === 60);
 }
@@ -4130,17 +4123,17 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carriedBy = String(id).to
 {
   // 1) 判定表：走 setState（recordBlock/recordPass/markBlocked/import 都走它）灌 700 行
   W.VT.clear();
-  for (let i = 0; i < 700; i++) W.vSetState("cap" + i + ".test", "r:198.51.100.9", 2, 1);
+  for (let i = 0; i < 700; i++) W.VT.setState("cap" + i + ".test", "r:198.51.100.9", 2, 1);
   ok("判定表的上限在 setState 上也生效（超限即收回容量）", W.VT.size() <= 600 && W.VT.size() >= 500, `size=${W.VT.size()}`);
-  ok("删掉的是最旧的：第一条已经不在了", !W.vAll().some((r) => r.target === "cap0.test"));
-  ok("最新的那条还在", W.vAll().some((r) => r.target === "cap699.test"));
+  ok("删掉的是最旧的：第一条已经不在了", !W.VT.all().some((r) => r.target === "cap0.test"));
+  ok("最新的那条还在", W.VT.all().some((r) => r.target === "cap699.test"));
 
   // 2) 判定表：走 import（远端同步，单批 120 行）灌 960 行
   W.VT.clear();
   for (let b = 0; b < 8; b++) {
     const rows = [];
     for (let i = 0; i < 120; i++) rows.push({ k: "imp" + b + "_" + i + ".test|r:198.51.100.9", s: 2, t: Date.now() + 1800000 });
-    W.vImport(rows);
+    W.VT.import(rows);
   }
   ok("判定表的上限在 import 上也生效（超限即收回容量）", W.VT.size() <= 600 && W.VT.size() >= 500, `size=${W.VT.size()}`);
   W.VT.clear();
@@ -4673,8 +4666,8 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   S.alive.clear();
 
   // ① 新鲜直连整页证据：判定层选直连，闸门必须放行（旧代码在这里返回 true）
-  W.vClear();
-  W.vSet("x.com", "d", 200, 40, 1);
+  W.VT.clear();
+  W.VT.set("x.com", "d", 200, 40, 1);
   const d1 = W.decide({ host: "x.com", cfHost: true, clientV6: false, relays: ["45.136.117.194"], legacyWantsRelay: true, mode: "tput" });
   eq("新鲜直连证据下判定层选直连", d1.chan.kind, "d");
   eq("新鲜直连证据下闸门不再硬绕中继", W.pxDecision(reqP, "x.com", true, true, 2), false);
@@ -4686,14 +4679,14 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   eq("没有直连证据时闸门走中继", W.pxDecision(reqP, "y.org", true, false, 2), true);
 
   // ③ 直连被差分判死：闸门必须改走中继（不依赖 wantPx）
-  W.vSetState("z.net", "d", 2, 1);
+  W.VT.setState("z.net", "d", 2, 1);
   const d3 = W.decide({ host: "z.net", cfHost: true, clientV6: false, relays: ["45.136.117.194"], legacyWantsRelay: false, mode: "tput" });
   ok("直连被判死时判定层改走中继", d3.chan.kind === "r", d3.why);
   eq("直连被判死时闸门走中继", W.pxDecision(reqP, "z.net", true, false, 2), true);
 
   // ④ 分级语义：2 才改行为，1 只改硬规则，0 全是影子
-  W.vClear();
-  W.vSet("k.io", "d", 200, 40, 1);
+  W.VT.clear();
+  W.VT.set("k.io", "d", 200, 40, 1);
   eq("level 1 不改行为（wantPx=false 就直连）", W.pxDecision(reqP, "k.io", true, false, 1), false);
   eq("level 0 不改行为（wantPx=true 就绕中继）", W.pxDecision(reqP, "k.io", true, true, 0), true);
 
@@ -4702,7 +4695,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   ok("闸门按判定结果而非无条件放行", srcPx.includes('if (cfHost && level >= 1 && out.via === "r")'), "pxhook 的 cfHost 分支形状变了");
   ok("闸门里没有无条件的 cfHost return true", !/if \(cfHost && level >= 1\) \{\s*return true;/.test(srcPx), "仍是无条件硬绕");
 
-  W.vClear();
+  W.VT.clear();
   S.pool = poolBak;
   S.alive.clear();
   for (const [k, v] of aliveBak) S.alive.set(k, v);
@@ -4715,14 +4708,14 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   eq("verdict.ts 不再有 stateOfCode 死导出", srcVt.includes("stateOfCode"), false);
   eq("「2xx-3xx 可用」的映射全仓只写一次", srcVt.split("code >= 200 && code < 400").length - 1, 1);
   // 删副本不许改行为：三条映射仍要落在 1 / 2 / 3
-  W.vClear();
+  W.VT.clear();
   W.VT.set("s195.test", "d", 200, 40, 1);
-  eq("200 仍是可用", W.vState("s195.test", "d"), 1);
+  eq("200 仍是可用", W.VT.state("s195.test", "d"), 1);
   W.VT.set("s195.test", "d", 403, 140, 1);
-  eq("403 仍是被拦", W.vState("s195.test", "d"), 2);
+  eq("403 仍是被拦", W.VT.state("s195.test", "d"), 2);
   W.VT.set("s195.test", "d", 0, 0, 1);
-  eq("没有状态码仍是连不上", W.vState("s195.test", "d"), 3);
-  W.vClear();
+  eq("没有状态码仍是连不上", W.VT.state("s195.test", "d"), 3);
+  W.VT.clear();
 
   // ② 没人读的代价先验常量已删除（代价先验由 score.ts 自己算，两份会分叉）
   const srcStat = statAll();
@@ -5921,13 +5914,13 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   // ① 两行封锁事实 + 一次站点级自愈：判「站点在拒绝所有人」，清表并静音 30 分钟
   W.BLK.clear();
   eq("建行两条", W.BLK.load([{ k: H + "|" + A, n: 3, at: t0 - 60000 }, { k: H + "|" + B, n: 3, at: t0 - 60000 }]), 2);
-  eq("封锁使出口涨价", W.blkPen(H, A, t0), W.BLK_PEN);
+  eq("封锁使出口涨价", W.BLK.penOf(H, A, t0), W.BLK_PEN);
   eq("站点级自愈触发", W.BLK.sweep(H, [A, B], t0), true);
   eq("自愈后静音中", W.BLK.muted(H, t0 + 1000), true);
-  eq("自愈清掉了封锁行", W.blkPen(H, A, t0), 1);
+  eq("自愈清掉了封锁行", W.BLK.penOf(H, A, t0), 1);
   // ② 静音期内，别处 isolate 回传同一个站点的封锁事实：必须被拒绝（否则自愈等于白做）
   eq("静音期内别处的封锁事实被拒绝", W.BLK.load([{ k: H + "|" + A, n: 3, at: t0 + 2000 }]), 0);
-  eq("静音期内封锁没有复活", W.blkPen(H, A, t0 + 3000), 1);
+  eq("静音期内封锁没有复活", W.BLK.penOf(H, A, t0 + 3000), 1);
   // ③ 别的站点不受影响
   eq("没被静音的站点照常收", W.BLK.load([{ k: "other222.example.com|" + A, n: 3, at: t0 + 2000 }]), 1);
   // ④ 静音过期之后，同一行要能重新被接受（不是永久拒收）
@@ -7070,8 +7063,8 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   // 行为面：一条 301 的中继必须拿到正证据（改前 vSet 只在 status === 200 时调用）
   const H249 = "d203.example.com";
   const ip249 = "203.0.113.9";
-  W.vClear(H249);
-  const before249 = W.vOk(H249, "r:" + ip249);
+  W.VT.clear(H249);
+  const before249 = W.VT.ok(H249, "r:" + ip249);
   const ctx249 = {
     env: {
       METER: {
@@ -7084,10 +7077,10 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
     },
   };
   await W.runTfb(ctx249, H249, 2, "");
-  const after249 = W.vOk(H249, "r:" + ip249);
+  const after249 = W.VT.ok(H249, "r:" + ip249);
   ok(`[${G}] 301 的中继拿到正证据（vOk 从 false 变成 true）`, before249 === false && after249 === true);
-  eq(`[${G}] 存的不是硬写的 200，而是真实状态码`, W.vState(H249, "r:" + ip249), 1);
-  W.vClear(H249);
+  eq(`[${G}] 存的不是硬写的 200，而是真实状态码`, W.VT.state(H249, "r:" + ip249), 1);
+  W.VT.clear(H249);
 
   const tfbSrc249 = fs.readFileSync("src/route/tfb.ts", "utf8");
   ok(`[${G}] tfVerdict 不再只认 status === 200`, !tfbSrc249.includes("x.ok && x.status === 200"));
@@ -7140,17 +7133,17 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 
 
   // D205-2：行为面 —— 判定表写入与读取在枚举口径下仍一致
-  W.vClear();
-  W.vSetState("enum250.test", "d", ST250.Dead, 1);
-  eq("状态 3 记成 Dead", W.vState("enum250.test", "d"), ST250.Dead);
-  eq("Dead 不是「可用」", W.vOk("enum250.test", "d"), false);
-  eq("Dead 算「不可用」", W.vBad("enum250.test", "d"), true);
-  W.vSetState("enum250.test", "d", ST250.Reachable, 1);
-  eq("状态 1 记成 Reachable", W.vState("enum250.test", "d"), ST250.Reachable);
-  eq("Reachable 算「可用」", W.vOk("enum250.test", "d"), true);
-  W.vSetState("enum250.test", "d", ST250.Blocked, 1);
-  eq("状态 2 记成 Blocked", W.vState("enum250.test", "d"), ST250.Blocked);
-  W.vClear();
+  W.VT.clear();
+  W.VT.setState("enum250.test", "d", ST250.Dead, 1);
+  eq("状态 3 记成 Dead", W.VT.state("enum250.test", "d"), ST250.Dead);
+  eq("Dead 不是「可用」", W.VT.ok("enum250.test", "d"), false);
+  eq("Dead 算「不可用」", W.VT.bad("enum250.test", "d"), true);
+  W.VT.setState("enum250.test", "d", ST250.Reachable, 1);
+  eq("状态 1 记成 Reachable", W.VT.state("enum250.test", "d"), ST250.Reachable);
+  eq("Reachable 算「可用」", W.VT.ok("enum250.test", "d"), true);
+  W.VT.setState("enum250.test", "d", ST250.Blocked, 1);
+  eq("状态 2 记成 Blocked", W.VT.state("enum250.test", "d"), ST250.Blocked);
+  W.VT.clear();
 
   // D205-3：源码锁 —— 状态字面量不许再散落在判定路径上
   const srcVer250 = verdictAll();
@@ -7222,9 +7215,9 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   // 枚举成员名：读代码时能看出语义（数字值与线协议都没变）
   eq(`[${G}] St 四个成员`, [W.St.Unknown, W.St.Reachable, W.St.Blocked, W.St.Dead], [0, 1, 2, 3]);
   eq(`[${G}] Mode 两个成员`, [W.Mode.Throughput, W.Mode.Latency], ["tput", "lat"]);
-  W.vClear();
-  W.vSetState("e251.test", "d", W.St.Reachable);
-  ok(`[${G}] vOk 认枚举写入的状态`, W.vOk("e251.test", "d") === true);
+  W.VT.clear();
+  W.VT.setState("e251.test", "d", W.St.Reachable);
+  ok(`[${G}] vOk 认枚举写入的状态`, W.VT.ok("e251.test", "d") === true);
 
   // 源码锁
   const relSrc251 = fs.readFileSync("src/route/relperf.ts", "utf8");
@@ -7482,10 +7475,10 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   ok("relay-health 的 ipOf 委托 relayIpOf", rhSrc.includes("return relayIpOf(node);"));
   ok("relay-health 不再自己拆冒号", !rhSrc.includes('node.lastIndexOf(":")'));
   // 行为面：方括号写法与裸写法查到同一条判定（同一张表、同一个键）
-  W.vClear();
-  W.vSet("ip6.test", "r:2a06:98c0::103", 200, 120, 1);
-  eq("方括号键查到与裸 IP 相同的态", W.vState("ip6.test", "r:" + relayIpOf("[2a06:98c0::103]:443")), 1);
-  W.vClear();
+  W.VT.clear();
+  W.VT.set("ip6.test", "r:2a06:98c0::103", 200, 120, 1);
+  eq("方括号键查到与裸 IP 相同的态", W.VT.state("ip6.test", "r:" + relayIpOf("[2a06:98c0::103]:443")), 1);
+  W.VT.clear();
 }
 // 第 261 组：中继健康表的两张账本收进 RelayLedger（行为 + 泄漏 + 源码锁）
 {
@@ -7606,9 +7599,9 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
 
 // ═══ 第 263 组：偏好行的字段名能读出含义（c/s/at → channel/state/updatedAt）═══
 {
-  W.vClear();
-  W.vSetState("r263.test", "r:7.7.7.1", 1, 10);
-  W.vSetState("r263.test", "r:7.7.7.2", 2, 20);
+  W.VT.clear();
+  W.VT.setState("r263.test", "r:7.7.7.1", 1, 10);
+  W.VT.setState("r263.test", "r:7.7.7.2", 2, 20);
   const pf = W.PREFS.of("r263.test", 10);
   const row = pf.ok[0] || {};
   eq("偏好行有 channel", typeof row.channel, "string");
@@ -7624,7 +7617,7 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   const src263 = fs.readFileSync("src/route/prefs.ts", "utf8");
   ok("源码里偏好行是语义名", src263.includes("channel: string;") && src263.includes("updatedAt: number;"), src263.slice(0, 0));
   ok("源码里没有旧的 c/s/at 三行", !/^  c: string;$/m.test(src263) && !/^  s: number;$/m.test(src263) && !/^  at: number;$/m.test(src263), src263.slice(0, 0));
-  W.vClear();
+  W.VT.clear();
 }
 // ── 264. 「node → IP」的解析只准有一份（v7.264） ─────────────────────────────
 // 7.260 把中继健康表与选路的三处解析收口到 relayIpOf，但 judge / factshadow / connection / fallback
@@ -7729,8 +7722,8 @@ ok("自证探针已清理", !fs.existsSync("src/__probe-body.ts"));
 const ST = W.St || { Unknown: -1, Reachable: -2, Blocked: -3, Dead: -4 };
 const host267 = "enum267.test";
 // 行为面：prefs 的两栏与 chan() 的三态都在枚举口径下成立
-W.vSetState(host267, "r:10.9.9.1", ST.Reachable, 1);
-W.vSetState(host267, "r:10.9.9.2", ST.Blocked, 1);
+W.VT.setState(host267, "r:10.9.9.1", ST.Reachable, 1);
+W.VT.setState(host267, "r:10.9.9.2", ST.Blocked, 1);
 const rows267 = W.prefsOf(host267, 40);
 eq("可用的那条落在 ok 栏", rows267.ok.length, 1);
 eq("打不通的那条落在 bad 栏", rows267.bad.length, 1);
@@ -7759,21 +7752,21 @@ ok("文档写明判定状态只用枚举", fs.readFileSync("docs/命名约定.md
 // 第 268 组：比例兜底「释放被判死的中继」时不能顺手抹掉正证据（D213）
 {
   const H268 = "rel268.group.test";
-  W.vClear();
+  W.VT.clear();
   const rels = ["10.8.0.1", "10.8.0.2", "10.8.0.3", "10.8.0.4", "10.8.0.5"];
   // 唯一能打通的那条先写（证据时间最早），四条判死的写在后面（时间更新）
-  W.vSet(H268, "r:" + rels[4], 200, 120, 1);
+  W.VT.set(H268, "r:" + rels[4], 200, 120, 1);
   for (let i = 0; i < 4; i++) {
-    W.vSet(H268, "r:" + rels[i], 403, 100, 1);
-    W.vSetState(H268, "r:" + rels[i], 2, 1);
+    W.VT.set(H268, "r:" + rels[i], 403, 100, 1);
+    W.VT.setState(H268, "r:" + rels[i], 2, 1);
   }
   const ctx268 = { host: H268, relays: rels.slice(), cfHost: true, clientV6: false, httpCode: 0, directOk: false, mode: "tput" };
   W.POLICY.decide(ctx268);
-  eq("比例兜底后仍记得能打通的那条", W.vState(H268, "r:" + rels[4]), 1);
-  ok("释放确实放开了被判死的中继", rels.slice(0, 4).some((ip) => W.vState(H268, "r:" + ip) === 0));
-  ok("最近判死的两条仍然保留结论", rels.slice(0, 2).every((ip) => W.vState(H268, "r:" + ip) === 2));
+  eq("比例兜底后仍记得能打通的那条", W.VT.state(H268, "r:" + rels[4]), 1);
+  ok("释放确实放开了被判死的中继", rels.slice(0, 4).some((ip) => W.VT.state(H268, "r:" + ip) === 0));
+  ok("最近判死的两条仍然保留结论", rels.slice(0, 2).every((ip) => W.VT.state(H268, "r:" + ip) === 2));
   const pol268 = policyAll();
-  ok("释放只在被判死的集合上做", pol268.includes("const dead = c.relays.filter((ip) => vBad(c.host, \"r:\" + ip));"));
+  ok("释放只在被判死的集合上做", pol268.includes("const dead = c.relays.filter((ip) => VT.bad(c.host, \"r:\" + ip));"));
   ok("排序也只在被判死的集合上做", pol268.includes("const sorted = dead.slice()"));
 }
 
@@ -7784,7 +7777,7 @@ const dialerSrc269 = fs.readFileSync("src/proxy/dialer.ts", "utf8");
   // 走到重拨循环需要三个前置条件：池子有条目（relays() 冷启动回退名单）、
   // 直连被判死（否则判定层直接返回 direct、整段跳过）、以及能记录调用次数的 SEL.current。
   W.S.pool = [{ k: "a", h: "1.1.1.1", p: 443 }, { k: "b", h: "1.1.1.1", p: 8443 }];
-  W.vSetState(host269, "d", 2, 1);
+  W.VT.setState(host269, "d", 2, 1);
   const before269 = W.cntView ? W.cntView() : {};
   let calls269 = 0;
   const seen269 = [];
@@ -8501,36 +8494,32 @@ console.log("\n[285] 策略本体与 HOOK 装配拆成两层");
   ok("结算类是单例可实例化", W.SETTLE instanceof W.ConnSettle, "");
   ok("连接仍持有自己的采样权重（状态归连接）", connSrc286.includes("this.sampleW += use;") && settleSrc286.includes("takeWeight(bytes: number, dt: number, factor?: number): number;"), "");
 }
-console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
+console.log("\n[287] 判定表只有一个文件：类型、表本体、单例都在 verdict.ts");
 {
-  const fac287 = fs.readFileSync("src/route/verdict.ts", "utf8");
-  const tab287 = fs.readFileSync("src/route/verdict-table.ts", "utf8");
-  const typ287 = fs.readFileSync("src/route/verdict-types.ts", "utf8");
-  ok("门面不再定义类", !fac287.includes("class ") && !fac287.includes("BoundedMap"));
-  ok("门面把表本体与类型再导出", fac287.includes('export { VerdictTable, VT } from "./verdict-table";') && fac287.includes('export { VT_TTL_MS } from "./verdict-types";'));
-  eq("门面保留十二个同名函数", (fac287.match(/^export function v/gm) || []).length, 12);
-  ok("门面不超过 140 行", fac287.split(/\r?\n/).length <= 140);
+  const tab287 = fs.readFileSync("src/route/verdict.ts", "utf8");
   ok("表本体持有私有表与单例", tab287.includes("export class VerdictTable") && tab287.includes("private byKey = new BoundedMap") && tab287.includes("export const VT = new VerdictTable();"));
-  ok("表本体不再写同名函数", !/^export function v/m.test(tab287));
+  ok("不再有十二个 v* 转发函数", !/^export function v/m.test(tab287));
   ok("状态机与通配拒写都在表本体", tab287.includes("private static stateOf(") && tab287.includes("private static blockWild("));
-  ok("类型文件只放类型与 TTL", typ287.includes("export type VState") && typ287.includes("export interface Verdict") && typ287.includes("export const VT_TTL_MS = 30 * 60_000;") && !typ287.includes("class "));
-  ok("TTL 只有一个真源", !tab287.includes("30 * 60_000") && !fac287.includes("30 * 60_000"));
+  ok("类型与 TTL 与表同住一个文件", tab287.includes("export type VState") && tab287.includes("export interface Verdict") && tab287.includes("export const VT_TTL_MS = 30 * 60_000;"));
+  eq("TTL 只有一个真源", (tab287.match(/30 \* 60_000/g) || []).length, 1);
+  ok("verdict-table.ts 已删除", !fs.existsSync("src/route/verdict-table.ts"));
+  ok("verdict-types.ts 已删除", !fs.existsSync("src/route/verdict-types.ts"));
   ok("VT 是 VerdictTable 实例", W.VT instanceof W.VerdictTable);
-  W.vClear();
-  W.vSet("rt287.example", "d", 200, 12);
-  ok("2xx 记成可用", W.vOk("rt287.example", "d") && W.vState("rt287.example", "d") === W.St.Reachable);
-  W.vSet("rt287.example", "r:1.1.1.1", 403, 30);
-  ok("403 记成被拦", W.vBad("rt287.example", "r:1.1.1.1"));
-  W.vSet("rt287.example", "r:1.1.1.1", 200, 30, 0);
-  ok("弱证据不得把强证据的 blocked 冲成可用", W.vBad("rt287.example", "r:1.1.1.1"));
+  W.VT.clear();
+  W.VT.set("rt287.example", "d", 200, 12);
+  ok("2xx 记成可用", W.VT.ok("rt287.example", "d") && W.VT.state("rt287.example", "d") === W.St.Reachable);
+  W.VT.set("rt287.example", "r:1.1.1.1", 403, 30);
+  ok("403 记成被拦", W.VT.bad("rt287.example", "r:1.1.1.1"));
+  W.VT.set("rt287.example", "r:1.1.1.1", 200, 30, 0);
+  ok("弱证据不得把强证据的 blocked 冲成可用", W.VT.bad("rt287.example", "r:1.1.1.1"));
   const before287 = W.VT.size();
-  W.vSet("*", "d", 200, 5);
-  W.vSetState("*", "r:2.2.2.2", W.St.Blocked, 1);
+  W.VT.set("*", "d", 200, 5);
+  W.VT.setState("*", "r:2.2.2.2", W.St.Blocked, 1);
   eq("通配目标一条都不落表", W.VT.size(), before287);
-  ok("通配在 vAll 里也查不到", W.vAll("*").length === 0);
+  ok("通配在 VT.all 里也查不到", W.VT.all("*").length === 0);
   W.VT.clearHost("rt287.example");
-  eq("清站点把该目标的行全删掉", W.vAll("rt287.example").length, 0);
-  W.vClear();
+  eq("清站点把该目标的行全删掉", W.VT.all("rt287.example").length, 0);
+  W.VT.clear();
 }
 // 第 288 组：评分这一层的三层（代价 / 健康度 / 候选表）都在一个文件里，且没有空壳类（7.288 拆分 → 7.297 合回）
 {
@@ -8573,8 +8562,7 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
     psSrc.includes("export class PsFacts") && psSrc.includes("export class PsOutbox") &&
       psSrc.includes("export function psPrior(") && psSrc.includes("export const PS_TTL = FACT_TTL.ps;"), "");
   ok("只留一个单例", (psSrc.match(/export const PS = new PsFacts\(\);/g) || []).length === 1);
-  ok("五个薄包装还在",
-    ["psNote", "psOk", "psBest", "psFactor", "psSnap"].every((n) => psSrc.includes(`export function ${n}(`)), "");
+ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", "psOk", "psBest", "psFactor", "psSnap"].some((n) => psSrc.includes(`export function ${n}(`)) && ["note", "okOf", "bestOf", "factor", "snap"].every((m) => psSrc.includes(`  ${m}(`)), "");
   ok("待发队列带批次上限", psSrc.includes("export const PS_BATCH = 60;"), "");
   // 队列类同在一个文件里，所以「有没有自己记账」要看 PsFacts 的类体，而不是整个文件。
   const psBody = psSrc.slice(psSrc.indexOf("export class PsFacts"));
@@ -8589,11 +8577,11 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   W.PS.clear();
   W.PS.note("ps289.example", "203.0.113.91", true, Date.now());
   {
-    const f289 = W.psFactor("ps289.example", "203.0.113.91");
+    const f289 = W.PS.factor("ps289.example", "203.0.113.91");
     ok("折价因子夹在 1/2 与 2 之间", f289 >= 0.5 && f289 <= 2, String(f289));
   }
   ok("观测进了待发队列", W.PS.delta().some((r) => r.k === "ps289.example|203.0.113.91"));
-  eq("历史最好跟着观测涨上去", W.psBest("ps289.example", "203.0.113.91"), 1);
+  eq("历史最好跟着观测涨上去", W.PS.bestOf("ps289.example", "203.0.113.91"), 1);
   W.PS.clear();
 }
 
@@ -8685,20 +8673,20 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   eq("policy.ts 仍在单文件上限内", polSrc.split("\n").length <= 560, true);
   ok("候选层导出视图与入口", polSrc.includes("export interface Ranked") && polSrc.includes("export function rankOf(c: Ctx): Ranked {"));
   ok("候选层保留比例兜底", polSrc.includes("blockedRatio > 0.75 && usable.length < 2"));
-  ok("候选层保留自愈", polSrc.includes("vClearHost(c.host)") && polSrc.includes("BLK.sweep(c.host, c.relays)"));
+  ok("候选层保留自愈", polSrc.includes("VT.clearHost(c.host)") && polSrc.includes("BLK.sweep(c.host, c.relays)"));
   ok("候选层自己排序", polSrc.includes("const ranked = usable"));
   ok("CF 分支树只认 CF 目标", polSrc.includes("if (!c.cfHost) return null;"));
   ok("CF 分支树带 PinSource", polSrc.includes("export interface PinSource") && polSrc.includes("pinFor(host: string, list: string[]): string;"));
   ok("策略把钉住与轮换暴露给分支树", polSrc.includes("nextRotation(limit: number): number"));
   ok("策略本体声明自己可当 PinSource", polSrc.includes("export class Policy implements PinSource"));
   eq("轮换游标按条数取模", [W.POLICY.nextRotation(3), W.POLICY.nextRotation(3), W.POLICY.nextRotation(3), W.POLICY.nextRotation(3)], [0, 1, 2, 0]);
-  W.vClear();
+  W.VT.clear();
   const v6c = W.decide({ host: "v6cf292.test", cfHost: true, clientV6: true, relays: ["104.18.32.1", "203.0.113.9"], legacyWantsRelay: true, mode: "tput" });
   eq("v6 客户端打 CF 目标走非 CF 中继", v6c.why, "v6-cf");
   eq("v6-cf 挑的是非 CF 那条", v6c.chan.ip, "203.0.113.9");
   const plain = W.decide({ host: "plain292.test", cfHost: false, clientV6: false, relays: [], legacyWantsRelay: false, mode: "tput" });
   eq("非 CF 目标没候选时直连", plain.why, "direct");
-  W.vSetState("rank292.test", "r:45.136.117.194", 2, 1);
+  W.VT.setState("rank292.test", "r:45.136.117.194", 2, 1);
   const rk = W.rankOf({ host: "rank292.test", cfHost: true, clientV6: false, relays: ["45.136.117.194", "203.0.113.9"], legacyWantsRelay: true, mode: "tput" });
   eq("被判死的不进可用集合", rk.usable.includes("45.136.117.194"), false);
   eq("被判死的进复检集合", rk.blocked.includes("45.136.117.194"), true);
@@ -8706,7 +8694,7 @@ console.log("\n[287] 判定表拆成「表本体」与「门面」两层");
   eq("排序结果只来自可用集合", rk.stick.includes("45.136.117.194"), false);
   eq("排序结果条数等于可用条数", rk.ranked.length, rk.usable.length);
   eq("非 CF 目标时 CF 分支树返回 null", W.decideCf({ host: "plain292.test", cfHost: false, clientV6: false, relays: [], legacyWantsRelay: false }, rk, W.POLICY), null);
-  W.vClear();
+  W.VT.clear();
 }
 /* ---------- 第 293 组：封锁事实的形状、上报队列与状态机分家（v7.293） ---------- */
 {

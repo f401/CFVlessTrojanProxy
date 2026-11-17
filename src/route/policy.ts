@@ -2,17 +2,17 @@ import { SC } from "../core/const";
 import { S } from "../core/state";
 import { isCfIp } from "../core/net";
 import { DIRECT } from "./channel";
-import { vAll, vAt, vBad, vOk, vClearHost, vSetState } from "./verdict";
+import { VT } from "./verdict";
 import { HEALTH, ipOf } from "./relay-health";
 import { JUDGE, CF_NEG } from "./judge";
-import { psBest } from "./psfacts";
+import { PS } from "./psfacts";
 import { WIRING } from "./policy-wiring";
 import type { Choice, Ctx } from "./policy-wiring";
 import { cnt } from "../core/counter";
 import { St } from "../core/enums";
 import { FACT_ALL } from "./factflags";
 import { BLK } from "./blkfacts";
-import { isDead } from "./deadfacts";
+import { DEAD } from "./deadfacts";
 import { factMul } from "./factmul";
 import { relCostMode, relSnap } from "./relperf";
 import { EG } from "./egfacts";
@@ -74,10 +74,10 @@ export interface Ranked {
 function healRatio(c: Ctx, usable: string[]): string[] {
   const blockedRatio = c.relays.length ? (c.relays.length - usable.length) / c.relays.length : 0;
   if (!(blockedRatio > 0.75 && usable.length < 2)) return usable;
-  const dead = c.relays.filter((ip) => vBad(c.host, "r:" + ip));
-  const sorted = dead.slice().sort((a, b) => vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a));
-  for (const ip of sorted.slice(2)) vSetState(c.host, "r:" + ip, 0, 1);
-  return c.relays.filter((ip) => !vBad(c.host, "r:" + ip));
+  const dead = c.relays.filter((ip) => VT.bad(c.host, "r:" + ip));
+  const sorted = dead.slice().sort((a, b) => VT.at(c.host, "r:" + b) - VT.at(c.host, "r:" + a));
+  for (const ip of sorted.slice(2)) VT.setState(c.host, "r:" + ip, 0, 1);
+  return c.relays.filter((ip) => !VT.bad(c.host, "r:" + ip));
 }
 
 /**
@@ -89,11 +89,11 @@ function healRatio(c: Ctx, usable: string[]): string[] {
  * @returns 候选视图
  */
 export function rankOf(c: Ctx): Ranked {
-  let usable = c.relays.filter((ip) => !(c.host && vBad(c.host, "r:" + ip)));
+  let usable = c.relays.filter((ip) => !(c.host && VT.bad(c.host, "r:" + ip)));
   usable = healRatio(c, usable);
   // 自愈：全部通道都被判死 → 清掉该站点的结论（宁可再试一次，也不能让站点没路可走）
   if (!usable.length && c.relays.length) {
-    vClearHost(c.host);
+    VT.clearHost(c.host);
     usable = c.relays.slice();
   }
   // 站点级自愈：整池都被同一站点写满 ⇒ 判据失效/站点在拒绝所有人，清空并静默 30 分钟。
@@ -125,14 +125,14 @@ export function rankOf(c: Ctx): Ranked {
         negOf(a) - negOf(b) ||
         posOf(a) - posOf(b) ||
         scoreOf(a) - scoreOf(b) ||
-        vAt(c.host, "r:" + b) - vAt(c.host, "r:" + a),
+        VT.at(c.host, "r:" + b) - VT.at(c.host, "r:" + a),
     );
   // I1：dead 是唯一允许缩小候选的事实，而且只挪到队尾不是删除
-  const live = ranked.filter((ip) => !isDead(ip));
+  const live = ranked.filter((ip) => !DEAD.isDead(ip));
   const stick = live.length ? live : ranked;
   const nonCf = stick.filter((ip) => !isCfIp(ip));
   // 通配键已不可能存在（7.133 起写入端直接拒绝）
-  const okOnes = stick.filter((ip) => vOk(c.host, "r:" + ip));
+  const okOnes = stick.filter((ip) => VT.ok(c.host, "r:" + ip));
   return { usable, blocked, ranked, stick, nonCf, okOnes };
 }
 
@@ -199,7 +199,7 @@ export function decideCf(c: Ctx, r: Ranked, src: PinSource): Choice | null {
   // 为什么：中继容量实测差 3–4 倍（1103 vs 300 KB/s），钉住一条时其余中继永远没有样本，
   // 「按站点 × 中继挑最快」就永远学不出来；轮换几条后样本足够，再交给排序去利用。
   const coldSite =
-    !stick.some((ip) => vAt(c.host, "r:" + ip) > 0) && !stick.some((ip) => JUDGE.posOn(c.host, ip));
+    !stick.some((ip) => VT.at(c.host, "r:" + ip) > 0) && !stick.some((ip) => JUDGE.posOn(c.host, ip));
   // 一次扫描同时拿到「量过几条」与「量过哪些」：7.188 之前这里把同一张表扫了三遍（每遍还要排序），
   // 而 CF 托管目标是热路径（闭环证明里 400 条请求有 379 条走这条分支）。
   const relRows = relSnap(c.host);
@@ -232,7 +232,7 @@ export function decideCf(c: Ctx, r: Ranked, src: PinSource): Choice | null {
   if (nonCf.length) return { chan: { kind: "r", ip: nonCf[0] }, why: "cf-noncf" };
   // 「本出口 fetch 得 200」不等于「隧道直连得 200」：fetch 走的是 CF 自己的出口，
   // 隧道直连可能落在一个对 CF 托管站点不友好的边缘出口上（实测 200 → 隧道 403）。
-  // 所以只有在**隧道直连自己有过成功证据**（`vOk(host,"d")`）时才选直连；否则宁可走一条已知可用的中继。
+  // 所以只有在**隧道直连自己有过成功证据**（`VT.ok(host,"d")`）时才选直连；否则宁可走一条已知可用的中继。
   // 直连成功证据只信 5 分钟内：边缘出口会漂移，"十分钟前直连 200" 不代表这一分钟还行。
   // 30 分钟 TTL 内一直选直连，一次幸运 200 会换来一串 4 字节 403（实测 tput 15/20 → 20/20 就来自这里）。
   if (code === 403 && stick.length) return { chan: { kind: "r", ip: stick[0] as string }, why: "http403" };
@@ -242,7 +242,7 @@ export function decideCf(c: Ctx, r: Ranked, src: PinSource): Choice | null {
   // 事实层里已有「这条中继送回过整页」的 v4 出口（DO 读到的），先把它们用起来，
   // 比直连稳得多（钉中继实测 v4 9/9 200、直连约 1/6）。只挑一条，失败交给 dialer 的重试。
   // 事实里的 v4 出口也可能刚被判死：不挑 dead，否则兜底会把请求送到已知连不上的中继
-  const eg4 = EG.v4List().filter((x) => !isDead(x));
+  const eg4 = EG.v4List().filter((x) => !DEAD.isDead(x));
   if (eg4.length) return { chan: { kind: "r", ip: eg4[0] as string }, why: "eg-pin" };
   return null;
 }
@@ -350,7 +350,7 @@ export class Policy implements PinSource {
    * @returns 可用返回 true
    */
   chanOk(ip: string, host: string): boolean {
-    return !(host && vBad(host, "r:" + ip));
+    return !(host && VT.bad(host, "r:" + ip));
   }
 
   /**
@@ -367,7 +367,7 @@ export class Policy implements PinSource {
       return { chan: { kind: "r", ip: r.blocked[0] as string }, why: "explore" };
     }
     // 直连已被实测/差分判死（任何站点都适用）→ 直接换中继
-    if (r.usable.length && vBad(c.host, "d")) {
+    if (r.usable.length && VT.bad(c.host, "d")) {
       return { chan: { kind: "r", ip: (r.nonCf[0] || r.usable[0]) as string }, why: "dir-blocked" };
     }
     // 康复通道（v8 §3.2 / D12）：每 20 条请求放 1 条「历史上有过整页、但现在排在最后」的中继。
@@ -383,7 +383,7 @@ export class Policy implements PinSource {
       // 闸门看「历史最好」而不是会衰减的当前均值：这条通道唯一的用途就是打破
       // 「被降权 → 拿不到样本 → 永远回不来」的死锁；用均值等于把这次机会交给运气
       // （实测口径：成过一次、之后连败十条的通道，均值早已 < 0.6，而它正是最该被放一条的）。
-      const back = r.stick.filter((ip) => psBest(c.host, ip) >= 0.6 || JUDGE.posOn(c.host, ip));
+      const back = r.stick.filter((ip) => PS.bestOf(c.host, ip) >= 0.6 || JUDGE.posOn(c.host, ip));
       const worst = back.length ? (back[back.length - 1] as string) : "";
       if (worst && worst !== r.stick[0]) {
         cnt("rehab");
@@ -392,8 +392,8 @@ export class Policy implements PinSource {
     }
     // 直连成功证据只信 5 分钟：边缘出口会漂移。这条必须排在「客户端 v6」与「有中继就用中继」之前 ——
     // 客户端地址族只影响落到哪个 POP，不会传给目标（本地配对实测：直连 30/30 vs 中继 26/30）。
-    const dAt = vAt(c.host, "d");
-    if (vOk(c.host, "d") && dAt && Date.now() - dAt < 300000) return { chan: DIRECT, why: "direct-ok" };
+    const dAt = VT.at(c.host, "d");
+    if (VT.ok(c.host, "d") && dAt && Date.now() - dAt < 300000) return { chan: DIRECT, why: "direct-ok" };
     // 剩下的局面全在 policy-cf.ts：CF 托管目标的六个分支（v6 客户端 / 未量过轮换 / 冷启动钉住 /
     // 优先非 CF / 本出口状态码 / 事实层兜底）。它对非 CF 目标返回 null，表示「不归它管」。
     const cf = decideCf(c, r, this);
@@ -421,14 +421,14 @@ export class Policy implements PinSource {
 
   /** 该站点 × 该中继是否被实测判 ok（probe 或端到端） */
   prefer(host: string, ip: string): boolean {
-    return !!host && !!ip && vOk(host, "r:" + ip);
+    return !!host && !!ip && VT.ok(host, "r:" + ip);
   }
 
   /** 该站点的通道成功记忆：弱 ok（src=0）也算 */
   win(host: string): { d: boolean; r: boolean } {
     let d = false;
     let r = false;
-    for (const v of vAll()) {
+    for (const v of VT.all()) {
       if (v.target !== host || v.state !== St.Reachable) continue;
       if (v.channel === "d") d = true;
       else if (v.channel.startsWith("r:")) {

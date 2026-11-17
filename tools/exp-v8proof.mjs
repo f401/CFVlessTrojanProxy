@@ -41,7 +41,7 @@ function reset() {
   for (const t of [W.EG, W.PS, W.BLK, W.DEAD, W.DNS, W.CAP]) {
     if (t && typeof t.clear === "function") t.clear();
   }
-  if (typeof W.vClear === "function") W.vClear();
+  if (typeof W.vClear === "function") W.VT.clear();
   const S = W.S;
   for (const k of ["alive", "pool", "bigByHost", "bigChan", "peers", "bigTyp"]) {
     const m = S && S[k];
@@ -60,7 +60,7 @@ function once(policy, world, host, facts, mode, rnd) {
   if (d.chan.kind === "d") {
     // 直连：v8 只允许「成功」进判定表（直连 403 不可归属，永不写共享事实）
     const ok = rnd() < world.direct;
-    if (ok) W.vSetState(host, "d", 1, 1);
+    if (ok) W.VT.setState(host, "d", 1, 1);
     return { why: d.why, ok };
   }
   const ip = d.chan.ip;
@@ -76,7 +76,7 @@ function once(policy, world, host, facts, mode, rnd) {
   if (!ok && resp.down <= 2048 && peerBig) W.BLK.note({ host, ip, down: resp.down, peerBig, at: vnow });
   // 拿到整页 ⇒ 判定表记一次通道胜利（judge 的真实写入点之一）。没有这一步，`coldSite` 永远成立，
   // 策略就会一直被 `cold-pin` 钉在第一条中继上 —— 实测过：400 条全是 cold-pin，学不到任何东西。
-  if (ok) W.vSetState(host, "r:" + ip, 1, 1);
+  if (ok) W.VT.setState(host, "r:" + ip, 1, 1);
   return { why: d.why, ok };
 }
 
@@ -86,7 +86,7 @@ function run(spec) {
   const world = { fam: new Map(spec.relays), direct: spec.direct, rej: new Map(Object.entries(spec.rej ?? {})) };
   const rnd = rng(spec.seed ?? 7);
   // 场景可预置「直连刚成功过」的证据（生产里由真实连接写入；本地无从产生，只能注入）
-  if (spec.seedDirect) W.vSetState(spec.host, "d", 1, 1);
+  if (spec.seedDirect) W.VT.setState(spec.host, "d", 1, 1);
   const byWhy = new Map();
   let policy = new W.Policy();
   policy.dbg = 0;
