@@ -1147,10 +1147,10 @@ reset();
     threw = true;
   }
   eq("DO 落盘失败会抛错", threw, true);
-  eq("DO 落盘失败回滚内存", m.c.up, 0);
+  eq("DO 落盘失败回滚内存", m.usage.up, 0);
   fail = false;
   await m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify({ up: 10, down: 20, conns: 1 }) }));
-  eq("恢复后只记一次", m.c.up, 10);
+  eq("恢复后只记一次", m.usage.up, 10);
 }
 
 // DO 请求串行化：并发 /add 不能交错写坏内存/storage
@@ -1325,9 +1325,9 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
       body: '{"up":0,"down":0,"conns":0,"spd":{"__proto__":{"med":1},"ok:443":{"med":2,"at":1}}}',
     }),
   );
-  eq("spd 容器是 null 原型", Object.getPrototypeOf(doP.m.s), null);
-  eq("__proto__ 不作为自有键写入", Object.prototype.hasOwnProperty.call(doP.m.s, "__proto__"), false);
-  ok("正常节点仍保留", !!doP.m.s["ok:443"]);
+  eq("spd 容器是 null 原型", Object.getPrototypeOf(doP.m.nodeSnapshots), null);
+  eq("__proto__ 不作为自有键写入", Object.prototype.hasOwnProperty.call(doP.m.nodeSnapshots, "__proto__"), false);
+  ok("正常节点仍保留", !!doP.m.nodeSnapshots["ok:443"]);
 }
 
 /* ---------- 探活不能灌水面板成功率 ---------- */
@@ -3284,11 +3284,11 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
     .fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify(body) }))
     .then(() => "ok", () => "rejected");
   eq("落盘失败时 /add 返回失败（让发送侧重发这一批）", r1, "rejected");
-  eq("失败后连接观测没有留在内存里", d.m.cl.length, 0);
-  eq("失败后用量也没有留在内存里", [d.m.c.up, d.m.c.down], [0, 0]);
+  eq("失败后连接观测没有留在内存里", d.m.connRing.length, 0);
+  eq("失败后用量也没有留在内存里", [d.m.usage.up, d.m.usage.down], [0, 0]);
   failPut = false;
   await d.m.fetch(new Request("https://m/add", { method: "POST", body: JSON.stringify(body) }));
-  eq("重发同一批后连接观测只算一次", [d.m.cl.length, d.m.cl[0].n, d.m.cl[0].ok], [1, 4, 3]);
+  eq("重发同一批后连接观测只算一次", [d.m.connRing.length, d.m.connRing[0].n, d.m.connRing[0].ok], [1, 4, 3]);
   const j108 = await (await d.m.fetch(new Request("https://m/get"))).json();
   eq("用量也只算一次", [j108.up, j108.down], [100, 200]);
 }
@@ -3881,18 +3881,18 @@ const dset = (m, body) => m.fetch(new Request("https://meter/set", { method: "PO
 {
   const a = mkDO();
   await dset(a.m, { up: 0, down: 0, conns: 7, first: 1000 });
-  eq("只有连接数、没有字节的用户也能恢复（旧代码整条跳过）", a.m.c.conns, 7);
-  eq("首次使用时间跟着恢复", a.m.c.first, 1000);
+  eq("只有连接数、没有字节的用户也能恢复（旧代码整条跳过）", a.m.usage.conns, 7);
+  eq("首次使用时间跟着恢复", a.m.usage.first, 1000);
   await dset(a.m, { up: 0, down: 0, conns: 12, first: 1000 });
-  eq("字节没变多时不再整体跳过：连接数继续前进", a.m.c.conns, 12);
+  eq("字节没变多时不再整体跳过：连接数继续前进", a.m.usage.conns, 12);
 }
 {
   const b = mkDO();
   await dset(b.m, { up: 100, down: 200, conns: 9, first: 1000 });
   await dset(b.m, { up: 150, down: 200, conns: 3, first: 5000 });
-  eq("快照落后时不会把更大的连接数改小", b.m.c.conns, 9);
-  eq("首次使用时间取更早的那个", b.m.c.first, 1000);
-  eq("字节按快照恢复（快照更大才覆盖）", b.m.c.up + b.m.c.down, 350);
+  eq("快照落后时不会把更大的连接数改小", b.m.usage.conns, 9);
+  eq("首次使用时间取更早的那个", b.m.usage.first, 1000);
+  eq("字节按快照恢复（快照更大才覆盖）", b.m.usage.up + b.m.usage.down, 350);
 }
 const mSrc166 = storeSrc();
 ok("恢复门槛含连接数（与 /seed 口径一致）", mSrc166.includes("wantN > curN"));
@@ -5633,7 +5633,7 @@ try {
   ok("不同批次的时间戳互不相同（同一批共享一个）", new Set(ring1.map((x) => x.t)).size >= 3, String(new Set(ring1.map((x) => x.t)).size));
   const meterSrc = storeSrc();
   ok("淘汰前按更新时间排序", meterSrc.includes("(Number(a.t) || 0) - (Number(b.t) || 0) || (a.n || 0) - (b.n || 0)"));
-  ok("排序在截断之前", meterSrc.indexOf("Number(a.t) || 0) - (Number(b.t) || 0)") >= 0 && meterSrc.indexOf("Number(a.t) || 0) - (Number(b.t) || 0)") < meterSrc.indexOf("m.cl = m.cl.slice(-60)"));
+  ok("排序在截断之前", meterSrc.indexOf("Number(a.t) || 0) - (Number(b.t) || 0)") >= 0 && meterSrc.indexOf("Number(a.t) || 0) - (Number(b.t) || 0)") < meterSrc.indexOf("m.connRing = m.connRing.slice(-60)"));
   ok("时间戳取 max(now, 表内最大 + 1)", meterSrc.includes("if (t0 >= clNow) clNow = t0 + 1;"));
   ok("已知行更新时刷新时间戳", meterSrc.includes("old.t = clNow;"));
   const appTypes = fs.readFileSync("types/app.d.ts", "utf8");
@@ -7827,5 +7827,49 @@ ok("/iter 夹住 n 并真的跑了", iterBody273.n === 1000 && iterBody273.ok ==
 const cryptoRes273 = await W.METER_DIAGNOSTICS.run("/crypto", new URL("https://meter/crypto"), fakeState273);
 const cryptoBody273 = await cryptoRes273.json();
 ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cryptoBody273.digestLen === 32);
+/* ---------- 274. 账本字段的语义名：内存改、落盘格式不动 ---------- */
+{
+  const do274 = mkDO();
+  const today274 = new Date().toISOString().slice(0, 10);
+  await do274.m.fetch(
+    new Request("https://m/add", {
+      method: "POST",
+      body: JSON.stringify({
+        up: 5,
+        down: 7,
+        conns: 2,
+        c: { d: today274, k274: 3 },
+        cl: [{ k: "1.1.1.1:443", n: 1, ok: 1, p50: 1, p95: 2, dn: 3 }],
+      }),
+    }),
+  );
+  const u274 = do274.m.usage || {};
+  eq("用量累计落在 usage 上", [u274.up, u274.down, u274.conns], [5, 7, 2]);
+  const g274 = do274.m.dayCounter || {};
+  ok("全局日计数落在 dayCounter 上", g274.d === today274 && g274.k274 === 3);
+  eq("连接观测落在 connRing 上", (do274.m.connRing || []).length, 1);
+  ok("旧单字母不再是账本字段", ["c", "g", "s", "e", "cl"].every((k) => !(k in do274.m)));
+  const meterSrc = fs.readFileSync("src/store/meter.ts", "utf8").split(/\r?\n/).join("\n");
+  const code274 = meterSrc.split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*")).join("\n");
+  ok("类字段声明用的是语义名", ["usage: UsageMeter;", "dayCounter: CounterDoc;", "nodeSnapshots: Record<string, NodeSnap>;", "errors: ErrItem[];", "connRing: ClRec[];"].every((x) => code274.includes(x)));
+  ok("类里不再有单字母字段声明", !/^\s{2}(c|g|s|e|cl):/m.test(code274));
+  ok(
+    "restore 逐项映射落盘键",
+    code274.includes("private restore(parts: MeterStore): void") &&
+      code274.includes("this.usage = { ...this.usage, ...parts.c }") &&
+      code274.includes("this.dayCounter = parts.g as CounterDoc") &&
+      code274.includes("this.nodeSnapshots = Object.assign(Object.create(null), parts.s)") &&
+      code274.includes("this.errors = parts.e as ErrItem[]") &&
+      code274.includes("this.connRing = parts.cl as ClRec[]"),
+  );
+  ok("loadShards 不再整块灌对象", code274.includes("this.restore(parts);") && !code274.includes("Object.assign(this, await readShards"));
+  const addSrc = fs.readFileSync("src/store/meteradd.ts", "utf8");
+  ok(
+    "AddTarget 也是语义名",
+    addSrc.includes("usage: UsageMeter;") && addSrc.includes("dayCounter: CounterDoc;") && addSrc.includes("nodeSnapshots: Record<string, NodeSnap>;") && addSrc.includes("errors: ErrItem[];") && addSrc.includes("connRing: ClRec[];"),
+  );
+  ok("add 内部不再访问旧短名", !/\bm\.(c|g|s|e|cl)\b/.test(addSrc));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

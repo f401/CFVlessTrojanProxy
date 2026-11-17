@@ -3,6 +3,7 @@ import { unseal } from "./index";
 import { applyAdd } from "./meteradd";
 import { cnt } from "../core/counter";
 import { readShards, saveState } from "./metershard";
+import type { MeterStore } from "./metershard";
 import { METER_DIAGNOSTICS } from "./meter-diagnostics";
 
 /**
@@ -15,12 +16,16 @@ import { METER_DIAGNOSTICS } from "./meter-diagnostics";
 export class Meter {
   state: DurableObjectState;
   env: Env;
-  c: UsageMeter;
-  g: CounterDoc;
-  s: Record<string, NodeSnap>;
-  e: ErrItem[];
+  /** 用量累计（`/get` 的响应体就是它） */
+  usage: UsageMeter;
+  /** 全局日计数（连接/走节点/断流…，按 UTC 日期一行） */
+  dayCounter: CounterDoc;
+  /** 跨 isolate 的节点快照（键 = 节点键） */
+  nodeSnapshots: Record<string, NodeSnap>;
+  /** 跨 isolate 的错误环（最多 50 条） */
+  errors: ErrItem[];
   /** 连接记录环形：最近 60 条，离线标定用 */
-  cl: ClRec[];
+  connRing: ClRec[];
   /**
    * 判定表的强证据：`站点|通道` → `{ s: 状态, t: 到期时间 }`。
    * 老数据里是裸数字（只有到期时间，状态默认 2）—— v7.164 前 DO 只存到期时间，
@@ -52,12 +57,12 @@ export class Meter {
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.env = env;
-    this.c = { up: 0, down: 0, conns: 0, first: 0, ts: 0, d: "", dU: 0, dD: 0 };
-    this.g = { d: "" }; // 全局日计数（连接/走节点/断流…）
+    this.usage = { up: 0, down: 0, conns: 0, first: 0, ts: 0, d: "", dU: 0, dD: 0 };
+    this.dayCounter = { d: "" }; // 全局日计数（连接/走节点/断流…）
     // 节点 key 来自 ?spd 的外部快照：用 null 原型，`__proto__` 当键也不能改原型
-    this.s = Object.create(null) as Record<string, NodeSnap>;
-    this.e = []; // 跨 isolate 的错误环形（最多 50 条）
-    this.cl = []; // 连接记录环形（最多 60 条）：离线标定 ttfb/抖动用
+    this.nodeSnapshots = Object.create(null) as Record<string, NodeSnap>;
+    this.errors = []; // 跨 isolate 的错误环形（最多 50 条）
+    this.connRing = []; // 连接记录环形（最多 60 条）：离线标定 ttfb/抖动用
     this.fs = 0; // 事实表代号（与分片同号才认；0 = 事实就在 `a` 里）
     this.vt = {};
     this.hl = {};
@@ -74,11 +79,11 @@ export class Meter {
       if (all) {
         const o = await unseal<MeterBody>(env, all);
         if (o && typeof o === "object") {
-          if (o.c && typeof o.c === "object") this.c = { ...this.c, ...o.c };
-          if (o.g && typeof o.g === "object") this.g = o.g as CounterDoc;
-          if (o.s && typeof o.s === "object") this.s = Object.assign(Object.create(null), o.s);
-          if (Array.isArray(o.e)) this.e = o.e;
-          if (Array.isArray(o.cl)) this.cl = o.cl as ClRec[];
+          if (o.c && typeof o.c === "object") this.usage = { ...this.usage, ...o.c };
+          if (o.g && typeof o.g === "object") this.dayCounter = o.g as CounterDoc;
+          if (o.s && typeof o.s === "object") this.nodeSnapshots = Object.assign(Object.create(null), o.s);
+          if (Array.isArray(o.e)) this.errors = o.e;
+          if (Array.isArray(o.cl)) this.connRing = o.cl as ClRec[];
           if (o.vt && typeof o.vt === "object")
           this.vt = o.vt as unknown as Record<string, number | { s: number; t: number }>;
           if (o.hl && typeof o.hl === "object") this.hl = o.hl as unknown as Record<string, { o: number; b: number; d: number; t?: number }>;
@@ -106,7 +111,7 @@ export class Meter {
       if (v) {
         const obj = await unseal<Record<string, number>>(env, v); // 兼容老的明文对象
         if (obj) {
-          this.c = { ...this.c, ...obj };
+          this.usage = { ...this.usage, ...obj };
           migrated = true;
         }
       }
@@ -114,7 +119,7 @@ export class Meter {
       if (ev) {
         const o4 = await unseal<ErrItem[]>(env, ev);
         if (Array.isArray(o4)) {
-          this.e = o4;
+          this.errors = o4;
           migrated = true;
         }
       }
@@ -122,7 +127,7 @@ export class Meter {
       if (sv) {
         const o3 = await unseal<Record<string, NodeSnap>>(env, sv);
         if (o3 && typeof o3 === "object") {
-          this.s = Object.assign(Object.create(null), o3);
+          this.nodeSnapshots = Object.assign(Object.create(null), o3);
           migrated = true;
         }
       }
@@ -130,7 +135,7 @@ export class Meter {
       if (gv) {
         const obj2 = await unseal<Record<string, number>>(env, gv);
         if (obj2 && typeof obj2 === "object") {
-          this.g = obj2 as CounterDoc;
+          this.dayCounter = obj2 as CounterDoc;
           migrated = true;
         }
       }
@@ -152,7 +157,37 @@ export class Meter {
    * @returns {Promise<void>}
    */
   private async loadShards(): Promise<void> {
-    Object.assign(this, await readShards(this.env, this.state.storage, this.fs));
+    const parts = await readShards(this.env, this.state.storage, this.fs);
+    // 存储键与内存字段名不同（存储格式一经写入就不能改，否则老数据读不回来），
+    // 这里逐项映射而不是 Object.assign：以前那种写法要求两侧键名逐字相同，
+    // 于是「改名」与「兼容老数据」被绑死，谁都不敢动字段名。
+    this.restore(parts);
+  }
+
+  /**
+   * 把存储里读出的账本逐项装回内存字段。
+   * 为什么单独一个方法：落盘键是 `c`/`g`/`s`/`e`/`cl`，内存字段是 `usage`/`dayCounter`/
+   * `nodeSnapshots`/`errors`/`connRing`；把映射写在一处，改名时只改这里。
+   * @param {MeterStore} parts 存储读出的账本（键是落盘格式）
+   * @returns {void}
+   */
+  private restore(parts: MeterStore): void {
+    // 账本五件：整体替换（存储里的就是上一次落盘的完整值），只有用量做增量合并——
+    // 它有「老值里有、存储里没有」的字段（`dU`/`dD` 是当日增量），覆盖会丢当天口径。
+    if (parts.c && typeof parts.c === "object") this.usage = { ...this.usage, ...parts.c };
+    if (parts.g && typeof parts.g === "object") this.dayCounter = parts.g as CounterDoc;
+    if (parts.s && typeof parts.s === "object") this.nodeSnapshots = Object.assign(Object.create(null), parts.s);
+    if (Array.isArray(parts.e)) this.errors = parts.e as ErrItem[];
+    if (Array.isArray(parts.cl)) this.connRing = parts.cl as ClRec[];
+    if (parts.vt && typeof parts.vt === "object") this.vt = parts.vt;
+    if (parts.hl && typeof parts.hl === "object") this.hl = parts.hl;
+    if (parts.eg && typeof parts.eg === "object") this.eg = parts.eg;
+    if (parts.ps && typeof parts.ps === "object") this.ps = parts.ps;
+    if (parts.dead && typeof parts.dead === "object") this.dead = parts.dead;
+    // 七张事实表：值都是「站点|通道 → 证据」，读回来整张替换；旧格式（裸数字、缺 at）由各自的
+    // 读取端兼容（见 `src/route/verdict.ts` 与 `factsOut`），这里不做形状修补。
+    if (parts.blk2 && typeof parts.blk2 === "object") this.blk2 = parts.blk2;
+    if (parts.dns && typeof parts.dns === "object") this.dns = parts.dns;
   }
 
   /**
@@ -167,7 +202,7 @@ export class Meter {
       this.bakRaw = null;
     }
     this.fs = await saveState(this.env, this.state.storage, {
-      c: this.c, g: this.g, s: this.s, e: this.e, cl: this.cl,
+      c: this.usage, g: this.dayCounter, s: this.nodeSnapshots, e: this.errors, cl: this.connRing,
       vt: this.vt, hl: this.hl, eg: this.eg, ps: this.ps,
       dead: this.dead, blk2: this.blk2, dns: this.dns,
     });
@@ -178,7 +213,7 @@ export class Meter {
    * @returns {Response} 200 + {up, down, conns, first, ts}
    */
   json() {
-    return Response.json(this.c);
+    return Response.json(this.usage);
   }
 
   /**
@@ -209,11 +244,11 @@ export class Meter {
       // 快照只覆盖「就地累加」的字段：事实表按时间戳幂等、用量/日计数/节点快照整体替换，
       // 连接观测是加法合并（行在表里就地累加）—— 所以 `cl` 必须深拷，否则回滚回不去。
       const snap = {
-        c: { ...this.c },
-        g: { ...this.g },
-        s: Object.assign(Object.create(null), this.s),
-        e: this.e.slice(),
-        cl: this.cl.map((r) => ({ ...r })),
+        usage: { ...this.usage },
+        dayCounter: { ...this.dayCounter },
+        nodeSnapshots: Object.assign(Object.create(null), this.nodeSnapshots),
+        errors: this.errors.slice(),
+        connRing: this.connRing.map((r) => ({ ...r })),
       };
       applyAdd(this, d);
       // 每次都落盘：DO 随时可能被驱逐，靠内存攒着会在驱逐时全丢；
@@ -234,7 +269,7 @@ export class Meter {
     const diagnostic = await METER_DIAGNOSTICS.run(p, url, this.state);
     if (diagnostic) return diagnostic;
     if (p.endsWith("/cl")) {
-      return Response.json({ cl: this.cl });
+      return Response.json({ cl: this.connRing });
     }
     if (p.endsWith("/hl")) {
       const rows = Object.entries(this.hl).map(([i, x]) => ({ i, o: x.o, b: x.b, d: x.d, t: Number(x.t) || 0 }));
@@ -249,7 +284,7 @@ export class Meter {
     // 七张表的出站形状与切片顺序都在 src/store/factout.ts（v7.187）
     if (p.endsWith("/vt")) return Response.json(factsOut(this));
     if (p.endsWith("/cnt")) {
-      return Response.json({ g: this.g, c: this.c, s: this.s, e: this.e });
+      return Response.json({ g: this.dayCounter, c: this.usage, s: this.nodeSnapshots, e: this.errors });
     }
 
     // 只在当前为 0 时回填，天然幂等，重建脚本后能自动恢复历史用量
@@ -259,23 +294,23 @@ export class Meter {
         const j = await req.json();
         if (j && typeof j === "object" && !Array.isArray(j)) d = j as MeterBody;
       } catch (e) {}
-      if ((this.c.up || 0) + (this.c.down || 0) + (this.c.conns || 0) === 0) {
-        const oldC = { ...this.c };
+      if ((this.usage.up || 0) + (this.usage.down || 0) + (this.usage.conns || 0) === 0) {
+        const oldC = { ...this.usage };
         const today = new Date().toISOString().slice(0, 10);
         const restoreDay = String(d.d || "") === today;
-        this.c.up = Number(d.up) || 0;
-        this.c.down = Number(d.down) || 0;
-        this.c.conns = Number(d.conns) || 0;
-        this.c.first = Number(d.first) || Date.now();
-        this.c.ts = Date.now();
+        this.usage.up = Number(d.up) || 0;
+        this.usage.down = Number(d.down) || 0;
+        this.usage.conns = Number(d.conns) || 0;
+        this.usage.first = Number(d.first) || Date.now();
+        this.usage.ts = Date.now();
         // 灾备快照里的当日字段：DO 被重建后"今日"不该从 0 开始
-        this.c.d = restoreDay ? today : this.c.d || "";
-        this.c.dU = restoreDay ? Number(d.dU) || 0 : this.c.dU || 0;
-        this.c.dD = restoreDay ? Number(d.dD) || 0 : this.c.dD || 0;
+        this.usage.d = restoreDay ? today : this.usage.d || "";
+        this.usage.dU = restoreDay ? Number(d.dU) || 0 : this.usage.dU || 0;
+        this.usage.dD = restoreDay ? Number(d.dD) || 0 : this.usage.dD || 0;
         try {
           await this.save();
         } catch (e) {
-          this.c = oldC;
+          this.usage = oldC;
           throw e;
         }
       }
@@ -289,51 +324,51 @@ export class Meter {
         const j = await req.json();
         if (j && typeof j === "object" && !Array.isArray(j)) d = j as MeterBody;
       } catch (e) {}
-      const cur = (this.c.up || 0) + (this.c.down || 0);
+      const cur = (this.usage.up || 0) + (this.usage.down || 0);
       const want = (Number(d.up) || 0) + (Number(d.down) || 0);
       // 连接数也是单调量：只看字节会让「只建过连接、没有可计量流量」的用户恢复不到
       // conns/first；`/seed` 的门槛是 up+down+conns，两条恢复路径的口径必须一致
-      const curN = this.c.conns || 0;
+      const curN = this.usage.conns || 0;
       const wantN = Number(d.conns) || 0;
       if (want > cur || wantN > curN) {
-        const oldC = { ...this.c };
+        const oldC = { ...this.usage };
         // 恢复历史累计不能把"今日"一起抹掉；只有快照的 d 是今天才采纳 dU/dD
         const today = new Date().toISOString().slice(0, 10);
         const restoreDay = String(d.d || "") === today;
-        const sameDay = this.c.d === today;
+        const sameDay = this.usage.d === today;
         const dU = restoreDay
-          ? Math.max(Number(d.dU) || 0, sameDay ? this.c.dU || 0 : 0)
+          ? Math.max(Number(d.dU) || 0, sameDay ? this.usage.dU || 0 : 0)
           : sameDay
-            ? this.c.dU || 0
+            ? this.usage.dU || 0
             : 0;
         const dD = restoreDay
-          ? Math.max(Number(d.dD) || 0, sameDay ? this.c.dD || 0 : 0)
+          ? Math.max(Number(d.dD) || 0, sameDay ? this.usage.dD || 0 : 0)
           : sameDay
-            ? this.c.dD || 0
+            ? this.usage.dD || 0
             : 0;
-        this.c = {
+        this.usage = {
           // 两维各自取大（v7.181）：以前无条件写成快照值，只看 conns 变大就会把
           // up/down 换成快照里的旧数（快照可能落后几小时）——面板与订阅头的累计用量倒退。
-          up: Math.max(Number(d.up) || 0, this.c.up || 0),
-          down: Math.max(Number(d.down) || 0, this.c.down || 0),
+          up: Math.max(Number(d.up) || 0, this.usage.up || 0),
+          down: Math.max(Number(d.down) || 0, this.usage.down || 0),
           // conns 取两者更大：快照可能比 DO 落后几小时，直接赋值会让面板的连接数变小
           conns: Math.max(wantN, curN),
           // first 取更早的非零值：重建后不能把「首次使用时间」推后
           first: (() => {
             const a = Number(d.first) || 0;
-            const b = this.c.first || 0;
+            const b = this.usage.first || 0;
             if (a > 0 && b > 0) return Math.min(a, b);
             return a || b || Date.now();
           })(),
           ts: Date.now(),
-          d: restoreDay || sameDay ? today : this.c.d || "",
+          d: restoreDay || sameDay ? today : this.usage.d || "",
           dU,
           dD,
         };
         try {
           await this.save();
         } catch (e) {
-          this.c = oldC;
+          this.usage = oldC;
           throw e;
         }
       }

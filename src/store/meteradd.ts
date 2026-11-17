@@ -10,11 +10,11 @@ import { mergeFacts } from "./factmerge";
 
 /** 合并目标：`Meter` 公开的账本字段（结构化即可，不要求是 `Meter` 实例） */
 export interface AddTarget {
-  c: UsageMeter;
-  g: CounterDoc;
-  s: Record<string, NodeSnap>;
-  e: ErrItem[];
-  cl: ClRec[];
+  usage: UsageMeter;
+  dayCounter: CounterDoc;
+  nodeSnapshots: Record<string, NodeSnap>;
+  errors: ErrItem[];
+  connRing: ClRec[];
   vt: Record<string, number | { s: number; t: number }>;
   hl: Record<string, { o: number; b: number; d: number; t?: number }>;
   eg: Record<string, { f: number; at: number }>;
@@ -31,31 +31,31 @@ export interface AddTarget {
  * @returns {void}
  */
 export function applyAdd(m: AddTarget, d: MeterBody): void {
-  const c = m.c;
+  const usage = m.usage;
   // 下面所有统计都写在这张表上：它同时是 `json()` 的响应体
       // 计数搭便车：同一次 /add 请求把 isolate 的日计数也带上来，0 额外请求
       if (d.c && typeof d.c === "object" && !Array.isArray(d.c)) {
         const d0 = String(d.c.d || new Date().toISOString().slice(0, 10));
         // 只接受"今天"或更新的一天：旧的 isolate 可能带着昨天的计数晚到，
         // 不能让它把全局日计数回滚到昨天，更不能把旧数加进今天。
-        if (!m.g || !m.g.d || d0 > m.g.d) m.g = { d: d0 };
-        if (m.g.d === d0) {
+        if (!m.dayCounter || !m.dayCounter.d || d0 > m.dayCounter.d) m.dayCounter = { d: d0 };
+        if (m.dayCounter.d === d0) {
           for (const [k, v] of Object.entries(d.c)) {
             if (k === "d" || k === "__proto__" || k === "constructor" || k === "prototype") continue;
             if (!(Number(v) > 0)) continue;
-            m.g[k] = (Number(m.g[k]) || 0) + Number(v);
+            m.dayCounter[k] = (Number(m.dayCounter[k]) || 0) + Number(v);
           }
         }
       }
       if (Array.isArray(d.e) && d.e.length) {
-        const seen = new Set(m.e.map((x) => x && x.t));
+        const seen = new Set(m.errors.map((x) => x && x.t));
         for (const x of d.e) {
           if (!x || !x.t || seen.has(x.t)) continue;
-          m.e.push(x);
+          m.errors.push(x);
           seen.add(x.t);
         }
-        m.e.sort((a, b) => a.t - b.t);
-        if (m.e.length > 50) m.e = m.e.slice(-50);
+        m.errors.sort((a, b) => a.t - b.t);
+        if (m.errors.length > 50) m.errors = m.errors.slice(-50);
       }
       // 连接观测按节点合并（不同 isolate 各报一段）：计数相加，分位数取最新一段
       if (Array.isArray(d.cl) && d.cl.length) {
@@ -63,13 +63,13 @@ export function applyAdd(m: AddTarget, d: MeterBody): void {
         // 时间戳相同会让排序退回插入序，「插得最早」的那条又被当成最旧的删掉 ——
         // 而它恰恰可能是样本最多的节点。取 max(now, 表内最大 + 1) 就永不并列。
         let clNow = Date.now();
-        for (const r of m.cl) {
+        for (const r of m.connRing) {
           const t0 = Number(r.t) || 0;
           if (t0 >= clNow) clNow = t0 + 1;
         }
         for (const x of d.cl) {
           if (!x || typeof x.n !== "number" || typeof x.k !== "string") continue;
-          const old = m.cl.find((r) => r.k === x.k);
+          const old = m.connRing.find((r) => r.k === x.k);
           if (old) {
             old.n += x.n;
             old.ok += x.ok;
@@ -78,15 +78,15 @@ export function applyAdd(m: AddTarget, d: MeterBody): void {
             old.p95 = x.p95;
             // 刷新时间戳（v7.215）：淘汰按它排序，活跃节点不能因为「插得早」先被删
             old.t = clNow;
-          } else m.cl.push({ k: x.k, n: x.n, ok: x.ok, p50: x.p50, p95: x.p95, dn: x.dn, t: clNow });
+          } else m.connRing.push({ k: x.k, n: x.n, ok: x.ok, p50: x.p50, p95: x.p95, dn: x.dn, t: clNow });
         }
-        if (m.cl.length > 60) {
+        if (m.connRing.length > 60) {
           // 按最近更新时间淘汰（v7.215）：以前按插入序 slice(-60)，而合并是就地累加、不移动位置，
           // 于是「最先进来的、样本最多的那个节点」永远排在最前，表一满就先被删，
           // 一次性的新节点反而都留着。没有 t 的老行按 0 处理，最先淘汰（它们本来就是最旧的）。
           // 无 t 的老行全是 0，先按样本数少的淘汰（它们是升级前留下的、也确实更旧）
-          m.cl.sort((a, b) => (Number(a.t) || 0) - (Number(b.t) || 0) || (a.n || 0) - (b.n || 0));
-          m.cl = m.cl.slice(-60);
+          m.connRing.sort((a, b) => (Number(a.t) || 0) - (Number(b.t) || 0) || (a.n || 0) - (b.n || 0));
+          m.connRing = m.connRing.slice(-60);
         }
       }
       // 中继 403 判定搭便车上来：只保留未过期的，最多 200 条。
@@ -149,29 +149,29 @@ export function applyAdd(m: AddTarget, d: MeterBody): void {
         for (const [k, v] of Object.entries(d.spd)) {
           if (!v || typeof v !== "object") continue;
           if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
-          const old = m.s[k];
-          if (!old || (v.at || 0) >= (old.at || 0)) m.s[k] = v; // 新的覆盖旧的
+          const old = m.nodeSnapshots[k];
+          if (!old || (v.at || 0) >= (old.at || 0)) m.nodeSnapshots[k] = v; // 新的覆盖旧的
         }
         // 池子每天换代，旧节点快照会无限累积；只留最近活跃的 64 个
-        const sk = Object.keys(m.s);
+        const sk = Object.keys(m.nodeSnapshots);
         if (sk.length > 64) {
-          sk.sort((a, b) => (m.s[a].at || 0) - (m.s[b].at || 0));
-          for (let i = 0; i < sk.length - 64; i++) delete m.s[sk[i]];
+          sk.sort((a, b) => (m.nodeSnapshots[a].at || 0) - (m.nodeSnapshots[b].at || 0));
+          for (let i = 0; i < sk.length - 64; i++) delete m.nodeSnapshots[sk[i]];
         }
       }
-      c.up += Number(d.up) || 0;
-      c.down += Number(d.down) || 0;
-      c.conns += Number(d.conns) || 0;
+      usage.up += Number(d.up) || 0;
+      usage.down += Number(d.down) || 0;
+      usage.conns += Number(d.conns) || 0;
       // 当日字节：跨天自动清零。累计值 up/down 是订阅头用的（协议惯例），
       // 面板上的"今日"用这一份 —— 否则用户永远只看到历史总量。
       const today0 = new Date().toISOString().slice(0, 10);
-      if (c.d !== today0) {
-        c.d = today0;
-        c.dU = 0;
-        c.dD = 0;
+      if (usage.d !== today0) {
+        usage.d = today0;
+        usage.dU = 0;
+        usage.dD = 0;
       }
-      c.dU = (c.dU || 0) + (Number(d.up) || 0);
-      c.dD = (c.dD || 0) + (Number(d.down) || 0);
-      c.ts = Date.now();
-      if (!c.first) c.first = c.ts;
+      usage.dU = (usage.dU || 0) + (Number(d.up) || 0);
+      usage.dD = (usage.dD || 0) + (Number(d.down) || 0);
+      usage.ts = Date.now();
+      if (!usage.first) usage.first = usage.ts;
 }
