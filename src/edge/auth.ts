@@ -3,9 +3,7 @@ import type { RouteCtx } from "./types";
 
 /* 面板鉴权：cookie / 挑战-应答会话 / 登录限流 */
 
-export const RL_MEM = new Map(); // ip -> { n, t }
-
-/** 限流表最多记多少个来源 IP：超了只删最旧的一个，不整体清空（见 rlTake 里的说明） */
+/** 限流表最多记多少个来源 IP：超了只淘汰一条，不整体清空（见 `RateLimiter.take` 里的说明） */
 const RL_MAX = 500;
 
 /**
@@ -80,47 +78,97 @@ export async function adminAuthed(request: Request, url: URL, env: Env) {
 }
 
 /**
- * 功能：进程内固定窗口限流（窗口 10 分钟，见函数体里的 600000；每 ip 每窗口 limit 次）。
- * @param ip 客户端标识
- * @param limit 窗口内允许次数
- * @returns 允许本次为 true
+ * 登录尝试的固定窗口限流（每来源 IP 每窗口 `limit` 次）。
+ *
+ * 为什么是类：这张表是**跨请求**的可变状态（同一 isolate 里所有登录尝试共用），
+ * 而「窗口怎么算、表满了淘汰谁」是它的内部细节 —— 散成模块级 `Map` + 两个函数时，
+ * 读 `admin.ts` 的人只知道「有个 rlTake」，看不到背后那张带淘汰策略的表。
  */
-export function rlTake(ip: string, limit: number) {
-  const now = Date.now();
-  const e = RL_MEM.get(ip);
-  if (e && now - e.t < 600000) {
-    if (e.n >= limit) return false;
-    e.n += 1;
+export class RateLimiter {
+  /** 来源 IP → 本窗口内的次数与窗口起点 */
+  private readonly rows = new Map<string, { n: number; t: number }>();
+
+  /**
+   * 功能：记一次尝试，并回答这次是否放行。
+   * @param ip 客户端标识（来源 IP）
+   * @param limit 窗口内允许次数
+   * @param now 当前时间，默认 `Date.now()`
+   * @returns 放行 true；本窗口额度用尽 false
+   */
+  take(ip: string, limit: number, now: number = Date.now()): boolean {
+    const WINDOW_MS = 600000;
+    const e = this.rows.get(ip);
+    // 窗口还没过：额度没用尽就 +1；用尽了就挡掉（不推进起点，连续尝试不能给自己续窗口）
+    if (e && now - e.t < WINDOW_MS) {
+      if (e.n >= limit) return false;
+      e.n += 1;
+      return true;
+    }
+    // 新窗口（或第一次见到这个来源）：记一条，起点记成现在
+    this.rows.set(ip, { n: 1, t: now });
+    this.trim(ip);
     return true;
   }
-  RL_MEM.set(ip, { n: 1, t: now });
-  // 只删最旧的一条，**不要整体 clear()**：清空会把所有人的计数一起归零，而来源 IP
-  // 是攻击者可以换的（IPv6 一个 /64 就有海量地址），拿 501 个来源刷一遍就等于
-  // 把自己刚被限住的计数重置掉 —— 限流表本来是为了挡住这件事。
-  if (RL_MEM.size > RL_MAX) {
-    // 淘汰「计数最小、且最旧」的那条，并且绝不删刚刚这条 ip：
-    // 正在被限住的来源计数会涨上去（n 大）自然留下，而拿一堆一次性来源刷表的
-    // 攻击者只会把自己刷进去的那批删掉 —— 这样刷表既换不出额度，也顶不掉别人的限额。
+
+  /**
+   * 功能：清掉某个来源的计数（登录成功后调用，让下一次失败重新计数）。
+   * @param ip 客户端标识
+   * @returns 无
+   */
+  reset(ip: string): void {
+    this.rows.delete(ip);
+  }
+
+  /**
+   * 功能：当前记了多少个来源（只读，给面板与单测看有界性）。
+   * @returns 行数
+   */
+  get size(): number {
+    return this.rows.size;
+  }
+
+  /**
+   * 功能：清空整张表（只有单测与本地调试会调用）。
+   * @returns 无
+   */
+  clear(): void {
+    this.rows.clear();
+  }
+
+  /**
+   * 功能：超上限时淘汰一条，绝不整体清空、绝不淘汰刚写进来的这条。
+   *
+   * 为什么不 `clear()`：来源 IP 是攻击者可以换的（IPv6 一个 /64 就有海量地址），
+   * 拿 501 个来源刷一遍就等于把自己刚被限住的计数重置掉 —— 这张表本来就是为了挡这件事。
+   * 淘汰「计数最小、且最旧」的那条：正被限住的来源计数会涨上去自然留下，
+   * 而拿一次性来源刷表的攻击者只会把自己刷进去的那批删掉。
+   * @param keep 刚被写入、不许淘汰的那个来源
+   * @returns 无
+   */
+  private trim(keep: string): void {
+    // 没超上限就什么都不做：这张表大多数时候只有几十行
+    if (this.rows.size <= RL_MAX) return;
+    // 一次只淘汰一条：本轮只多了一行，多删会把正当用户的计数也抹掉
     let victim = "";
     let minN = Infinity;
     let minT = Infinity;
-    for (const [k, v] of RL_MEM) {
-      if (k === ip || !v) continue;
+    for (const [k, v] of this.rows) {
+      // 跳过刚写进来的来源（`keep`）：否则「刷 501 个来源」就能把攻击者自己的计数重置
+      if (k === keep || !v) continue;
+      // 先比计数（小的先走，正被限住的来源计数已经涨上去），计数相同再比时间（更旧的先走）
       if (v.n < minN || (v.n === minN && v.t < minT)) {
         minN = v.n;
         minT = v.t;
-        victim = k as string;
+        victim = k;
       }
     }
-    if (victim) RL_MEM.delete(victim);
+    // 全是 `keep` 的行时 `victim` 为空，那就这轮先不淘汰（下一轮会有一条可淘汰的）
+    if (victim) this.rows.delete(victim);
   }
-  return true;
 }
 
-/** 功能：rlReset 是薄包装，直接委托 RL_MEM.delete。@param ip string。@returns 无（RL_MEM.delete 无返回值） */
-export function rlReset(ip: string) {
-  RL_MEM.delete(ip);
-}
+/** 进程内唯一限流器：登录尝试是跨请求的，必须由模块级实例持有（不能挂在每个请求的对象上） */
+export const RATE_LIMIT = new RateLimiter();
 
 /**
  * 功能：生成一次性随机串（时间前缀 + 12 字节随机），用于防重放。

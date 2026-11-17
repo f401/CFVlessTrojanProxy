@@ -278,6 +278,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `DebugTables` | `src/routes/debug.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：`read()` 只按固定顺序编排，每个分支一个方法、只认自己那个参数键（`?blk=` 等自己取参数、自己拼载荷）；只读表、不拨号、不改状态，`&do=1` 时只有 `healthRows()` 与 `connRows()` 会多一次 DO 往返 |
 | `ProxyipView` | `src/routes/proxyip.ts` | `/proxyip` 的六个方法：只读报表（`?day`、`?src`）、两个管理员动作（`?reset` 清表、`?refresh` 跑一轮探活）、默认视图分三段——`liveRows()` 并内存表与跨 isolate 快照并按模式排序、`explain()` 只在 `?why=1` 时算画像与分项、`poolReport()` 只拼字段 |
 | `AdminView`（`admin` 门面） | `src/routes/admin.ts` | `/admin` 的四个分支各占一个方法：登出只清 cookie、登录做挑战-应答与限速、用户操作要读改写整份托管用户表（`cur.ok === false` 时必须拒绝，否则会把缺失用户整份删掉）、面板按用户数扇出 DO 往返并被 `ADMIN_STATS_MAX` 截断 |
+| `RateLimiter`（`RATE_LIMIT`） | `src/edge/auth.ts` | 登录尝试的固定窗口限流：`take` 判「这个来源这一分钟还能不能试」、`reset` 在成功登录后清零、`size` 供诊断；表按 `RL_MAX` 有界（超限只淘汰「计数最小且最旧」的一条，绝不整体清空、绝不淘汰刚写入的来源），7.355 起由类持有而不是裸 `Map` |
 | `SubscriptionRoutes`（`subscription` 门面） | `src/routes/subscription.ts` | 控制页与订阅：`page()` 读用量 + 存活表两次往返、`feed(kind)` 把 clash / sing-box / 明文链接三种格式收成一条路（差别只有渲染器与 content-type，见 `FEEDS` 表）、`stats()` 的 JSON 分支零额外往返、`statsHtml()` 才并跨 isolate 快照；页面视图 `PageView` 由它自己持有（7.353 起，不再有模块级 `PAGES`） |
 | `ProxySession` | `src/proxy/session.ts` | WebSocket 数据面的会话对象：握手 / 首帧解析 / 拨号（地区与补救两条路）/ 收尾各一个方法；`?rg=` 用的 `RegionPicker` 由它自己持有（7.346 起，不再有模块级 `REGION`） |
 | `UploadStream` | `src/proxy/ws-in.ts` | 客户端 → 上游的上行字节流：积压计数、超限关连接（1013）、正常关闭与异常各自收尾；`wsToStream()` 只是 `new UploadStream(ws, early).stream` |

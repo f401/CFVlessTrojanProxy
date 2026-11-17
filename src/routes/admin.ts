@@ -1,4 +1,4 @@
-import { adminAuthed, newNonce, randomPwd, rlReset, rlTake, sessionToken, sha256Hex } from "../edge/auth";
+import { RATE_LIMIT, adminAuthed, newNonce, randomPwd, sessionToken, sha256Hex } from "../edge/auth";
 import { loadUsers, saveUsers } from "../proxy/protocol";
 import { eachLimit } from "../core/util";
 import { cnt } from "../core/counter";
@@ -75,7 +75,7 @@ export class AdminView {
   private async login(): Promise<Response> {
     const ip = this.c.request.headers.get("cf-connecting-ip") || "unknown";
     // 内存计数优先（同一 isolate 内精确），KV 只做跨 isolate 的粗粒度兜底
-    if (!rlTake(ip, 10)) {
+    if (!RATE_LIMIT.take(ip, 10)) {
       return html(renderLogin(newNonce(), "尝试次数过多，请 10 分钟后再试"), 429);
     }
     const f = await this.c.request.formData();
@@ -92,7 +92,7 @@ export class AdminView {
       return html(renderLogin(newNonce(), "密码错误"), 401);
     }
     // 成功才清限速：失败留痕是为了让「连错」在 10 分钟内持续受限
-    rlReset(ip);
+    RATE_LIMIT.reset(ip);
     const tok = await sessionToken(this.c.env);
     return new Response(null, {
       status: 303,

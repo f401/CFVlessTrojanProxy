@@ -4210,15 +4210,15 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carry.owner = String(id).
   ok("attacher 不再自己数 300", !/S\.needPx\.size >= 300/.test(atSrc));
 
   // 2) 限流表：撑爆时只删最旧，不清空别人的计数
-  W.RL_MEM.clear();
+  W.RATE_LIMIT.clear();
   const hot = "203.0.113.200";
   let allowed = 0;
-  for (let i = 0; i < 10; i++) if (W.rlTake(hot, 10)) allowed += 1;
+  for (let i = 0; i < 10; i++) if (W.RATE_LIMIT.take(hot, 10)) allowed += 1;
   eq("窗口内前 10 次放行", allowed, 10);
-  ok("第 11 次被挡", W.rlTake(hot, 10) === false);
-  for (let i = 0; i < 600; i++) W.rlTake("10.9." + Math.floor(i / 256) + "." + (i % 256), 10);
-  ok("表被撑爆之后，原来被限住的 IP 仍然被限住（不是整体 clear）", W.rlTake(hot, 10) === false);
-  ok("限流表自己仍然有界", W.RL_MEM.size <= 501);
+  ok("第 11 次被挡", W.RATE_LIMIT.take(hot, 10) === false);
+  for (let i = 0; i < 600; i++) W.RATE_LIMIT.take("10.9." + Math.floor(i / 256) + "." + (i % 256), 10);
+  ok("表被撑爆之后，原来被限住的 IP 仍然被限住（不是整体 clear）", W.RATE_LIMIT.take(hot, 10) === false);
+  ok("限流表自己仍然有界", W.RATE_LIMIT.size <= 501);
 
   // 3) shadowRate 的说明不再自称「显示 10 实际 0」
   const uSrc = fs.readFileSync("src/core/util.ts", "utf8");
@@ -11815,6 +11815,38 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     a.endClient(gone, 1000, "done");
     return calls.length === 1 && calls[0] === "1011:proxyip failed";
   })(), "关客户端的口径变了");
+}
+
+{
+  // ---- 第 355 组：限流表成为类（RateLimiter / RATE_LIMIT），两个转发函数退场 ----
+  const auth355 = fs.readFileSync("src/edge/auth.ts", "utf8");
+  const admin355 = fs.readFileSync("src/routes/admin.ts", "utf8");
+  ok("[355] 限流表不再是裸 Map 单例", !auth355.includes("export const RL_MEM = new Map()"), "还留着 RL_MEM");
+  ok("[355] 限流器是类", auth355.includes("export class RateLimiter {"), "");
+  ok("[355] 模块级实例仍是一个（跨请求状态）", auth355.includes("export const RATE_LIMIT = new RateLimiter();"), "");
+  ok("[355] 窗口与上限都收进类", auth355.includes("const WINDOW_MS = 600000;") && auth355.includes("const RL_MAX = 500;"), "");
+  ok("[355] 登录分支直接用类", admin355.includes("RATE_LIMIT.take(ip, 10)") && admin355.includes("RATE_LIMIT.reset(ip)") && !admin355.includes("rlTake(") && !admin355.includes("rlReset("), "");
+  ok("[355] 两个转发函数已从源码消失", !auth355.includes("export function rlTake(") && !auth355.includes("export function rlReset("), "");
+  ok("[355] 窗口里只剩类与实例", typeof W.RateLimiter === "function" && W.RATE_LIMIT instanceof W.RateLimiter && W.rlTake === undefined && W.rlReset === undefined && W.RL_MEM === undefined, "");
+  ok("[355] 独立实例的额度互不影响", (() => {
+    const a = new W.RateLimiter();
+    const b = new W.RateLimiter();
+    for (let i = 0; i < 10; i++) a.take("9.9.9.9", 10);
+    return a.take("9.9.9.9", 10) === false && b.take("9.9.9.9", 10) === true;
+  })(), "");
+  ok("[355] 成功后 reset 能重新计数", (() => {
+    const r = new W.RateLimiter();
+    for (let i = 0; i < 5; i++) r.take("ip-reset", 5);
+    const blocked = r.take("ip-reset", 5) === false;
+    r.reset("ip-reset");
+    return blocked && r.take("ip-reset", 5) === true;
+  })(), "");
+  ok("[355] 表被撑爆后仍是有界且不整体清空", (() => {
+    const r = new W.RateLimiter();
+    for (let i = 0; i < 10; i++) r.take("hot355", 10);
+    for (let i = 0; i < 600; i++) r.take("10.8." + Math.floor(i / 256) + "." + (i % 256), 10);
+    return r.size <= 501 && r.take("hot355", 10) === false;
+  })(), "");
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
