@@ -28,6 +28,7 @@ import { aliveList, commitPool, flushPx, pxSet } from "../px/pool";
 import { EXTRA_HOSTS, probeProxy, probeSni, refillPool } from "../px/probe";
 import { clSnapshot, restoreUsage } from "../store/index";
 import { adminOnly } from "../edge/auth";
+import { METER_PROBES } from "./debug-meter";
 
 import type { Chan } from "../route/channel";
 import type { RouteCtx } from "../edge/types";
@@ -355,63 +356,11 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
       return json({ ok: false, error: errMsg(e) });
     }
   }
-  // 诊断：量 DO 的 CPU 预算（不涉及 TLS）
-  if (url.searchParams.get("burn")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    if (!env.METER) return json({ ok: false, error: "no METER" });
-    const ms = Number(url.searchParams.get("burn") || 50);
-    try {
-      // 独立实例名：上一次被 CPU 墙打断的请求可能让该实例的串行队列永久 pending
-      const inst = url.searchParams.get("n") || "burn";
-      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
-      const resp = await withTimeout(stub.fetch(`https://meter/burn?ms=${ms}`), 15000);
-      return json({ ok: resp.ok, doStatus: resp.status, burn: await resp.json() });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
-  // 读 DO 里记录下来的探测阶段
-  if (url.searchParams.get("stage")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    try {
-      const inst = url.searchParams.get("n") || "";
-      if (!inst) return json({ ok: false, error: "need &n=<inst>" });
-      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
-      const resp = await withTimeout(stub.fetch("https://meter/stage"), 8000);
-      return json({ ok: resp.ok, doStatus: resp.status, stage: await resp.json() });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
-  // DO 里 setTimeout 是否触发（根库解析那个 /meter/dbt 端点已随 subtls 一起删除）
-  if (url.searchParams.get("tim")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    const inst = url.searchParams.get("n") || "t" + Date.now();
-    try {
-      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
-      const resp = await withTimeout(stub.fetch(`https://meter/tim?ms=${Number(url.searchParams.get("tim"))}`), 20000);
-      return json({ ok: resp.ok, doStatus: resp.status, out: await resp.json() });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
-  // 固定迭代量的纯 CPU 循环：量 DO 的真实算力预算（不依赖 Date.now）
-  if (url.searchParams.get("iter")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    const n = Number(url.searchParams.get("iter") || 1000000);
-    try {
-      const inst = url.searchParams.get("n") || "it" + Date.now();
-      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
-      const resp = await withTimeout(stub.fetch(`https://meter/iter?n=${n}`), 20000);
-      return json({ ok: resp.ok, doStatus: resp.status, iter: await resp.json() });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
+  // 六个「计量 DO 诊断」端点（?burn= / ?stage= / ?tim= / ?iter= / ?burnjs= / ?crypto=）交给
+  // `DebugMeterProbes`：它们的形状完全一样（校验管理员 → 取带实例名的 DO → 带超时 fetch →
+  // 包成 { ok, doStatus, <item> }），写成六个 if 块时每一步都可能在某一块里漏掉。
+  const probe = await METER_PROBES.run(c, url, id);
+  if (probe) return probe;
   // IP 级封锁探测（见 route/tfb.ts）
   if (url.searchParams.get("tfb")) {
     const denyB = await adminOnly(c);
@@ -432,34 +381,7 @@ note: "这段说明的是「中转腿」：隧道里是端到端 TLS，只能拿
     const body = r ? await withTimeout(r.json(), 5000) : { ok: false, err: "tf-timeout" };
     return Response.json({ host: tfHost, relay: tfRelay, do: body });
   }
-
-  // 纯同步忙等：区分「CPU 预算」与「crypto.subtle 不返回」
-  if (url.searchParams.get("burnjs")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    const ms = Number(url.searchParams.get("burnjs") || 20);
-    try {
-      const inst = url.searchParams.get("n") || "js" + Date.now();
-      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
-      const resp = await withTimeout(stub.fetch(`https://meter/burnjs?ms=${ms}`), 20000);
-      return json({ ok: resp.ok, doStatus: resp.status, burn: await resp.json() });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
-  // 逐项量 DO 里的 WebCrypto API
-  if (url.searchParams.get("crypto")) {
-    const deny = await adminOnly(c);
-    if (deny) return deny;
-    try {
-      const inst = url.searchParams.get("n") || "cr" + Date.now();
-      const stub = env.METER.get(env.METER.idFromName(id + "::" + inst));
-      const resp = await withTimeout(stub.fetch("https://meter/crypto"), 25000);
-      return json({ ok: resp.ok, doStatus: resp.status, crypto: await resp.json() });
-    } catch (e) {
-      return json({ ok: false, error: errMsg(e) });
-    }
-  }
+  // 从 KV 快照回填用量（只在 DO 累计仍为 0 时生效，重建脚本后靠它恢复历史数字）
   if (url.searchParams.get("restore") === "1") {
     const deny = await adminOnly(c);
     if (deny) return deny;

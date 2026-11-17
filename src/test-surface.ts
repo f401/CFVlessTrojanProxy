@@ -93,6 +93,7 @@ export { doFetch, meterGet } from "./store/meter-client";
 export { runCron } from "./routes/cron";
 export { proxyip } from "./routes/proxyip";
 export { debug } from "./routes/debug";
+export { METER_PROBES, DebugMeterProbes } from "./routes/debug-meter";
 export { renderStatsHtml } from "./views/panel";
 export { statsNodeRows } from "./nodes/stats-rows";
 export { randomPwd } from "./edge/auth";

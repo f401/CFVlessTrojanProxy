@@ -6972,7 +6972,9 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 
   const srcDbg248 = fs.readFileSync("src/routes/debug.ts", "utf8");
   ok("转发分支不再无条件写 ok: true", !srcDbg248.includes("return json({ ok: true, burn: await resp.json() })"));
-  ok("转发分支带出 DO 状态码", (srcDbg248.match(/ok: resp\.ok, doStatus: resp\.status/g) || []).length >= 6);
+  const srcMeter275 = fs.readFileSync("src/routes/debug-meter.ts", "utf8");
+  ok("转发分支带出 DO 状态码", srcMeter275.includes("ok: resp.ok, doStatus: resp.status"));
+  ok("六个转发分支已交给 DebugMeterProbes", srcDbg248.includes("METER_PROBES.run(c, url, id)") && !srcDbg248.includes("searchParams.get(\"burn\")"));
   ok("回填分支用 seedOk", srcDbg248.includes("let seedOk = false;") && srcDbg248.includes("return json({ ok: seedOk, doStatus: seedStatus, seeded });"));
   ok("钉节点分支用 fx.ok 判定落盘", srcDbg248.includes('anchor: fx.ok ? "ok" : "fail"'));
 }
@@ -7869,6 +7871,91 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
     addSrc.includes("usage: UsageMeter;") && addSrc.includes("dayCounter: CounterDoc;") && addSrc.includes("nodeSnapshots: Record<string, NodeSnap>;") && addSrc.includes("errors: ErrItem[];") && addSrc.includes("connRing: ClRec[];"),
   );
   ok("add 内部不再访问旧短名", !/\bm\.(c|g|s|e|cl)\b/.test(addSrc));
+}
+
+// ---- 第 275 组：六个诊断端点由 DebugMeterProbes 统一派发（7.275，用户 m39603 的 OOP 要求） ----
+{
+  const kv275 = () => {
+    const m = new Map();
+    return {
+      get: async (k) => (m.has(k) ? m.get(k) : null),
+      put: async (k, v) => void m.set(k, v),
+      delete: async (k) => void m.delete(k),
+      list: async () => ({ keys: [...m.keys()].map((name) => ({ name })), list_complete: true }),
+    };
+  };
+  // 记录 DO 实际收到的 URL 与实例名：六个端点的差别只在参数名、默认实例名、超时与结果键
+  const sink = { url: "", name: "", calls: 0 };
+  const meter275 = (status, body) => ({
+    idFromName: (n) => {
+      sink.name = n;
+      return n;
+    },
+    get: () => ({
+      fetch: async (u) => {
+        sink.calls += 1;
+        sink.url = String(u);
+        return new Response(body, { status, headers: { "content-type": "application/json" } });
+      },
+    }),
+  });
+  const KEY275 = "#probe-admin-275";
+  const run275 = async (qs, opts = {}) => {
+    sink.url = "";
+    sink.name = "";
+    sink.calls = 0;
+    const url = new URL("https://sim.example.com/7c53c12a-88b1-4fda-b6e7-4da62e47a4e1/debug" + qs);
+    const request = new Request(url.toString(), { headers: { "x-admin-key": KEY275 } });
+    const env = { STATS: kv275(), adminKey: KEY275 };
+    if (!opts.noMeter) env.METER = meter275(opts.status || 500, opts.body || "{\"error\":\"boom\"}");
+    const ctx = { request, url, env, id: "7c53c12a-88b1-4fda-b6e7-4da62e47a4e1", exec: { waitUntil() {}, passThroughOnException() {} } };
+    return { body: await (await W.debug(ctx)).json(), sink: { ...sink } };
+  };
+
+  // ① 六个参数都走同一条路径：DO 回 500 时 ok 必须是 false，并且带出真实状态码
+  for (const qs of ["?burn=10&n=p275", "?stage=1&n=p275", "?tim=10&n=p275", "?iter=1000&n=p275", "?burnjs=10&n=p275", "?crypto=1&n=p275"]) {
+    const r = await run275(qs);
+    eq(qs + " 的 ok 是 DO 的真实状态", r.body.ok, false);
+    eq(qs + " 带出 DO 状态码", r.body.doStatus, 500);
+  }
+
+  // ② 查询串只由规格表拼：`ms` 类端点带值、`/stage` 与 `/crypto` 是空查询
+  const burn275 = await run275("?burn=10&n=p275");
+  ok("burn 把 ms=10 拼进 DO 查询串", burn275.sink.url.includes("/burn?ms=10"), burn275.sink.url);
+  const crypto275 = await run275("?crypto=1&n=p275");
+  ok("crypto 是不带查询串的端点", crypto275.sink.url.endsWith("/crypto"), crypto275.sink.url);
+  const iter275 = await run275("?iter=&n=p275");
+  ok("空值的 iter 用规格里的默认 n", iter275.sink.url.includes("/iter?n=1000000"), iter275.sink.url);
+
+  // ③ 实例名：显式 `&n=` 优先，否则用规格里的前缀 + 时间戳（前缀各不相同，避免串实例）
+  eq("显式实例名优先", burn275.sink.name, "7c53c12a-88b1-4fda-b6e7-4da62e47a4e1::p275");
+  const noName275 = await run275("?tim=5");
+  ok("没给实例名时用规格前缀", noName275.sink.name.startsWith("7c53c12a-88b1-4fda-b6e7-4da62e47a4e1::t"), noName275.sink.name);
+  const crNoName = await run275("?crypto=1");
+  ok("crypto 用自己的实例前缀", crNoName.sink.name.startsWith("7c53c12a-88b1-4fda-b6e7-4da62e47a4e1::cr"), crNoName.sink.name);
+
+  // ④ stage 需要固定实例：没说实例名就直接报错，绝不读一个随机实例上的空标记
+  const stageNoName = await run275("?stage=1");
+  eq("stage 缺 &n= 时如实报错", stageNoName.body.error, "need &n=<inst>");
+  eq("stage 缺 &n= 时不发 DO 请求", stageNoName.sink.calls, 0);
+
+  // ⑤ 没绑定 METER 时给出可读错误，而不是抛 TypeError
+  const noMeter275 = await run275("?burn=10", { noMeter: true });
+  eq("没有 METER 绑定时报 no METER", noMeter275.body.error, "no METER");
+
+  // ⑥ 结构断言：规格表是数据、类持有派发、debug.ts 只剩一行委托
+  ok("暴露了 DebugMeterProbes 单例", W.METER_PROBES && typeof W.METER_PROBES.run === "function");
+  eq("规格表六行对应六个端点", W.METER_PROBES.specs.length, 6);
+  ok(
+    "规格表覆盖六个参数名",
+    ["burn", "stage", "tim", "iter", "burnjs", "crypto"].every((p) => W.METER_PROBES.specs.some((x) => x.param === p)),
+  );
+  const dbgSrc275 = fs.readFileSync("src/routes/debug.ts", "utf8").split(/\r?\n/).join("\n");
+  ok("debug.ts 只留一行委托", dbgSrc275.includes("METER_PROBES.run(c, url, id)"));
+  ok("debug.ts 不再自己读这六个参数", !dbgSrc275.includes("searchParams.get(\"burn\")") && !dbgSrc275.includes("searchParams.get(\"burnjs\")") && !dbgSrc275.includes("searchParams.get(\"crypto\")"));
+  const dmSrc275 = fs.readFileSync("src/routes/debug-meter.ts", "utf8");
+  ok("派发路径带出真实状态码", dmSrc275.includes("ok: resp.ok, doStatus: resp.status"));
+  ok("派发路径统一用 withTimeout 包住 DO 调用", dmSrc275.includes("withTimeout(stub.fetch(") && dmSrc275.includes("spec.budgetMs"));
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

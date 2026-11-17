@@ -245,6 +245,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `LatObs` | `src/core/latobs.ts` | 首字节 / 总耗时 / 抖动三类窗口统计器 |
 | `FirstObs` | `src/core/firstobs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
 | `Attacher` | `src/proxy/attacher.ts` | 上游挂载与补救链：中转再试一条 → IPv6 兜底 → proxyip → 放弃 |
+| `DebugMeterProbes` | `src/routes/debug-meter.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表 |
 | `SubscriptionView` / `PageView` | `src/views/subview.ts`、`pageview.ts` | 三种订阅格式与面板渲染 |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
