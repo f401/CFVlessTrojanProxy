@@ -106,6 +106,7 @@ export { PEND, RESTORE_MAX, nodeSnapGet, flushSnap, usageSnapWrite, readStats, r
 export { doFetch, meterGet } from "./store/meter-client";
 export { runCron } from "./routes/cron";
 export { proxyip } from "./routes/proxyip";
+export { AdminView, admin } from "./routes/admin";
 export { debug, DEBUG, DebugActions, DebugMeterProbes, DebugTables, DebugSuite } from "./routes/debug";
 export {
   BENCH,

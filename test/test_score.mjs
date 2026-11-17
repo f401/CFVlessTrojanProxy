@@ -9413,6 +9413,34 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("视图持有本次请求的上下文", pipSrc316.includes("private readonly url: URL;") && pipSrc316.includes("private readonly id: string;"));
 }
 
+/* ---------- 317. /admin 的四个分支各占一个方法（视图对象） ---------- */
+{
+  const admSrc317 = fs.readFileSync("src/routes/admin.ts", "utf8");
+  ok("管理路由有视图类", /^export class AdminView \{/m.test(admSrc317));
+  ok("入口只做对象创建与一次执行", /export async function admin\(c: RouteCtx\): Promise<Response> \{\s*return new AdminView\(c\)\.run\(\);\s*\}/m.test(admSrc317));
+  ok("四个分支各是一个方法", ["logout", "login", "usersOp", "panel"].every((n) => admSrc317.includes("private async " + n + "(") || admSrc317.includes("private " + n + "(")));
+  ok("分派顺序与原来一致（登出 → 登录 → 鉴权 → 用户操作 → 面板）", admSrc317.indexOf("this.logout()") < admSrc317.indexOf("this.login()") && admSrc317.indexOf("adminAuthed(") < admSrc317.indexOf("this.usersOp()"));
+  ok("短管理密钥直接拒绝（挑战-应答依赖密钥本身的熵）", admSrc317.includes("this.adminKey.length < 12"));
+  ok("读不到用户表时拒绝改写（否则会把缺失的用户整份删掉）", admSrc317.includes("cur.ok === false"));
+  ok("面板按 ADMIN_STATS_MAX 截断并记下被截人数", admSrc317.includes("SC.ADMIN_STATS_MAX") && admSrc317.includes('cnt("admStatsSkip"'));
+  const admEnv317 = { adminKey: "" };
+  const mkAdm317 = (env, first, seg, method) => ({
+    env,
+    url: new URL("https://example.com/admin" + (seg.length ? "/" + seg.join("/") : "")),
+    request: new Request("https://example.com/admin", { method: method || "GET" }),
+    host: "example.com",
+    first,
+    seg,
+    pageKey: undefined,
+  });
+  const noKey = await W.admin(mkAdm317(admEnv317, "admin", [], "GET"));
+  ok("没配 adminKey 时整块面板关闭", noKey.status === 503);
+  const shortKey = await W.admin(mkAdm317({ adminKey: "short" }, "admin", [], "GET"));
+  ok("管理密钥太短时拒绝", shortKey.status === 503);
+  const notAdmin = await W.admin(mkAdm317({ adminKey: "0123456789abcdef" }, "health", [], "GET"));
+  ok("非 /admin 前缀直接 404", notAdmin.status === 404);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
