@@ -6,7 +6,7 @@ import { VT } from "./verdict";
 import { HEALTH, ipOf } from "./relay-health";
 import { JUDGE, CF_NEG } from "./judge";
 import { PS } from "./psfacts";
-import { WIRING } from "./policy-wiring";
+import { PolicyWiring } from "./policy-wiring";
 import type { Choice, Ctx } from "./policy-wiring";
 import { cnt } from "../core/counter";
 import { St } from "../core/enums";
@@ -309,6 +309,15 @@ export class Policy implements PinSource {
   private seq = new Map<string, number>();
 
   /**
+   * 装配器：把这套策略接到 `HOOK` 槽位上（`install()` 里只调它一次）。
+   *
+   * 为什么由策略自己持有（7.351）：它装配的永远是「本策略实例」的能力，模块级单例
+   * 会让「谁装配了谁」在 `policy.ts` 里看不出来；而 `PolicyWiring` 无状态，多造一个
+   * 也只是零字段分配。
+   */
+  private readonly wiring = new PolicyWiring();
+
+  /**
    * 功能：给两张「按站点」的表设上限（`pin` 与 `seq`）。
    *
    * 为什么要有（v7.140）：两者都在每次决策里 `set` 一次，条目只增不减 —— 长跑 isolate 里
@@ -492,7 +501,7 @@ export class Policy implements PinSource {
    * @returns {void}
    */
   install(): void {
-    WIRING.install(this);
+    this.wiring.install(this);
   }
 }
 

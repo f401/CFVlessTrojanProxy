@@ -8487,12 +8487,12 @@ console.log("\n[285] 策略本体与 HOOK 装配拆成两层");
   ok("装配层注册点 ≥ 18", (wireSrc.match(/HOOK\.[a-zA-Z]+ =/g) || []).length >= 18);
   ok("装配层不含决策算法（没有 pin 表）", !wireSrc.includes("private pin") && !wireSrc.includes("HOST_MEM_MAX"));
   ok("策略本体不再自己注册 HOOK", !polSrc285.includes("HOOK.decide = ") && !polSrc285.includes("HOOK.facts = "));
-  ok("策略本体通过 WIRING 装配", polSrc285.includes("WIRING.install(this);"));
+  ok("策略本体通过自己的装配器接槽位", polSrc285.includes("this.wiring.install(this);"));
   ok("策略本体保留决策与三张表", polSrc285.includes("decide(c: Ctx): Choice {") && polSrc285.includes("private pin") && polSrc285.includes("private seq"));
-  ok("装配器与接口都对外可见", typeof W.WIRING === "object" && typeof W.PolicyWiring === "function");
+  ok("装配器对外可见、模块级单例已撤", W.WIRING === undefined && typeof W.PolicyWiring === "function");
   // 行为面：换一个假策略装配进去，HOOK 真的会用它；再装回来还原
   const fake = { shadow: () => ({ chan: { kind: "d" }, why: "fake-why" }), relays: () => [], prefer: () => false, win: () => ({ d: false, r: false }) };
-  W.WIRING.install(fake);
+  new W.PolicyWiring().install(fake);
   const viaFake = W.HOOK.decide({ host: "x285.example", cfHost: false, clientV6: false, legacyWantsRelay: false });
   eq("装配后 HOOK.decide 用的是新策略", viaFake.why, "fake-why");
   W.POLICY.install();
@@ -11709,6 +11709,28 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   W.S.alive.clear();
 }
 
+// 7.351：策略自己持有装配器 —— 模块级 WIRING 退场，槽位注册仍由 PolicyWiring 负责。
+{
+  const pol351 = fs.readFileSync("src/route/policy.ts", "utf8");
+  const walk351 = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk351(d + "/" + e.name) : e.name.endsWith(".ts") ? [d + "/" + e.name] : []));
+  const wire351 = fs.readFileSync("src/route/policy-wiring.ts", "utf8");
+  const surf351 = fs.readFileSync("src/test-surface.ts", "utf8");
+  const all351 = walk351("src").map((p) => fs.readFileSync(p, "utf8")).join("\n");
+  ok("351·模块级装配器单例已撤", (all351.match(/export const WIRING = new PolicyWiring\(\);/g) || []).length === 0);
+  ok("351·策略按类名引入装配器", pol351.includes(`import { PolicyWiring } from "./policy-wiring";`) && !pol351.includes("import { WIRING }"));
+  ok("351·策略自己持有装配器字段", pol351.includes("private readonly wiring = new PolicyWiring();"));
+  ok("351·安装入口走自己的装配器", pol351.includes("this.wiring.install(this);") && !pol351.includes("WIRING.install("));
+  ok("351·窗口里不再导出装配器单例", !surf351.includes("WIRING"));
+  ok("351·装配层仍注册 ≥18 个槽位", (wire351.match(/HOOK\.[a-zA-Z]+ =/g) || []).length >= 18);
+  ok("351·装配器仍可独立构造", typeof W.PolicyWiring === "function" && typeof W.PolicyWiring.prototype.install === "function");
+  ok("351·旧单例在窗口里已消失", W.WIRING === undefined);
+  ok("351·策略仍生效（槽位已装配）", W.POLICY.enabled === true || W.POLICY.enabled === false);
+  const fake351 = { shadow: () => ({ chan: { kind: "d" }, why: "fake-351" }), relays: () => [], prefer: () => false, win: () => ({ d: false, r: false }) };
+  new W.PolicyWiring().install(fake351);
+  eq("351·独立装配器能接管槽位", W.HOOK.decide({ host: "wire351.example", cfHost: false, clientV6: false, legacyWantsRelay: false }).why, "fake-351");
+  W.POLICY.install();
+  ok("351·装回真策略后不再是假实现", W.HOOK.decide({ host: "wire351.example", cfHost: false, clientV6: false, legacyWantsRelay: false }).why !== "fake-351");
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

@@ -114,5 +114,3 @@ export class PolicyWiring {
   }
 }
 
-/** 进程内唯一装配器 */
-export const WIRING = new PolicyWiring();

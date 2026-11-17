@@ -151,7 +151,7 @@ export { JUDGE, Judge } from "./route/judge";
 export { POLICY, Policy } from "./route/policy";
 export { decideCf } from "./route/policy";
 export { rankOf } from "./route/policy";
-export { PolicyWiring, WIRING } from "./route/policy-wiring";
+export { PolicyWiring } from "./route/policy-wiring";
 export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, tfBlockOk, tfRemember, pickFresh } from "./route/tfb";
 export { TFB, TfbBook } from "./route/tfbbook";
