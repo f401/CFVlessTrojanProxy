@@ -9,9 +9,6 @@ import { FactTable } from "./fact-table";
 // `PsOutbox`（`pending`/`sent` + `delta`/`ack`/`nack`），与 `eg`/`blk`/`dead`/`dns` 逐字重复 ——
 // 抄四遍就会修两遍（7.143 清空 pending 丢证据、7.177 按插入序切片发最旧的）。
 
-/** 事实键：`站点|中继 IP`（`eg` 用 IP、`blk` 用同一个键，方便互相印证） */
-export type PsKey = string;
-
 /** 一行成功率统计：`q` 是 0..255 的成功率分位，`n` 是有效样本数 */
 export interface PsRow {
   /** 0..255 的成功率（255 = 全成功） */

@@ -190,13 +190,6 @@ export async function admin(c: RouteCtx): Promise<Response> {
  * 面板页（PanelView）与用量看板留在 views 层，管理页跟着它的路由走。
  * ================================================================== */
 
-export interface AdminIn {
-  url: URL;
-  users: { list: UserRec[] };
-  statsMap: Record<string, { up: number; down: number; todayUp: number; todayDown: number }>;
-  pageKey?: string;
-}
-
 /**
  * 渲染管理面板（用户列表 + 用量 + 增删操作）。
  * @param {URL} url 请求 URL

@@ -273,6 +273,12 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `FirstObs` | `src/core/obs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
 | `Attacher`（`ProxySession.attacher`） | `src/proxy/attacher.ts` | 上游挂载与补救链：`run()` 只装配，收尾交给 `onClose()`；中转再试一条 / IPv6 兜底 / proxyip 三段各一方法；无字段，7.354 起由 `ProxySession` 自己持有，模块级 `ATTACHER` 已撤 |
 | `ConnSettle`（`Connection.settle`） | `src/proxy/conn-settle.ts` | 一条连接结束时的结算流水线：收尾采样 → pStall 占比 → 节点观测聚合 → 首眼观测（含站点画像与通道证据）→ PEND 记账；只读 `SettleView`，状态仍归 `Connection`；7.348 起由连接自己持有，模块级 `SETTLE` 已撤 |
+| `CallGate` | `src/core/call-gate.ts` | 一次调用的额度闸门（connect / 子请求 / DO 三类计数）：请求与 cron 轮各 `new` 一份随 `ctx.budget` 下传，`openSocket()` 与 `fetch()` 是全仓唯一的建连与子请求出口 —— 判断依据从「记得写 take」变成「绕不过这两个门」；7.362 起没有模块级实例，额度也不进 `S` |
+| `BudgetExhausted` | `src/core/call-gate.ts` | 额度耗尽时抛的错误（`message` 为 `budget exhausted: <kind>`）：调用方靠它区分「这一轮额度不够」与真实网络错误 —— 前者应该放弃补救或整批延后，而不是记一次节点失败 |
+| `FirstFrame` | `src/proxy/protocol.ts` | 首帧解析器，**纯函数式**：只回答「这帧要打哪、是不是 UDP」，回 400 / 关连接 / 记账 / 设响应头都由调用方按固定顺序做（省掉 v7.187 那种「顺序错了但单测全绿」的坑） |
+| `SessionRouter` | `src/proxy/fallback.ts` | 把「这一跳往哪走」从会话里独立出来：`?rg=` 硬分流 → 拨号策略 → 补救一条中继三段各一方法，失败分别记 `rgFail` / `dead` / 节点 `bumpFail` |
+| `DnsLane` | `src/proxy/dns.ts` | 一条连接上的 DNS 转发通道：首包 `start(offset, trojan)` 记偏移与协议，之后 `feed(u8)` 直接转发；会话不再自己维护 `udp` / `udpTrojan` 两个标记 |
+| `SessionTail` | `src/proxy/conn-settle.ts` | 收尾的四件事（释放 socket / `noPayload` / 冲账本 / 冲快照）各一方法；它是唯一「连接已不可用还要花 IO 预算」的阶段，用结构化 `TailConn` 取参而不 import `Connection` |
 | `SampleWindow` | `src/proxy/connection.ts` | 一条连接的两个采样窗口边界（节点级 800ms 窗口 / 5 秒出样本间隔 / 站点级 60 秒）：窗口太短或间隔未到都不推进起点，小样本只推进起点不交样本 |
 | `ClientFlow` | `src/proxy/connection.ts` | 客户端这一侧的流量控制：唯一读 `ws.bufferedAmount` 的地方，也是唯一区分「客户端自己走了」（记 `ccut`）与「真卡死」（记 `stall`）的地方 |
 | `DebugSuite`（`DEBUG`） | `src/routes/debug.ts` | 调试路由四个组件的持有者（读表 / 测网 / 写操作 / 计量探测）：收成一个对象后，「这次调试动用了哪些能力」在同一处读完，也是判断「某个参数会不会真的拨号」的入口 |
@@ -282,7 +288,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `AdminView`（`admin` 门面） | `src/routes/admin.ts` | `/admin` 的四个分支各占一个方法：登出只清 cookie、登录做挑战-应答与限速、用户操作要读改写整份托管用户表（`cur.ok === false` 时必须拒绝，否则会把缺失用户整份删掉）、面板按用户数扇出 DO 往返并被 `ADMIN_STATS_MAX` 截断 |
 | `RateLimiter`（`RATE_LIMIT`） | `src/edge/auth.ts` | 登录尝试的固定窗口限流：`take` 判「这个来源这一分钟还能不能试」、`reset` 在成功登录后清零、`size` 供诊断；表按 `RL_MAX` 有界（超限只淘汰「计数最小且最旧」的一条，绝不整体清空、绝不淘汰刚写入的来源），7.355 起由类持有而不是裸 `Map` |
 | `SubscriptionRoutes`（`subscription` 门面） | `src/routes/subscription.ts` | 控制页与订阅：`page()` 读用量 + 存活表两次往返、`feed(kind)` 把 clash / sing-box / 明文链接三种格式收成一条路（差别只有渲染器与 content-type，见 `FEEDS` 表）、`stats()` 的 JSON 分支零额外往返、`statsHtml()` 才并跨 isolate 快照；页面视图 `PageView` 由它自己持有（7.353 起，不再有模块级 `PAGES`） |
-| `ProxySession` | `src/proxy/session.ts` | WebSocket 数据面的会话对象：握手 / 首帧解析 / 拨号（地区与补救两条路）/ 收尾各一个方法；`?rg=` 用的 `RegionPicker` 由它自己持有（7.346 起，不再有模块级 `REGION`） |
+| `ProxySession` | `src/proxy/session.ts` | WebSocket 数据面的会话对象，7.362 起只剩「解析参数 / 起管道 101 / 帧分派」：首帧解析交给 `FirstFrame`、路由决策交给 `SessionRouter`、DNS 交给 `DnsLane`、收尾交给 `SessionTail`；`?rg=` 用的 `RegionPicker` 与额度闸门也由它持有 |
 | `UploadStream` | `src/proxy/ws-in.ts` | 客户端 → 上游的上行字节流：积压计数、超限关连接（1013）、正常关闭与异常各自收尾；`wsToStream()` 只是 `new UploadStream(ws, early).stream` |
 | `UserIndex` | `src/proxy/protocol.ts` | 用户表装配器：env（`uuid`/`uuids`、`trojan` 单密码与 `user:pass` 多密码）与 KV 托管用户合成一张表，维护「启用 id 集合」与「密码摘要 → 稳定 owner」；托管记录最后写，因此能覆盖 env 的启用状态 |
 | `DebugNets` | `src/routes/debug-nets.ts` | 会对外拨号的诊断分支门面：七个分支在四个组件里，这里只按「只读 → 测速 → 诊断 → 探活 → 抓源 → 钉住 → 明文 HTTP → 判定批 → 真握手 → 回填 → seed → 兜底」然后按顺序派发（顺序变了，`?diag=x&refill=1` 会先花一次抓源）。7.344 起四个组件（`benchRunner`/`diagRunner`/`probeRunner`/`tfRunner`）由它自己持有，不再是模块级单例 |

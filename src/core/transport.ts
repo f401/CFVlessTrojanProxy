@@ -1,6 +1,7 @@
-import { connect } from "cloudflare:sockets";
+// 建连已统一走 CallGate.openSocket（7.362）：这个文件不再直接 import cloudflare:sockets
 import { Client } from "tunnelfetch";
 import { splitRelay } from "./relay-addr";
+import { CallGate } from "./call-gate";
 import { CONNECT_MS, withTimeout } from "./util";
 
 // ---- 并入自 transport-types.ts ----
@@ -25,7 +26,7 @@ export interface TransportProbe {
 }
 
 /** 一次探测的结果：成功带 `probe`，失败带 `err`，两者都带 `ms` */
-export type TransportOutcome = ({ ok: true } & TransportProbe) | { ok: false; err: string; ms: number };
+type TransportOutcome = ({ ok: true } & TransportProbe) | { ok: false; err: string; ms: number };
 
 /** 探测传输的契约：一个实现只负责「怎么把请求送到目标」 */
 export interface ProbeTransport {
@@ -41,7 +42,7 @@ export interface ProbeTransport {
    * @param timeoutMs 整段预算（含建连、请求、读体）
    * @returns 探测结果（从不 reject：失败包成 `{ ok: false, err }`，诊断路径不该抛异常）
    */
-  probe(host: string, relay: string, path: string, timeoutMs: number): Promise<TransportOutcome>;
+  probe(host: string, relay: string, path: string, timeoutMs: number, gate?: CallGate): Promise<TransportOutcome>;
 }
 
 // ---- 并入自 transport-tunnelfetch.ts ----
@@ -66,12 +67,14 @@ export class TunnelFetchTransport implements ProbeTransport {
    * @param timeoutMs 整段预算
    * @returns 探测结果
    */
-  async probe(host: string, relay: string, path: string, timeoutMs: number): Promise<TransportOutcome> {
+  async probe(host: string, relay: string, path: string, timeoutMs: number, gateArg?: CallGate): Promise<TransportOutcome> {
     const startedAt = Date.now();
+    // 建连一律经额度闸门：tunnelfetch 只要一个 `connect` 回调，我们交给它的就是闸门的方法
+    const gate = gateArg || CallGate.unlimited();
     // 拆 `host:port` 必须走 splitRelay：IPv6 字面量自带冒号，`lastIndexOf(":")` 会把
     // `2a06:98c0::1:443` 拆成 host=`2a06`、port=`98c0`（7.180 在 http80 修过同一处）
     const [relayHost, relayPort] = relay ? splitRelay(relay, 443) : ["", 443];
-    const dial = relay ? () => connect({ hostname: relayHost, port: relayPort }) : undefined;
+    const dial = relay ? () => gate.openSocket(relayHost, relayPort) : undefined;
     const client = new Client({ connect: dial } as unknown as ConstructorParameters<typeof Client>[0]);
     // 抓「请求 + 读体」这整段：只给 fetch 加超时，读体阶段照样能挂住
     let work: Promise<{ status: number; server: string; body: ArrayBuffer }> | null = null;
@@ -164,14 +167,16 @@ export class Http80Transport implements ProbeTransport {
    * @param timeoutMs 整段预算；写与读各取它与 `CONNECT_MS` 的小者
    * @returns 探测结果：状态码在 `status`，状态行在 `head`
    */
-  async probe(host: string, relay: string, path: string, timeoutMs: number): Promise<TransportOutcome> {
+  async probe(host: string, relay: string, path: string, timeoutMs: number, gateArg?: CallGate): Promise<TransportOutcome> {
     const startedAt = Date.now();
+    // 这条实现自己发明文请求，建连同样只能经闸门（否则 80 端口探测会绕过额度）
+    const gate = gateArg || CallGate.unlimited();
     const budget = Math.max(1, Math.min(CONNECT_MS, timeoutMs));
     // 拆 `host:port` 同样必须走 splitRelay：探测打错主机比超时更难发现
     const [dialHost, dialPort] = relay ? splitRelay(relay, 80) : [host, 80];
-    let sock: ReturnType<typeof connect>;
+    let sock: Awaited<ReturnType<CallGate["openSocket"]>>;
     try {
-      sock = connect({ hostname: dialHost, port: Number(dialPort) || 80 });
+      sock = await gate.openSocket(dialHost, Number(dialPort) || 80);
     } catch (e) {
       return { ok: false, err: "connect: " + String((e as Error).message).slice(0, 80), ms: Date.now() - startedAt };
     }
@@ -259,10 +264,11 @@ export async function probeTf(
   path = "/",
   transportName?: string,
   budgetMs: number = PROBE_BUDGET_MS,
+  gate?: CallGate,
 ): Promise<TransportOutcome> {
   // 传输选择放在门面里做：调用点只关心「探测这件事」，不关心谁去送
   const transport = TRANSPORTS.get(transportName);
-  return transport.probe(host, relay, path, budgetMs);
+  return transport.probe(host, relay, path, budgetMs, gate);
 }
 
 // ---- 门面（对外导出面保持不变） ----

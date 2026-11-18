@@ -3,7 +3,7 @@ import { cnt } from "../core/counter";
 import { checkTarget } from "../core/net";
 import { timeoutSignal, CONNECT_MS, dec, enc, toHex, withTimeout } from "../core/util";
 import type { Socket } from "cloudflare:sockets";
-import { connect } from "cloudflare:sockets";
+import { CallGate } from "../core/call-gate";
 
 // ---- 并入自 poolsrc.ts ----
 // 池子从哪来：公开源清单、去重解析、逐源抓取，以及「哪个源该排到最后」的健康度。
@@ -78,7 +78,7 @@ export const POOL_MAX = 1600; // 候选池硬上限
 export const POOL_ENOUGH = 300;
 
 /** 一次抓取的结果：池子 + 每个源的行数/新增数（/proxyip?refill=1 直接展示） */
-export interface PoolRefill {
+interface PoolRefill {
   pool: PoolEntry[];
   sources: Record<string, { lines: number; ok: number; skip?: boolean }>;
 }
@@ -275,27 +275,24 @@ export const PROBE_HELLO = (() => {
 })();
 
 /**
- * 一次原始探测的会话：建连 → 写报文 → 按预算收首段字节。
- *
- * 为什么成类：开放反代探测与 SNI 探测除「首段字节怎么判」外完全一样（都要过 `checkTarget`、
- * 都要给惰性 `connect()` 的第一次写设时限、都要按 deadline 循环读），而以前字节上限、等待下限、
- * 总预算六个数字各写两处，改一处不会提醒另一处；「迟到连上要关」也只写在两个 finally 里。
+ * 一次原始探测的会话：建连 → 写报文 → 按预算收首段字节。两条探测（开放反代 / SNI）除
+ * 「首段字节怎么判」外完全一样，所以六个预算数字与「迟到连上要关」只在这里写一遍。
  */
 export class RawProbe {
   private sock: Socket | null = null;
   private startedAt = 0;
   private connectedAt = 0;
-  /** @param host 候选主机 @param port 候选端口 */
-  constructor(readonly host: string, readonly port: number) {}
+  /** @param host 候选主机 @param port 候选端口 @param gate 建连额度闸门（默认不限额） */
+  constructor(readonly host: string, readonly port: number, private readonly gate: CallGate = CallGate.unlimited()) {}
 
   /** 建连；IPv4 字面量在 Workers 上常连不上时，可按需退回 sslip.io 让 DNS 承担一次。 */
   async open(sslipFallback = false): Promise<void> {
     this.startedAt = Date.now();
     try {
-      this.sock = await connect({ hostname: this.host, port: this.port });
+      this.sock = await this.gate.openSocket(this.host, this.port);
     } catch (e0) {
       if (!sslipFallback || !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(this.host)) throw e0;
-      this.sock = await connect({ hostname: this.host + ".sslip.io", port: this.port });
+      this.sock = await this.gate.openSocket(this.host + ".sslip.io", this.port);
     }
     this.connectedAt = Date.now();
   }
@@ -370,9 +367,9 @@ export class RawProbe {
  * @param {number} p 候选端口
  * @returns {Promise<{h:string,p:number,ms:number,ts:number,bad?:string}|null>} 成功返回节点信息，失败返回 null
  */
-export async function probeProxy(h: string, p: number) {
+export async function probeProxy(h: string, p: number, gate: CallGate = CallGate.unlimited()) {
   if (checkTarget(h, p)) return null; // 纵深防御：任何路径都不许探内网
-  const probe = new RawProbe(h, p);
+  const probe = new RawProbe(h, p, gate);
   try {
     await probe.open(true);
     const tcp = probe.tcpMs; // ① 建连：纯网络 RTT
@@ -480,9 +477,9 @@ export function tlsHello(sni: string): Uint8Array {
  * @param {number} [ms] 超时毫秒
  * @returns {Promise<{tcp:number, hs?:number, err:string}>} 结果
  */
-export async function probeSni(nodeHost: string, nodePort: number, sni: string, ms = CONNECT_MS): Promise<SniProbe> {
+export async function probeSni(nodeHost: string, nodePort: number, sni: string, ms = CONNECT_MS, gate: CallGate = CallGate.unlimited()): Promise<SniProbe> {
   if (checkTarget(nodeHost, nodePort)) return { err: "denied" };
-  const probe = new RawProbe(nodeHost, nodePort);
+  const probe = new RawProbe(nodeHost, nodePort, gate);
   try {
     // 注意：Workers 的 connect() 是惰性的，真正的 TCP 建连发生在第一次 write/read，
     // 所以这里不单独报 tcp，只报"从发起到收到 ServerHello"的总耗时。

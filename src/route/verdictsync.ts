@@ -10,7 +10,7 @@ import { dropExpired, trimAged } from "../core/hostmem";
 import { doFetch } from "../store/meter-client";
 import { St } from "../core/enums";
 
-export interface VtRow {
+interface VtRow {
   k: string; // `target|chan`
   s: number; // state
   t: number; // 到期时间

@@ -15,6 +15,7 @@ import { splitRelay } from "../core/relay-addr";
 import { HTTP80_TRANSPORT, probeTf } from "../core/transport";
 import { adminOnly } from "../edge/auth";
 import { SOCKET_DIALER } from "../proxy/socket-dialer";
+import { CallGate } from "../core/call-gate";
 import { DIRECT, chanKey } from "../route/channel";
 import type { Chan } from "../route/channel";
 import { runTfb } from "../route/tfb";
@@ -360,7 +361,7 @@ export class DebugProbe {
    * @param url 请求 URL（`?host=<域名>`，缺省 example.com）
    * @returns 解析与建连结果
    */
-  async host(url: URL): Promise<Response> {
+  async host(url: URL, gate: CallGate = CallGate.unlimited()): Promise<Response> {
     const h = url.searchParams.get("host") || "example.com";
     const out: Record<string, unknown> = { host: h, aaaa: null, a: null, v6Connect: null };
     try {
@@ -369,7 +370,7 @@ export class DebugProbe {
       out.aaaa = "ERR " + errMsg(e);
     }
     try {
-      out.a = await dohQuery(h, "A");
+      out.a = await dohQuery(h, "A", gate);
     } catch (e) {
       out.a = "ERR " + errMsg(e);
     }
@@ -382,7 +383,7 @@ export class DebugProbe {
         try {
           // 预算与「超时后关掉迟到 socket」只有一处实现（`SocketDialer.open`）：这个分支以前
           // 自己抄了一遍，7.272 收敛时漏了它，于是两个文件各有一份建连预算的语义。
-          const s6 = await SOCKET_DIALER.open(expandV6(out.aaaa), 443);
+          const s6 = await SOCKET_DIALER.open(expandV6(out.aaaa), 443, gate);
           out.v6Connect = "ok";
           try {
             s6.close();
@@ -531,8 +532,8 @@ export class DebugNets {
    * @param url 请求 URL（`?host=<域名>`，缺省 example.com）
    * @returns 解析与建连结果
    */
-  async host(url: URL): Promise<Response> {
-    return this.probeRunner.host(url);
+  async host(url: URL, gate: CallGate = CallGate.unlimited()): Promise<Response> {
+    return this.probeRunner.host(url, gate);
   }
 }
 

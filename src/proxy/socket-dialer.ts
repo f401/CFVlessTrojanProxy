@@ -1,6 +1,7 @@
-import { connect } from "cloudflare:sockets";
 import type { Socket } from "cloudflare:sockets";
 import { CONNECT_MS, withTimeout } from "../core/util";
+import { CallGate } from "../core/call-gate";
+
 
 /**
  * 功能：按预算建一条 TCP，超时之后把「迟到成功」的 socket 关掉。
@@ -29,9 +30,10 @@ export class SocketDialer {
    * @returns 已连上的 socket
    * @throws 建连失败或超过 `budgetMs`
    */
-  async open(hostname: string, port: number): Promise<Socket> {
-    // Cloudflare 的 connect() 自身没有超时：黑洞地址会一直挂着，所以预算由这里兜
-    const pending = Promise.resolve(connect({ hostname, port }));
+  async open(hostname: string, port: number, budget: CallGate = CallGate.unlimited()): Promise<Socket> {
+    // Cloudflare 的 connect() 自身没有超时：黑洞地址会一直挂着，所以预算由这里兜。
+    // 额度与 connect 都在 `CallGate.openSocket()` 里（全仓唯一的 connect 调用点）—— 这里只负责超时与迟到关闭。
+    const pending = budget.openSocket(hostname, port);
     try {
       return await withTimeout(pending, this.budgetMs);
     } catch (error) {

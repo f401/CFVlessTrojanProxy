@@ -25,8 +25,5 @@ export type RelayIp = string;
 /** 目标站点：主机名或 IP 字面量（客户端在 CONNECT / ClientHello 里给的） */
 export type HostName = string;
 
-/** 节点键：`地址:端口`（池子与存活表的键形状） */
-export type NodeKey = string;
-
 /** 通道键：`d` 表示直连，`r:<ip>` 表示经某条中继（与 `src/route/channel.ts` 同义） */
 export type ChanToken = string;

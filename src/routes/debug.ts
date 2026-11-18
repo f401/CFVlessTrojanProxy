@@ -524,5 +524,5 @@ export async function debug(c: DebugCtx): Promise<Response> {
   if (seed) return seed;
 
   // 6) 兜底：两个地址族各查一次，再试一次 v6 建连
-  return DEBUG.nets.host(url);
+  return DEBUG.nets.host(url, c.budget);
 }

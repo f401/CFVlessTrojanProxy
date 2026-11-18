@@ -7,7 +7,7 @@ import { RelayLedger } from "./relay-ledger";
 import { PAGE_ABS } from "../core/facts";
 
 /** 中继健康记录 */
-export interface RelayStat {
+interface RelayStat {
   ok: number; // 整页成功次数（>= BIG）
   bad: number; // 有小响应但没整页（403/假页，按站点记在判定表，这里只做加权）
   dead: number; // 0 字节收尾（连接都没建立）
@@ -20,7 +20,7 @@ export interface RelayStat {
  * 但**必须带上**：没有它，`merge()` 只能把别处的旧证据当成「刚刚发生」，
  * `score()` 里的 30 分钟半衰期对冷启动最大的那批数据就完全失效。
  */
-export interface HlRow {
+interface HlRow {
   i: string;
   o: number;
   b: number;

@@ -183,7 +183,7 @@ export const EG_BIG = PAGE_ABS.big;
 export const EG_TINY = PAGE_ABS.tiny;
 
 /** 推导 `eg` 时可用的旁证：都是「数据面已经发生的事实」，不需要任何额外探测 */
-export interface EgEv {
+interface EgEv {
   /** 同窗口是否另有通道对本站出过 ≥20KB 整页（小页 ⇒ 族级拒绝的必要对照） */
   peerBig?: boolean;
   /** 站点「确实能出内容」的旁证（本出口 fetch 200 或同站点别的通道出过整页） */

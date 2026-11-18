@@ -1,20 +1,19 @@
-import { CONNECT_MS, closeQuietly, enc, errMsg, safeSend, toU8, withTimeout } from "../core/util";
-import { connect } from "cloudflare:sockets";
+import { closeQuietly, enc, errMsg, safeSend, toU8 } from "../core/util";
+import { CallGate } from "../core/call-gate";
 import type { Socket } from "cloudflare:sockets";
 import { Connection } from "./connection";
 import { wsToStream } from "./ws-in";
 import { logErr, rttLearn } from "../nodes/metrics";
-import { checkTarget, parseProxyIp } from "./dial";
-import { DIALER } from "./dialer";
+import { checkTarget } from "./dial";
 import { RegionPicker } from "./region";
-import { handleDns } from "./dns";
+import { DnsLane } from "./dns";
 import { Attacher } from "./attacher";
-import { dialAnother } from "./fallback";
-import { detectProtocol, loadUsers, parseTrojan, parseVLESS } from "./protocol";
+import { SessionTail } from "./conn-settle";
+import { SessionRouter } from "./fallback";
+import { FirstFrame, loadUsers } from "./protocol";
 import { cnt } from "../core/counter";
 import { SC } from "../core/const";
-import { flushSnap, kickFlush, PEND, statBump } from "../store/index";
-import { SEL } from "../px/selector";
+import { statBump } from "../store/index";
 
 /**
  * 功能：一条 WebSocket 数据面连接的会话对象 —— 把「升级握手 / 首帧解析 / 拨号路由 / 收尾」四段各自成方法。
@@ -34,6 +33,8 @@ export class ProxySession {
   private readonly clientWS: WebSocketLike;
   private readonly serverWS: WebSocketLike;
   private readonly conn: Connection;
+  /** 本次调用的额度：建连只从它取号，用完即放弃补救（7.362 起额度随调用传递） */
+  private readonly budget = new CallGate("request");
   private readonly mode: Mode;
   private readonly pxForce: number;
   private readonly rxPin: string;
@@ -45,6 +46,14 @@ export class ProxySession {
   // 上游挂载器没有任何字段（补救链的状态全在 Connection 里），但「谁在挂上游」属于会话自己：
   // 7.354 前它是模块级 `ATTACHER`，读 session.ts 时看不出这个会话用什么挂载上游。
   private readonly attacher = new Attacher();
+  // 收尾（释放 / noPayload / 冲账本 / 冲快照）自成一类：它是唯一「连接已不可用还要花 IO 预算」的阶段
+  private readonly tail = new SessionTail();
+  // 这条连接的 DNS 通道（首包进入 UDP 模式后由它接手，会话只说 feed）
+  private readonly dns: DnsLane;
+  // 首帧解析器：纯函数式，只回答「这帧是什么」，回 400 / 关连接 / 记账都由本会话按顺序做（7.362）
+  private readonly frames = new FirstFrame();
+  // 往哪走的决策（地区硬分流 / 拨号策略 / 补救一条中继）在 7.362 起是单独对象，会话只问 route(host, port)
+  private readonly router: SessionRouter;
   // 用户表在 run() 里才读（ctor 只解析参数、不碰 KV）；给一份空表让类型成立，
   // 真实值一定在首帧到达之前就绪。
   private users: Auth = { uuids: new Set<string>(), trojan: new Map<string, string>(), list: [] };
@@ -86,6 +95,19 @@ export class ProxySession {
     this.conn = new Connection(env, ctx, this.mode, this.ipTag);
     this.conn.targetBytes = szBytes;
     this.conn.forceRelayIp = this.rxPin;
+    this.dns = new DnsLane(this.serverWS, this.conn);
+    // 路由会话借用本会话已解好的参数与额度闸门；关连接仍由本会话执行（只有它知道客户端 socket）
+    this.router = new SessionRouter({
+      env,
+      request,
+      conn: this.conn,
+      mode: this.mode,
+      pxForce: this.pxForce,
+      ipRegion: this.ipRegion,
+      budget: this.budget,
+      regionPicker: this.regionPicker,
+      onHangUp: (code, reason) => this.hangUp(code, reason),
+    });
   }
 
   /**
@@ -157,15 +179,15 @@ export class ProxySession {
     // 同一个 UDP 连接里的后续 DNS 报文：首包已经解析过，不能再当协议头。
     // 上行字节在入口已经计过，这里只转发，不要重复 onUp。
     if (st.udp) {
-      await handleDns(this.serverWS, u8, st, st.udpTrojan);
+      await this.dns.feed(u8);
       return;
     }
     const r = await this.parseHead(u8);
     if (!r) return;
     if (r.udp) {
-      await handleDns(this.serverWS, u8.subarray(r.offset), st, r.proto === "trojan");
-      st.udp = true;
-      st.udpTrojan = r.proto === "trojan";
+      // 首包带 UDP 头：先让通道记下偏移与协议，再按偏移剥掉转发（后续报文直接走 feed(u8)）
+      this.dns.start(r.offset, r.proto === "trojan");
+      await this.dns.feed(u8, true);
       return;
     }
     // 首包写入 + 双向搬运 + 0 字节关闭的补救链都在 Attacher 里（P5-4）：
@@ -182,6 +204,7 @@ export class ProxySession {
         port: r.port,
         region: this.ipRegion,
         payload: u8.subarray(r.offset),
+        budget: this.budget,
       },
       sock,
     );
@@ -202,9 +225,11 @@ export class ProxySession {
     offset: number;
   } | null> {
     const st = this.conn;
-    const proto = detectProtocol(u8);
-    const r = proto === "trojan" ? parseTrojan(u8, this.users) : parseVLESS(u8, this.users);
+    // 解析本身是纯的；下面按「协议错 → 记账 → 目标黑名单 → 响应头 → UDP 白名单」的固定顺序施加副作用，
+    // 顺序错会让面板上的 noAuth / dead / 头部语义互相冒充（v7.187 那种错就是这样漏进去的）
+    const r = this.frames.read(u8, this.users);
     if (r.ok === false) {
+      // 协议头都解析不出来：给客户端 400 再按 1008 关，计 noAuth（与鉴权失败分开看）
       safeSend(this.serverWS, enc.encode(`HTTP/1.1 400 Bad Request\r\n\r\n`));
       cnt("noAuth");
       this.hangUp(1008, r.err);
@@ -214,6 +239,7 @@ export class ProxySession {
     st.host = r.host;
     statBump(r.id, 0, 0, true);
     if (this.ipTag) rttLearn(this.request.cf || {}, this.ipTag, r.id);
+    // 目标黑名单要在记账之后判：被策略禁止的目标同样是一次真实连接尝试（面板能看到是谁在打 25 端口）
     const bad = checkTarget(r.host, r.port);
     if (bad) {
       this.hangUp(1011, bad);
@@ -230,99 +256,13 @@ export class ProxySession {
   }
 
   /**
-   * 功能：拨号 —— 有 `?rg=` 走地区硬分流，否则走拨号策略并在失败时补救一条中继。
+   * 功能：给这一跳选一条出路 —— 地区硬分流 / 拨号策略 / 补救一条中继都在 `SessionRouter` 里。
    * @param {string} host 目标主机
    * @param {number} port 目标端口
-   * @returns {Promise<Socket | null>} socket；地区路径失败时返回 null（连接已关）
+   * @returns {Promise<Socket | null>} socket；地区路径失败时返回 null（连接已被关）
    */
   private async dial(host: string, port: number): Promise<Socket | null> {
-    // 以前这里末尾有一道 `if (!sock) throw new Error("dial returned null")` 守卫，是为了把类型收窄成
-    // Socket —— 结论现在仍然成立（两条拨号路径都不返回 null：DIALER.open 只返回 socket 或抛错），
-    // 但守卫已经不需要了：返回 null 只可能来自地区分流那一支，而它失败时自己关过连接，调用方直接
-    // return 即可。历史标签「skip-direct」的教训保留在 dialer.ts 那边（v7.168）。
-    if (this.ipRegion) return this.dialRegion(host);
-    const st = this.conn;
-    try {
-      // 拨号策略整体在 Dialer 里：判难直连 → 选中继 → 退 IPv4 拨号 → 退直连（P5）
-      return await DIALER.open({
-        env: this.env,
-        request: this.request,
-        conn: st,
-        mode: this.mode,
-        host,
-        port,
-        pxForce: this.pxForce,
-      });
-    } catch (e) {
-      return this.dialFallback(host, e);
-    }
-  }
-
-  /**
-   * 功能：地区硬分流 —— 找不到 / 连不上就明确失败，绝不回落（`?rg=` 的语义）。
-   * @param {string} host 目标主机（地区分流只按主机与地区挑节点，端口留给 Attacher）
-   * @returns {Promise<Socket | null>} socket；失败返回 null
-   */
-  private async dialRegion(host: string): Promise<Socket | null> {
-    const st = this.conn;
-    const failRegion = (msg: string) => {
-      st.dead = true;
-      st.failed = true;
-      // 地区失败与「目标不可达」不是一回事：没节点 / 节点被策略禁止 / 节点连不上，三种都不说明
-      // 目标站有问题。混记进 dead 会让面板上的 dead 同时代表两件事（v7.170 起分开计）。
-      cnt("rgFail");
-      kickFlush(this.env, st.id);
-      logErr(`region ${this.ipRegion}: ${msg}`, host);
-      this.hangUp(1011, msg);
-    };
-    const picked = await this.regionPicker.open({ env: this.env, mode: this.mode, region: this.ipRegion || "", conn: st, onFail: failRegion });
-    return picked || null;
-  }
-
-  /**
-   * 功能：直连/中继都失败时的补救 —— 取一条中继直连，连不上就再换一条。
-   * @param {string} host 目标主机
-   * @param {unknown} err 原始错误（一条中继都没有时要把它抛出去）
-   * @returns {Promise<Socket | null>} socket
-   */
-  private async dialFallback(host: string, err: unknown): Promise<Socket | null> {
-    const st = this.conn;
-    const px0 = parseProxyIp(await SEL.current(this.env, this.mode, st, host, st.cf));
-    if (!px0) {
-      cnt("dead");
-      kickFlush(this.env, st.id); // 直连失败且没有可用中转 → 目标不可达
-      logErr(`dead target ${host}: ${errMsg(err)}`);
-      this.hangUp(1011, "连接目标失败");
-      throw err;
-    }
-    st.retried = true;
-    st.pxTries = 1;
-    try {
-      // 纵深防御：种子池来自外部名单，进 connect 之前再验一次地址
-      st.node = px0.host + ":" + px0.port;
-      if (checkTarget(px0.host, px0.port)) throw new Error("proxyip 被策略禁止");
-      // 与 Dialer / Attacher / Region 的补救链同一口径：connect() 自己没有超时，挂死会让客户端
-      // 一直等；超时之后迟到成功的 socket 也必须关掉，否则白占免费计划的 6 个并发 connect 名额。
-      const pk0 = Promise.resolve(connect({ hostname: px0.host, port: px0.port }));
-      try {
-        const sock = await withTimeout(pk0, CONNECT_MS);
-        st.via = "node";
-        return sock;
-      } catch (e3) {
-        void pk0
-          .then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } })
-          .catch(() => { /* 本来就没连上 */ });
-        throw e3;
-      }
-    } catch (e2) {
-      // 这个中转连不上，换一个再试一次
-      const alt = await dialAnother(this.env, st, this.mode, host);
-      if (alt) return alt;
-      // 连不上中转是节点问题，不是目标站问题：站点级试探也要把节点冻掉，否则这条探索路径
-      // 每次都白撞同一个坏节点（softFail 只记 0.2 站责）。
-      await SEL.bumpFail(this.env, st.mode, st.node, st.hostTrial);
-      throw e2;
-    }
+    return this.router.route(host, port);
   }
 
   /**
@@ -342,13 +282,7 @@ export class ProxySession {
    * @returns {void}
    */
   private finish(): void {
-    this.conn.release();
-    if (!this.conn.id) cnt("noPayload"); // 握手期就结束的连接（占大多数），以前完全不可见
-    this.conn.flush(true);
-    if (this.ctx && this.ctx.waitUntil) {
-      this.ctx.waitUntil(PEND.flush(this.env));
-      this.ctx.waitUntil(flushSnap(this.env));
-    }
+    this.tail.done(this.conn, this.env, this.ctx);
   }
 
   /**

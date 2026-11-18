@@ -17,7 +17,7 @@ export interface DecisionOut {
   why: string;
 }
 
-export interface Hooks {
+interface Hooks {
   decide: ((x: DecisionIn) => DecisionOut) | null;
   /** 该站点 × 该中继出口是否已被判定为不可用（blocked/dead），由 route 层实现 */
   veto: ((host: string, ip: string) => boolean) | null;

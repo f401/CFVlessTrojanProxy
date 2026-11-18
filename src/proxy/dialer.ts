@@ -1,4 +1,3 @@
-import { connect } from "cloudflare:sockets";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 import { SC } from "../core/const";
@@ -15,9 +14,10 @@ import { SEL } from "../px/selector";
 import { refreshCfHttp } from "./cfverdict";
 import { checkTarget, dial, dial4, isCfHost, isV6Literal, parseProxyIp } from "./dial";
 import { pxDecision } from "./pxhook";
+import { CallGate } from "../core/call-gate";
 
 
-export interface DialOpts {
+interface DialOpts {
   env: Env;
   request: Request;
   conn: Connection;
@@ -26,6 +26,8 @@ export interface DialOpts {
   port: number;
   /** 1 = 强制中转，-1 = 强制直连，0 = 按名单 + 失败学习（?px= 调试用） */
   pxForce: number;
+  /** 本次请求的额度：建连只从它取号（额度用完即视为这条腿拨不动） */
+  budget: CallGate;
 }
 
 /**
@@ -77,7 +79,7 @@ export class Dialer {
       sock = await this.viaRelay(o, route.cfHost);
     }
     // 中转不可用或没走中转：CF 托管目标优先按 A 记录拨号（X 会直接拒 IPv6 出口）
-    if (!sock) sock = await this.direct(host, port, route.cfHost);
+    if (!sock) sock = await this.direct(o, host, port, route.cfHost);
     if (!sock) throw new Error("dial returned null");
     return sock;
   }
@@ -211,7 +213,7 @@ export class Dialer {
    */
   private async attemptRelay(o: DialOpts, cand: RelayCand, tries: number): Promise<Socket | null> {
     const { conn } = o;
-    const pk = Promise.resolve(connect({ hostname: cand.host, port: cand.port }));
+    const pk = o.budget.openSocket(cand.host, cand.port);
     try {
       // 拨号必须有上限：connect() 自己没有超时，挂死的中继会把整个请求拖到客户端放弃为止。
       const sock = await withTimeout(pk, CONNECT_MS);
@@ -241,16 +243,16 @@ export class Dialer {
    * @param cfHost 目标是 CF 托管（此时 `X` 会拒 IPv6 出口，所以先试 IPv4）
    * @returns 连上的 socket；两条都失败时返回 null
    */
-  private async direct(host: string, port: number, cfHost: boolean): Promise<Socket | null> {
+  private async direct(o: DialOpts, host: string, port: number, cfHost: boolean): Promise<Socket | null> {
     let sock: Socket | null = null;
     if (cfHost && !isV6Literal(host)) {
-      sock = await this.guarded(dial4(host, port), host);
+      sock = await this.guarded(dial4(host, port, o.budget), host);
       if (sock) {
         cnt("px4");
         logErr(`ipv4 first ${host}`, host);
       }
     }
-    if (!sock) sock = await this.guarded(dial(host, port), host);
+    if (!sock) sock = await this.guarded(dial(host, port, o.budget), host);
     return sock;
   }
 

@@ -95,9 +95,9 @@ function trojanBuf(pwd, host = "example.com", port = 80, cmd = 1, atyp = 3) {
 }
 
 /* ---------- 2. 协议侦测 ---------- */
-eq("detect(vless)", W.detectProtocol(vlessBuf(UUID)), "vless");
-eq("detect(trojan)", W.detectProtocol(trojanBuf(PWD)), "trojan");
-eq("detect(短包)", W.detectProtocol(new Uint8Array([0, 1, 2])), "vless");
+eq("detect(vless)", new W.FirstFrame().kindOf(vlessBuf(UUID)), "vless");
+eq("detect(trojan)", new W.FirstFrame().kindOf(trojanBuf(PWD)), "trojan");
+eq("detect(短包)", new W.FirstFrame().kindOf(new Uint8Array([0, 1, 2])), "vless");
 
 /* ---------- 3. 解析 ---------- */
 const auth = await W.loadUsers({ uuids: UUID, trojan: `${UUID}:${PWD}` });

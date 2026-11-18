@@ -10,7 +10,7 @@ import { St } from "../core/enums";
 import type { ChanToken, EpochMs, HostName, SampleCount } from "../core/types";
 
 export type VState = 0 | 1 | 2 | 3;
-export type VSrc = 0 | 1 | 2; // 0 traffic 弱证据 / 1 probe 强证据 / 2 client 端到端
+type VSrc = 0 | 1 | 2; // 0 traffic 弱证据 / 1 probe 强证据 / 2 client 端到端
 
 /** 一行判定：某个目标站经某条通道的结论 */
 export interface Verdict {

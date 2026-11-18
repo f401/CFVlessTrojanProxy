@@ -13,7 +13,7 @@
 import type { DurationMs, EpochMs } from "./types";
 
 /** 构造参数：容量上限、可选寿命、以及「这一行的时间戳」怎么取 */
-export interface BoundedOptions<Row> {
+interface BoundedOptions<Row> {
   /** 表内最多保留多少条 */
   max: number;
   /** 行多久算过期（毫秒）；不传表示永不过期 */

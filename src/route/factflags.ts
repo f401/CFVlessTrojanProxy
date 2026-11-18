@@ -2,7 +2,7 @@ import { S } from "../core/state";
 
 
 /** 五类会影响选路的事实（`dns` 也在这里：它只在本 isolate 生效，但同样是乘数）。 */
-export type FactName = "eg" | "ps" | "cap" | "blk" | "dns";
+type FactName = "eg" | "ps" | "cap" | "blk" | "dns";
 
 /** 全部事实名，按「上线顺序」排列（与清单 §H4 的批次一致）。 */
 export const FACT_ALL: FactName[] = ["eg", "ps", "cap", "blk", "dns"];

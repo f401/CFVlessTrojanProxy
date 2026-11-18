@@ -170,3 +170,45 @@ export async function handleDns(
 /* ==================================================================
  * §8  配置下发
  * ================================================================== */
+
+/**
+ * 功能：一条连接上的 DNS 转发通道 —— 首包是 UDP 头时由它接手，后续报文也走同一条通道。
+ *
+ * 为什么单独成类：`handleDns` 需要「客户端 socket + 连接 + 协议」三样东西，而 session 原先在 `feed()` 里
+ * 直接调它并手动维护 `st.udp`/`st.udpTrojan` 两个标记；把三样东西收进这个对象后，会话只说 `lane.feed(u8)`。
+ */
+export class DnsLane {
+  /**
+   * 功能：构造一条 DNS 通道。
+   * @param {WebSocketLike} client 客户端 socket（回包写这里）
+   * @param {Connection} conn 本次连接（记账与 socket 的生命周期都在它身上）
+   */
+  constructor(private readonly client: WebSocketLike, private readonly conn: Connection) {}
+
+  /**
+   * 功能：转发一段 DNS 报文（首包需要 `start()` 先标协议）。
+   * @param {Uint8Array} u8 报文
+   * @param {boolean} first 是不是这条连接的首包（首包含 UDP 头，要按 `start()` 记的偏移剥掉）
+   * @returns {Promise<void>} 转发完成的 Promise
+   */
+  async feed(u8: Uint8Array, first = false): Promise<void> {
+    // 首包含 UDP 头（ATYP/端口/长度），后续报文是裸 DNS 负载 —— 只有首包需要剥
+    const body = first ? u8.subarray(this.offset) : u8;
+    await handleDns(this.client, body, this.conn, this.conn.udpTrojan);
+  }
+
+  /**
+   * 功能：标记「这条连接进入 UDP 模式」，并记下首包的负载偏移。
+   * @param {number} offset 首包里 DNS 负载的起始位置
+   * @param {boolean} trojan 是否 Trojan 协议（决定帧格式）
+   * @returns {void}
+   */
+  start(offset: number, trojan: boolean): void {
+    this.offset = offset;
+    this.conn.udp = true;
+    this.conn.udpTrojan = trojan;
+  }
+
+  /** 首包里 DNS 负载的偏移（`start()` 之前无意义） */
+  private offset = 0;
+}

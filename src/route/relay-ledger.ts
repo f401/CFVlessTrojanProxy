@@ -5,7 +5,7 @@
 // 把「记账」和「证据」放两个类里，删除路径就只有 `forget()` 一个入口。
 
 /** 一行计数（送上行的形状，短键是线协议） */
-export interface RelayCounts {
+interface RelayCounts {
   o: number;
   b: number;
   d: number;
@@ -17,7 +17,7 @@ export interface RelayCounts {
  * 与 `relay-health.ts` 的 `LedgerRow` 字段逐一相同（都是线协议键）：这里独立声明而不反向 import，
  * 是为了不造出 `relay-health → relay-ledger → relay-health` 的循环依赖（`check-arch` 会红）。
  */
-export interface LedgerRow {
+interface LedgerRow {
   i: string;
   o: number;
   b: number;

@@ -32,7 +32,7 @@ export function escapeHtml(s: unknown) {
 }
 
 // ---- 并入自 pageview.ts ----
-export interface StatsIn {
+interface StatsIn {
   env: Env;
   id: string;
   stats: StatsView;

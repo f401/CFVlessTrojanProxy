@@ -27,7 +27,7 @@ export const BLK_MUTE = 30 * 60000;
 export const BLK_MUTE_MAX = 256;
 
 /** 累计中的一批 */
-export interface Batch {
+interface Batch {
   /** 当前这一批里已经看到的 tiny 次数 */
   n: number;
   /** 当前这一批的开始时间 */

@@ -9,7 +9,7 @@
 import { St } from "../core/enums";
 
 /** DO 里七张事实表的最小形状（只声明这里读到的东西） */
-export interface FactOutSrc {
+interface FactOutSrc {
   /** 判定表：`站点|通道` → 到期时间，或 `{ 状态, 到期时间 }`（老行是裸数字） */
   vt: Record<string, number | { s: number; t: number }>;
   /** 中继存活度：ip → 计数与最后观测时间 */
@@ -27,7 +27,7 @@ export interface FactOutSrc {
 }
 
 /** 判定行的线格式（状态 2 = blocked、3 = dead） */
-export interface VtOutRow {
+interface VtOutRow {
   /** `站点|通道` */
   k: string;
   /** 状态 */
@@ -37,7 +37,7 @@ export interface VtOutRow {
 }
 
 /** 中继存活度行（`t` 缺省的老行按 0 发，由接收方按 TTL 判过期） */
-export interface HlOutRow {
+interface HlOutRow {
   /** 中继 IP */
   i: string;
   /** 成功次数 */

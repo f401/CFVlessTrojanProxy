@@ -30,7 +30,7 @@ export interface RelSample {
 }
 
 /** `snap()` 输出的行（诊断端点的 JSON 形状） */
-export interface RelRow {
+interface RelRow {
   /** 中继出口地址 */
   relayIp: RelayIp;
   /** 样本条数 */

@@ -27,7 +27,7 @@ export { aesKey, b64d, b64e, seal, unseal } from "./store/crypto";
 export { factsOut, freshTop } from "./store/factout";
 export { MeterState } from "./store/meter-state";
 export { MeterEndpoints } from "./store/meter";
-export { detectProtocol, parseVLESS, parseTrojan, loadUsers, normAtyp, readAddr, UserIndex } from "./proxy/protocol";
+export { FirstFrame, parseVLESS, parseTrojan, loadUsers, normAtyp, readAddr, UserIndex } from "./proxy/protocol";
 export { DOH_ENDPOINTS, checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
 export { isPxHost, pxHostList } from "./core/hosts";
 export { isCfIp } from "./core/net";
@@ -108,6 +108,7 @@ export {
   errCount,
 } from "./nodes/metrics";
 export { ERRS } from "./nodes/errlog";
+export { BudgetExhausted, CallGate } from "./core/call-gate";
 export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES, pxPolicy, RawProbe } from "./px/probe";
 export { regionListAsync } from "./px/regions";
 export { PEND, RESTORE_MAX, getSnap, kvGetStrict, nodeSnapGet, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";

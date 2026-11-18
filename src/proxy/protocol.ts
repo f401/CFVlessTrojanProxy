@@ -213,33 +213,7 @@ export async function saveUsers(env: Env, list: UserRec[]) {
  * §4  协议侦测与解析
  * ================================================================== */
 
-/**
- * 判断字节区间内是否全为十六进制字符（Trojan 密码预检）。
- * @param {Uint8Array} u8 字节数组
- * @param {number} from 起始下标（含）
- * @param {number} to 结束下标（不含）
- * @returns {boolean} 全部是 0-9a-fA-F 时返回 true
- */
-export function isHexAscii(u8: Uint8Array, from: number, to: number) {
-  for (let i = from; i < to; i++) {
-    const c = u8[i];
-    const ok = (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x66) || (c >= 0x41 && c <= 0x46);
-    if (!ok) return false;
-  }
-  return true;
-}
 
-/**
- * 识别首包协议：第 57-58 字节是 \r\n 且前面 56 字节是十六进制 → Trojan，否则 VLESS。
- * @param {Uint8Array} u8 客户端首个载荷
- * @returns {'vless'|'trojan'} 协议名
- */
-export function detectProtocol(u8: Uint8Array) {
-  if (u8.length >= 58 && u8[56] === 0x0d && u8[57] === 0x0a && isHexAscii(u8, 0, 56)) {
-    return "trojan";
-  }
-  return "vless";
-}
 
 /**
  * 把两种协议里含义不同的地址类型字节归一化成 VLESS 语义。
@@ -385,3 +359,60 @@ export function parseTrojan(u8: Uint8Array, auth: Auth): ParseResult {
 
 // 危险端口：邮件滥发、数据库、远程桌面、SMB 等
 
+
+/** 首帧解析的结构化结果：成功给出目标与偏移，失败给出原因与「该不该回 400」 */
+export type FrameResult =
+  | { ok: true; id: string; host: string; port: number; proto: string; ver?: number; udp: boolean; udpTrojan: boolean; offset: number }
+  | { ok: false; err: string; bad: boolean };
+
+/**
+ * 功能：把首帧（VLESS / Trojan 头）解析成目标或失败原因 —— **纯函数式**，不做 I/O、不动账本、不关连接。
+ *
+ * 为什么单独成类：会话原先把「选协议、解析、回 400、记 noAuth、写 st.id/st.host、statBump、rttLearn、
+ * checkTarget、设置 VLESS 响应头」全部塞在一个 parseHead 里，任何一条顺序错了都要靠通读才能发现（v7.187
+ * 那种「先记统计后判目标」的错就是这样漏进去的）。这里只回答「这帧是什么」，副作用留给调用方按顺序做。
+ */
+export class FirstFrame {
+  /**
+   * 功能：判这一帧属于哪套协议（不解析目标）。
+   *
+   * 为什么单独给一个：诊断与单测要先知道「这一帧该按哪套规则解」，而 `read()`
+   * 在鉴别之前就要求用户表齐全、失败还要区分 400 与 1011，拿它做分类太重。
+   * @param u8 首帧内容
+   * @returns `vless` 或 `trojan`
+   */
+  kindOf(u8: Uint8Array): "vless" | "trojan" {
+    // Trojan 的指纹是「56 个十六进制字符 + CRLF」；VLESS 的版本号在实践中是 0，
+    // 所以不能用首字节判（第一版就是这么写的，把真实 VLESS 全判成了 Trojan）
+    if (u8.length < 58 || u8[56] !== 0x0d || u8[57] !== 0x0a) return "vless";
+    for (let i = 0; i < 56; i++) {
+      const c = u8[i];
+      const hex = (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x66) || (c >= 0x41 && c <= 0x46);
+      if (!hex) return "vless";
+    }
+    return "trojan";
+  }
+
+  /**
+   * 功能：解析首帧。
+   * @param u8 首帧内容
+   * @param users 用户表（鉴权与 Trojan 密码摘要都在里面）
+   * @returns 目标或失败原因；`bad` 为真表示该回 400（协议错），否则是按 1011 关
+   */
+  read(u8: Uint8Array, users: Auth): FrameResult {
+    // 与 `kindOf()` 用同一判据：只有「56 hex + CRLF」才是 Trojan
+    const hard = this.kindOf(u8) === "vless" ? parseVLESS(u8, users) : parseTrojan(u8, users);
+    if (hard.ok === false) return { ok: false, err: hard.err, bad: true };
+    return {
+      ok: true,
+      id: hard.id,
+      host: hard.host,
+      port: hard.port,
+      proto: hard.proto,
+      ver: hard.ver,
+      udp: !!hard.udp,
+      udpTrojan: hard.proto === "trojan",
+      offset: hard.offset,
+    };
+  }
+}

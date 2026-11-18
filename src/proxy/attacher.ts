@@ -12,6 +12,7 @@ import { kickFlush } from "../store/pend";
 import { checkTarget, expandV6, isV6Literal, parseProxyIp } from "./dial";
 import { dialAnother } from "./fallback";
 import { SOCKET_DIALER } from "./socket-dialer";
+import type { CallGate } from "../core/call-gate";
 import { pipeBack } from "./tunnel";
 
 export interface AttachOpts {
@@ -25,6 +26,8 @@ export interface AttachOpts {
   region: string | null;
   /** 客户端首个载荷（TLS ClientHello 含 SNI）：每接一条新上游都要重发 */
   payload: Uint8Array;
+  /** 本次请求的额度：补救链的每一次建连都从这里取号 */
+  budget: CallGate;
 }
 
 /**
@@ -123,7 +126,7 @@ export class Attacher {
     NodeStatsTable.nsEmptyClose(conn.node, true);
     // 同一跳最多换一条中继：换第三跳解决不了「这个站经中转走不通」这件事
     if ((conn.pxTries || 1) < 2) {
-      const s2 = await dialAnother(env, conn, o.mode, host, region || undefined);
+      const s2 = await dialAnother(env, conn, o.mode, o.budget, host, region || undefined);
       if (s2) {
         // 递归回来时 run 会接管新 socket，旧的已在 run 开头释放
         await this.run(o, s2);
@@ -177,7 +180,7 @@ export class Attacher {
       // 谁漏掉后半段都不会有门禁变红，只会静默吃掉并发名额（7.86）。
       try {
         logErr(`empty close -> retry via IPv6 ${v6}`, host);
-        const s6 = await SOCKET_DIALER.open(expandV6(v6), port);
+        const s6 = await SOCKET_DIALER.open(expandV6(v6), port, o.budget);
         conn.via = "v6";
         await this.run(o, s6);
         return true;
@@ -223,7 +226,7 @@ export class Attacher {
       return;
     }
     try {
-      const s3 = await SOCKET_DIALER.open(px.host, px.port);
+      const s3 = await SOCKET_DIALER.open(px.host, px.port, o.budget);
       conn.node = px.host + ":" + px.port;
       conn.via = "node";
       await this.run(o, s3);

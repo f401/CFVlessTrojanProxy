@@ -2,10 +2,13 @@ import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 import { NodeStatsTable } from "../nodes/stat";
 import { SOCKET_DIALER } from "./socket-dialer";
+import type { CallGate } from "../core/call-gate";
 import { SEL } from "../px/selector";
 import { checkTarget } from "./dial";
 
-export interface RegionOpts {
+interface RegionOpts {
+  /** 本次请求的额度：地区分流同样要从两个出口取号 */
+  budget: CallGate;
   env: Env;
   mode: Mode;
   /** 目标国家/地区码（?rg=xx），是硬要求：绝不跨地区回落 */
@@ -38,7 +41,7 @@ export class RegionPicker {
     let failed = ""; // 已经记过失败的那个节点：同一次失败只罚一次
     // 建连预算与「迟到关闭」都交给 SOCKET_DIALER（与 Dialer.open 同一个口径）
     try {
-      const sock = await SOCKET_DIALER.open(p.h, p.p);
+      const sock = await SOCKET_DIALER.open(p.h, p.p, o.budget);
       conn.via = "node";
       conn.retried = true;
       return sock;
@@ -50,7 +53,7 @@ export class RegionPicker {
       if (alt && !checkTarget(alt.h, alt.p)) {
         conn.node = alt.h + ":" + alt.p;
         try {
-          const sock2 = await SOCKET_DIALER.open(alt.h, alt.p);
+          const sock2 = await SOCKET_DIALER.open(alt.h, alt.p, o.budget);
           conn.via = "node";
           conn.retried = true;
           return sock2;

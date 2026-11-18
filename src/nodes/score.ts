@@ -97,7 +97,7 @@ export function usable(k: string, now = Date.now()): boolean {
    避免「面板一套公式、选路另一套」。纯计算：除了只读 S.nstat / S.alive，不改任何状态。 */
 
 /** 一次评分的完整分解（面板分项与选路排序共用） */
-export interface ScoreParts {
+interface ScoreParts {
   mode: Mode; score: number; latencyMs: number; e10Ms: number;
   pFailRisk: number; pStall: number; capBps: number; confB: number;
   nEff: number; latN: number; sampleAgeMs: number; xferMs: number;
@@ -105,17 +105,17 @@ export interface ScoreParts {
 }
 
 /** 延迟项：真实首字节与抖动（`jitMs` 是 MAD×1.4826 折出的 σ） */
-export interface LatencyTerm {
+interface LatencyTerm {
   latencyMs: number; jitMs: number;
 }
 
 /** 吞吐项：容量证据与两种「传完目标流量」的毫秒数（`xferMs` 只在延迟模式有意义） */
-export interface ThroughputTerm {
+interface ThroughputTerm {
   capBps: number; nEff: number; sampleAgeMs: number; confB: number; xferMs: number; e10Ms: number;
 }
 
 /** 风险项：失败综合概率、卡顿占比与样本量 */
-export interface RiskTerm {
+interface RiskTerm {
   pFailRisk: number; pStall: number; samples: number;
 }
 

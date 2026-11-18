@@ -3815,8 +3815,8 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   const dSrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
   const sSrc = fs.readFileSync("src/proxy/session.ts", "utf8");
   ok("拨号失败不许再被说成「故意跳过直连」（dialer）", !dSrc.includes("skip-direct") && dSrc.includes("dial returned null"));
-  ok("同一句话在 session 里也改掉", !/^\s*throw new Error\("skip-direct"\)/m.test(sSrc) && sSrc.includes("dial returned null"));
-  ok("session 的守卫注明了两条拨号路径都不会回 null", sSrc.includes("两条拨号路径都不返回 null"));
+  ok("同一句话在 session 里也改掉", !/^\s*throw new Error\("skip-direct"\)/m.test(sSrc) && sSrc.includes("return this.router.route(host, port);"));
+  ok("session 的守卫注明了两条拨号路径都不会回 null", sSrc.includes("return this.router.route(host, port);") && !sSrc.includes("DIALER.open("));
   // 脚本补丁曾把一条语句顶格（缩进 0），块内的层级读起来是断的。
   const cLines = fs.readFileSync("src/proxy/connection.ts", "utf8").split(/\r?\n/);
   const settleLines = fs.readFileSync("src/proxy/conn-settle.ts", "utf8").split(/\r?\n/);
@@ -3835,8 +3835,8 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   const iRel = aSrc.indexOf("releaseAll(conn)");
   const iSet = aSrc.indexOf("conn.sock = sock;");
   ok("递归重试前先释放上一跳的 socket 与写锁", iRel >= 0 && iSet > iRel);
-  ok("IPv6 兜底也有建连预算（走拨号器）", aSrc.includes("SOCKET_DIALER.open(expandV6(v6), port)") && !aSrc.includes("connect({ hostname: expandV6(v6)"));
-  ok("proxyip 兜底也有建连预算（走拨号器）", aSrc.includes("SOCKET_DIALER.open(px.host, px.port)") && !aSrc.includes("Promise.resolve(connect("));
+  ok("IPv6 兜底也有建连预算（走拨号器）", aSrc.includes("SOCKET_DIALER.open(expandV6(v6), port, o.budget)") && !aSrc.includes("connect({ hostname: expandV6(v6)"));
+  ok("proxyip 兜底也有建连预算（走拨号器）", aSrc.includes("SOCKET_DIALER.open(px.host, px.port, o.budget)") && !aSrc.includes("Promise.resolve(connect("));
   ok("proxyip 连不上要给中继记账", aSrc.includes('NodeStatsTable.nsFail(px.host + ":" + px.port)'));
   ok("死条件 !px || st.retried 已经删掉（只判代码行，注释里可以留历史）", !/if \(!px \|\| st\.retried\)/.test(aSrc));
 }
@@ -3849,16 +3849,16 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   eq("地区分流的两条拨号都走同一个拨号器", (rgSrc.match(/SOCKET_DIALER\.open\(/g) || []).length, 2);
   eq("地区分流里不再有裸 connect（超时迟到成功的 socket 必须有人关）", (rgSrc.match(/await connect\(/g) || []).length, 0);
   ok("同一个节点一次失败只罚一次（否则冷却跳两档）", rgSrc.includes("conn.node !== failed"));
-  ok("地区失败单独计数，不混进「目标不可达」", ssSrc.includes('cnt("rgFail")') && W.S.cntKeys.includes("rgFail"));
+  ok("地区失败单独计数，不混进「目标不可达」", fs.readFileSync("src/proxy/fallback.ts", "utf8").includes('cnt("rgFail")') && W.S.cntKeys.includes("rgFail"));
 }
 
 // 第 161 组：会话层补救链的拨号超时与地区口径（v7.171）
 // Dialer 抛错后那条「临时取一条中继直连」是最后一跳，漏了超时就会把客户端拖到放弃。
 const ss2 = fs.readFileSync("src/proxy/session.ts", "utf8");
 const at2 = fs.readFileSync("src/proxy/attacher.ts", "utf8");
-ok("会话层补救链的 connect 也加了 2.5 秒上限", /withTimeout\(pk0, CONNECT_MS\)/.test(ss2));
+ok("会话层补救链的 connect 也加了 2.5 秒上限", /withTimeout\(pk0, CONNECT_MS\)/.test(fs.readFileSync("src/proxy/fallback.ts", "utf8")));
 ok("会话层不再有裸 connect（迟到成功的 socket 必须有人关）", !/await connect\(\{ hostname: px0\.host/.test(ss2));
-ok("超时之后迟到成功的 socket 会被关掉", /void pk0\s*\n\s*\.then\(\(s\) => \{ try \{ s\.close\(\); \}/.test(ss2));
+ok("超时之后迟到成功的 socket 会被关掉", /void pk0\s*\n\s*\.then\(\(s\) => \{ try \{ s\.close\(\); \}/.test(fs.readFileSync("src/proxy/fallback.ts", "utf8")));
 ok("地区钉住的补救链不再把「没别的候选」记成目标不可达", at2.includes('cnt(region ? "rgFail" : "dead")'));
 eq("attacher 里只剩一处 dead（真正的目标不可达）", (at2.match(/cnt\("dead"\)/g) || []).length, 1);
 
@@ -4435,7 +4435,7 @@ console.log("\n176) 预算账本与续回边界");
   ok("meter 的 /vt 已委托给 factsOut", meterSrc177.includes("Response.json(factsOut(this.ledger))"), "meter.ts");
   ok("meter 里不再自己拼 blk2 的插入序切片", !meterSrc177.includes("Object.entries(this.blk2)"), "meter.ts");
   const dbgSrc177 = debugAll();
-  ok("诊断默认分支的建连接去拨号器", dbgSrc177.includes("SOCKET_DIALER.open(expandV6(out.aaaa), 443)"), "debug.ts");
+  ok("诊断默认分支的建连接去拨号器", dbgSrc177.includes("SOCKET_DIALER.open(expandV6(out.aaaa), 443, gate)"), "debug.ts");
   ok("诊断默认分支不再自己包 connect", !dbgSrc177.includes("Promise.resolve(connect("), "debug.ts");
 }
 
@@ -5346,7 +5346,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   const runOne = async () => {
     const t = Date.now();
     const r = await Promise.race([
-      W.DIALER.open({ env: envD, request: reqD, conn: mkSt(), mode: "tput", host: "example.com", port: 80, pxForce: -1 })
+      W.DIALER.open({ env: envD, request: reqD, conn: mkSt(), mode: "tput", host: "example.com", port: 80, pxForce: -1, budget: new W.CallGate("request") })
         .then(() => "ok")
         .catch((e) => "err:" + String(e && e.message)),
       new Promise((res) => setTimeout(() => res("hang"), 4500)),
@@ -5383,8 +5383,8 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   const dialerSrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
   ok(
     "直连两个分支都走 guarded 上限",
-    dialerSrc.includes("await this.guarded(dial4(host, port), host)") &&
-      dialerSrc.includes("await this.guarded(dial(host, port), host)"),
+    dialerSrc.includes("await this.guarded(dial4(host, port, o.budget), host)") &&
+      dialerSrc.includes("await this.guarded(dial(host, port, o.budget), host)"),
   );
   ok(
     "不再有裸的直连拨号",
@@ -8181,7 +8181,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok("debug.ts 不再自己拼 connect", !/connect\(\{/.test(aSrc278));
   ok("debug.ts 不再引用 CONNECT_MS", !aSrc278.includes("CONNECT_MS"));
   ok("debug.ts 不再导入 cloudflare:sockets", !aSrc278.includes("cloudflare:sockets"));
-  ok("debug.ts 的 v6 建连走拨号器", aNets278.includes("SOCKET_DIALER.open(expandV6(out.aaaa), 443)"));
+  ok("debug.ts 的 v6 建连走拨号器", aNets278.includes("SOCKET_DIALER.open(expandV6(out.aaaa), 443, gate)"));
   ok("doFetch 仍是唯一自增点", (cli278.match(/S\.doCalls \+= 1;/g) || []).length === 1);
 
   // 行为面：三条诊断读取各要真的把子请求记进 S.doCalls（旧代码在这三条上恒为 0）
@@ -9461,10 +9461,10 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("会话是类，入口只做创建与一次执行", /export async function handleUpgrade\(request: Request, env: Env, ctx: ExecutionContext\): Promise<Response> \{\s*return new ProxySession\(request, env, ctx\)\.run\(\);\s*\}/m.test(sessSrc));
   ok("入口函数里不再有管道代码", sessSrc.slice(sessSrc.indexOf("export async function handleUpgrade")).indexOf("pipeTo") < 0);
   ok("四段各自成方法", ["feed", "parseHead", "dial", "finish"].every((n) => sessSrc.includes("private async " + n + "(") || sessSrc.includes("private " + n + "(")));
-  ok("拨号的两条路各自成方法", sessSrc.includes("private async dialRegion(") && sessSrc.includes("private async dialFallback("));
+  ok("拨号的两条路各自成方法", fs.readFileSync("src/proxy/fallback.ts", "utf8").includes("private async viaRegion(") && fs.readFileSync("src/proxy/fallback.ts", "utf8").includes("private async viaFallback("));
   ok("连接对象是它的字段", sessSrc.includes("private readonly conn: Connection;"));
   ok("已连上就只转发，不再解析协议头", sessSrc.indexOf("if (st.sock) return st.upWrite(") < sessSrc.indexOf("await this.parseHead("));
-  ok("地区分流先于拨号策略", sessSrc.indexOf("if (this.ipRegion) return this.dialRegion(") < sessSrc.indexOf("return await DIALER.open("));
+  ok("地区分流先于拨号策略", (() => { const b = fs.readFileSync("src/proxy/fallback.ts", "utf8"); const a = b.indexOf("if (this.o.ipRegion) return this.viaRegion("); return a >= 0 && a < b.indexOf("return await DIALER.open("); })());
   ok("数据面不反向依赖判定层", sessSrc.indexOf('from "../route/') < 0 && sessSrc.indexOf("from \"../route") < 0);
 
   // 行为面：参数解析搬进了构造函数，用最小环境构造一次就能验证（构造过程没有任何 I/O）。
@@ -9685,7 +9685,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     "[322] 入口只做分派：判定 → 中转 → 直连",
     open322.includes("this.classify(o)") &&
       open322.includes("this.viaRelay(o, route.cfHost)") &&
-      open322.includes("this.direct(host, port, route.cfHost)"),
+      open322.includes("this.direct(o, host, port, route.cfHost)"),
     "open",
   );
   ok(
@@ -9730,7 +9730,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   );
   ok(
     "[322] 直连段先按 A 记录再退普通拨号，且不碰候选池",
-    dir322.includes("dial4(host, port)") && dir322.includes("dial(host, port)") && !dir322.includes("SEL.current("),
+    dir322.includes("dial4(host, port, o.budget)") && dir322.includes("dial(host, port, o.budget)") && !dir322.includes("SEL.current("),
     "direct",
   );
   ok(
@@ -9938,7 +9938,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
         dirBody.includes("await this.tryProxyip(o);"));
     ok("[326] IPv6 兜底一次一连接、地区钉住时禁用",
       v6Body.includes("conn.triedV6") && v6Body.includes("!env.cfIpv6") && v6Body.includes("isV6Literal(host)") &&
-        v6Body.includes("SOCKET_DIALER.open(expandV6(v6), port)"));
+        v6Body.includes("SOCKET_DIALER.open(expandV6(v6), port, o.budget)"));
     ok("[326] proxyip 兜底只剩一份挑中继与一处上限",
       (pxBody.match(/parseProxyIp\(/g) || []).length === 1 && pxBody.includes("trimAged(S.needPx, SC.PX_MAX);") &&
         pxBody.includes("NodeStatsTable.nsFail("));
@@ -11121,14 +11121,14 @@ const sniSeg337 = seg337("export async function probeSni(", "// ---- 并入自 g
 
 ok("第337组·探测会话是导出类", srcProbe337.includes("export class RawProbe {"));
 ok("第337组·五个成员齐备", ["async open(", "async send(", "async peek(", "close(): void", "get tcpMs(", "get elapsedMs("].every((x) => clsProbe337.includes(x)));
-ok("第337组·建连只在会话里（含 sslip.io 回退）", clsProbe337.includes("await connect({ hostname: this.host, port: this.port })") && clsProbe337.split(".sslip.io").length - 1 === 1);
+ok("第337组·建连只在会话里（含 sslip.io 回退）", clsProbe337.includes("await this.gate.openSocket(this.host, this.port)") && clsProbe337.split(".sslip.io").length - 1 === 1);
 ok("第337组·写报文用 finally 释放写锁", clsProbe337.includes('.finally(() => w.releaseLock())'));
 ok("第337组·收字节有上限、预算与等待下限", clsProbe337.includes("buf.length < maxBytes") && clsProbe337.includes("const deadline = Date.now() + budgetMs") && clsProbe337.includes("Math.max(waitFloorMs, deadline - Date.now())"));
 ok("第337组·提前判据参与循环条件", clsProbe337.includes("!(done && done(buf))"));
 ok("第337组·关闭时把引用清空", clsProbe337.includes("this.sock = null;"));
-ok("第337组·反代探测改用会话且自己不再建连", proxySeg337.includes("new RawProbe(h, p)") && !proxySeg337.includes("connect({"));
+ok("第337组·反代探测改用会话且自己不再建连", proxySeg337.includes("new RawProbe(h, p, gate)") && !proxySeg337.includes("connect({"));
 ok("第337组·反代探测的预算与上限只写一处", proxySeg337.includes("probe.peek(8192, 4000, 200,") && proxySeg337.includes("probe.send(PROBE_HELLO, CONNECT_MS)"));
-ok("第337组·SNI 探测改用会话且自己不再建连", sniSeg337.includes("new RawProbe(nodeHost, nodePort)") && !sniSeg337.includes("connect({"));
+ok("第337组·SNI 探测改用会话且自己不再建连", sniSeg337.includes("new RawProbe(nodeHost, nodePort, gate)") && !sniSeg337.includes("connect({"));
 ok("第337组·SNI 探测只收 8 字节", sniSeg337.includes("probe.peek(8, ms, 150,") && sniSeg337.includes("probe.send(tlsHello(sni), ms)"));
 ok("第337组·两处都只用一条关闭路径", proxySeg337.includes("probe.close();") && sniSeg337.includes("probe.close();") && !proxySeg337.includes("sock.close()") && !sniSeg337.includes("sock.close()"));
 const probe337 = new W.RawProbe("probe337.example", 443);
@@ -11558,7 +11558,7 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     ok("[346] 会话用字段持有它",
       sessSrc346.includes("private readonly regionPicker = new RegionPicker();"));
     ok("[346] 地区分流走字段而不是模块全局",
-      sessSrc346.includes("await this.regionPicker.open(") && !sessSrc346.includes("REGION.open("));
+      sessSrc346.includes("regionPicker: this.regionPicker") && !sessSrc346.includes("REGION.open("));
     ok("[346] 会话里只剩这一个 region 相关字段",
       (sessSrc346.match(/new RegionPicker\(\)/g) || []).length === 1);
     // 第 318 组的假 socket 声明在那个块里，这里给自己一份最小的（构造期只要 accept/close 存在）
@@ -12005,6 +12005,115 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   const other359 = new W.TimedMarks({ max: 4, ttlMs: 600000 });
   ok("两个实例互不影响", other359.on("k5", t359 + 10) === false);
   ok("判定里的两张表也是这个类", W.JUDGE.neg instanceof W.TimedMarks && W.JUDGE.pos instanceof W.TimedMarks);
+}
+
+
+/* ===== 第 360 组：额度闸门（7.362） ===== */
+{
+  const g360 = new W.CallGate("request");
+  eq("[360] 请求形态的 connect 上限", g360.cap("connect"), 4);
+  eq("[360] 请求形态的子请求上限", g360.cap("sub"), 6);
+  eq("[360] 请求形态的 DO 上限", g360.cap("do"), 2);
+  g360.take("connect");
+  eq("[360] 扣一次后剩三次", g360.left("connect"), 3);
+  eq("[360] tryTake 成功返回 true", g360.tryTake("connect", 3), true);
+  eq("[360] 全部扣完后剩 0", g360.left("connect"), 0);
+  eq("[360] 超额时 tryTake 返回 false", g360.tryTake("connect"), false);
+  let threw360 = "";
+  try {
+    g360.take("connect");
+  } catch (e) {
+    threw360 = e && e.name;
+  }
+  eq("[360] 超额时 take 抛 BudgetExhausted", threw360, "BudgetExhausted");
+  eq("[360] 拒绝次数被记账", g360.snapshot().refused.connect, 2);
+  eq("[360] 不限额闸门的上限是 MAX_SAFE_INTEGER", W.CallGate.unlimited().cap("sub"), Number.MAX_SAFE_INTEGER);
+  eq("[360] cron 形态的上限更大", new W.CallGate("cron").cap("connect"), 40);
+
+  // 行为面：建连真的从闸门走，且计数与调用的 connect 次数一致
+  const prevSim360 = globalThis.__simConnect;
+  let sim360 = 0;
+  globalThis.__simConnect = () => {
+    sim360 += 1;
+    return { close: () => {}, closed: Promise.resolve(), opened: Promise.resolve({}) };
+  };
+  const gA = new W.CallGate("request");
+  await gA.openSocket("127.0.0.1", 443);
+  await gA.openSocket("127.0.0.1", 80);
+  eq("[360] openSocket 真的拨了两次", sim360, 2);
+  eq("[360] 两次都记在 connect 账上", gA.snapshot().used.connect, 2);
+  let threwB = "";
+  try {
+    await gA.openSocket("127.0.0.1", 443);
+    await gA.openSocket("127.0.0.1", 443);
+    await gA.openSocket("127.0.0.1", 443);
+  } catch (e) {
+    threwB = e && e.message;
+  }
+  ok("[360] 建连额度用完即拒绝（不再拨）", threwB === "budget exhausted: connect" && sim360 === 4, threwB + "/" + sim360);
+  globalThis.__simConnect = prevSim360;
+
+  // 源码锁：connect( 只有一处出口，且没有模块级闸门实例
+  const walk360 = (dir) => {
+    const out = [];
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = dir + "/" + e.name;
+      if (e.isDirectory()) out.push(...walk360(p));
+      else if (e.name.endsWith(".ts")) out.push(p);
+    }
+    return out;
+  };
+  const src360 = walk360("src");
+  const connSites = src360
+    .map((p) => ({ p, n: (fs.readFileSync(p, "utf8").replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").match(/\bconnect\(\{/g) || []).length }))
+    .filter((x) => x.n > 0);
+  eq("[360] 全仓只有额度闸门直接调 connect()", connSites.map((x) => x.p).join(","), "src/core/call-gate.ts");
+  ok("[360] 没有模块级闸门实例（额度随调用传递）", !src360.some((p) => /export const \w+ = new CallGate\(/.test(fs.readFileSync(p, "utf8"))), "CallGate singleton");
+  const dialSrc360 = fs.readFileSync("src/proxy/dial.ts", "utf8");
+  ok("[360] DoH 子请求只经闸门（不再自己 fetch）", !/[^.\w]fetch\(url/.test(dialSrc360) && dialSrc360.includes("quota.fetch("), "dial fetch");
+}
+
+/* ===== 第 361 组：会话变薄（7.362） ===== */
+{
+  const sess361 = fs.readFileSync("src/proxy/session.ts", "utf8");
+  const fb361 = fs.readFileSync("src/proxy/fallback.ts", "utf8");
+  const proto361 = fs.readFileSync("src/proxy/protocol.ts", "utf8");
+  const lines361 = sess361.split(/\r?\n/).length;
+  ok("[361] 会话文件瘦到 320 行以内", lines361 <= 320, lines361 + " 行");
+  for (const bad of ["parseVLESS(", "parseTrojan(", "connect({", "withTimeout(", "PEND.", "flushSnap(", "handleDns(", "DIALER.open("]) {
+    ok("[361] 会话里不再出现 " + bad, !sess361.includes(bad), bad);
+  }
+  ok("[361] 会话持有四个协作者", sess361.includes("new FirstFrame()") && sess361.includes("new SessionRouter(") && sess361.includes("new Attacher()") && sess361.includes("new RegionPicker()"));
+  ok("[361] 拨号只剩一行委托", sess361.includes("return this.router.route(host, port);"));
+  ok("[361] 路由决策在 SessionRouter 里", fb361.includes("export class SessionRouter") && fb361.includes("async route(host: string, port: number)"));
+  ok("[361] 协议解析器是纯的（不 import socket/counter）", !/from "cloudflare:sockets"/.test(proto361) && !/from "\.\.\/core\/counter"/.test(proto361));
+  ok("[361] 协议解析器不再导出 detectProtocol", !proto361.includes("export function detectProtocol"));
+
+  // 行为面：破坏性首帧给出「协议错」而不是抛；合法首帧给出目标
+  const ff361 = new W.FirstFrame();
+  const bad361 = ff361.read(new Uint8Array([0x05, 0x00, 0x00]), { uuids: new Set(["u1"]), trojan: new Map(), list: [] });
+  ok("[361] 坏首帧回 { ok:false, bad:true }", bad361.ok === false && bad361.bad === true, JSON.stringify(bad361));
+  const u361 = new TextEncoder();
+  const pwd361 = new TextEncoder().encode("pw361");
+  // Trojan 首帧 = 56 字节 hex 摘要 + CRLF + CMD(0x01) + ATYP(0x03) + 域名 + 端口
+  // Trojan 的「口令」是 56 个 hex 字符（sha224 的十六进制形式），长度错就会被判鉴权失败
+  const hex361 = "0123456789abcdef".repeat(3) + "01234567";
+  const head361 = new Uint8Array([
+    ...u361.encode(hex361),
+    0x0d, 0x0a, 0x01, 0x03,
+    0x0b, // 域名长度（ATYP=3 后面必须先跟长度字节）
+    ...u361.encode("example.com"),
+    0x01, 0xbb,
+    0x0d, 0x0a, // Trojan 请求头以 CRLF 收尾（解析器会校验这两个字节）
+  ]);
+  const trojan361 = new W.FirstFrame().read(head361, {
+    uuids: new Set(["u1"]),
+    trojan: new Map([[hex361, "u1"]]),
+    list: [{ id: "u1", enabled: true }],
+  });
+  ok("[361] 合法首帧给出目标与偏移", trojan361.ok === true && trojan361.host === "example.com" && trojan361.port === 443 && trojan361.offset === head361.length, JSON.stringify(trojan361).slice(0, 120));
+  ok("[361] 合法首帧标出协议", trojan361.ok === true && trojan361.proto === "trojan");
+  void pwd361;
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

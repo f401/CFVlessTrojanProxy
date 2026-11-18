@@ -13,6 +13,7 @@ import { loadUsers } from "./proxy/protocol";
 import { regionListAsync } from "./px/regions";
 
 import { S } from "./core/state";
+import { CallGate } from "./core/call-gate";
 import { PEND } from "./store/index";
 
 /**
@@ -28,6 +29,9 @@ export default {
    * @returns 响应
    */
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    // 一次请求 = 一本新的额度账：额度对象随 ctx 交给拨号器与探测器，
+    // 扣减只发生在 openSocket()（connect）与 HttpIO.get()（子请求）两个出口（7.362）
+    const budget = new CallGate("request");
     try {
       const url = new URL(request.url);
       // 用 URL 的 hostname：Host 头可能带 :port，直接拿去当节点 server 会生成
@@ -50,13 +54,13 @@ export default {
       /* ---------- 管理面板（会话登录） ---------- */
       // 放在 uuid 检查之前：全新部署没有 uuid 时也要能进 /admin 建第一个用户
       if (first === "admin") {
-        return admin({ request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf });
+        return admin({ request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf, budget });
       }
 
       /* ---------- 健康检查 ---------- */
       // 放在 uuid 检查之前：全新部署还没配 uuid 时也要能自检（否则只会看到 500）
       if (first === "health") {
-        return health({ request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf });
+        return health({ request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf, budget });
       }
 
       if (auth.uuids.size === 0) {
@@ -69,7 +73,7 @@ export default {
 
       const id = first;
       const sub = (seg[1] || "").toLowerCase();
-      const base = { request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf };
+      const base = { request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf, budget };
 
       // 路由表分发：表决定「要不要先推增量 / 读 RTT」，组装根只负责按表调用
       const def = RouteTable.route(sub);

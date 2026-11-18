@@ -1,4 +1,4 @@
-- 线上 **7.270**（已部署、可跑）｜仓库 **7.361**（明文 HTTP/80 探测不再是独立门面，而是 `ProbeTransport` 的第三个实现，共 215 个缺陷皆已修复）：两者差 91 个版本。
+- 线上 **7.270**（已部署、可跑）｜仓库 **7.362**（会话变薄：首帧解析 / 路由决策 / DNS / 收尾各自成类，建连与子请求统一经 `CallGate` 扣额度，共 215 个缺陷皆已修复）：两者差 92 个版本。
 
 # AGENTS.md
 
@@ -18,7 +18,7 @@ Constraints of the free plan shape most of the design: ≤6 concurrent `connect(
 2. **No block without a 2xx.** Block evidence requires, inside one time window, the same site succeeding on one channel and failing on another. All-4xx / all-timeout may only `rotate` and re-sample. Business 403s pass through untouched.
 3. **Never deploy an unobfuscated bundle.** `tools/check-obf.js` is a hard gate (strict keywords must be 0, `a_0x >= 100`, no plaintext `class Meter`), wired into the deploy script; it refuses on failure.
 4. **Entry preference can only be measured by the client.** A Worker dialing its own hostname loops (522). Subscription emits `server: <ip>` entries plus an `🌐 入口优选` url-test group pointing at `/health`; `?e=0` disables it.
-5. **Mind the three free-plan budgets.** ① concurrent `connect()` ≤ 6 (`CONNECT_MS` in `src/core/util.ts` bounds every dial); ② subrequests ≤ 50 per invocation (`SCAN_SUB = 48`, `plan.sub` budget); ③ DO CPU is tens of ms — single-shot TLS handshakes go through `tunnelfetch` only.
+5. **Mind the three free-plan budgets.** ① concurrent `connect()` ≤ 6 (`CONNECT_MS` in `src/core/util.ts` bounds every dial); ② subrequests ≤ 50 per invocation (`SCAN_SUB = 48`, `plan.sub` budget); ③ DO CPU is tens of ms — single-shot TLS handshakes go through `tunnelfetch` only. Since 7.362 the single arbiter for all three is the per-call `CallGate` (`src/core/call-gate.ts`): request and cron rounds each `new` one, it travels as `ctx.budget` / `DialOpts.budget`, and it spends budget **only** in `openSocket()` and `fetch()`. Do not call `connect()` or `fetch()` (for a subrequest) anywhere else, and never park a `CallGate` in `S`.
 6. **Comments and docs are gates, not courtesy.** Every exported function/method/class needs `/** what / @param / @returns */`; non-trivial bodies explain *why*. `doc-audit`, `body-audit` and `check-arch` all fail the build.
 
 ## 3. Layout

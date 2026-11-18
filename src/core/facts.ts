@@ -42,7 +42,7 @@ export const PAGE_ABS = {
 } as const;
 
 /** 带时间戳的行 */
-export interface AtRow {
+interface AtRow {
   /** 最后观测时间 */
   at: number;
 }
@@ -89,7 +89,7 @@ export function mergeAt<T extends AtRow>(
 }
 
 /** 封锁行（键在 map 上，值只有计数与时间） */
-export interface BlkRow {
+interface BlkRow {
   /** 批数 */
   n: number;
   /** 时间 */

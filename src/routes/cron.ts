@@ -1,6 +1,7 @@
 import { eachLimit, errMsg } from "../core/util";
 
 import { logErr } from "../nodes/metrics";
+import { CallGate } from "../core/call-gate";
 import { S } from "../core/state";
 import { cnt } from "../core/counter";
 import { CronLock } from "../core/lock";
@@ -67,7 +68,7 @@ async function tfbRound(env: Env): Promise<void> {
  * 只处理 `needPx` 里尚未过期的站点、每轮最多 DNS_BATCH 个（每个站点最多 DOH_ENDPOINTS.length 次 DoH：
  * @returns {Promise<void>}
  */
-async function dnsRound(): Promise<void> {
+async function dnsRound(gate: CallGate): Promise<void> {
   try {
     const now = Date.now();
     const hosts = [...S.needPx.entries()]
@@ -76,7 +77,7 @@ async function dnsRound(): Promise<void> {
       .filter((h) => DNS.v6Of(h, now) < 0)
       .slice(0, DNS_BATCH);
     for (const h of hosts) {
-      const r = await probeFam(h);
+      const r = await probeFam(h, gate);
       if (r.answered) DNS.note(h, r.v6, now);
     }
     if (hosts.length) cnt("dnsProbe", hosts.length);
@@ -93,11 +94,13 @@ async function cronOnce(env: Env): Promise<void> {
   // 一轮 cron 的额度先算清：探活次数（connect 账）与剩余 fetch 额度（子请求账）。
   // 放在最外层是因为下面三段都要用：准入探活用 adm，续回用户数用 sub。
   const plan = planRound(S.pool.length, S.alive.size);
+  // 一轮 cron = 一份额度：池子扫描、站点判定、DoH 探测都从这里取号（7.362）
+  const gate = new CallGate("cron");
   try {
     // 准入吃满本轮预算即可：加码函数 alivePlan 在 7.179 删除（它永远是恒等变换，见 ALIVE_TARGET 的文档）
     await cronScan(env, plan.adm);
     await tfbRound(env);
-    await dnsRound();
+    await dnsRound(gate);
     SEL.afterScan(env);
   } catch (e) {
     logErr(`cron: ${errMsg(e)}`);

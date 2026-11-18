@@ -59,10 +59,10 @@ export interface FactCtx {
 }
 
 /** 可以写的事实种类 */
-export type FactKind = "eg" | "dead" | "blk" | "ps";
+type FactKind = "eg" | "dead" | "blk" | "ps";
 
 /** 一条待写事实 */
-export interface FactWrite {
+interface FactWrite {
   kind: FactKind;
   key: string;
   at: number;

@@ -4,7 +4,7 @@ import { subscription } from "./subscription";
 import { debug, proxyip } from "./tools";
 
 /** 用户级路由定义：谁匹配、处理前要准备什么、交给谁 */
-export interface SubRoute {
+interface SubRoute {
   name: string;
   /** 能匹配的子路径（空串 = 裸 /<uuid>） */
   subs: string[];

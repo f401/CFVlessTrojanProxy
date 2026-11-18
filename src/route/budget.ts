@@ -59,7 +59,7 @@ export const SUB_FIXED_N = SUB_FIXED.refill + SUB_FIXED.tfb + SUB_FIXED.dns;
 export const SHARE_PEND = 0.5;
 export const SHARE_SNAP = 0.3;
 
-export interface Plan {
+interface Plan {
   adm: number; // 池子准入探活（新增候选），单位是 connect() 次数
   sub: number; // 扣掉固定支出后剩余的 fetch 子请求额度（= pend + snap + restore + 余量）
   pend: number; // 本轮增量上报最多带几个用户（每人一次 DO 往返）

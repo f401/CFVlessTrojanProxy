@@ -6,7 +6,7 @@ import { splitRelay } from "../core/relay-addr";
 /** 订阅输出格式：Clash/Mihomo YAML、sing-box JSON、纯链接列表 */
 export type SubKind = "clash" | "singbox" | "links";
 
-export interface SubViewIn {
+interface SubViewIn {
   env: Env;
   url: URL;
   id: string;

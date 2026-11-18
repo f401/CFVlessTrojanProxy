@@ -205,6 +205,45 @@ interface PendEntry {
   conns: number;
 }
 
+/**
+ * 一次调用的额度计数（`src/core/budget.ts` 的 `BUDGET` 读写它）。
+ *
+ * 三个数字都是「这次调用已经发起过几次」，不是「当前同时打开了几个」：
+ * 后者由 `SocketDialer` 的迟到关闭与 `SC.PROBE_CONC` 保证，前者才是能挡住失控补救链的量。
+ */
+interface BudgetCounters {
+  /** 本次调用的起始时刻（`BUDGET.begin()` 写入） */
+  at: number;
+  /** 已发起的 `connect()` 次数 */
+  connect: number;
+  /** 已花掉的子请求次数 */
+  sub: number;
+  /** 已花掉的 DO 往返次数 */
+  do: number;
+  /** 被拒次数（按种类）：`refused.connect > 0` 说明这次调用撞到过上限 */
+  refused: { connect: number; sub: number; do: number };
+}
+
+/**
+ * 一次调用的额度计数（`src/core/budget.ts` 的 `InvocationBudget` 读写它）。
+ *
+ * 三个计数都是「本次调用已经发起过几次」，不是「同时开着几条」—— 后者由
+ * `SocketDialer` 的超时关闭与 `SC.PROBE_CONC` 切段保证（见 budget.ts 的文件头）。
+ */
+interface BudgetCounters {
+  /** 本次调用的起点（`begin()` 时刻） */
+  at: number;
+  /** 已发起的 `connect()` 次数 */
+  connect: number;
+  /** 已花掉的子请求次数 */
+  sub: number;
+  /** 已花掉的 DO 往返次数 */
+  do: number;
+  /** 被拒次数（按种类）：只用于诊断，说明「谁在撞额度」 */
+  refused: { connect: number; sub: number; do: number };
+}
+
+
 /** 节点排行一行 */
 interface RankRow {
   k: string;

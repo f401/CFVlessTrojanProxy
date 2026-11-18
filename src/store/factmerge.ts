@@ -22,7 +22,7 @@ export interface FactTables {
 }
 
 /** 上行/下行车身里与事实有关的字段（其余字段由 meter 自己处理）。 */
-export interface FactDeltaIn {
+interface FactDeltaIn {
   eg?: unknown;
   ps?: unknown;
   dead?: unknown;

@@ -6,7 +6,7 @@ import { VT } from "./verdict";
 import { St } from "../core/enums";
 
 /** 一条通道的偏好记录 */
-export interface PrefRow {
+interface PrefRow {
   /** 通道键：d（直连）/ r:<ip>（中继） */
   channel: string;
   /** 1 = 实测能打通；2/3 = 实测打不通 */

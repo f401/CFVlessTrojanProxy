@@ -1,8 +1,15 @@
 import { NodeStatsTable, CANDS } from "../nodes/score";
+import { CONNECT_MS, errMsg, withTimeout } from "../core/util";
+import { checkTarget, parseProxyIp } from "./dial";
+import { DIALER } from "./dialer";
+import type { RegionPicker } from "./region";
+import { SEL } from "../px/selector";
+import { cnt } from "../core/counter";
+import { kickFlush } from "../store/index";
 import { SOCKET_DIALER } from "./socket-dialer";
+import type { CallGate } from "../core/call-gate";
 import { logErr } from "../nodes/metrics";
 import { isCfIp } from "../core/net";
-import { checkTarget } from "./dial";
 import { HOOK } from "../core/hook";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
@@ -26,6 +33,7 @@ export async function dialAnother(
   _env: Env,
   st: Connection,
   mode: Mode,
+  budget: CallGate,
   tag?: string | null,
   cc?: string | null,
 ): Promise<Socket | null> {
@@ -44,7 +52,7 @@ export async function dialAnother(
     if (HOOK.chanPref && HOOK.chanPref(host, st.host) === 2) continue;
     // 建连预算与「迟到关闭」都交给 SOCKET_DIALER：补救链更怕挂死——走到这里客户端已经等了两三秒。
     try {
-      const socket = await SOCKET_DIALER.open(host, port);
+      const socket = await SOCKET_DIALER.open(host, port, budget);
       st.node = alt;
       st.via = "node";
       st.pxTries = (st.pxTries || 1) + 1;
@@ -57,3 +65,134 @@ export async function dialAnother(
   return null;
 }
 
+
+/** 路由会话需要的东西：都是会话自己已经解好的量，router 不再解析请求 */
+export interface RouterOpts {
+  /** Worker 环境（池子、KV 都在里面） */
+  env: Env;
+  /** 升级请求（规划器要 cf 信息与 header） */
+  request: Request;
+  /** 本次连接（记录 node/via/retried 等归属） */
+  conn: Connection;
+  /** 目标模式（tput / lat） */
+  mode: Mode;
+  /** `?px=` 强制候选下标（0 表示不强制） */
+  pxForce: number;
+  /** `?rg=` 地区（null 表示没有钉地区） */
+  ipRegion: string | null;
+  /** 本次调用的额度闸门（建连只从这里取号） */
+  budget: CallGate;
+  /** 地区钉住时用的挑选器（会话持有，router 只借用） */
+  regionPicker: RegionPicker;
+  /** 关连接（会话负责：只有它知道客户端 socket 与关闭码语义） */
+  onHangUp: (code: number, reason: string) => void;
+}
+
+/**
+ * 功能：把「这一跳往哪走」的决策从会话里独立出来 —— `?rg=` 硬分流 → 拨号策略 → 补救一条中继。
+ *
+ * 为什么是它自己的类：这三段各自会花掉不同的额度（地区分流一次 connect、策略拨号最多两次、补救再
+ * 两次），而且失败时记的账完全不同（`rgFail` / `dead` / 节点 `bumpFail`）。原先它们和握手、首帧解析、
+ * 收尾挤在 session.ts 的 359 行里，「哪一步在花 connect 名额」只能靠通读；现在会话只说 `route(host, port)`。
+ */
+export class SessionRouter {
+  /**
+   * 功能：构造路由会话。
+   * @param {RouterOpts} o 会话注入的上下文
+   */
+  constructor(private readonly o: RouterOpts) {}
+
+  /**
+   * 功能：给这一跳选一条出路。
+   * @param {string} host 目标主机
+   * @param {number} port 目标端口
+   * @returns {Promise<Socket | null>} socket；地区路径失败或没有可用中继时返回 null（连接已被关）
+   */
+  async route(host: string, port: number): Promise<Socket | null> {
+    // 地区钉住是硬分流：找不到 / 连不上就明确失败，绝不回落到策略拨号（`?rg=` 的语义）
+    if (this.o.ipRegion) return this.viaRegion(host);
+    try {
+      // 拨号策略整体在 Dialer 里：判难直连 → 选中继 → 退 IPv4 → 退直连
+      return await DIALER.open({
+        env: this.o.env,
+        request: this.o.request,
+        conn: this.o.conn,
+        mode: this.o.mode,
+        host,
+        port,
+        pxForce: this.o.pxForce,
+        budget: this.o.budget,
+      });
+    } catch (e) {
+      return this.viaFallback(host, e);
+    }
+  }
+
+  /**
+   * 功能：地区硬分流这一支 —— 失败时记 `rgFail` 并关连接，返回 null。
+   * @param {string} host 目标主机
+   * @returns {Promise<Socket | null>} socket 或 null
+   */
+  private async viaRegion(host: string): Promise<Socket | null> {
+    const o = this.o;
+    const region = o.ipRegion || "";
+    // 地区失败与「目标不可达」不是一回事：没节点 / 节点被策略禁止 / 节点连不上，三种都不说明目标站
+    // 有问题。混记进 dead 会让面板上的 dead 同时代表两件事（v7.170 起分开计）。
+    const onFail = (msg: string) => {
+      o.conn.dead = true;
+      o.conn.failed = true;
+      cnt("rgFail");
+      kickFlush(o.env, o.conn.id);
+      logErr(`region ${region}: ${msg}`, host);
+      o.onHangUp(1011, msg);
+    };
+    const picked = await o.regionPicker.open({ env: o.env, mode: o.mode, region, conn: o.conn, onFail, budget: o.budget });
+    return picked || null;
+  }
+
+  /**
+   * 功能：直连/中继都失败时的补救 —— 取一条中继直连，连不上就再换一条。
+   * @param {string} host 目标主机
+   * @param {unknown} err 原始错误（一条中继都没有时要把它抛出去）
+   * @returns {Promise<Socket | null>} socket 或 null
+   */
+  private async viaFallback(host: string, err: unknown): Promise<Socket | null> {
+    const o = this.o;
+    const st = o.conn;
+    const px0 = parseProxyIp(await SEL.current(o.env, o.mode, st, host, st.cf));
+    if (!px0) {
+      // 直连失败且没有可用中转 ⇒ 目标不可达（与「地区失败」严格区分）
+      cnt("dead");
+      kickFlush(o.env, st.id);
+      logErr(`dead target ${host}: ${errMsg(err)}`);
+      o.onHangUp(1011, "连接目标失败");
+      throw err;
+    }
+    st.retried = true;
+    st.pxTries = 1;
+    try {
+      // 纵深防御：种子池来自外部名单，进 connect 之前再验一次地址
+      st.node = px0.host + ":" + px0.port;
+      if (checkTarget(px0.host, px0.port)) throw new Error("proxyip 被策略禁止");
+      // connect() 自己没有超时，挂死会让客户端一直等；超时之后迟到成功的 socket 也必须关掉，
+      // 否则白占免费计划的并发 connect 名额（与 Dialer / Attacher / Region 同一口径）
+      const pk0 = o.budget.openSocket(px0.host, px0.port);
+      try {
+        const sock = await withTimeout(pk0, CONNECT_MS);
+        st.via = "node";
+        return sock;
+      } catch (e3) {
+        void pk0
+          .then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } })
+          .catch(() => { /* 本来就没连上 */ });
+        throw e3;
+      }
+    } catch (e2) {
+      const alt = await dialAnother(o.env, st, o.mode, o.budget, host);
+      if (alt) return alt;
+      // 连不上中转是节点问题，不是目标站问题：站点级试探也要把节点冻掉，否则这条探索路径每次白撞
+      await SEL.bumpFail(o.env, st.mode, st.node, st.hostTrial);
+      throw e2;
+    }
+  }
+}

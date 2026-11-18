@@ -1,4 +1,5 @@
 import { SC } from "../core/const";
+import { flushSnap, PEND } from "../store/index";
 import { HOOK } from "../core/hook";
 import { hostDirectMark, hostNodeMark } from "../nodes/metrics";
 import { cnt } from "../core/counter";
@@ -333,3 +334,41 @@ export class ConnSettle {
   }
 }
 
+
+/** 收尾只需要连接的这三样能力（结构化取参：结算层不 import Connection，避免与连接互相依赖） */
+export interface TailConn {
+  /** 连接 id（null / 空串表示握手期就结束，没有解析出目标） */
+  readonly id: string | null;
+  /** 释放上游 socket 与计数名额 */
+  release(): void;
+  /** 冲一次本地账本（force 为真时忽略节流） */
+  flush(force: boolean): void;
+}
+/**
+ * 功能：一条连接收尾时要做的四件事 —— 释放 socket、记「握手期就结束」、冲账本、冲快照。
+ *
+ * 为什么单独成类：收尾是唯一「连接已经不可用之后还要花 IO 预算」的阶段（`PEND.flush` 是一次 DO 往返、
+ * `flushSnap` 可能是一次 KV 写），原先它和握手、拨号挤在 session.ts 里，看不出「谁在关连接之后还在花额度」。
+ */
+export class SessionTail {
+  /**
+   * 功能：按顺序收尾（先释放 socket，再记账本，最后冲快照）。
+   * @param {TailConn} conn 本次连接（只用到释放 / id / flush 三样，结构化作参）
+   * @param {Env} env Worker 环境
+   * @param {ExecutionContext | null} ctx 执行上下文（没有 waitUntil 时同步跑完）
+   * @returns {void}
+   */
+  done(conn: TailConn, env: Env, ctx: ExecutionContext | null): void {
+    // 先释放 socket：后面两步都是异步 IO，占着连接只会让延迟关掉的名额继续被占用
+    conn.release();
+    // 握手期就结束的连接（占大多数）以前完全不可见，这里补一个计数
+    if (!conn.id) cnt("noPayload");
+    conn.flush(true);
+    if (!ctx || !ctx.waitUntil) {
+      // 本地/单测没有 waitUntil：直接返回，别把 Promise 挂成未处理的 rejection
+      return;
+    }
+    ctx.waitUntil(PEND.flush(env));
+    ctx.waitUntil(flushSnap(env));
+  }
+}

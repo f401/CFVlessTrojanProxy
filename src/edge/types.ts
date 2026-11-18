@@ -1,4 +1,6 @@
 /** 单个请求的上下文：路由函数只认这个对象，不再各自从 fetch 里抓变量 */
+import type { CallGate } from "../core/call-gate";
+
 export interface RouteCtx {
   request: Request;
   env: Env;
@@ -11,6 +13,8 @@ export interface RouteCtx {
   pageKey: string;
   keyOk: boolean;
   cf: CfMeta;
+  /** 本次请求的额度账本（connect / 子请求 / DO），交给拨号器与探测使用 */
+  budget: CallGate;
 }
 
 /** 已通过 UUID 校验的上下文 */
