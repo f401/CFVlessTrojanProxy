@@ -12247,6 +12247,57 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   ok("[366] BudgetExhausted 可识别", W.isBudgetExhausted(be366) && !W.isBudgetExhausted(new Error("x")));
 }
 
+// ── 367 新增用户订阅：用户表不能用「只含 env 变量的 sig」做正向缓存 ──
+{
+  const protoSrc367 = fs.readFileSync("src/proxy/protocol.ts", "utf8").replace(/\r\n/g, "\n");
+  const i367 = protoSrc367.indexOf("export async function loadUsers(");
+  const j367 = i367 < 0 ? -1 : protoSrc367.indexOf("\n}\n", i367);
+  const lu367 = i367 < 0 || j367 < 0 ? "" : protoSrc367.slice(i367, j367);
+
+  // 结构：读 KV 之前不能再拿 sig 命中的旧表直接 return（跨 isolate 的根因）
+  ok("[367] loadUsers 不再用 sig 命中正向缓存", !/if \(S\.usersCache\.v && S\.usersSig === sig/.test(lu367));
+  ok("[367] 每次都读 KV 的 users 键", lu367.includes('kvGetStrict<UserRec[]>(env, "users")'));
+  ok("[367] 旧表只在 KV 失败时兜底", lu367.includes("!readOk && S.usersCache.v && prevSig === sig"));
+
+  // 行为：KV 里新增托管用户后，env 不变（sig 相同）、也不调 invalidateUsers，
+  // 下一次 loadUsers 必须立刻看到新用户 —— 这就是面板 A isolate 加用户、
+  // 订阅落到 B isolate 的真实场景（旧代码在这里命中 5 分钟旧缓存 ⇒ 404）。
+  const OLD367 = "aaaaaaaa-0000-4000-8000-000000000001";
+  const NEW367 = "aaaaaaaa-0000-4000-8000-000000000002";
+  const box367 = new Map();
+  const env367 = {
+    uuid: OLD367,
+    STATS: {
+      get: async (k) => box367.get(k) ?? null,
+      put: async (k, v) => { box367.set(k, v); },
+    },
+  };
+  W.S.usersCache = { v: null, t: 0 };
+  W.S.usersSig = "";
+  const first367 = await W.loadUsers(env367);
+  ok("[367] 初始只有老用户", first367.uuids.has(OLD367) && !first367.uuids.has(NEW367));
+
+  // 模拟面板在另一个 isolate 上 saveUsers：只写 KV，不动本 isolate 的 S.usersCache
+  box367.set("users", JSON.stringify([
+    { id: NEW367, pwd: "newpass367", note: "", enabled: true, managed: true, ts: 1 },
+  ]));
+  const second367 = await W.loadUsers(env367);
+  ok("[367] 同一 sig 下新增用户立即生效", second367.uuids.has(NEW367), "新用户仍 404");
+  eq("[367] 新用户的 Trojan 密码可取", W.trojanPasswordOf(env367, NEW367, second367), "newpass367");
+
+  // 兜底契约仍在：KV 读失败时返回上一份，且 ok 为假（不谎称已落盘）
+  const failEnv367 = {
+    uuid: OLD367,
+    STATS: { get: async () => { throw new Error("kv down 367"); } },
+  };
+  const third367 = await W.loadUsers(failEnv367);
+  ok("[367] KV 故障仍返回上一份用户表", third367.uuids.has(NEW367));
+  eq("[367] KV 故障时 ok 为假", third367.ok, false);
+
+  W.S.usersCache = { v: null, t: 0 };
+  W.S.usersSig = "";
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

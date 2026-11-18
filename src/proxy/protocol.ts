@@ -3,7 +3,7 @@ import { kvGetStrict, kvSet } from "../store/index";
 import { dec, enc, secretPwd, sha224Bytes, toHex, uuidFromBytes } from "../core/util";
 
 /* 协议解析：VLESS / Trojan 首包 */
-export const USERS_TTL = 300000; // 面板改动最多 5 分钟生效（把 KV 读从 1.4 万/天压到 1.4 千）
+export const USERS_TTL = 300000; // 仅作 KV 读失败后的重试冷却基准（1 分钟后再试）；正常路径每次都读 KV
 
 export const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -155,21 +155,29 @@ export class UserIndex {
  */
 export async function loadUsers(env: Env): Promise<Auth> {
   const sig = `${env.uuids || env.uuid || ""}|${secretPwd(env)}`;
-  if (S.usersCache.v && S.usersSig === sig && Date.now() - S.usersCache.t < USERS_TTL) return S.usersCache.v;
   const prevSig = S.usersSig;
   S.usersSig = sig;
 
   let managed: Partial<UserRec>[] = [];
   let readOk = true;
   try {
+    // 用户表每次都读 KV：面板加的用户在别的 isolate 上必须立刻生效。
+    // 以前拿「只含 env 变量的 sig」当正向缓存键，托管用户不在 sig 里，
+    // A isolate 加完用户只清了自己，B isolate 命中旧缓存 ⇒ 新 UUID 一直 404
+    // 直到 5 分钟 TTL 到期。这里的内存表因此**只**当 KV 读失败时的兜底，
+    // 绝不作为正常路径的返回值。
     managed = (await kvGetStrict<UserRec[]>(env, "users")) || [];
   } catch (e) {
     // KV 抖动不等于"没有用户"：有旧缓存就继续用，别让所有托管用户被踢下线
     readOk = false;
   }
   if (!readOk && S.usersCache.v && prevSig === sig) {
-    S.usersCache.t = Date.now() - USERS_TTL + 60000; // 1 分钟后再试，别每个请求都打 KV
-    return S.usersCache.v;
+    // 读失败且上一份缓存还是同一套 env：继续用旧表，并保持"过期"时间戳，
+    // 让下一个请求立刻再试 KV（不再因 TTL 未到而长期停在旧表）。
+    // 关键：兜表必须标 ok=false —— 面板 usersOp 靠它拒绝增删改。旧表可能
+    // 缺别的 isolate 刚加的用户，若当完整表写回 KV 会把新用户整份删掉。
+    S.usersCache.t = Date.now() - USERS_TTL;
+    return { ...S.usersCache.v, ok: false };
   }
 
   // 装配顺序是口径：env 先、托管后（托管记录必须能覆盖 env 的启用状态）
@@ -177,7 +185,8 @@ export async function loadUsers(env: Env): Promise<Auth> {
   index.fromEnv(env);
   index.fromManaged(managed);
   const out = index.result(readOk);
-  S.usersCache = { v: out, t: readOk ? Date.now() : Date.now() - USERS_TTL + 60000 };
+  // 只保留最近一次成功读到的表，供 KV 故障时兜底（正常路径不会命中它）
+  S.usersCache = { v: out, t: readOk ? Date.now() : Date.now() - USERS_TTL };
   return out;
 }
 
