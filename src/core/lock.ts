@@ -20,7 +20,7 @@ export class CronLock {
    * @param now 当前时间（毫秒时间戳；测试可注入）
    * @returns 拿到返回 true；正被一轮**未超时**的任务持有则返回 false
    */
-  claim(now = Date.now()): boolean {
+  static claim(now = Date.now()): boolean {
     const held = S.cronAt;
     // 没被持有，或持有已超时（上一轮大概率卡死了）→ 可以跑
     if (held && now - held < SC.CRON_STALE_MS) return false;
@@ -31,7 +31,7 @@ export class CronLock {
   }
 
   /** 功能：释放闸门（只在该轮真正收尾时调用） */
-  release(): void {
+  static release(): void {
     S.cronAt = 0;
   }
 
@@ -40,10 +40,7 @@ export class CronLock {
    * @param now 当前时间
    * @returns 0 表示空闲
    */
-  age(now = Date.now()): number {
+  static age(now = Date.now()): number {
     return S.cronAt ? now - S.cronAt : 0;
   }
 }
-
-/** 全局唯一的 cron 闸门；真实状态在 `S.cronAt`，这里只是方法容器 */
-export const CRONLOCK = new CronLock();

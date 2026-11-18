@@ -34,26 +34,23 @@ const TABLE: SubRoute[] = [
  */
 export class RouteTable {
   /** 按子路径查表；未命中返回 undefined（调用方回 404） */
-  route(sub: string): SubRoute | undefined {
+  static route(sub: string): SubRoute | undefined {
     return TABLE.find((r) => r.subs.includes(sub));
   }
 
   /** 表里注册的路由名（调试与测试用） */
-  names(): string[] {
+  static names(): string[] {
     return TABLE.map((r) => r.name);
   }
 
   /** 该子路径是否需要「先推增量、跳缓存」 */
-  needsStats(sub: string): boolean {
+  static needsStats(sub: string): boolean {
     return this.route(sub)?.stats === true;
   }
 
   /** 该子路径是否需要 RTT/地区数据 */
-  needsRtt(sub: string): boolean {
+  static needsRtt(sub: string): boolean {
     return this.route(sub)?.rtt === true;
   }
 }
-
-/** 进程内唯一实例 */
-export const ROUTES = new RouteTable();
 

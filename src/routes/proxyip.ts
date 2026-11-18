@@ -4,13 +4,13 @@ import { SC } from "../core/const";
 import { S } from "../core/state";
 import { json } from "../edge/respond";
 import { HOSTS, logErr } from "../nodes/metrics";
-import { costOf, scoreParts, STATS } from "../nodes/score";
+import { costOf, scoreParts, NodeStatsTable } from "../nodes/score";
 import { nodeSnapGet } from "../store/index";
 import { cronScan, nsOf, pxGet } from "../px/pool";
 import { POOL_SOURCES, SOURCES } from "../px/probe";
 import { SEL } from "../px/selector";
 import { cnt, cntView } from "../core/counter";
-import { CRONLOCK } from "../core/lock";
+import { CronLock } from "../core/lock";
 import { spdSnapshot } from "../core/obs";
 import { regionListAsync } from "../px/regions";
 import { PEND } from "../store/index";
@@ -139,7 +139,7 @@ export class ProxyipView {
     S.hostNode.clear();
     S.hostDirect.clear();
     S.hostRankCache.clear();
-    STATS.invalidateRank();
+    NodeStatsTable.invalidateRank();
     S.candN = 0;
     return json({ ok: true, alive: 0, curs: S.curs });
   }
@@ -159,15 +159,15 @@ export class ProxyipView {
       // 5 秒节流窗口内不动手：也不必占住闸门
       return null;
     }
-    if (!CRONLOCK.claim()) {
-      return json({ ok: false, error: "cron in progress", heldMs: CRONLOCK.age() });
+    if (!CronLock.claim()) {
+      return json({ ok: false, error: "cron in progress", heldMs: CronLock.age() });
     }
     S.lastManual = Date.now();
     try {
       await cronScan(this.env).catch((e) => logErr("cron: " + errMsg(e)));
       SEL.afterScan(this.env);
     } finally {
-      CRONLOCK.release();
+      CronLock.release();
     }
     return null;
   }

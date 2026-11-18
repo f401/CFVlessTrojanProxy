@@ -11,7 +11,7 @@ import { S } from "../core/state";
 import { shadowRate } from "../core/util";
 import { hostKey, HOSTS } from "../nodes/metrics";
 import { cnt } from "../core/counter";
-import { costOf, isBlack, isFrozen, usable, STATS, CANDS } from "../nodes/score";
+import { costOf, isBlack, isFrozen, usable, NodeStatsTable, CANDS } from "../nodes/score";
 import { ThompsonPicker } from "./ts";
 import { relayIpOf } from "../core/http80";
 import { HOOK } from "../core/hook";
@@ -188,7 +188,7 @@ export class SitePick {
     const t0 = HOSTS.untried(host, mode);
     if (!t0) return "";
     // 记下试过的时间：`HOSTS.untried` 下次就会跳过它，影子预算因此能轮到别的节点
-    STATS.nsGet(t0).lastTry = Date.now();
+    NodeStatsTable.nsGet(t0).lastTry = Date.now();
     if (st) {
       st.hostTrial = true;
       st.node = t0;

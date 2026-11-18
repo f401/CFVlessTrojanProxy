@@ -9,7 +9,7 @@ S.alive.clear(); S.nstat.clear();
 for (let i = 0; i < N; i++) {
   const k = `n${i}:443`;
   S.alive.set(k, { h: `n${i}`, p: 443, cc: "", ms: 100 + (i % 50) });
-  const s = W.STATS.nsGet(k);
+  const s = W.NodeStatsTable.nsGet(k);
   s.tcp = 50 + (i % 80); s.tls = 60; s.okW = 10 + (i % 20); s.failW = i % 3;
   s.hist[7] = 5; s.sumW = 5; s.sumW2 = 5; s.recentBytesW = 5 * 1048576; s.lastSampleAt = Date.now();
 }

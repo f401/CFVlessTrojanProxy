@@ -29,7 +29,7 @@ export class Prefs {
    * @param limit 每栏最多返回多少条
    * @returns 两栏记录
    */
-  of(host = "", limit = 40): { ok: PrefRow[]; bad: PrefRow[] } {
+  static of(host = "", limit = 40): { ok: PrefRow[]; bad: PrefRow[] } {
     const pick = new Map<string, PrefRow>();
     for (const r of VT.all()) {
       if (host && r.target !== host) continue;
@@ -48,7 +48,7 @@ export class Prefs {
    * @param host 目标站点
    * @returns 0 = 实测能打通，2 = 实测打不通，1 = 还没测过（未知不惩罚）
    */
-  chan(ip: string, host: string): 0 | 1 | 2 {
+  static chan(ip: string, host: string): 0 | 1 | 2 {
     if (!ip || !host) return 1;
     const state = VT.state(host, "r:" + ip);
     if (state === St.Reachable) return 0;
@@ -60,19 +60,12 @@ export class Prefs {
    * @param limit 每栏最多返回多少条
    * @returns 两栏记录与总条数
    */
-  json(limit = 40): { ok: PrefRow[]; bad: PrefRow[]; n: number } {
+  static json(limit = 40): { ok: PrefRow[]; bad: PrefRow[]; n: number } {
     const { ok, bad } = this.of("", limit);
     return { ok, bad, n: ok.length + bad.length };
   }
 }
 
-// 进程内唯一偏好视图（判定表的只读投影）。调用点直接用 `PREFS.of/chan/json`：
+// 进程内唯一偏好视图（判定表的只读投影）。调用点直接用 `Prefs.of/chan/json`：
 // 7.349 起 `prefsOf`/`chanPref`/`prefsJson` 三个转发函数已删除，与 7.303 同一条判据。
 //
-/**
- * 功能：进程内唯一的偏好视图实例（判定表的只读投影）。
- * @returns 无（模块级常量）
- */
-
-export const PREFS = new Prefs();
-

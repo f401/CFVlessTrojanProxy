@@ -1,4 +1,4 @@
-- 线上 **7.270**（已部署、可跑）｜仓库 **7.359**（架构重写完成：83 个导出类，模块级实例 57 → 37，共 215 个缺陷皆已修复）：两者差 89 个版本。
+- 线上 **7.270**（已部署、可跑）｜仓库 **7.360**（架构重写完成：82 个导出类、模块级实例 57 → 29、8 个无字段门面改静态方法、Pool 门面删除，共 215 个缺陷皆已修复）：两者差 90 个版本。
 
 # AGENTS.md
 
@@ -96,9 +96,9 @@ Account-level traps (all have happened):
 
 ## 6. Coding style
 
-- **Classes own state; functions compute.** Give a class to a module only when it exclusively owns mutable cross-request state (`VerdictTable`, `Selector`, `Pool`, `MeterState`, `FactTable` subclasses…). Pure computation and rendering stay free functions (`src/core/util.ts` must not become a class).
-- **No thin-wrapper facades.** A class whose every method is one-line delegation, or a module-level instance with no fields and a single consumer, is a defect: hold the object where it is used instead. Enforced socially plus `check-dead`; `Store`/`STORE`, `SUBVIEW`, `ALIVE`, `REGION`, `ATTACHER`, `SETTLE`, `FAILS`, `ROTATION`, `WIRING` were all removed this way.
-- **Module-level instances must fit one of three buckets** (see `docs/命名约定.md`): owns cross-request state, a typed view over `S` with no fields, or a constant/encoder. Anything else belongs to an object. Current count: 37.
+- **Classes own state; functions compute.** Give a class to a module only when it exclusively owns mutable cross-request state (`VerdictTable`, `Selector`, `MeterState`, `FactTable` subclasses, static-only holders such as `NodeStatsTable`…). Pure computation and rendering stay free functions (`src/core/util.ts` must not become a class).
+- **No thin-wrapper facades.** A class whose every method is one-line delegation, or a module-level instance with no fields and a single consumer, is a defect: hold the object where it is used instead. Enforced socially plus `check-dead`; `Store`/`STORE`, `SUBVIEW`, `ALIVE`, `REGION`, `ATTACHER`, `SETTLE`, `FAILS`, `ROTATION`, `WIRING` were removed this way, and 7.360 turned the eight field-less holders (`STATS`/`SEEDS`/`PREFS`/`PROBE_COOL`/`FACTS`/`ROUTES`/`CRONLOCK`/`POOL`) into static-method classes — then deleted `Pool` outright once its nine static methods were found to have zero production callers.
+- **Module-level instances must fit one of three buckets** (see `docs/命名约定.md`): owns cross-request state, a typed view over `S` with no fields, or a constant/encoder. Anything else belongs to an object. Current count: 29.
 - **Names must say what they hold.** No 1–2 character member names unless listed in the ALLOW table of `docs/命名约定.md`; units go in the name (`Ms`, `At`, `Bps`, `Count`, `Bytes`); closed sets use `St` / `Mode` from `src/core/enums.ts`; bounded tables use `BoundedMap` / `TimedMarks` from `src/core/table.ts`.
 - **No hardcoded transport.** Probing goes through the `ProbeTransport` interface and `TRANSPORTS` registry (`src/core/transport.ts`); exactly one file may import `tunnelfetch`.
 - **Comments** are Chinese (matching the codebase); this file and `docs/` are English-optional but currently Chinese in places. JSDoc says what/params/returns; body comments say what a step does and *why* (protocol offsets, bounds, temporary workarounds). Never put `//` inside HTML template strings in `src/views/` — it ships to browsers.
@@ -126,8 +126,8 @@ Account-level traps (all have happened):
 
 ## 9. Current state
 
-- Repo **7.359**; **live 7.270**. Everything from 7.271 to 7.359 is committed and pushed but **deliberately not deployed** (the user asked to keep CF pushes rare). Run the release flow above before shipping.
-- Architecture phase is closed: 112 source files, 83 exported classes, 37 module-level instances (from 57). `docs/ARCHITECTURE.md` lists every class and who owns it; `docs/命名约定.md` holds the naming rules and the singleton admission test.
+- Repo **7.360**; **live 7.270**. Everything from 7.271 to 7.360 is committed and pushed but **deliberately not deployed** (the user asked to keep CF pushes rare). Run the release flow above before shipping.
+- Architecture phase is closed: 112 source files, 82 exported classes, 29 module-level instances (from 57). `docs/ARCHITECTURE.md` lists every class and who owns it; `docs/命名约定.md` holds the naming rules and the singleton admission test.
 - Deliberately not done: merging the six fact tables (`VT`/`PS`/`EG`/`DNS`/`DEAD`/`BLK`) behind one root object. They appear ~540 times in `tests/` and `tools/`; the only gain is one less global. Rationale is recorded in `docs/命名约定.md`.
 - Open boundaries that only real traffic can answer: long-term benefit of relaying, subrequest / `connect()` exhaustion under load, and the paired `facts=eg` vs `none` gain (+6 ± 10.4 — not significant).
 - Historical audit ledger (defects 1–215 with root causes) lives in `docs/v8实现清单.md` (table H6), not here.

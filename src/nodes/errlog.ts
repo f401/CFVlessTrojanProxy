@@ -133,14 +133,6 @@ export function errCount(msg: unknown): void {
 }
 
 /**
- * 功能：当前窗口的错误直方图（薄包装，委托 ERRS.hist）。
- * @returns [{k, n}] 最多 8 条，按次数降序
- */
-export function errHist(): Array<{ k: string; n: number }> {
-  return ERRS.hist();
-}
-
-/**
  * 功能：记一条错误日志（薄包装，委托 ERRS.log）。
  * @param msg 消息（截断到 200 字符）
  * @param tag 关联键

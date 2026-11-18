@@ -46,13 +46,13 @@ export {
 } from "./views/sub";
 export { regionEntries } from "./views/sub-common";
 export { SubscriptionView } from "./views/sub";
-export { ROUTES, RouteTable } from "./routes/table";
+export { RouteTable } from "./routes/table";
 export { PageView } from "./views/panel";
 export { loadRtt, rttLearn, rttMark } from "./nodes/metrics";
 export { HOSTS, HostProfile, siteKey } from "./nodes/metrics";
 export { subHeaders, effectiveQuota } from "./core/quota";
 export { S } from "./core/state";
-export { EMPTY_CLOSE_BAD, NodeStatsTable, STATS, TEN_MB, ZERO_STAT } from "./nodes/stat";
+export { EMPTY_CLOSE_BAD, NodeStatsTable, TEN_MB, ZERO_STAT } from "./nodes/stat";
 export { SC } from "./core/const";
 export { SEL, Selector } from "./px/selector";
 export { FailBook } from "./px/failbook";
@@ -60,7 +60,7 @@ export { Rotation, dwellOf } from "./px/selector";
 export { PICK, PickPath } from "./px/pickpath";
 export { ThompsonPicker } from "./px/ts";
 export { SitePick, PathPrefs } from "./px/pickpath";
-export { SEEDS } from "./px/seed";
+export { SeedStore } from "./px/seed";
 export { Connection } from "./proxy/connection";
 export { CAGG_MAX, ConnSettle, type SettleView } from "./proxy/conn-settle";
 export { FLOW_TICK_MS, NODE_EMIT_GAP_MS, NODE_WIN_MS, SITE_WIN_MS, SampleWindow, ClientFlow } from "./proxy/connection";
@@ -84,9 +84,8 @@ export {
   CandidateBoard,
   ScoreModel,
 } from "./nodes/score";
-export { nsOf, pxGet, flushPx, noteProbe, bumpProbeBad } from "./px/pool";
-export { POOL, Pool } from "./px/pool";
-export { ALIVE_MAX, AliveBoard, PROBE_COOL, PoolScan, SEED_COLD_N, aliveList, cronScan } from "./px/pool";
+export { commitPool, ensurePool, nsOf, pxGet, flushPx, noteProbe, bumpProbeBad } from "./px/pool";
+export { ALIVE_MAX, AliveBoard, ProbeCooldown, PoolScan, SEED_COLD_N, aliveList, cronScan } from "./px/pool";
 export { ScanAlive, ScanHouse, ScanProbe, probeBatch, probeOne } from "./px/scan";
 export type { ProbeHit } from "./px/scan";
 export { DIALER, Dialer } from "./proxy/dialer";
@@ -95,7 +94,7 @@ export { MeterDiagnostics } from "./store/meter-diagnostics";
 export { Attacher } from "./proxy/attacher";
 export { RegionPicker } from "./proxy/region";
 export { cnt, cntDelta, cntUnsend, cntView } from "./core/counter";
-export { CRONLOCK, CronLock } from "./core/lock";
+export { CronLock } from "./core/lock";
 export {
   logErr,
   hostNodeMark,
@@ -107,7 +106,6 @@ export {
   HN_MAX_NODES,
   errKind,
   errCount,
-  errHist,
 } from "./nodes/metrics";
 export { ERRS } from "./nodes/errlog";
 export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES, pxPolicy, RawProbe } from "./px/probe";
@@ -143,7 +141,7 @@ export { DIRECT, chanKey, nodeKeyOf } from "./route/channel";
 export { pxDecision } from "./proxy/pxhook";
 export { HOOK } from "./core/hook";
 export { DNS_BATCH, SHARE_PEND, SHARE_SNAP, TFB_CALLS, SUB_FIXED, SUB_FIXED_N, planRound, planView } from "./route/budget";
-export { PREFS } from "./route/prefs";
+export { Prefs } from "./route/prefs";
 export { HEALTH, RelayHealth, ipOf } from "./route/relay-health";
 export { RelayLedger } from "./route/relay-ledger";
 export { VT, VerdictTable } from "./route/verdict";
@@ -175,7 +173,7 @@ export type { FactTables } from "./store/factmerge";
 export { BLK_TTL, BIG_PEER, BIG_WIN, DEAD_TTL, TINY_ABS, WRITE_GAP, commitFact, factKey, isTiny } from "./route/commitfact";
 export { FACT, FactShadow, shadowCtx, shadowObs } from "./route/factshadow";
 /** 四类事实的门面（OOP 收口后唯一的上行/合并入口） */
-export { FACTS, FactsStore } from "./route/factsstore";
+export { FactsStore } from "./route/factsstore";
 /** 探测传输层：抽象、两个实现与门面现在同住 `core/transport.ts`（出口族对照实验用） */
 export {
   GATEWAY_TRANSPORT,

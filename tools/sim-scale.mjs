@@ -65,7 +65,7 @@ function reset() {
 function install(pool) {
   for (const n of pool) {
     S.alive.set(n.key, { h: n.id, p: 443, cc: n.cc, ms: n.probeTcp + n.tls });
-    const s = W.STATS.nsGet(n.key);
+    const s = W.NodeStatsTable.nsGet(n.key);
     s.tcp = n.probeTcp;
     s.tls = n.tls;
     s.at = NOW;
@@ -85,13 +85,13 @@ async function request(n) {
   }
   const bytes = 0.2 * MB;
   const dur = rttOf(n) + (bytes / (n.bw * MB)) * 1000;
-  W.STATS.nsSpeed(n.key, bytes / (dur / 1000), bytes, ENV, Math.min(1, dur / 1000));
-  W.STATS.nsOk(n.key, 0, 0);
-  W.STATS.nsLatency(n.key, rttOf(n));
+  W.NodeStatsTable.nsSpeed(n.key, bytes / (dur / 1000), bytes, ENV, Math.min(1, dur / 1000));
+  W.NodeStatsTable.nsOk(n.key, 0, 0);
+  W.NodeStatsTable.nsLatency(n.key, rttOf(n));
 }
 
 function cron(pool) {
-  for (const n of pool) W.STATS.nsProbe(n.key, (n.probeTcp + n.tls) * 1.0, n.probeTcp, n.tls);
+  for (const n of pool) W.NodeStatsTable.nsProbe(n.key, (n.probeTcp + n.tls) * 1.0, n.probeTcp, n.tls);
   W.SEL.afterScan(ENV);
 }
 
@@ -135,7 +135,7 @@ async function run(n, hours, seedVal) {
     S.rankCache = { t: 0, at: {}, v: {}, step: {} };
     W.candsFor("tput");
   }, 10);
-  S.seedAt = NOW + 3600e3; // 让 SEEDS.read 直接返回，只量选路本身
+  S.seedAt = NOW + 3600e3; // 让 SeedStore.read 直接返回，只量选路本身
   const reg = await benchAsync(() => W.SEL.region(ENV, "DE", "lat"), 10);
   const pickUs = bench(() => W.SEL.pick(ENV, "lat", { host: "" }), 500);
 
@@ -174,7 +174,7 @@ async function run(n, hours, seedVal) {
 
   // seed 体积：SEED_MAX=40，看看 40 个节点占多少字节
   const seedBytes = (() => {
-    const rows = pool2.slice(0, 40).map((x) => W.SEEDS.packNode(x.key));
+    const rows = pool2.slice(0, 40).map((x) => W.SeedStore.packNode(x.key));
     return JSON.stringify(rows).length;
   })();
 

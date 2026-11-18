@@ -10,11 +10,11 @@ import { HEALTH } from "./relay-health";
 import { JUDGE } from "./judge";
 import { VT } from "./verdict";
 import { vtAck, vtDelta, vtNack, vtLoad } from "./verdictsync";
-import { PREFS } from "./prefs";
+import { Prefs } from "./prefs";
 import { relNote } from "./relperf";
 import { DEAD } from "./deadfacts";
 import { CAP } from "./capfacts";
-import { FACTS } from "./factsstore";
+import { FactsStore } from "./factsstore";
 import type { FactsDelta } from "./factsstore";
 import { FACT_ALL, factOnce } from "./factflags";
 import type { Chan } from "./channel";
@@ -81,12 +81,12 @@ export class PolicyWiring {
     HOOK.syncAck = (): void => {
       HEALTH.ack();
       vtAck();
-      FACTS.ack();
+      FactsStore.ack();
     };
     HOOK.syncNack = (): void => {
       HEALTH.nack();
       vtNack();
-      FACTS.nack();
+      FactsStore.nack();
     };
     HOOK.veto = (host: string, ip: string): boolean => {
       if (!ip) return false;
@@ -98,13 +98,13 @@ export class PolicyWiring {
       if (ok) VT.set(host, "r:" + ip, 200, ms, 1);
     };
     HOOK.prefer = (host: string, ip: string): boolean => policy.prefer(host, ip);
-    HOOK.chanPref = (ip: string, host = ""): number => PREFS.chan(ip, host);
+    HOOK.chanPref = (ip: string, host = ""): number => Prefs.chan(ip, host);
     HOOK.win = (host: string): { d: boolean; r: boolean } => policy.win(host);
     HOOK.relPerf = (host: string, ip: string, ttfb: number, kbs: number): void => relNote(host, ip, ttfb, kbs);
     HOOK.capNote = (ip: string, kbs: number): void => { CAP.note(ip, kbs); };
     HOOK.vtDelta = (): Array<{ k: string; s: number; t: number }> => vtDelta();
     HOOK.deadNote = (ip: string, ok: boolean): void => DEAD.note(ip, ok);
-    HOOK.factsDelta = (): FactsDelta => FACTS.delta();
+    HOOK.factsDelta = (): FactsDelta => FactsStore.delta();
     // 之前没注册这个槽位 -> DecisionIn.facts 恒 undefined -> scoreOf 走 FULL_ON，
     // 也就是「facts 绑定只影响 /health 显示、不影响选路」。这是 check-wire 抓不到的接线洞
     // （它扫的是符号是否有生产调用点，而槽位是「注册」不是「调用」）。

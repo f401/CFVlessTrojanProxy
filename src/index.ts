@@ -4,7 +4,7 @@ import { handleUpgrade } from "./proxy/session";
 import { health } from "./routes/health";
 import { runCron } from "./routes/cron";
 import { admin } from "./routes/admin";
-import { ROUTES } from "./routes/table";
+import { RouteTable } from "./routes/table";
 
 import { loadRtt, logErr } from "./nodes/metrics";
 
@@ -72,7 +72,7 @@ export default {
       const base = { request, env, ctx, url, host, seg, first, auth, pageKey, keyOk, cf };
 
       // 路由表分发：表决定「要不要先推增量 / 读 RTT」，组装根只负责按表调用
-      const def = ROUTES.route(sub);
+      const def = RouteTable.route(sub);
       if (!def) return new Response("Not Found", { status: 404 });
 
       // 订阅 / 看用量之前：把本 isolate 还没送达的增量推给 DO，并把 DO 读缓存作废。

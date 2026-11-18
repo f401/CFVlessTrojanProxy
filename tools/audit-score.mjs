@@ -20,7 +20,7 @@ const reset = () => {
 const node = (k, patch = {}) => {
   const i = k.lastIndexOf(":");
   S.alive.set(k, { h: k.slice(0, i), p: Number(k.slice(i + 1)) || 443, cc: patch.cc || "", ms: patch.tcp || 100 });
-  Object.assign(W.STATS.nsGet(k), patch);
+  Object.assign(W.NodeStatsTable.nsGet(k), patch);
 };
 
 const pad = (s, n) => String(s).padEnd(n);
@@ -75,12 +75,12 @@ console.log(`jp1 在途=9，jp2 在途=0 → region 选中=${herd && herd.h + ":
 /* ---------- 3. 快失败窗口：旧成功会不会稀释新失败 ---------- */
 console.log("\n[3] 快失败窗口（4 次成功 → 9 分钟后 4 次失败）");
 reset();
-const s = W.STATS.nsGet("ff:443");
-for (let i = 0; i < 4; i++) W.STATS.nsOk("ff:443", 50, 10);
+const s = W.NodeStatsTable.nsGet("ff:443");
+for (let i = 0; i < 4; i++) W.NodeStatsTable.nsOk("ff:443", 50, 10);
 const shift = 9 * 60000;
 s.winAt -= shift;
 s.at -= shift;
-for (let i = 0; i < 4; i++) W.STATS.nsFail("ff:443");
+for (let i = 0; i < 4; i++) W.NodeStatsTable.nsFail("ff:443");
 console.log(
   `winOk=${s.winOk.toFixed(2)} winFail=${s.winFail.toFixed(2)} pFailFast=${W.pFailFast(s).toFixed(3)} ` +
     `blackUntil-now=${Math.round((s.blackUntil - Date.now()) / 1000)}s`,
@@ -117,7 +117,7 @@ console.log("\n[6] 400 候选的排序成本");
 reset();
 for (let i = 0; i < 400; i++) {
   node(`n${i}:443`, { tcp: 100 + (i % 80), tls: 40, okW: 10 + (i % 20), failW: i % 3 });
-  const st = W.STATS.nsGet(`n${i}:443`);
+  const st = W.NodeStatsTable.nsGet(`n${i}:443`);
   st.hist[7] = 5;
   st.sumW = 5;
   st.sumW2 = 5;

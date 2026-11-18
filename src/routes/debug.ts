@@ -10,15 +10,15 @@ import { planView } from "../route/budget";
 import { BLK_TTL } from "../route/commitfact";
 import { DEAD } from "../route/deadfacts";
 import { EG } from "../route/egfacts";
-import { FACTS } from "../route/factsstore";
-import { PREFS } from "../route/prefs";
+import { FactsStore } from "../route/factsstore";
+import { Prefs } from "../route/prefs";
 import { PS } from "../route/psfacts";
 import { HEALTH } from "../route/relay-health";
 import { REL_SAMPLE_TTL, RELPERF } from "../route/relperf";
 import { VT } from "../route/verdict";
 import { errMsg, withTimeout } from "../core/util";
 import { adminOnly } from "../edge/auth";
-import { STATS } from "../nodes/score";
+import { NodeStatsTable } from "../nodes/score";
 import { commitPool, flushPx, pxSet } from "../px/pool";
 import { EXTRA_HOSTS, refillPool } from "../px/probe";
 
@@ -128,7 +128,7 @@ export class DebugTables {
    */
   private factsAll(q: URLSearchParams): Response | null {
     if (q.get("facts") !== "1") return null;
-    return json({ tables: FACTS.snap(), counters: cntView() });
+    return json({ tables: FactsStore.snap(), counters: cntView() });
   }
 
   /**
@@ -186,7 +186,7 @@ export class DebugTables {
    */
   private prefsRows(q: URLSearchParams): Response | null {
     if (q.get("prefs") !== "1") return null;
-    return json({ prefs: PREFS.json(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });
+    return json({ prefs: Prefs.json(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });
   }
 
   /**
@@ -269,7 +269,7 @@ export class DebugActions {
     if (!/^[0-9a-zA-Z.\-]+:\d+$/.test(want)) return json({ ok: false, error: "格式应为 host:port" });
     await pxSet(c.env, { cur: want });
     // 把这条节点的惩罚清掉：手动指定的语义就是「我就要用这条，别拿历史失败拦我」
-    const stat = STATS.nsGet(want);
+    const stat = NodeStatsTable.nsGet(want);
     stat.blackUntil = 0;
     stat.freeUntil = 0;
     stat.streak = 0;

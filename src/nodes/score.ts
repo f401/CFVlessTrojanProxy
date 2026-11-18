@@ -1,6 +1,6 @@
 import { SC } from "../core/const";
 import { S } from "../core/state";
-import { availOf, effView, TEN_MB, ZERO_STAT, pFailFast, pFailOf, pStallOf, STATS } from "./stat";
+import { availOf, effView, TEN_MB, ZERO_STAT, pFailFast, pFailOf, pStallOf, NodeStatsTable } from "./stat";
 import type { EffView } from "./stat";
 import { pcts } from "../core/hist";
 
@@ -40,11 +40,11 @@ export function isFrozen(k: string): boolean {
  */
 export function freezeNode(k: string): void {
   if (!k) return;
-  const s = STATS.nsGet(k);
+  const s = NodeStatsTable.nsGet(k);
   s.freeUntil = Math.max(s.freeUntil || 0, Date.now() + SC.ROLL_FREEZE);
   // 站点排行里不能再推荐它：清缓存 + 打一次失效戳
   S.hostRankCache.clear();
-  STATS.invalidateRank();
+  NodeStatsTable.invalidateRank();
 }
 
 /**

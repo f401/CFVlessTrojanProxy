@@ -339,7 +339,7 @@ function reset() {
 
 function addNode(n) {
   S.alive.set(n.key, { h: n.id, p: 443, cc: n.cc, ms: n.probeTcp + n.tls });
-  const s = W.STATS.nsGet(n.key);
+  const s = W.NodeStatsTable.nsGet(n.key);
   s.tcp = n.probeTcp;
   s.tls = n.tls;
   s.at = NOW;
@@ -384,11 +384,11 @@ async function request(n, mode, burst, jitter, bytes = 0) {
   const tx = Math.max(dur * 0.4, dur - stallMs - rtt);
   const bps = szR / (tx / 1000);
   const w = Math.min(1, szR / (512 * 1024)) * Math.min(1, dur / 1000);
-  if (w > 0) W.STATS.nsSpeed(n.key, bps, szR, ENV, Math.min(4, w));
+  if (w > 0) W.NodeStatsTable.nsSpeed(n.key, bps, szR, ENV, Math.min(4, w));
   // 和生产一致：runMs 记"所有连接"的时长（早先只记卡过的那条，pStall 分母被缩成几百毫秒）
-  W.STATS.nsStall(n.key, n.stall > 0 ? n.stall * dur : 0, dur);
-  W.STATS.nsOk(n.key, 0, 0);
-  W.STATS.nsLatency(n.key, rtt + wait); // 真实首字节回流（排队时间也算进 ttfb）
+  W.NodeStatsTable.nsStall(n.key, n.stall > 0 ? n.stall * dur : 0, dur);
+  W.NodeStatsTable.nsOk(n.key, 0, 0);
+  W.NodeStatsTable.nsLatency(n.key, rtt + wait); // 真实首字节回流（排队时间也算进 ttfb）
   return wait;
 }
 
@@ -414,11 +414,11 @@ function cron(sc) {
     }
   }
   for (const n of pool) {
-    if (rnd() < n.pFail * 0.4) W.STATS.nsProbeFail(n.key);
+    if (rnd() < n.pFail * 0.4) W.NodeStatsTable.nsProbeFail(n.key);
     else {
       const j = 0.9 + rnd() * 0.2;
       const pj = sc.probeJitter ? 0.4 + rnd() * 1.2 : 1;
-      W.STATS.nsProbe(n.key, (n.probeTcp * pj + n.tls) * j, n.probeTcp * pj * j, n.tls * j);
+      W.NodeStatsTable.nsProbe(n.key, (n.probeTcp * pj + n.tls) * j, n.probeTcp * pj * j, n.tls * j);
     }
   }
   W.SEL.afterScan(ENV);
@@ -582,7 +582,7 @@ async function run(sc, hours, seedVal) {
 
   if (process.env.DUMP) {
     const rows = [...hits.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-    console.log("[dump]", sc.name, rows.map(([k, v]) => `${k}:${v}(cost=${Math.round(W.costOf(k, mode))},cap=${Math.round((W.STATS.nsGet(k).capBps||0)/1024)}KB,n=${Math.round(W.STATS.nsGet(k).okW||0)})`).join(" "));
+    console.log("[dump]", sc.name, rows.map(([k, v]) => `${k}:${v}(cost=${Math.round(W.costOf(k, mode))},cap=${Math.round((W.NodeStatsTable.nsGet(k).capBps||0)/1024)}KB,n=${Math.round(W.NodeStatsTable.nsGet(k).okW||0)})`).join(" "));
   }
   ratios.sort((a, b) => a - b);
   if (process.env.DBG && dscope.size) {

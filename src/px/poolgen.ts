@@ -2,11 +2,11 @@ import { errMsg } from "../core/util";
 
 import { S } from "../core/state";
 import { logErr } from "../nodes/metrics";
-import { STATS } from "../nodes/score";
+import { NodeStatsTable } from "../nodes/score";
 import { kvGetStrict, kvSet } from "../store/index";
 import { PX_TTL, SEED_KEY } from "./const";
 import { POOL_MAX } from "./probe";
-import { SEEDS } from "./seed";
+import { SeedStore } from "./seed";
 
 /* 候选池的代际读写：单独一层，因为提交规则（跨 isolate 单调 + 两阶段锚点）本身就是一段逻辑 */
 
@@ -19,7 +19,7 @@ export async function ensurePool(env: Env) {
   // 内存空 → 读种子表拿当前代际号，再按代际键取池子；
   // 代际号是两阶段提交的锚点，读一个键比扫 px:pool:* 前缀便宜得多
   if (S.pool.length) return S.pool;
-  await SEEDS.read(env);
+  await SeedStore.read(env);
   const gen = S.seed.poolGen || 0;
   // 没有代际号说明从没成功提交过池子：返回空，交给 cronScan 去拉源重建
   if (!gen) return [];
@@ -29,7 +29,7 @@ export async function ensurePool(env: Env) {
       // 截断到当前上限：KV 里的池子可能比配置的 POOL_MAX 大（上限被调小过）
       S.pool = v.slice(0, POOL_MAX);
       S.poolGen = gen;
-      STATS.invalidateRank();
+      NodeStatsTable.invalidateRank();
     }
   } catch (e) {
     // 读失败与「还没有池子」在调用方看来都是空池，但前者要留证据：
@@ -84,14 +84,14 @@ export async function commitPool(env: Env, fresh: PoolEntry[], allowShrink = fal
   }
   S.pool = fresh;
   S.poolGen = gen;
-  STATS.invalidateRank();
+  NodeStatsTable.invalidateRank();
   S.poolBuilt = Date.now();
   S.seed.poolGen = gen;
   // 第二阶段：把锚点写回 seed。写失败时新池子只活在本 isolate 里（冷启动会退回旧代际），
   // 所以失败要重试一次，还不成就记进错误环 —— 不能像以前那样返回 ok 就当已落盘。
-  let w = await SEEDS.write(env, S.colo ? undefined : true, true);
+  let w = await SeedStore.write(env, S.colo ? undefined : true, true);
   if (!w.ok) {
-    w = await SEEDS.write(env, S.colo ? undefined : true, true);
+    w = await SeedStore.write(env, S.colo ? undefined : true, true);
     if (!w.ok) logErr("pool anchor " + String(w.err || "write").slice(0, 60), "kv");
   }
   return { ok: true, gen, n: newN, anchored: w.ok };

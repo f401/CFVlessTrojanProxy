@@ -5,16 +5,15 @@ import { commitPool, ensurePool } from "./poolgen";
 
 import { SEED_WRITE_GAP } from "../core/const";
 import { capOf, p90Of, pFailOf, pStallOf, pctOf, scoreParts } from "../nodes/score";
-import { SEEDS } from "./seed";
+import { SeedStore } from "./seed";
 import { S } from "../core/state";
-import { aliveList, noteProbe, pxGet } from "./alive";
-import { cronScan } from "./scan";
+import { pxGet } from "./alive";
 
 // 池子的代际读写搬去 ./poolgen（提交规则较长，混在本文件会顶到 560 行上限）；
 // 存活表与探活冷却搬去 ./alive；一轮维护搬去 ./scan。这里全部原样再导出，
 // 让 `../px/pool` 依旧是候选池的唯一入口（调用点与单测零改动）。
 export { commitPool, ensurePool };
-export { ALIVE_MAX, AliveBoard, PROBE_COOL, ProbeCooldown, SEED_COLD_N, aliveList, bumpProbeBad, noteProbe, pxGet } from "./alive";
+export { ALIVE_MAX, AliveBoard, ProbeCooldown, SEED_COLD_N, aliveList, bumpProbeBad, noteProbe, pxGet } from "./alive";
 export { PoolScan, cronScan } from "./scan";
 
 /* 代理节点：状态 / 信誉分桶 / 选择 / cron */
@@ -95,58 +94,5 @@ export async function flushPx(env: Env, force?: boolean) {
     if (Date.now() - last < SEED_WRITE_GAP) return { ok: true, skipped: true };
   }
   S.nsWriteAt = Date.now();
-  return SEEDS.write(env, S.colo ? undefined : true, !!force);
+  return SeedStore.write(env, S.colo ? undefined : true, !!force);
 }
-
-/**
- * Pool 门面（P4）：把「抓取 → 准入探活 → 写 alive → 淘汰」这条流程以对象形式暴露。
- * 每个方法都委托**模块级同名函数**（实现分别在 ./alive、./scan、./poolgen 与本源文件），
- * 因此返回值就是被委托函数的返回值 —— 不要在这里另做裁剪或转换，否则会出现两份口径。
- * 与 src/store/store.ts 的 Store 门面同一形态；要真正内联时逐个方法替换实现即可。
- */
-export class Pool {
-  /** 功能：委托模块级 `noteProbe`，把一条探活结果写进探活分类计数。@param r 探活结果（`bad` 为非空表示失败原因）。@returns 无 */
-  noteProbe(r: { bad?: string } | null) {
-    return noteProbe(r);
-  }
-  /** 功能：委托模块级 `ensurePool`，按代际键从 KV 载入候选池（冷 isolate 的入口）。@param env Worker 环境。@returns 载入后的池子（可能为空数组） */
-  async ensurePool(env: Env) {
-    return ensurePool(env);
-  }
-  /** 功能：委托模块级 `commitPool`，把新候选合并进池子并按代际键写回。@param env Worker 环境。@param fresh 新候选。@param allowShrink 允许池子变小（不能超过 POOL_MIN）。@returns 写入结果 */
-  async commitPool(env: Env, fresh: PoolEntry[], allowShrink = false) {
-    return commitPool(env, fresh, allowShrink);
-  }
-  /** 功能：委托模块级 `pxGet`，取当前可用中继列表与面板状态。@param env Worker 环境。@returns 游标、存活条目与状态快照 */
-  async pxGet(env: Env) {
-    return pxGet(env);
-  }
-  /** 功能：委托模块级 `nsOf`，把候选键翻译成节点统计视图。@param keys 候选键。@param limit 最多取几条。@returns 键 → 统计的映射 */
-  nsOf(keys: string[], limit = 64) {
-    return nsOf(keys, limit);
-  }
-  /**
-   * 功能：委托模块级 `pxSet`，改内存里的当前节点。
-   * @param env Worker 环境
-   * @param patch 只认 `cur`（`alive` 那条分支在 7.173 删掉了：零调用方）
-   * @returns 转发 `pxSet` 的返回值
-   */
-  async pxSet(env: Env, patch: { cur?: string | null }) {
-    return pxSet(env, patch);
-  }
-  /** 功能：委托模块级 `flushPx`，把信誉表的变更落盘（有节流）。@param env Worker 环境。@param force 跳过节流立即写。@returns 写入结果 */
-  async flushPx(env: Env, force?: boolean) {
-    return flushPx(env, force);
-  }
-  /** 功能：委托模块级 `aliveList`，取探活通过的条目（冷启动会先载入名单）。@param env Worker 环境。@returns 存活条目 */
-  async aliveList(env: Env) {
-    return aliveList(env);
-  }
-  /** 功能：委托模块级 `cronScan`，跑一轮「抓取 → 准入复测 → 打标 → 游标重算」。@param env Worker 环境。@param adm 本轮准入预算（0 表示按池子大小自适应）。@returns 无 */
-  async cronScan(env: Env, adm = 0) {
-    return cronScan(env, adm);
-  }
-}
-
-/** 进程内唯一实例 */
-export const POOL = new Pool();

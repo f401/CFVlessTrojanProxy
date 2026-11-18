@@ -6,7 +6,7 @@ import { trimAged } from "../core/hostmem";
 import { cnt } from "../core/counter";
 import { FIRST_UP_MS, closeQuietly, releaseAll, WS_OPEN } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
-import { STATS } from "../nodes/stat";
+import { NodeStatsTable } from "../nodes/stat";
 import { SEL } from "../px/selector";
 import { kickFlush } from "../store/pend";
 import { checkTarget, expandV6, isV6Literal, parseProxyIp } from "./dial";
@@ -120,7 +120,7 @@ export class Attacher {
     const { env, clientSocket, conn, host, region } = o;
     // 已经走中转还是 0 字节关闭 → 这次中转失败，必须计数（否则面板上看不出中转在失败）
     cnt("eCloseP");
-    STATS.nsEmptyClose(conn.node, true);
+    NodeStatsTable.nsEmptyClose(conn.node, true);
     // 同一跳最多换一条中继：换第三跳解决不了「这个站经中转走不通」这件事
     if ((conn.pxTries || 1) < 2) {
       const s2 = await dialAnother(env, conn, o.mode, host, region || undefined);
@@ -205,7 +205,7 @@ export class Attacher {
       cnt("dead");
       kickFlush(env, conn.id);
       cnt("eCloseD"); // 直连空关闭：目标站的问题，不算节点
-      STATS.nsEmptyClose(conn.node, false);
+      NodeStatsTable.nsEmptyClose(conn.node, false);
       this.endClient(clientSocket, 1000, "done");
       return;
     }
@@ -229,7 +229,7 @@ export class Attacher {
       await this.run(o, s3);
     } catch (e) {
       // 池子里能解析、但连不上：必须给这条中继记账，否则选择器会一直把它挑回来
-      STATS.nsFail(px.host + ":" + px.port);
+      NodeStatsTable.nsFail(px.host + ":" + px.port);
       this.endClient(clientSocket, 1011, "proxyip failed");
     }
   }

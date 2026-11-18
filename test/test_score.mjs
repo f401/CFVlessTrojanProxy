@@ -118,21 +118,21 @@ const reset = () => {
 const node = (k, patch = {}) => {
   const i = k.lastIndexOf(":");
   S.alive.set(k, { h: k.slice(0, i), p: Number(k.slice(i + 1)) || 443, cc: "", ms: 100 });
-  Object.assign(W.STATS.nsGet(k), patch);
+  Object.assign(W.NodeStatsTable.nsGet(k), patch);
 };
 
 /* ---------- 1. 直方图分位 ---------- */
 reset();
-eq("空直方图 p50", W.pcts(W.STATS.nsGet("x:1")).p50, 0);
-eq("空直方图 p90", W.pcts(W.STATS.nsGet("x:1")).p90, 0);
+eq("空直方图 p50", W.pcts(W.NodeStatsTable.nsGet("x:1")).p50, 0);
+eq("空直方图 p90", W.pcts(W.NodeStatsTable.nsGet("x:1")).p90, 0);
 
-const s1 = W.STATS.nsGet("h1:443");
+const s1 = W.NodeStatsTable.nsGet("h1:443");
 s1.hist[7] = 10; // 2 MB/s 桶
 const q1 = W.pcts(s1);
 ok("单桶 p50 落在 2MB 附近", q1.p50 > 1.4e6 && q1.p50 < 2.9e6, q1.p50);
 ok("单桶 cap ≤ p50*2.5", q1.cap <= q1.p50 * 2.5 + 1, `${q1.cap} vs ${q1.p50}`);
 
-const s2 = W.STATS.nsGet("h2:443");
+const s2 = W.NodeStatsTable.nsGet("h2:443");
 s2.hist[4] = 9;
 s2.hist[10] = 1; // 256KB ×9 + 16MB ×1
 const q2 = W.pcts(s2);
@@ -244,20 +244,20 @@ node("seed:443", { tcp: 50 });
 eq("无本地样本时用固定先验", Math.round(W.scoreParts("seed:443", "tput").e10Ms), Math.round((10 * 1048576 / W.SC.PRIOR_BPS) * 1000));
 {
   // 一条 512KB、1 秒的本地窗口：capBps 立刻由本地样本给出，confB 仍不够（要 3 个有效窗口 + 3MiB）
-  W.STATS.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
+  W.NodeStatsTable.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
   const p = W.scoreParts("seed:443", "tput");
   ok("本地样本决定 capBps", p.capBps >= 400 * 1024, String(p.capBps));
   eq("单条短样本不构成高置信度", p.confB, 0);
-  W.STATS.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
-  W.STATS.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
+  W.NodeStatsTable.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
+  W.NodeStatsTable.nsSpeed("seed:443", 512 * 1024, 512 * 1024, {}, 1);
   ok("3 个有效窗口后 nEff 达标", W.scoreParts("seed:443", "tput").nEff >= 3, String(W.scoreParts("seed:443", "tput").nEff));
 }
 
 /* ---------- 3. 门槛与过滤 ---------- */
 reset();
-eq("无样本 avail = 0.5", W.availOf(W.STATS.nsGet("z:443")), 0.5);
+eq("无样本 avail = 0.5", W.availOf(W.NodeStatsTable.nsGet("z:443")), 0.5);
 {
-  const s = W.STATS.nsGet("z2:443");
+  const s = W.NodeStatsTable.nsGet("z2:443");
   s.okW = 1;
   s.failW = 5;
   ok("1 成功 5 失败 → avail < 0.75", W.availOf(s) < 0.75, W.availOf(s));
@@ -288,9 +288,9 @@ eq(
 );
 // 空关闭计数必须跟着半衰期衰减，否则老账永远赖着，节点一旦攒够 5 次就被永久排除
 {
-  const se = W.STATS.nsGet("e:443");
+  const se = W.NodeStatsTable.nsGet("e:443");
   se.at = Date.now() - 12 * 3600e3; // 两个半衰期
-  W.STATS.nsEmptyClose("e:443", true); // 触发衰减后再 +1
+  W.NodeStatsTable.nsEmptyClose("e:443", true); // 触发衰减后再 +1
   ok("空关闭计数按半衰期衰减", se.eCloseP > 2 && se.eCloseP < 2.6, String(se.eCloseP));
   eq("衰减后不再可疑", W.emptyCloseSuspect("e:443"), false);
 }
@@ -311,7 +311,7 @@ eq(
   eq("地区无节点返回 null", await W.SEL.region({}, "JP", "lat"), null);
   eq("nextNode 按国家过滤", W.CANDS.next("lat", "", "US"), "us1:443");
   eq("nextNode 避开后无同国节点", W.CANDS.next("lat", "us1:443", "US"), "");
-  W.STATS.nsFail("de1:443");
+  W.NodeStatsTable.nsFail("de1:443");
   const deCold = await W.SEL.region({}, "DE", "lat");
   eq("地区跳过冷却节点", deCold && deCold.h + ":" + deCold.p, "de2:443");
 }
@@ -461,7 +461,7 @@ node("rf:443", {});
 S.pxFailSeen = 1;
 S.pxFailMem = 2;
 await W.SEL.resetFail({}, "rf:443");
-eq("resetFail 不重复记成功", W.STATS.nsGet("rf:443").okW, 0);
+eq("resetFail 不重复记成功", W.NodeStatsTable.nsGet("rf:443").okW, 0);
 eq("resetFail 清零记忆", S.pxFailMem, 0);
 
 reset();
@@ -621,7 +621,7 @@ eq("命中偏好不算试探", st1.hostTrial, false);
 // 冻结的节点不能出现在站点排行里
 W.freezeNode("fast:443");
 eq("冻结节点被跳过", W.HOSTS.rank("site.test", "tput")[0].k, "slow:443");
-W.STATS.nsGet("fast:443").freeUntil = 0;
+W.NodeStatsTable.nsGet("fast:443").freeUntil = 0;
 
 // 冷启动：新域名第一次一定挑一个没试过的节点
 reset();
@@ -792,11 +792,11 @@ eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1
 
 /* ---------- 11. v2.1：风险先验 / 不跨 isolate / 自适应探索 ---------- */
 reset();
-eq("无样本 pFailRisk = 0.1（不加不确定性溢价）", W.pFailOf(W.STATS.nsGet("fresh:443")), 0.1);
+eq("无样本 pFailRisk = 0.1（不加不确定性溢价）", W.pFailOf(W.NodeStatsTable.nsGet("fresh:443")), 0.1);
 
 {
   // v6.35：seed 只传候选名单，没有可靠性伪计数 —— 失败率先验只由本地样本决定
-  const s = W.STATS.nsGet("seedrel:443");
+  const s = W.NodeStatsTable.nsGet("seedrel:443");
   s.failW = 1;
   const p = W.pFailOf(s);
   ok("一次失败就把风险先验抬到 0.1 以上", p > 0.1, String(p));
@@ -805,7 +805,7 @@ eq("无样本 pFailRisk = 0.1（不加不确定性溢价）", W.pFailOf(W.STATS.
 }
 
 {
-  const s = W.STATS.nsGet("oneok:443");
+  const s = W.NodeStatsTable.nsGet("oneok:443");
   s.okW = 1;
   const p = W.pFailOf(s);
   ok("第一条成功不额外惩罚", p <= 0.101, String(p));
@@ -854,7 +854,7 @@ const c30 = W.CANDS.list("lat");
 eq("30 个候选全部返回", c30.length, 30);
 ok("大规模下启用了排行缓存", (W.CANDS.cache.at.lat || 0) > 0);
 // 排行缓存按模式各算各的：曾经两模式共用 t，tput 重算会给 lat 续命（实际有效期 40 s）
-W.STATS.invalidateRank();
+W.NodeStatsTable.invalidateRank();
 eq("缓存起点：30 个候选", W.CANDS.list("lat").length, 30);
 W.CANDS.cache.t = Date.now(); // 全局戳是新的……
 W.CANDS.cache.at = { lat: Date.now() - 25000, tput: Date.now() }; // ……但 lat 那条是 25 秒前算的
@@ -867,7 +867,7 @@ eq("lat 缓存新鲜就复用（不白算）", W.CANDS.list("lat").length, 31);
 // 线上 alive 实测就是 18 个：低于 CAND_CACHE_MIN(24)，排行全程现算
 reset();
 for (let i = 0; i < 18; i++) node(`n18-${i}:443`, { tcp: 60 + i, okW: 10 });
-W.STATS.invalidateRank();
+W.NodeStatsTable.invalidateRank();
 eq("18 个候选全部返回", W.CANDS.list("lat").length, 18);
 eq("18 个节点（线上实测值）不启用排行缓存", W.CANDS.cache.at.lat || 0, 0);
 
@@ -883,8 +883,8 @@ eq("探活结果按原因分类", W.S.probeWhy, { err: 1, notTls: 1, noCf: 1, ok
 reset();
 node("wide:443", { tcp: 60, okW: 10 });
 node("narrow:443", { tcp: 60, okW: 10 });
-W.STATS.nsSpeed("wide:443", 20 * 1048576, 1048576, {}, 1);
-W.STATS.nsSpeed("narrow:443", 1 * 1048576, 1048576, {}, 1);
+W.NodeStatsTable.nsSpeed("wide:443", 20 * 1048576, 1048576, {}, 1);
+W.NodeStatsTable.nsSpeed("narrow:443", 1 * 1048576, 1048576, {}, 1);
 ok(
   "lat：同延迟下窄带宽节点分数更高",
   W.costOf("wide:443", "lat") + 50 < W.costOf("narrow:443", "lat"),
@@ -894,9 +894,9 @@ ok(
 /* 探活高估（420ms）要能被真实样本（80ms）纠正，否则这种节点永远翻不了身 */
 reset();
 node("shy2:443", { tcp: 420, okW: 10 });
-W.STATS.nsLatency("shy2:443", 80);
+W.NodeStatsTable.nsLatency("shy2:443", 80);
 ok("lat：探活高估被真实样本纠正", W.scoreParts("shy2:443", "lat").latencyMs < 200, Math.round(W.scoreParts("shy2:443", "lat").latencyMs));
-W.STATS.nsGet(c30[0].k).blackUntil = Date.now() + 60000;
+W.NodeStatsTable.nsGet(c30[0].k).blackUntil = Date.now() + 60000;
 eq(
   "缓存之外仍会过滤黑名单",
   W.CANDS.list("lat").some((x) => x.k === c30[0].k),
@@ -931,7 +931,7 @@ W.hostNodeMark("site-seed.test", "hpb:443", { bps: 2 * 1048576 });
   };
   W.S.colo = "TST";
   W.S.seedAt = 0;
-  await W.SEEDS.write(env, false, true);
+  await W.SeedStore.write(env, false, true);
   const doc = JSON.parse(box.get([...box.keys()][0]));
   const row = doc.byColo.TST.nodes.find((x) => x.k === "hpb:443");
   eq("seed 只存候选名单的四个字段", row ? Object.keys(row).sort().join(",") : "", "cc,h,k,p");
@@ -942,7 +942,7 @@ W.hostNodeMark("site-seed.test", "hpb:443", { bps: 2 * 1048576 });
   W.S.hostNode.clear();
   W.S.seedAt = 0;
   W.S.seed = { v: 0, ts: 0, poolGen: 0, poolN: 0, builtAt: 0, byColo: {} };
-  await W.SEEDS.read(env);
+  await W.SeedStore.read(env);
   await W.pxGet(env);
   eq("别的 isolate 只用名字起步（延迟=先验）", (W.S.alive.get("hpb:443") || {}).ms, 250);
   eq("没有任何统计被灌进来", W.S.nstat.has("hpb:443"), false);
@@ -953,8 +953,8 @@ W.hostNodeMark("site-seed.test", "hpb:443", { bps: 2 * 1048576 });
 reset();
 for (let i = 0; i < 20; i++) {
   node(`sn${i}:443`, {});
-  W.STATS.nsGet(`sn${i}:443`).bytesDown = i * 1024 * 1024;
-  W.STATS.nsGet(`sn${i}:443`).trafficOkW = i + 1;
+  W.NodeStatsTable.nsGet(`sn${i}:443`).bytesDown = i * 1024 * 1024;
+  W.NodeStatsTable.nsGet(`sn${i}:443`).trafficOkW = i + 1;
 }
 const snapN = W.spdSnapshot();
 ok("快照包含流量最大的节点", !!snapN["sn19:443"], Object.keys(snapN).join(","));
@@ -967,33 +967,33 @@ eq("latN = 探活 + 成功连接", W.scoreParts("ln:443", "lat").latN, 8);
 /* ---------- 13. 归因 / 负载 / 快速窗口 / 站点门槛 ---------- */
 reset();
 {
-  const s = W.STATS.nsGet("sitefail:443");
+  const s = W.NodeStatsTable.nsGet("sitefail:443");
   const beforeFail = s.failW,
     beforeBlack = s.blackUntil;
-  W.STATS.nsSiteFail("sitefail:443");
+  W.NodeStatsTable.nsSiteFail("sitefail:443");
   ok("站点失败只加 0.2 全局权重", Math.abs(s.failW - beforeFail - 0.2) < 1e-9, String(s.failW));
   eq("站点失败不进冷却阶梯", s.blackUntil, beforeBlack);
   W.CANDS.cache.t = 12345;
-  W.STATS.nsSiteFail("sitefail:443");
+  W.NodeStatsTable.nsSiteFail("sitefail:443");
   eq("站点失败不再清空全局排行缓存", W.CANDS.cache.t, 12345);
 }
 
 reset();
 node("fk:443", {});
-const sfk = W.STATS.nsGet("fk:443");
-W.STATS.nsOk("fk:443", 0, 0);
-W.STATS.nsFail("fk:443");
-W.STATS.nsFail("fk:443");
+const sfk = W.NodeStatsTable.nsGet("fk:443");
+W.NodeStatsTable.nsOk("fk:443", 0, 0);
+W.NodeStatsTable.nsFail("fk:443");
+W.NodeStatsTable.nsFail("fk:443");
 ok("10 分钟窗口内 2 次失败会抬高近期风险", W.pFailFast(sfk) > 0.15, String(W.pFailFast(sfk)));
 ok("总分用 max(慢, 快)", W.scoreParts("fk:443", "lat").pFailRisk >= W.pFailFast(sfk));
 
 reset();
 {
-  const s = W.STATS.nsGet("flap:443");
+  const s = W.NodeStatsTable.nsGet("flap:443");
   s.winAt = Date.now();
   s.winOk = 2;
   s.winFail = 3;
-  W.STATS.nsFail("flap:443");
+  W.NodeStatsTable.nsFail("flap:443");
   ok("抖动（窗口内成败参半）触发 5 分钟冷却", s.blackUntil - Date.now() > 4 * 60000, String(s.blackUntil - Date.now()));
 }
 
@@ -1125,7 +1125,7 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
   node("fr:443", {});
   W.freezeNode("fr:443");
   eq("冻结生效", W.isFrozen("fr:443"), true);
-  W.STATS.nsOk("fr:443", 0, 0);
+  W.NodeStatsTable.nsOk("fr:443", 0, 0);
   eq("成功连接解除冻结", W.isFrozen("fr:443"), false);
 }
 
@@ -1137,7 +1137,7 @@ S.pxFailSeen = 0;
 await W.SEL.bumpFail({}, "tput", "tr:443", true);
 eq("影子失败不进全局失败记忆", S.pxFailMem, 0);
 eq("影子失败不置失败标志", S.pxFailSeen, 0);
-eq("影子失败仍记节点失败", W.STATS.nsGet("tr:443").failW >= 1, true);
+eq("影子失败仍记节点失败", W.NodeStatsTable.nsGet("tr:443").failW >= 1, true);
 eq("影子失败冻结节点", W.isFrozen("tr:443"), true);
 
 // 灾备快照不能用 |0：>2^31 的用量会溢出成负数/0
@@ -1173,10 +1173,10 @@ eq("影子失败冻结节点", W.isFrozen("tr:443"), true);
 // 新失败不能把已有的长冷却缩短
 reset();
 {
-  const s = W.STATS.nsGet("cd:443");
+  const s = W.NodeStatsTable.nsGet("cd:443");
   const until = Date.now() + 10 * 60000;
   s.blackUntil = until;
-  W.STATS.nsFail("cd:443");
+  W.NodeStatsTable.nsFail("cd:443");
   ok("失败不缩短已有冷却", s.blackUntil >= until, String(s.blackUntil - Date.now()));
   s.freeUntil = Date.now() + 60 * 60000;
   W.freezeNode("cd:443");
@@ -1393,8 +1393,8 @@ eq("pxShadow 封顶 1", W.shadowRate({ pxShadow: "3" }), 1);
 
 /* ---------- 探活不能灌水面板成功率 ---------- */
 {
-  const s = W.STATS.nsGet("probe-only:443");
-  W.STATS.nsProbe("probe-only:443", 50, 40, 10);
+  const s = W.NodeStatsTable.nsGet("probe-only:443");
+  W.NodeStatsTable.nsProbe("probe-only:443", 50, 40, 10);
   eq("探活不增加 ok", s.ok, 0);
   eq("探活仍记延迟样本", s.probeSamples, 1);
   W.S.nstat.delete("probe-only:443");
@@ -1424,7 +1424,7 @@ S.alive.get("rde2:443").cc = "DE";
 eq("可疑节点进不了全局候选", W.CANDS.list("lat").some((x) => x.k === "rde1:443"), false);
 const rOk = await W.SEL.region({}, "DE", "lat");
 eq("地区选路跳过可疑节点", rOk && rOk.h + ":" + rOk.p, "rde2:443");
-W.STATS.nsFail("rde2:443"); // 冷却 → 硬排除
+W.NodeStatsTable.nsFail("rde2:443"); // 冷却 → 硬排除
 const rLast = await W.SEL.region({}, "DE", "lat");
 eq("地区只剩可疑节点时仍返回（硬要求，不返回 null）", rLast && rLast.h + ":" + rLast.p, "rde1:443");
 
@@ -1442,11 +1442,11 @@ W.S.inflight.clear();
 
 // 快失败窗口：9 分钟前的 4 次成功不能把刚刚的 3 次失败稀释成"健康"
 reset();
-const ffx = W.STATS.nsGet("ffx:443");
-for (let i = 0; i < 4; i++) W.STATS.nsOk("ffx:443", 50, 10);
+const ffx = W.NodeStatsTable.nsGet("ffx:443");
+for (let i = 0; i < 4; i++) W.NodeStatsTable.nsOk("ffx:443", 50, 10);
 ffx.winAt -= 9 * 60000;
 ffx.at -= 9 * 60000;
-for (let i = 0; i < 3; i++) W.STATS.nsFail("ffx:443");
+for (let i = 0; i < 3; i++) W.NodeStatsTable.nsFail("ffx:443");
 ok("旧成功不按次数稀释新失败", W.pFailFast(ffx) > 0.27, String(W.pFailFast(ffx)));
 ok("旧成功同时被时间权重压掉", ffx.winOk < 1, String(ffx.winOk));
 
@@ -1476,16 +1476,16 @@ eq("6 小时没切换才轮换", S.curs.lat, "sc2:443");
 // 真实首字节回流：探活快、实际慢的节点不能按探活算延迟
 reset();
 node("liar:443", { tcp: 25, tls: 40, okW: 5 });
-W.STATS.nsLatency("liar:443", 420);
+W.NodeStatsTable.nsLatency("liar:443", 420);
 ok("真实首字节远慢于探活 → 按真实值算", W.scoreParts("liar:443", "lat").latencyMs > 300, String(W.scoreParts("liar:443", "lat").latencyMs));
 reset();
 node("honest:443", { tcp: 60, tls: 40, okW: 5 });
-W.STATS.nsLatency("honest:443", 130);
+W.NodeStatsTable.nsLatency("honest:443", 130);
 ok("真实首字节与探活接近 → 不触发", W.scoreParts("honest:443", "lat").latencyMs < 200, String(W.scoreParts("honest:443", "lat").latencyMs));
 
 // —— 单层抽样：未测节点被抽到，测过且差的节点退场 ——
 reset();
-W.STATS.invalidateRank();
+W.NodeStatsTable.invalidateRank();
 node("k1:443", { tcp: 60, okW: 40 });
 node("k2:443", { tcp: 400, okW: 40 });
 node("k3:443", { tcp: 70 });
@@ -1494,7 +1494,7 @@ node("k3:443", { tcp: 70 });
   for (let i = 0; i < 400; i++) {
     const k = W.SEL.pick({ pxShadow: 0 }, "lat", { host: "" });
     hit[k] = (hit[k] || 0) + 1;
-    W.STATS.nsOk(k, 0, 0); // 真实连接成功 → 样本 +1，乐观面随之收缩
+    W.NodeStatsTable.nsOk(k, 0, 0); // 真实连接成功 → 样本 +1，乐观面随之收缩
   }
   ok("未测节点拿到探索流量", (hit["k3:443"] || 0) > 0, JSON.stringify(hit));
   ok("测过且慢的节点基本退场", (hit["k2:443"] || 0) <= 2, JSON.stringify(hit));
@@ -1506,8 +1506,8 @@ node("k3:443", { tcp: 70 });
 // 算出来 pStall=0.34（真实占比 0.0007），单次卡顿白送 800+ ms，还会踩中 +400 的重罚档。
 reset();
 node("ps:443", { tcp: 100 });
-for (let i = 0; i < 100; i++) W.STATS.nsStall("ps:443", 0, 30000);
-W.STATS.nsStall("ps:443", 2000, 5000);
+for (let i = 0; i < 100; i++) W.NodeStatsTable.nsStall("ps:443", 0, 30000);
+W.NodeStatsTable.nsStall("ps:443", 2000, 5000);
 const psV = W.scoreParts("ps:443", "lat").pStall;
 ok("pStall 按连接总时长稀释", psV < 0.01, psV.toFixed(5));
 ok("pStall 没被抹平（2 秒卡顿还在）", psV > 0.0001, psV.toFixed(5));
@@ -1516,7 +1516,7 @@ ok("pStall 没被抹平（2 秒卡顿还在）", psV > 0.0001, psV.toFixed(5));
 // 早先直读 s.capBps，而直方图衰减是等比缩放（分位不变）→ 一周前测到的 16MB/s 永久少算 70ms。
 reset();
 node("xf:443", { tcp: 100, okW: 20 });
-const xf = W.STATS.nsGet("xf:443");
+const xf = W.NodeStatsTable.nsGet("xf:443");
 xf.hist[7] = 100;
 xf.sumW = 100;
 xf.sumW2 = 100;
@@ -1534,7 +1534,7 @@ ok("新鲜样本按实测带宽折算", xfNew < 12, xfNew.toFixed(1));
 // 早先探索排在 Thompson 之后，lat 模式只要有已测节点就 return：
 // pxShadow=0.5、10 个节点、1000 次 pick 仍然 100% 打同一个节点，池子里除王者外一个样本都没有。
 reset();
-W.STATS.invalidateRank();
+W.NodeStatsTable.invalidateRank();
 node("ex1:443", { tcp: 60, okW: 200 });
 node("ex2:443", { tcp: 70 });
 node("ex3:443", { tcp: 80 });
@@ -1542,14 +1542,14 @@ const exHit = new Set();
 for (let i = 0; i < 400; i++) {
   const k = W.SEL.pick({ pxShadow: 0.5 }, "lat", { host: "" });
   exHit.add(k);
-  W.STATS.nsOk(k, 0, 0); // 真实连接成功 → 样本 +1，乐观面随样本收缩
+  W.NodeStatsTable.nsOk(k, 0, 0); // 真实连接成功 → 样本 +1，乐观面随样本收缩
 }
 ok("延迟模式影子采样可达", exHit.size > 1, [...exHit].join(","));
 ok("延迟模式大多数请求仍走王者", exHit.has("ex1:443"), [...exHit].join(","));
 
 // —— 回归：吞吐模式也走同一套抽样，不再"粘滞游标" ——
 reset();
-W.STATS.invalidateRank();
+W.NodeStatsTable.invalidateRank();
 node("tp1:443", { tcp: 60, okW: 20 });
 node("tp2:443", { tcp: 80, okW: 20 });
 const tpHit = new Set();
@@ -1560,32 +1560,32 @@ ok("吞吐模式两个候选都抽得到", tpHit.size > 1, [...tpHit].join(","))
 // —— CUSUM 变点：一条怪样本不动，连续两条大跳立刻冻结 ——
 reset();
 node("cu1:443", { tcp: 100, pSum: 100, msLocal: 100 });
-W.STATS.nsLatency("cu1:443", 400);
-ok("延迟变点：单条慢样本不冻结", !W.STATS.nsGet("cu1:443").freeUntil, String(W.STATS.nsGet("cu1:443").freeUntil || 0));
-W.STATS.nsLatency("cu1:443", 400);
-ok("延迟变点：连续两条大跳立刻冻结", W.STATS.nsGet("cu1:443").freeUntil > Date.now(), String(W.STATS.nsGet("cu1:443").freeUntil - Date.now()));
+W.NodeStatsTable.nsLatency("cu1:443", 400);
+ok("延迟变点：单条慢样本不冻结", !W.NodeStatsTable.nsGet("cu1:443").freeUntil, String(W.NodeStatsTable.nsGet("cu1:443").freeUntil || 0));
+W.NodeStatsTable.nsLatency("cu1:443", 400);
+ok("延迟变点：连续两条大跳立刻冻结", W.NodeStatsTable.nsGet("cu1:443").freeUntil > Date.now(), String(W.NodeStatsTable.nsGet("cu1:443").freeUntil - Date.now()));
 
 // —— CUSUM 吞吐：带宽崩塌后 cap 立刻掉下来，老直方图不再拖一周 ——
 reset();
 node("cb1:443", { tcp: 60 });
-for (let i = 0; i < 3; i++) W.STATS.nsSpeed("cb1:443", 8 * 1048576, 512 * 1024, {});
-const capBoom = W.STATS.nsGet("cb1:443").capBps;
-W.STATS.nsSpeed("cb1:443", 512 * 1024, 512 * 1024, {});
-const capBust = W.STATS.nsGet("cb1:443").capBps;
+for (let i = 0; i < 3; i++) W.NodeStatsTable.nsSpeed("cb1:443", 8 * 1048576, 512 * 1024, {});
+const capBoom = W.NodeStatsTable.nsGet("cb1:443").capBps;
+W.NodeStatsTable.nsSpeed("cb1:443", 512 * 1024, 512 * 1024, {});
+const capBust = W.NodeStatsTable.nsGet("cb1:443").capBps;
 ok("吞吐变点：崩塌样本立刻改写 capBps", capBoom > 4 * 1048576 && capBust < 1048576, `${capBoom} -> ${capBust}`);
 
 // —— 稳健抖动：一条 5 秒的怪连接不该把抖动抬到秒级（MAD，不是方差）——
 reset();
 node("jt1:443", { tcp: 100 });
-for (let i = 0; i < 5; i++) W.STATS.nsLatency("jt1:443", 100);
+for (let i = 0; i < 5; i++) W.NodeStatsTable.nsLatency("jt1:443", 100);
 const jit0 = W.scoreParts("jt1:443", "lat").jitMs;
-W.STATS.nsLatency("jt1:443", 5000);
+W.NodeStatsTable.nsLatency("jt1:443", 5000);
 const jit1 = W.scoreParts("jt1:443", "lat").jitMs;
 ok("抖动对单条离群连接不敏感", jit1 < 400, `${jit0.toFixed(1)} -> ${jit1.toFixed(1)}`);
 
 // —— S 参数化：小对象看延迟，批量看带宽 ——
 reset();
-W.STATS.invalidateRank();
+W.NodeStatsTable.invalidateRank();
 const now0 = Date.now();
 node("za:443", { tcp: 60, pSum: 60, msLocal: 60, okW: 20, capBps: 4 * 1048576, lastSampleAt: now0 });
 node("zb:443", { tcp: 120, pSum: 120, msLocal: 120, okW: 20, capBps: 20 * 1048576, lastSampleAt: now0 });
@@ -1604,7 +1604,7 @@ ok("pick 会把目标流量传进打分", pickI === "za:443" && pickB === "zb:44
 // —— 兜底：全池都在冷却时也必须给出节点 ——
 // 返回空串会让 session 直接 cnt("dead")，哪怕池子里还有节点只是暂时被罚
 reset();
-W.STATS.invalidateRank();
+W.NodeStatsTable.invalidateRank();
 node("fb1:443", { tcp: 60, okW: 20, blackUntil: Date.now() + 600000 });
 node("fb2:443", { tcp: 80, okW: 20, blackUntil: Date.now() + 60000 });
 const fbPick = W.SEL.pick({ pxShadow: 0 }, "lat", { host: "" });
@@ -1617,13 +1617,13 @@ ok("冻结节点排在冷却节点之后", fbPick2 === "fb2:443", fbPick2);
 // 失败阶梯跟池子大小走：小池子首档 10 s，大池子 60 s
 reset();
 for (let i = 0; i < 6; i++) node("sm" + i + ":443", { tcp: 100 });
-W.STATS.nsFail("sm0:443");
-const blSmall = W.STATS.nsGet("sm0:443").blackUntil - Date.now();
+W.NodeStatsTable.nsFail("sm0:443");
+const blSmall = W.NodeStatsTable.nsGet("sm0:443").blackUntil - Date.now();
 ok("小池子失败首档 ≈10 秒", blSmall > 8000 && blSmall < 12000, blSmall);
 reset();
 for (let i = 0; i < 20; i++) node("bg" + i + ":443", { tcp: 100 });
-W.STATS.nsFail("bg0:443");
-const blBig = W.STATS.nsGet("bg0:443").blackUntil - Date.now();
+W.NodeStatsTable.nsFail("bg0:443");
+const blBig = W.NodeStatsTable.nsGet("bg0:443").blackUntil - Date.now();
 ok("大池子失败首档 ≈60 秒", blBig > 55000 && blBig < 65000, blBig);
 
 // 连接观测按节点聚合（n/ok/p50/p95），不再是一条连接一行
@@ -1638,7 +1638,7 @@ ok("聚合后的下行字节累加", cl.length === 1 && cl[0].dn === 4096, cl.le
 /* ---------- 28. 大池分片重建（2000 候选不再有 4 ms 尖峰） ---------- */
 reset();
 for (let i = 0; i < 1300; i++) node(`b${i}:443`, { tcp: 50 + i, okW: 10 });
-W.STATS.invalidateRank();
+W.NodeStatsTable.invalidateRank();
 const br1 = W.CANDS.list("lat");
 ok("大池分片：首片就能给出候选", br1.length > 0 && br1.length <= 128, String(br1.length));
 eq("大池分片：每片只推进 128 个", W.CANDS.cache.step.lat.pos, 128);
@@ -1829,14 +1829,14 @@ W.VT.clear();
 // 第 39 组：节点偏好表（站点 × 通道的「能通 / 打不通」两栏）
 {
   W.VT.clear();
-  eq("没测过的通道不降权（未知 = 1）", W.PREFS.chan("9.9.9.1", "a.com"), 1);
-  eq("不传站点一律「未知」：通配行已经不存在", W.PREFS.chan("9.9.9.1"), 1);
+  eq("没测过的通道不降权（未知 = 1）", W.Prefs.chan("9.9.9.1", "a.com"), 1);
+  eq("不传站点一律「未知」：通配行已经不存在", W.Prefs.chan("9.9.9.1"), 1);
   W.VT.setState("a.com", "r:9.9.9.2", 1, 1);
-  eq("实测能打通的通道 = 0", W.PREFS.chan("9.9.9.2", "a.com"), 0);
-  eq("别的站点看不到这条证据", W.PREFS.chan("9.9.9.2", "b.com"), 1);
+  eq("实测能打通的通道 = 0", W.Prefs.chan("9.9.9.2", "a.com"), 0);
+  eq("别的站点看不到这条证据", W.Prefs.chan("9.9.9.2", "b.com"), 1);
   W.VT.setState("a.com", "r:9.9.9.3", 2, 1);
-  eq("实测打不通的通道 = 2", W.PREFS.chan("9.9.9.3", "a.com"), 2);
-  const pf = W.PREFS.json(20);
+  eq("实测打不通的通道 = 2", W.Prefs.chan("9.9.9.3", "a.com"), 2);
+  const pf = W.Prefs.json(20);
   eq("偏好表能打通一栏含该通道", pf.ok.some((x) => x.channel === "r:9.9.9.2"), true);
   eq("偏好表打不通一栏含该通道", pf.bad.some((x) => x.channel === "r:9.9.9.3"), true);
   W.VT.clear();
@@ -1847,15 +1847,15 @@ W.VT.clear();
   W.VT.clear();
   const ch = { kind: "r", ip: "9.9.9.7" };
   W.recordBlock({ target: "x.com", chan: ch, down: 700, ok: false });
-  eq("小响应立刻判该通道被拒", W.PREFS.chan("9.9.9.7", "x.com"), 2);
-  eq("别的站点不受牵连", W.PREFS.chan("9.9.9.7", "y.com"), 1);
+  eq("小响应立刻判该通道被拒", W.Prefs.chan("9.9.9.7", "x.com"), 2);
+  eq("别的站点不受牵连", W.Prefs.chan("9.9.9.7", "y.com"), 1);
   W.recordPass({ target: "x.com", chan: ch, down: 40000, ok: true });
-  eq("大响应回来就解除", W.PREFS.chan("9.9.9.7", "x.com"), 0);
+  eq("大响应回来就解除", W.Prefs.chan("9.9.9.7", "x.com"), 0);
   W.VT.clear();
   const ch2 = { kind: "r", ip: "9.9.9.8" };
   W.VT.set("x.com", "r:9.9.9.8", 200, 40, 1);
   W.recordBlock({ target: "x.com", chan: ch2, down: 700, ok: false });
-  eq("probe 确认过能通的通道不被小响应当掉", W.PREFS.chan("9.9.9.8", "x.com"), 0);
+  eq("probe 确认过能通的通道不被小响应当掉", W.Prefs.chan("9.9.9.8", "x.com"), 0);
   W.VT.clear();
 }
 // 第 41 组：差分复核链路已删除（免费计划单次 userland TLS 握手就超 CPU 预算，实测 1102）
@@ -1951,10 +1951,10 @@ eq("未知中继不被 veto", W.HOOK.veto("x.com", "6.6.6.6"), false);
 W.HEALTH.clear();
 W.VT.clear();
 W.VT.setState("z.com", "r:5.5.5.5", 1, 1);
-const pj = W.PREFS.json(10);
+const pj = W.Prefs.json(10);
 ok("Prefs 类能给出两栏视图", Array.isArray(pj.ok) && Array.isArray(pj.bad) && pj.n >= 1, JSON.stringify(pj));
-eq("Prefs 能看到实测能打通的通道", W.PREFS.chan("5.5.5.5", "z.com"), 0);
-eq("Prefs 对完全没测过的通道返回 1（未知）", W.PREFS.chan("4.4.4.4", "z.com"), 1);
+eq("Prefs 能看到实测能打通的通道", W.Prefs.chan("5.5.5.5", "z.com"), 0);
+eq("Prefs 对完全没测过的通道返回 1（未知）", W.Prefs.chan("4.4.4.4", "z.com"), 1);
 // ═══ 第 46 组：中继存活度跨 isolate（P3）+ Store 门面 ═══
 W.HEALTH.clear();
 W.HEALTH.note("1.1.1.1:443", 30000, true);
@@ -1970,10 +1970,10 @@ W.HEALTH.clear();
 eq("主 uuid 由待上报账本给出（小写、取第一个）", W.PEND.id({ uuid: "AA,BB" }), "aa");
 ok("观测快照由待上报账本给出", Array.isArray(W.PEND.clSnap(5)), "conns");
 // ═══ 第 47 组：Pool 类化（P4）═══
-ok("Pool 是类实例，抓取/探活/准入都在它身上", typeof W.POOL === "object" && typeof W.POOL.cronScan === "function", "POOL");
-ok("Pool 提供准入巡检", typeof W.POOL.ensurePool === "function" && typeof W.POOL.commitPool === "function", "ensure/commit");
-ok("Pool 提供读视图", typeof W.POOL.pxGet === "function" && typeof W.POOL.aliveList === "function", "pxGet/alive");
-eq("nsOf 空列表返回空表", Object.keys(W.POOL.nsOf([], 5)).length, 0);
+ok("Pool 门面已退场（7.360 删掉 Pool 类），抓取/探活/准入都在模块函数上", W.Pool === undefined && typeof W.cronScan === "function" && typeof W.pxGet === "function", "POOL");
+ok("准入巡检仍在模块函数上（Pool 门面已删）", typeof W.ensurePool === "function" && typeof W.commitPool === "function", "ensure/commit");
+ok("读视图仍在模块函数上（Pool 门面已删）", typeof W.pxGet === "function" && typeof W.aliveList === "function", "pxGet/alive");
+eq("nsOf 空列表返回空表", Object.keys(W.nsOf([], 5)).length, 0);
 // ═══ 第 48 组：Dialer（P5）═══
 ok("Dialer 是类实例且有 open()", typeof W.DIALER === "object" && typeof W.DIALER.open === "function", "DIALER");
 ok("Dialer 与 Connection 解耦（不持有 session 状态）", typeof W.Dialer === "function", "Dialer");
@@ -1987,11 +1987,11 @@ ok("Attacher 可构造", typeof W.Attacher === "function", "Attacher");
 ok("SubscriptionView 是类实例且可 render()", typeof W.SubscriptionView === "function" && typeof W.SubscriptionView.prototype.render === "function" && W.SUBVIEW === undefined, "SUBVIEW");
 ok("SubscriptionView 可构造", typeof W.SubscriptionView === "function", "SubscriptionView");
 // ═══ 第 52 组：路由表（P6-2）═══
-ok("RouteTable 注册了四条用户级路由", W.ROUTES.names().join(",") === "subscription,logs,proxyip,debug", W.ROUTES.names().join(","));
-ok("cl 命中 subscription 且需要 RTT/统计", W.ROUTES.route("cl")?.name === "subscription" && W.ROUTES.needsRtt("cl") && W.ROUTES.needsStats("cl"), "cl");
-ok("裸 /<uuid> 也命中 subscription", W.ROUTES.route("")?.name === "subscription", "empty");
-ok("logs 命中但不需要 RTT", W.ROUTES.route("logs")?.name === "logs" && !W.ROUTES.needsRtt("logs"), "logs");
-ok("未知子路径返回 undefined（404）", W.ROUTES.route("nope") === undefined, "nope");
+ok("RouteTable 注册了四条用户级路由", W.RouteTable.names().join(",") === "subscription,logs,proxyip,debug", W.RouteTable.names().join(","));
+ok("cl 命中 subscription 且需要 RTT/统计", W.RouteTable.route("cl")?.name === "subscription" && W.RouteTable.needsRtt("cl") && W.RouteTable.needsStats("cl"), "cl");
+ok("裸 /<uuid> 也命中 subscription", W.RouteTable.route("")?.name === "subscription", "empty");
+ok("logs 命中但不需要 RTT", W.RouteTable.route("logs")?.name === "logs" && !W.RouteTable.needsRtt("logs"), "logs");
+ok("未知子路径返回 undefined（404）", W.RouteTable.route("nope") === undefined, "nope");
 // ═══ 第 53 组：判死通道的复检（P6-3）═══
 {
   const rndBak = Math.random;
@@ -2131,19 +2131,19 @@ console.log("\n64) 错误分类直方图");
   eq("errKind 取前两个词", W.errKind("tfb x.com site ok=0 bad=3 esc=rotate n=3"), "tfb x.com");
   eq("errKind 第二类", W.errKind("forced proxyip 1.2.3.4:443"), "forced proxyip");
   eq("空消息给占位", W.errKind(""), "?");
-  const before = W.errHist().find((x) => x.k === "tfb x.com");
+  const before = W.ERRS.hist().find((x) => x.k === "tfb x.com");
   const n0 = before ? before.n : 0;
   W.errCount("tfb x.com chan ok=1 bad=1 esc=none n=2");
   W.errCount("tfb x.com ok ok=3 bad=0 esc=none n=3");
-  const after = W.errHist().find((x) => x.k === "tfb x.com");
+  const after = W.ERRS.hist().find((x) => x.k === "tfb x.com");
   eq("同类两次累加", after.n, n0 + 2);
-  const other = W.errHist().find((x) => x.k === "cron: scan");
+  const other = W.ERRS.hist().find((x) => x.k === "cron: scan");
   eq("别的类不受影响", other, undefined);
   W.errCount("cron: scan start");
   eq("跨前缀独立成立", W.errKind("cron: scan start"), "cron: scan");
-  ok("直方图键不含正文", W.errHist().every((x) => !/bad=|ok=\d/.test(x.k)));
-  W.errHist().forEach((x) => ok("直方图项非空", x.k.length > 0 && x.n > 0));
-  ok("直方图最多 8 条", W.errHist().length <= 8, String(W.errHist().length));
+  ok("直方图键不含正文", W.ERRS.hist().every((x) => !/bad=|ok=\d/.test(x.k)));
+  W.ERRS.hist().forEach((x) => ok("直方图项非空", x.k.length > 0 && x.n > 0));
+  ok("直方图最多 8 条", W.ERRS.hist().length <= 8, String(W.ERRS.hist().length));
 }
 
 // 65) 子请求预算：两项之和不得超过 cap（入口那一份已随「入口偏好表」一起删除）
@@ -2284,21 +2284,21 @@ console.log("\n72) 探活失败过期");
   const t0 = 1_700_000_000_000;
   ok("阈值是 3", W.SC.SCAN_BAD_MAX === 3, String(W.SC.SCAN_BAD_MAX));
   ok("过期时长 30 分钟", W.SC.PROBE_BAD_TTL === 1800000, String(W.SC.PROBE_BAD_TTL));
-  ok("没失败过不跳过", W.PROBE_COOL.skip(key, t0) === false, "false");
+  ok("没失败过不跳过", W.ProbeCooldown.skip(key, t0) === false, "false");
   W.bumpProbeBad(key, false, t0);
-  ok("失败 1 次不跳过", W.PROBE_COOL.skip(key, t0) === false, "false");
+  ok("失败 1 次不跳过", W.ProbeCooldown.skip(key, t0) === false, "false");
   W.bumpProbeBad(key, false, t0 + 1000);
   W.bumpProbeBad(key, false, t0 + 2000);
-  ok("连续 3 次后跳过", W.PROBE_COOL.skip(key, t0 + 3000) === true, "true");
-  ok("30 分钟后自动作废", W.PROBE_COOL.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 1) === false, "false");
+  ok("连续 3 次后跳过", W.ProbeCooldown.skip(key, t0 + 3000) === true, "true");
+  ok("30 分钟后自动作废", W.ProbeCooldown.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 1) === false, "false");
   // 真正过了 TTL 之后再失败，才算新一轮
   W.bumpProbeBad(key, false, t0 + 2000 + W.SC.PROBE_BAD_TTL + 5000);
-  ok("过期后再失败从 1 重新数（还不跳过）", W.PROBE_COOL.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 5000) === false, "false");
+  ok("过期后再失败从 1 重新数（还不跳过）", W.ProbeCooldown.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 5000) === false, "false");
   W.bumpProbeBad(key, false, t0 + 2000 + W.SC.PROBE_BAD_TTL + 6000);
   W.bumpProbeBad(key, false, t0 + 2000 + W.SC.PROBE_BAD_TTL + 7000);
-  ok("重新数满 3 次又跳过", W.PROBE_COOL.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 7000) === true, "true");
+  ok("重新数满 3 次又跳过", W.ProbeCooldown.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 7000) === true, "true");
   W.bumpProbeBad(key, true, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000);
-  ok("探活成功立刻清除", W.PROBE_COOL.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000) === false, "false");
+  ok("探活成功立刻清除", W.ProbeCooldown.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000) === false, "false");
 }
 
 console.log("\n73) 业务 4xx 不被误升级成封锁");
@@ -2998,28 +2998,28 @@ console.log("\n94) 五类事实门面：一次取齐增量，ack 后清空");
 {
   const H = "gate.example.com";
   const IP = "203.0.113.77";
-  W.FACTS.clear();
-  eq("清空后没有增量", Object.keys(W.FACTS.delta()).length, 0);
+  W.FactsStore.clear();
+  eq("清空后没有增量", Object.keys(W.FactsStore.delta()).length, 0);
   W.PS.note(H, IP, true);
   W.EG.note(IP, 4);
   W.DEAD.note("203.0.113.78", false);
   W.DEAD.note("203.0.113.78", false);
-  const d1 = W.FACTS.delta();
+  const d1 = W.FactsStore.delta();
   eq("增量里 ps 有 1 行", (d1.ps || []).length, 1);
   eq("增量里 eg 有 1 行", (d1.eg || []).length, 1);
   eq("增量里 dead 有 1 行（连续两次失败）", (d1.dead || []).length, 1);
   W.DNS.note(H, false, Date.now());
-  eq("增量里 dns 有 1 行", (W.FACTS.delta().dns || []).length, 1);
-  eq("未 ack 前再取仍然是同一批", (W.FACTS.delta().ps || []).length, 1);
-  W.FACTS.ack();
-  eq("ack 后增量清空", (W.FACTS.delta().ps || []).length, 0);
-  eq("ack 后 dns 增量也清空（门面必须点名五张表）", (W.FACTS.delta().dns || []).length, 0);
-  eq("快照里有 dns 一类", W.FACTS.snap().dns !== undefined, true);
-  W.FACTS.clear();
-  const n = W.FACTS.load({ eg: [{ i: "203.0.113.9", f: 4, at: Date.now() }], ps: [{ k: H + "|203.0.113.9", q: 128, n: 8, at: Date.now() }], dead: [{ i: "203.0.113.10", n: 3, at: Date.now() }], blk2: [{ k: H + "|203.0.113.9", n: 3, at: Date.now() }] });
+  eq("增量里 dns 有 1 行", (W.FactsStore.delta().dns || []).length, 1);
+  eq("未 ack 前再取仍然是同一批", (W.FactsStore.delta().ps || []).length, 1);
+  W.FactsStore.ack();
+  eq("ack 后增量清空", (W.FactsStore.delta().ps || []).length, 0);
+  eq("ack 后 dns 增量也清空（门面必须点名五张表）", (W.FactsStore.delta().dns || []).length, 0);
+  eq("快照里有 dns 一类", W.FactsStore.snap().dns !== undefined, true);
+  W.FactsStore.clear();
+  const n = W.FactsStore.load({ eg: [{ i: "203.0.113.9", f: 4, at: Date.now() }], ps: [{ k: H + "|203.0.113.9", q: 128, n: 8, at: Date.now() }], dead: [{ i: "203.0.113.10", n: 3, at: Date.now() }], blk2: [{ k: H + "|203.0.113.9", n: 3, at: Date.now() }] });
   eq("load 四类都并入", [n.eg, n.ps, n.dead, n.blk2].join(","), "1,1,1,1");
   eq("并入后 ps 能查到", W.PS.factor(H, "203.0.113.9") > 1, true);
-  W.FACTS.clear();
+  W.FactsStore.clear();
 }
 
 
@@ -3056,7 +3056,7 @@ W.DNS.note("a.example.com", false, 1000);
 W.DNS.ack();
 eq("只认更新的观测", W.DNS.load([{ h: "a.example.com", v: 1, at: 2000 }, { h: "a.example.com", v: 0, at: 500 }]), 1);
 eq("合并后取有 AAAA 的那条", W.DNS.v6Of("a.example.com", 2500), 1);
-eq("FACTS.clear 一并清 dns", (W.FACTS.clear(), W.DNS.v6Of("a.example.com", 3000)), -1);
+eq("FactsStore.clear 一并清 dns", (W.FactsStore.clear(), W.DNS.v6Of("a.example.com", 3000)), -1);
 
 
 console.log("\n96) 事实开关真的接进选路");
@@ -3102,19 +3102,19 @@ eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
   const putSeed = (gen, n) => mem.set("px:seed", JSON.stringify({ v: 7, ts: 0, poolGen: gen, poolN: n, builtAt: 0, byColo: {} }));
   W.S.pool = mk(10, "old"); W.S.poolGen = 3; W.S.seed.poolGen = 3; W.S.seedAt = Date.now(); W.S.seedReadFail = false; W.S.colo = "TST";
   putSeed(9, 10);
-  const c1 = await W.POOL.commitPool(envP, mk(60, "n"), true);
+  const c1 = await W.commitPool(envP, mk(60, "n"), true);
   eq("代际号以 KV 锚点为准（不是本地 +1）", c1.gen, 10);
   eq("新代际键写进去了", mem.has("px:pool:10"), true);
   eq("锚点写回成功", c1.anchored, true);
   // 本地没有池子时，缩水判断必须看 KV 里的真实大小
   W.S.pool = []; W.S.poolGen = 10; W.S.seed.poolGen = 10;
   putSeed(10, 100);
-  const c2 = await W.POOL.commitPool(envP, mk(50, "s"), false);
+  const c2 = await W.commitPool(envP, mk(50, "s"), false);
   eq("按 KV 的真实池子大小拒绝缩水", c2.ok, false);
   eq("拒绝时不落新代际键", mem.has("px:pool:11"), false);
   // 锚点读失败：宁可这轮不换池，也不盲写一个可能被占用的号
   const badEnv = { uuid: "00000000-0000-0000-0000-000000000000", STATS: { get: async () => { throw new Error("kv down"); }, put: async () => { throw new Error("kv down"); } } };
-  const c3 = await W.POOL.commitPool(badEnv, mk(60, "b"), true);
+  const c3 = await W.commitPool(badEnv, mk(60, "b"), true);
   eq("锚点读失败就不提交", c3.ok, false);
   eq("理由就是 anchor read", c3.reason, "anchor read");
   W.S.pool = []; W.S.poolGen = 0; W.S.seed.poolGen = 0; W.S.colo = "";
@@ -3155,8 +3155,8 @@ eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
   eq("统计读缓存已删除（不再有 60 秒陈旧窗口）", S.statCache, undefined);
   eq("store 门面已退场（7.357 删掉 Store/STORE）", W.STORE, undefined);
   // 「要不要先推增量」只认路由表：装配根里那份硬编码子路径列表已删（v7.135）
-  eq("路由表是 stats 的唯一真源：订阅要推增量", W.ROUTES.needsStats("cl"), true);
-  eq("调试路由不推增量", W.ROUTES.needsStats("debug"), false);
+  eq("路由表是 stats 的唯一真源：订阅要推增量", W.RouteTable.needsStats("cl"), true);
+  eq("调试路由不推增量", W.RouteTable.needsStats("debug"), false);
   S.pend.clear();
   S.meterCache.clear();
 }
@@ -3206,9 +3206,9 @@ eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
 
 console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表有上限");
 {
-  W.FACTS.clear();
-  eq("门面登记了全部五张表（新增一类必须登记，否则 interface 报错）", W.FACTS.kinds().join(","), "eg,ps,dead,blk2,dns");
-  eq("快照按同一份登记表生成", Object.keys(W.FACTS.snap()).length, 5);
+  W.FactsStore.clear();
+  eq("门面登记了全部五张表（新增一类必须登记，否则 interface 报错）", W.FactsStore.kinds().join(","), "eg,ps,dead,blk2,dns");
+  eq("快照按同一份登记表生成", Object.keys(W.FactsStore.snap()).length, 5);
   // 站点名来自客户端请求、不是有限集合：两张按站点的表必须被压回上限
   W.POLICY.trim(0);
   for (let i = 0; i < 600; i++) {
@@ -3222,7 +3222,7 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   eq("冷启动确实钉住了一条（否则下面的过期断言是空断言）", pinBefore >= 1, true);
   W.POLICY.trim(Date.now() + 61_000);
   eq("过期钉住被清掉（trim 传未来时间）", W.POLICY.pinSize(), 0);
-  W.FACTS.clear();
+  W.FactsStore.clear();
 }
 /** 第 97 组（v7.142）：门面不再提供「永远不写」的快照入口 + 管理面板的子请求预算 */
 {
@@ -3272,7 +3272,7 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
 // 为什么测这个：delta() 有行数上限（eg 16 / 其余 60），而 ack() 过去一次清空整个 pending ——
 // 超出上限的行既没发出去、也不会再重发，等于每条 flush 都在丢证据，且没有任何报错。
 {
-  W.FACTS.clear();
+  W.FactsStore.clear();
   const t0 = Date.now();
   // ps：70 个键，一批只发 60
   for (let i = 0; i < 70; i++) W.PS.note("a" + i + ".example", "198.51.100." + i, true, t0);
@@ -3303,7 +3303,7 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
   W.DNS.ack();
   eq("ack 后剩下 5 行仍待发", W.DNS.delta().length, 5);
   W.DNS.ack();
-  W.FACTS.clear();
+  W.FactsStore.clear();
 }
 
 // 107) 站点级自愈（BLK.sweep）：覆盖率的分母必须是整池，不是过滤后的 usable
@@ -3311,7 +3311,7 @@ console.log("\n104) 事实门面是表驱动的：五张表都在，按站点表
 // 旧口径拿 usable 当分母时，分子恰好被同一个事件剔掉，覆盖率恒接近 0，这条自愈在生产上永不触发。
 {
   const H = "sweep.example";
-  W.FACTS.clear();
+  W.FactsStore.clear();
   const rel = [
     "203.0.113.101", "203.0.113.102", "203.0.113.103", "203.0.113.104",
     "203.0.113.105", "203.0.113.106", "203.0.113.107", "203.0.113.108",
@@ -3426,7 +3426,7 @@ ok("状态表里不再有 tsMem 的键", !Object.prototype.hasOwnProperty.call(W
 {
   const g = "113";
   const H = "sweep3.example";
-  W.FACTS.clear();
+  W.FactsStore.clear();
   const rel = ["203.0.113.111", "203.0.113.112", "203.0.113.113", "203.0.113.114", "203.0.113.115", "203.0.113.116", "203.0.113.117", "203.0.113.118"];
   const t0 = Date.now();
   W.BLK.load(rel.slice(0, 6).map((ip) => ({ k: H + "|" + ip, n: 3, at: t0 })));
@@ -3474,7 +3474,7 @@ ok(`[${g}] doc-audit 有活文档引用规则（否则文档能一直给不存�
 ok(`[${g}] 类表里没有指向已删读缓存的 StatsTable 行`, !arch.includes("| `StatsTable` |"));
 ok(`[${g}] 预算那段写的是自由函数而不是 Budget 类`, arch.includes("自由函数 `planRound`"));
 ok(`[${g}] 快照那段不再声称有 Snapshot 类`, !arch.includes("| `Snapshot` |"));
-ok(`[${g}] v8 映射表用的是落地名 FACTS.ack()`, v8.includes("`FACTS.ack()`"));
+ok(`[${g}] v8 映射表用的是落地名 FactsStore.ack()`, v8.includes("`FactsStore.ack()`"));
 ok(`[${g}] 设计阶段的临时名只在「更正」那句里出现`, !v8.includes("`factsAck()`"));
 
 // 146. 连接观测的上报确认：按发出去的数量相减，而不是整表清空（v7.157）
@@ -3728,24 +3728,24 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
 // ── 第 155 组：空关闭的门槛只该在「跨过那一条」上生效 ──
 {
   W.S.hostRankCache.clear();
-  for (let i2 = 0; i2 < 4; i2 += 1) W.STATS.nsEmptyClose("ec.test:443", true);
+  for (let i2 = 0; i2 < 4; i2 += 1) W.NodeStatsTable.nsEmptyClose("ec.test:443", true);
   const ecs = W.S.nstat.get("ec.test:443");
   W.S.hostRankCache.set("a.example", { t: 1, v: [] });
-  W.STATS.nsEmptyClose("ec.test:443", true);   // 第 5 条：这一条把计数推过门槛
+  W.NodeStatsTable.nsEmptyClose("ec.test:443", true);   // 第 5 条：这一条把计数推过门槛
   ok("跨过门槛那一条会作废站点排行缓存", !W.S.hostRankCache.has("a.example"));
   ok("门槛就是 5 次", Math.round(ecs.eCloseP) >= 5);
   W.S.hostRankCache.set("b.example", { t: 1, v: [] });
-  W.STATS.nsEmptyClose("ec.test:443", true);   // 第 6 条：已经跨过，不该再清
+  W.NodeStatsTable.nsEmptyClose("ec.test:443", true);   // 第 6 条：已经跨过，不该再清
   ok("跨过之后再空关闭不再清缓存（eCloseP 按 6 小时半衰期挂着，每次清等于关掉缓存）", W.S.hostRankCache.has("b.example"));
   ok("计数继续累加", Math.round(ecs.eCloseP) >= 6);
   W.S.hostRankCache.set("c.example", { t: 1, v: [] });
-  W.STATS.nsEmptyClose("ec.test:443", false);
+  W.NodeStatsTable.nsEmptyClose("ec.test:443", false);
   ok("直连腿的空关闭不清站点排行", W.S.hostRankCache.has("c.example"));
 }
 // 探活只累加样本数与 tcp/tls 的 EWMA，不写真实首字节的矩
 {
-  W.STATS.nsProbe("pr.test:443", 120, 90, 30);
-  W.STATS.nsProbe("pr.test:443", 130, 95, 35);
+  W.NodeStatsTable.nsProbe("pr.test:443", 120, 90, 30);
+  W.NodeStatsTable.nsProbe("pr.test:443", 130, 95, 35);
   const prs = W.S.nstat.get("pr.test:443");
   eq("探活只累加样本数", prs.probeSamples, 2);
   ok("探活不写首字节矩（否则会给还没承载流量的节点白加抖动罚）", prs.pSum === 0 && prs.pSumSq === 0);
@@ -3761,8 +3761,8 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   const mk = (k) => { const i = k.lastIndexOf(":"); W.S.alive.set(k, { h: k.slice(0, i), p: Number(k.slice(i + 1)) || 443, cc: "", ms: 100 }); };
   mk("1.1.1.1:443");
   mk("2.2.2.2:443");
-  W.STATS.nsGet("1.1.1.1:443").tcp = 40;
-  W.STATS.nsGet("2.2.2.2:443").tcp = 200;
+  W.NodeStatsTable.nsGet("1.1.1.1:443").tcp = 40;
+  W.NodeStatsTable.nsGet("2.2.2.2:443").tcp = 200;
   W.hostNodeMark("1.1.1.1:443", "retry.test", true, 120);
   const env = { proxyip: "auto" };
   const a1 = await W.SEL.current(env, "tput", null, "retry.test", false);
@@ -3830,14 +3830,14 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   const fSrc = fs.readFileSync("src/proxy/fallback.ts", "utf8");
   const aSrc = fs.readFileSync("src/proxy/attacher.ts", "utf8");
   ok("换节点重试也走带预算的拨号器", fSrc.includes("SOCKET_DIALER.open(") && !fSrc.includes("withTimeout(pk, CONNECT_MS)"));
-  ok("换节点失败要给这条候选记一笔（否则一直被挑回来）", fSrc.includes("STATS.nsFail(alt)"));
+  ok("换节点失败要给这条候选记一笔（否则一直被挑回来）", fSrc.includes("NodeStatsTable.nsFail(alt)"));
   ok("超时迟到成功的 socket 由拨号器关掉（fallback 不再自己写）", !fSrc.includes("pk.then((s) =>") && fSrc.includes("SOCKET_DIALER"));
   const iRel = aSrc.indexOf("releaseAll(conn)");
   const iSet = aSrc.indexOf("conn.sock = sock;");
   ok("递归重试前先释放上一跳的 socket 与写锁", iRel >= 0 && iSet > iRel);
   ok("IPv6 兜底也有建连预算（走拨号器）", aSrc.includes("SOCKET_DIALER.open(expandV6(v6), port)") && !aSrc.includes("connect({ hostname: expandV6(v6)"));
   ok("proxyip 兜底也有建连预算（走拨号器）", aSrc.includes("SOCKET_DIALER.open(px.host, px.port)") && !aSrc.includes("Promise.resolve(connect("));
-  ok("proxyip 连不上要给中继记账", aSrc.includes('STATS.nsFail(px.host + ":" + px.port)'));
+  ok("proxyip 连不上要给中继记账", aSrc.includes('NodeStatsTable.nsFail(px.host + ":" + px.port)'));
   ok("死条件 !px || st.retried 已经删掉（只判代码行，注释里可以留历史）", !/if \(!px \|\| st\.retried\)/.test(aSrc));
 }
 {
@@ -4314,19 +4314,19 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carry.owner = String(id).
   const pSrc = scanAll();
   eq(
     "pool.ts 里没有任何 nsLatency 调用（探活 RTT 不是真实首字节）",
-    (pSrc.match(/^\s*STATS\.nsLatency\(/gm) || []).length,
+    (pSrc.match(/^\s*NodeStatsTable\.nsLatency\(/gm) || []).length,
     0,
   );
   ok(
     "探活仍然把样本写进统计（nsProbe）：② 与 ②b 复测合并进 probeInto 后剩三处调用",
-    (pSrc.match(/^\s*STATS\.nsProbe\(/gm) || []).length >= 3,
+    (pSrc.match(/^\s*NodeStatsTable\.nsProbe\(/gm) || []).length >= 3,
     true,
   );
   const pk = "11.9.9.9:443";
   W.S.nstat.delete(pk);
-  W.STATS.nsProbe(pk, 40, 38, 2);
-  W.STATS.nsProbe(pk, 44, 40, 4);
-  const st175 = W.STATS.nsGet(pk);
+  W.NodeStatsTable.nsProbe(pk, 40, 38, 2);
+  W.NodeStatsTable.nsProbe(pk, 44, 40, 4);
+  const st175 = W.NodeStatsTable.nsGet(pk);
   eq("探活只累加样本数", st175.probeSamples, 2);
   ok(
     "探活不写首字节矩（pSum 仍是 0）",
@@ -4567,8 +4567,8 @@ console.log("\n191a) 站点失败的记账路径");
   S.pxFailSeen = 0;
   await W.SEL.softFail("sfa:443");
   await W.SEL.bumpFail({}, "tput", "sfb:443", false, "site");
-  const fa = W.STATS.nsGet("sfa:443");
-  const fb = W.STATS.nsGet("sfb:443");
+  const fa = W.NodeStatsTable.nsGet("sfa:443");
+  const fb = W.NodeStatsTable.nsGet("sfb:443");
   eq("softFail 与 kind=site 的权重一致", Math.round(fb.failW * 10), Math.round(fa.failW * 10));
   ok("站点失败只记 0.2 的站责", fa.failW > 0.1 && fa.failW < 0.3, String(fa.failW));
   eq("站点失败不进全局失败记忆", S.pxFailMem, 0);
@@ -4637,10 +4637,10 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   W.S.pool = mk(10, "stale"); W.S.poolGen = 4; W.S.seed.poolGen = 4; W.S.seed.poolN = 10;
   W.S.seedAt = Date.now(); W.S.seedReadFail = false; W.S.colo = "TST";
   putSeed(5, 200);
-  const c1 = await W.POOL.commitPool(envP, mk(80, "shrink"), false);
+  const c1 = await W.commitPool(envP, mk(80, "shrink"), false);
   eq("本地是小池子时仍按 KV 的真实规模判缩水", c1.ok, false);
   ok("拒绝理由写明是缩水", String(c1.reason || "").includes("rejected"), String(c1.reason));
-  const c2 = await W.POOL.commitPool(envP, mk(80, "shrink"), true);
+  const c2 = await W.commitPool(envP, mk(80, "shrink"), true);
   eq("手动 refill 仍然可以缩水", c2.ok, true);
   // 读失败：普通 kvGet 会把 get 抛错吞成 null，那条 logErr 永远写不出来
   // 错误环上限 50 条、满了 shift：只能按时间戳认「这条是刚写进去的」，不能按下标切
@@ -4650,7 +4650,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
     get: async () => { throw new Error("kv down"); },
     put: async () => { throw new Error("kv down"); },
   } };
-  const got = await W.POOL.ensurePool(downEnv);
+  const got = await W.ensurePool(downEnv);
   eq("读失败按空池返回，不炸调用方", got.length, 0);
   const logged = W.S.errs.some((x) => x && x.t >= errAt && String(x.m || "").includes("pool gen 6"));
   ok("读失败写进了错误环", logged, JSON.stringify(W.S.errs.filter((x) => x && x.t >= errAt)));
@@ -4731,7 +4731,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   // 行为面：七张表里最容易漏的那张（dns）必须真能穿过车身进表
   W.DNS.clear();
   const now195 = Date.now();
-  const n195 = W.FACTS.load({ dns: [{ h: "d195.test", v: 1, at: now195 }], eg: [{ i: "9.9.9.9", f: 6, at: now195 }] });
+  const n195 = W.FactsStore.load({ dns: [{ h: "d195.test", v: 1, at: now195 }], eg: [{ i: "9.9.9.9", f: 6, at: now195 }] });
   eq("车身里的 dns 事实被读入", n195.dns, 1);
   eq("车身里的 eg 事实被读入", n195.eg, 1);
   eq("dns 事实真的进了 DNS 表", W.DNS.v6Of("d195.test"), 1);
@@ -5091,7 +5091,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   W.S.poolGen = 6;
   W.S.poolBuilt = 111;
   W.S.pool = fakePool(320);
-  await W.SEEDS.write(envS, false, true);
+  await W.SeedStore.write(envS, false, true);
   eq("锚点建立到第 6 代", W.S.seed.poolGen, 6);
   eq("锚点规模 320", W.S.seed.poolN, 320);
   // 第二步：本地停在旧代（5 代 200 条）的 isolate 落盘，不得把锚点改小
@@ -5099,7 +5099,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   W.S.poolGen = 5;
   W.S.poolBuilt = 100;
   W.S.pool = fakePool(200);
-  await W.SEEDS.write(envS, false, true);
+  await W.SeedStore.write(envS, false, true);
   eq("落后一个代际的 isolate 不会把锚点代际改小", W.S.seed.poolGen, 6);
   eq("也不会把锚点规模改小", W.S.seed.poolN, 320);
   eq("也不会把建池时间改小", W.S.seed.builtAt, 111);
@@ -5107,14 +5107,14 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   W.S.seedAt = 0;
   W.S.poolGen = 6;
   W.S.pool = fakePool(400);
-  await W.SEEDS.write(envS, false, true);
+  await W.SeedStore.write(envS, false, true);
   eq("同代取较大规模", W.S.seed.poolN, 400);
   // 第四步：本地确实更新 → 用本地那一对
   W.S.seedAt = 0;
   W.S.poolGen = 7;
   W.S.poolBuilt = 222;
   W.S.pool = fakePool(410);
-  await W.SEEDS.write(envS, false, true);
+  await W.SeedStore.write(envS, false, true);
   eq("本地更新时代际前移", W.S.seed.poolGen, 7);
   eq("本地更新时规模取本地", W.S.seed.poolN, 410);
   eq("本地更新时建池时间取本地", W.S.seed.builtAt, 222);
@@ -5480,7 +5480,7 @@ try {
     eq("超时记 ustall", Number(W.S.cnt.ustall || 0) - before, 1);
     eq("超时关掉 socket", sock.closed, 1);
     ok("超时后不再往死连接写", c.dead === true);
-    ok("超时归因到中继节点", Number(W.STATS.nsGet("203.0.113.211:443").failW || 0) > 0);
+    ok("超时归因到中继节点", Number(W.NodeStatsTable.nsGet("203.0.113.211:443").failW || 0) > 0);
   }
   // 直连黑洞：没有节点可罚，计数与断开照做
   {
@@ -5488,10 +5488,10 @@ try {
     const sock = mkSock211();
     c.sock = sock;
     c.writer = { write: () => new Promise(() => {}) };
-    const fw = Number(W.STATS.nsGet("203.0.113.212:443").failW || 0);
+    const fw = Number(W.NodeStatsTable.nsGet("203.0.113.212:443").failW || 0);
     await c.upWrite(new Uint8Array(16), 40);
     eq("直连黑洞也关 socket", sock.closed, 1);
-    eq("直连黑洞不罚池子里的节点", Number(W.STATS.nsGet("203.0.113.212:443").failW || 0), fw);
+    eq("直连黑洞不罚池子里的节点", Number(W.NodeStatsTable.nsGet("203.0.113.212:443").failW || 0), fw);
   }
   // 正常写：不计 ustall、不关 socket
   {
@@ -5530,7 +5530,7 @@ try {
     W.S.alive.set(h + ":443", { h, p: 443, cc: "", ms: 100 });
   }
   W.S.candN = 0;
-  W.STATS.invalidateRank();
+  W.NodeStatsTable.invalidateRank();
   W.CANDS.list("lat");
   eq("切片中途不写 candN（旧代码会把 128 当池子大小）", W.S.candN, 0);
   let calls212 = 1;
@@ -5548,7 +5548,7 @@ try {
   W.S.alive.clear();
   for (const [k212, v212] of bak212) W.S.alive.set(k212, v212);
   W.S.candN = bakN212;
-  W.STATS.invalidateRank();
+  W.NodeStatsTable.invalidateRank();
 }
 
 // ---- 第 213 组：站点冷启动的影子试探（lastTry 只写不读）+ 节点统计里的僵尸字段 ----
@@ -5566,14 +5566,14 @@ try {
   setup213();
   const a213 = W.HOSTS.untried(g213host, "lat");
   ok("影子试探先给全局排行第一名", Boolean(a213), a213);
-  W.STATS.nsGet(a213).lastTry = Date.now();
+  W.NodeStatsTable.nsGet(a213).lastTry = Date.now();
   const b213 = W.HOSTS.untried(g213host, "lat");
   ok("刚试过的节点不会被第二条并发请求立刻再选一次", b213 !== a213, a213 + " / " + b213);
   ok("换到的是另一条真实候选", g213keys.includes(b213), b213);
-  W.STATS.nsGet(a213).lastTry = Date.now() - 60000;
+  W.NodeStatsTable.nsGet(a213).lastTry = Date.now() - 60000;
   eq("过了窗口期可以再用它", W.HOSTS.untried(g213host, "lat"), a213);
   setup213();
-  for (const k of g213keys) W.STATS.nsGet(k).lastTry = Date.now();
+  for (const k of g213keys) W.NodeStatsTable.nsGet(k).lastTry = Date.now();
   const c213 = W.HOSTS.untried(g213host, "lat");
   ok("全都在窗口内时退回一条，不能返回空串", Boolean(c213), c213);
   W.S.alive = new Map([[g213keys[0], { h: "10.213.0.1", p: 443, cc: "HK" }]]);
@@ -5588,16 +5588,16 @@ try {
   ok("节点统计里不再有 eCloseD（只写不读）", !stCode.includes("eCloseD"));
   ok("影子试探的窗口常量进了 SC", fs.readFileSync("src/core/const.ts", "utf8").includes("UNTRIED_GAP: 20000"));
   ok("untried 会读 lastTry", metricsAll().includes("SC.UNTRIED_GAP"));
-  ok("selector 仍在返回前记 lastTry", pickAll().includes("STATS.nsGet(t0).lastTry = Date.now();"));
+  ok("selector 仍在返回前记 lastTry", pickAll().includes("NodeStatsTable.nsGet(t0).lastTry = Date.now();"));
   ok("直连空关闭的全局计数保留", fs.readFileSync("src/proxy/attacher.ts", "utf8").includes('cnt("eCloseD")'));
   ok("类型里也没有 eCloseD", !fs.readFileSync("types/app.d.ts", "utf8").includes("eCloseD"));
   const k213 = "10.213.9.9:443";
   W.S.nstat.delete(k213);
-  W.STATS.nsEmptyClose(k213, false);
+  W.NodeStatsTable.nsEmptyClose(k213, false);
   const r213 = W.S.nstat.get(k213);
   eq("直连空关闭不增加中转侧的计数", r213.eCloseP, 0);
   ok("节点统计里没有 eCloseD 这个键", !Object.prototype.hasOwnProperty.call(r213, "eCloseD"));
-  W.STATS.nsEmptyClose(k213, true);
+  W.NodeStatsTable.nsEmptyClose(k213, true);
   eq("中转空关闭会加一", W.S.nstat.get(k213).eCloseP, 1);
   W.S.nstat.delete(k213);
 }
@@ -5950,7 +5950,7 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   ok("?blk= 按站点前缀过滤封锁行", dbg.includes("BLK.snap().filter((r) => r.k === host || r.k.startsWith(host + \"|\"))") || dbg.includes('r.k.startsWith(bh + "|")'));
   ok("?blk= 报告自愈静音", dbg.includes("muted: BLK.muted(host)"));
   ok("debug 有 ?facts=1 分支", dbg.includes('q.get("facts") !== "1"'));
-  ok("?facts=1 发的是事实层快照", dbg.includes("tables: FACTS.snap()"));
+  ok("?facts=1 发的是事实层快照", dbg.includes("tables: FactsStore.snap()"));
   ok("debug 有 ?plan=1 分支", dbg.includes('q.get("plan") !== "1"'));
   ok("?plan=1 与 vt 分支同一口径", dbg.includes("planView(S.pool.length, S.alive.size)"));
 
@@ -5968,7 +5968,7 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   ok("sweep 触发自愈", W.BLK.sweep("a223.example.com", ["10.9.1.1", "10.9.1.2", "10.9.1.3"], now223) === true);
   ok("自愈后 muted 为 true", W.BLK.muted("a223.example.com", now223) === true);
   W.BLK.clear();
-  const fs223 = Object.keys(W.FACTS.snap() || {}).sort().join(",");
+  const fs223 = Object.keys(W.FactsStore.snap() || {}).sort().join(",");
   eq("事实层快照是五张表", fs223, "blk2,dead,dns,eg,ps");
 
   // 文档口径：不能再声称一个服务端不存在的端点
@@ -5979,7 +5979,7 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
 }
 /* ---------- 第 224 组：cron 闸门要有截止时间 ---------- */
 {
-  const L = W.CRONLOCK;
+  const L = W.CronLock;
   ok("闸门对象存在", !!L && typeof L.claim === "function");
   const t0 = Date.now();
   W.S.cronAt = 0;
@@ -6018,8 +6018,8 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   const cnstSrc = fs.readFileSync("src/core/const.ts", "utf8");
   ok("lock.ts 用 SC.CRON_STALE_MS 判超时", lockSrc.includes("SC.CRON_STALE_MS"));
   ok("lock.ts 接管时计 cronStale", lockSrc.includes('cnt("cronStale")'));
-  ok("cron.ts 走 CRONLOCK.claim", cronSrc.includes("if (!CRONLOCK.claim()) return;"));
-  ok("proxyip.ts 报告持有毫秒", pipSrc.includes("heldMs: CRONLOCK.age()"));
+  ok("cron.ts 走 CronLock.claim", cronSrc.includes("if (!CronLock.claim()) return;"));
+  ok("proxyip.ts 报告持有毫秒", pipSrc.includes("heldMs: CronLock.age()"));
   ok("两个入口都不再有布尔闩", !cronSrc.includes("S.cronBusy") && !pipSrc.includes("S.cronBusy"));
   ok("S 里是时间戳而不是布尔", stSrc.includes("cronAt = 0;") && !stSrc.includes("cronBusy"));
   ok("CRON_STALE_MS 已定义", /CRON_STALE_MS:\s*8 \* 60_000/.test(cnstSrc));
@@ -6057,7 +6057,7 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   const PB = W.S.probeBad;
   const key226 = (i) => `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}:443`;
   const t0 = Date.now();
-  const sw = (t) => W.PROBE_COOL.sweep(t);
+  const sw = (t) => W.ProbeCooldown.sweep(t);
   eq("上限常量在位", W.SC.PROBE_BAD_MAX, 2048);
   // 过期记录：对 probeBadSkip 已经无意义，必须清掉
   PB.clear();
@@ -6086,13 +6086,13 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   // 判据与 TTL 同源：过 TTL 后不再判「跳过」
   PB.clear();
   for (let i = 0; i < 3; i++) W.bumpProbeBad(key226(9), false, t0);
-  ok("连续 3 次失败后判跳过", W.PROBE_COOL.skip(key226(9), t0));
-  ok("过了 TTL 不再判跳过", W.PROBE_COOL.skip(key226(9), t0 + W.SC.PROBE_BAD_TTL + 1) === false);
+  ok("连续 3 次失败后判跳过", W.ProbeCooldown.skip(key226(9), t0));
+  ok("过了 TTL 不再判跳过", W.ProbeCooldown.skip(key226(9), t0 + W.SC.PROBE_BAD_TTL + 1) === false);
   PB.clear();
   // 源码锁：清理函数存在、且 cronScan 每轮都调它
   const poolSrc226 = scanAll();
 const aliveSrc226 = fs.readFileSync("src/px/alive.ts", "utf8");
-  ok("cronScan 每轮都扫这张表", poolSrc226.includes("PROBE_COOL.sweep();"));
+  ok("cronScan 每轮都扫这张表", poolSrc226.includes("ProbeCooldown.sweep();"));
   ok("扫的时候先看 TTL", aliveSrc226.includes("if (now - entry.at > SC.PROBE_BAD_TTL) {"));
   ok("超上限按 at 升序淘汰", aliveSrc226.includes("sort((a, b) => a[1].at - b[1].at)"));
 }
@@ -7285,7 +7285,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
 }
 // ── 第 254 组：统计层字段改成语义名（纯内存结构，与线协议无关） ────────────
 {
-  const z254 = W.STATS.nsGet("zero254.test:443");
+  const z254 = W.NodeStatsTable.nsGet("zero254.test:443");
   eq("统计行有 probeSamples", typeof z254.probeSamples, "number");
   eq("统计行有 probeFails", typeof z254.probeFails, "number");
   eq("统计行有 trafficOkW", typeof z254.trafficOkW, "number");
@@ -7296,22 +7296,22 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
   eq("旧短名 tS 已消失", "tS" in z254, false);
   eq("旧短名 cusB 已消失", "cusB" in z254, false);
 
-  W.STATS.nsProbe("probe254.test:443", 40, 30, 10);
-  W.STATS.nsProbe("probe254.test:443", 42, 31, 11);
-  const p254 = W.STATS.nsGet("probe254.test:443");
+  W.NodeStatsTable.nsProbe("probe254.test:443", 40, 30, 10);
+  W.NodeStatsTable.nsProbe("probe254.test:443", 42, 31, 11);
+  const p254 = W.NodeStatsTable.nsGet("probe254.test:443");
   eq("两次探活累加 probeSamples", p254.probeSamples, 2);
   eq("探活不写首字节矩", p254.pSum, 0);
 
-  W.STATS.nsOk("ok254.test:443", 0, 0);
-  const o254 = W.STATS.nsGet("ok254.test:443");
+  W.NodeStatsTable.nsOk("ok254.test:443", 0, 0);
+  const o254 = W.NodeStatsTable.nsGet("ok254.test:443");
   eq("真实成功累加 trafficOkW", o254.trafficOkW, 1);
 
-  W.STATS.nsFail("fail254.test:443");
-  const f254 = W.STATS.nsGet("fail254.test:443");
+  W.NodeStatsTable.nsFail("fail254.test:443");
+  const f254 = W.NodeStatsTable.nsGet("fail254.test:443");
   eq("真实失败累加 trafficFailW", f254.trafficFailW, 1);
 
   // 衰减必须一起作用（effView 是只读投影，衰减在两处共用同一套换算）
-  const d254 = W.STATS.nsGet("decay254.test:443");
+  const d254 = W.NodeStatsTable.nsGet("decay254.test:443");
   d254.trafficOkW = 8; d254.probeSamples = 8; d254.at = Date.now() - W.SC.HL * 2;
   const v254 = W.effView(d254);
   eq("effView 暴露的是 probeSamples 而不是旧名", "probeSamples" in v254 && !("pN" in v254), true);
@@ -7608,7 +7608,7 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   W.VT.clear();
   W.VT.setState("r263.test", "r:7.7.7.1", 1, 10);
   W.VT.setState("r263.test", "r:7.7.7.2", 2, 20);
-  const pf = W.PREFS.of("r263.test", 10);
+  const pf = W.Prefs.of("r263.test", 10);
   const row = pf.ok[0] || {};
   eq("偏好行有 channel", typeof row.channel, "string");
   eq("偏好行有 state", typeof row.state, "number");
@@ -7618,7 +7618,7 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   eq("偏好行不再用 at 这个短名", "at" in row, false);
   eq("能打通的通道 state 是 1", row.state, 1);
   eq("打不通的通道 state 是 2", (pf.bad[0] || {}).state, 2);
-  const json263 = W.PREFS.json(10);
+  const json263 = W.Prefs.json(10);
   eq("JSON 出口也用新名", Object.keys(json263.ok[0] || {}).sort().join(","), "channel,state,updatedAt");
   const src263 = fs.readFileSync("src/route/prefs.ts", "utf8");
   ok("源码里偏好行是语义名", src263.includes("channel: string;") && src263.includes("updatedAt: number;"), src263.slice(0, 0));
@@ -7730,14 +7730,14 @@ const host267 = "enum267.test";
 // 行为面：prefs 的两栏与 chan() 的三态都在枚举口径下成立
 W.VT.setState(host267, "r:10.9.9.1", ST.Reachable, 1);
 W.VT.setState(host267, "r:10.9.9.2", ST.Blocked, 1);
-const rows267 = W.PREFS.of(host267, 40);
+const rows267 = W.Prefs.of(host267, 40);
 eq("可用的那条落在 ok 栏", rows267.ok.length, 1);
 eq("打不通的那条落在 bad 栏", rows267.bad.length, 1);
 eq("ok 栏的 state 就是 St.Reachable", rows267.ok[0].state, ST.Reachable);
 eq("bad 栏的 state 就是 St.Blocked", rows267.bad[0].state, ST.Blocked);
-eq("chanPref 对可用中继回 0", W.PREFS.chan("10.9.9.1", host267), 0);
-eq("chanPref 对判死中继回 2", W.PREFS.chan("10.9.9.2", host267), 2);
-eq("chanPref 对没测过的中继回 1（未知不惩罚）", W.PREFS.chan("10.9.9.3", host267), 1);
+eq("chanPref 对可用中继回 0", W.Prefs.chan("10.9.9.1", host267), 0);
+eq("chanPref 对判死中继回 2", W.Prefs.chan("10.9.9.2", host267), 2);
+eq("chanPref 对没测过的中继回 1（未知不惩罚）", W.Prefs.chan("10.9.9.3", host267), 1);
 
 // 源码锁：四个消费端都改走枚举
 const srcPol267 = fs.readFileSync("src/route/policy.ts", "utf8");
@@ -8261,31 +8261,31 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok("alive.ts 同时有冷却表与存活表", aliveSrc279.includes("export class ProbeCooldown") && aliveSrc279.includes("export class AliveBoard"), "");
   ok(
     "pool.ts 原样再导出旧名字（调用点零改动）",
-    ["PROBE_COOL", "bumpProbeBad", "pxGet", "aliveList", "cronScan", "PoolScan", "ALIVE"].every((n) => poolSrc279.includes(n)),
+    ["ProbeCooldown", "bumpProbeBad", "pxGet", "aliveList", "cronScan", "PoolScan", "AliveBoard"].every((n) => poolSrc279.includes(n)),
     "",
   );
 
   // 冷却表：连续失败到 SCAN_BAD_MAX 才跳过，成功一次就恢复；TTL 过了自动作废
   const cool = "cool279.test:443";
-  eq("没记录时不跳过", W.PROBE_COOL.skip(cool), false);
-  W.PROBE_COOL.bump(cool, false);
-  eq("失败一次还不跳过", W.PROBE_COOL.skip(cool), false);
-  W.PROBE_COOL.bump(cool, false);
-  W.PROBE_COOL.bump(cool, false);
-  eq("连续失败到上限才跳过", W.PROBE_COOL.skip(cool), true);
-  W.PROBE_COOL.bump(cool, true);
-  eq("成功一次就重新可探", W.PROBE_COOL.skip(cool), false);
+  eq("没记录时不跳过", W.ProbeCooldown.skip(cool), false);
+  W.ProbeCooldown.bump(cool, false);
+  eq("失败一次还不跳过", W.ProbeCooldown.skip(cool), false);
+  W.ProbeCooldown.bump(cool, false);
+  W.ProbeCooldown.bump(cool, false);
+  eq("连续失败到上限才跳过", W.ProbeCooldown.skip(cool), true);
+  W.ProbeCooldown.bump(cool, true);
+  eq("成功一次就重新可探", W.ProbeCooldown.skip(cool), false);
 
   const cool2 = "cool279b.test:443";
-  W.PROBE_COOL.bump(cool2, false);
-  W.PROBE_COOL.bump(cool2, false);
-  W.PROBE_COOL.bump(cool2, false);
-  eq("TTL 内仍然跳过", W.PROBE_COOL.skip(cool2, Date.now() + 1000), true);
-  eq("TTL 过了自动恢复", W.PROBE_COOL.skip(cool2, Date.now() + W.SC.PROBE_BAD_TTL + 1), false);
+  W.ProbeCooldown.bump(cool2, false);
+  W.ProbeCooldown.bump(cool2, false);
+  W.ProbeCooldown.bump(cool2, false);
+  eq("TTL 内仍然跳过", W.ProbeCooldown.skip(cool2, Date.now() + 1000), true);
+  eq("TTL 过了自动恢复", W.ProbeCooldown.skip(cool2, Date.now() + W.SC.PROBE_BAD_TTL + 1), false);
 
   // 上限：越过 PROBE_BAD_MAX 时把最久没更新的淘汰掉（表没有别的裁剪路径）
-  for (let i = 0; i < W.SC.PROBE_BAD_MAX + 20; i++) W.PROBE_COOL.bump("cap279-" + i + ".test:443", false);
-  const dropped = W.PROBE_COOL.sweep();
+  for (let i = 0; i < W.SC.PROBE_BAD_MAX + 20; i++) W.ProbeCooldown.bump("cap279-" + i + ".test:443", false);
+  const dropped = W.ProbeCooldown.sweep();
   ok("越过上限会淘汰最久没更新的", dropped >= 20, "dropped=" + dropped);
 
   // 存活表裁剪：先删不在池子里的，再按延迟从慢到快删
@@ -8320,7 +8320,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok("门面不再列候选", !facadeSrc.includes("candsFor("), "");
   ok("门面不再自写 IP 解析", !facadeSrc.includes("relayIpOf("), "");
   ok("门面不再动游标", !facadeSrc.includes("S.curs"), "");
-  ok("门面不再记样本", !facadeSrc.includes("STATS.nsGet("), "");
+  ok("门面不再记样本", !facadeSrc.includes("NodeStatsTable.nsGet("), "");
   // 职责边界：换节点只由 Rotation 判，FailBook 调它而不是自己判
   ok("failbook 用注入的 rotation", failSrc.includes("this.rotation.maybeSwitch("), "");
   ok("failbook 不再 this.maybeSwitch", !failSrc.includes("this.maybeSwitch("), "");
@@ -8376,29 +8376,29 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   // 四段没有各自独立的生命周期，拆开只是把 import 搬了个位置。
   ok("四段归位到同一个文件", ["src/nodes/stat-types.ts", "src/nodes/stat-table.ts", "src/nodes/stat-view.ts", "src/nodes/stat-observe.ts"].every((f) => !fs.existsSync(f)), "");
   ok("类型与常量仍在", src.includes("export interface EffView") && src.includes("export const ZERO_STAT") && src.includes("export const TEN_MB") && src.includes("export const EMPTY_CLOSE_BAD"), "");
-  ok("表本体持有类与单例", src.includes("export class NodeStatsTable {") && src.includes("export const STATS = new NodeStatsTable();"), "");
-  ok("表本体自己管「取条目 / 打缓存 / 九个写入」", src.includes("  nsGet(k: string): NodeStats {") && src.includes("  invalidateRank() {") && src.includes("  nsOk(k: string, tcp: number, tls: number) {"), "");
+  ok("表本体只有类、没有模块级实例", src.includes("export class NodeStatsTable {") && !src.includes("export const STATS = new NodeStatsTable();"), "");
+  ok("表本体自己管「取条目 / 打缓存 / 九个写入」", src.includes("  static nsGet(k: string): NodeStats {") && src.includes("  static invalidateRank() {") && src.includes("  static nsOk(k: string, tcp: number, tls: number) {"), "");
   ok(
       "十一个同名转发都已删除",
       ["nsOk", "nsProbe", "nsProbeFail", "nsFail", "nsSiteFail", "nsSpeed", "nsStall", "nsLatency", "nsEmptyClose", "nsGet", "invalidateRank"].every((f) => !new RegExp("^export function " + f + "\\(", "m").test(src)),
       "",
     );
   ok("派生层七个纯函数都在", ["nsDecay", "ageFactor", "effView", "pFailFast", "pFailOf", "availOf", "pStallOf"].every((f) => src.includes(`export function ${f}(`)), "");
-  ok("九个写入都是类方法", ["nsOk", "nsProbe", "nsProbeFail", "nsFail", "nsSiteFail", "nsSpeed", "nsStall", "nsLatency", "nsEmptyClose"].every((f) => src.includes(`  ${f}(`)), "");
+  ok("九个写入都是类方法", ["nsOk", "nsProbe", "nsProbeFail", "nsFail", "nsSiteFail", "nsSpeed", "nsStall", "nsLatency", "nsEmptyClose"].every((f) => src.includes(`  static ${f}(`)), "");
   ok("写入全部经 this.nsGet 取条目、不自己碰 S.nstat", (src.match(/this\.nsGet\(/g) || []).length >= 9 && !noComment(src).includes("S.nstat["), "");
   ok("这一层只有 NodeStatsTable 一个类", (src.match(/^export class /gm) || []).length === 1, "");
   // 行为面：常量与写入仍然照旧（用独立键，避免与别的组互相污染）
   eq("TEN_MB 仍是 10MB", W.TEN_MB, 10 * 1048576);
   eq("空关闭门槛仍是 5", W.EMPTY_CLOSE_BAD, 5);
-  eq("表单例可判定", W.STATS instanceof W.NodeStatsTable, true);
+  eq("模块级单例已不存在（表只以静态方法存在）", W.STATS, undefined);
   eq("零值条目的样本数为 0", W.ZERO_STAT.probeSamples, 0);
   const k282 = "stat282.probe:443";
-  W.STATS.nsFail(k282);
-  ok("失败后进入冷却", W.STATS.nsGet(k282).blackUntil > Date.now(), "");
-  ok("冷却被记成失败一笔", W.effView(W.STATS.nsGet(k282)).failW > 0, "");
-  W.STATS.nsOk(k282, 12, 30);
-  eq("成功清零冷却", W.STATS.nsGet(k282).blackUntil, 0);
-  ok("成功留下 tcp 样本", W.STATS.nsGet(k282).tcp > 0, "");
+  W.NodeStatsTable.nsFail(k282);
+  ok("失败后进入冷却", W.NodeStatsTable.nsGet(k282).blackUntil > Date.now(), "");
+  ok("冷却被记成失败一笔", W.effView(W.NodeStatsTable.nsGet(k282)).failW > 0, "");
+  W.NodeStatsTable.nsOk(k282, 12, 30);
+  eq("成功清零冷却", W.NodeStatsTable.nsGet(k282).blackUntil, 0);
+  ok("成功留下 tcp 样本", W.NodeStatsTable.nsGet(k282).tcp > 0, "");
 }
 
 
@@ -8513,7 +8513,7 @@ eq("策略是否生效是只读属性", W.POLICY.enabled, W.SC.POLICY > 0);
   ok("结算流水线是独立的类（模块级单例已并入连接）", settleSrc286.includes("export class ConnSettle") && !settleSrc286.includes("export const SETTLE"), "");
   ok("结算只读结构化视图（不 import Connection）", settleSrc286.includes("export interface SettleView") && !settleSrc286.includes("Connection }"), "");
   ok("结算入口只有 close / pend 两条", settleSrc286.includes("close(v: SettleView): void") && settleSrc286.includes("pend(v: SettleView): void"), "");
-  ok("连接本体不再自己结算节点分数", !connSrc286.includes("STATS.nsOk(") && !connSrc286.includes("STATS.nsStall(") && !connSrc286.includes("markSeedDirty("), "");
+  ok("连接本体不再自己结算节点分数", !connSrc286.includes("NodeStatsTable.nsOk(") && !connSrc286.includes("NodeStatsTable.nsStall(") && !connSrc286.includes("markSeedDirty("), "");
   ok("连接本体不再自己记 PEND 账", !connSrc286.includes("statBump(") && !connSrc286.includes("scheduleFlush("), "");
   ok("flush 只负责调度结算", connSrc286.includes("this.settle.close(this)") && connSrc286.includes("this.settle.pend(this)"), "");
   ok("通道证据也搬进结算", !connSrc286.includes("HOOK.traffic") && settleSrc286.includes("HOOK.traffic"), "");
@@ -8584,7 +8584,7 @@ console.log("\n[287] 判定表只有一个文件：类型、表本体、单例�
   W.freezeNode("g288:443");
   ok("冻结后立即不可用", W.usable("g288:443") === false && W.isFrozen("g288:443") === true, "");
   W.S.alive.delete("g288:443");
-  W.STATS.invalidateRank();
+  W.NodeStatsTable.invalidateRank();
 }
 
 // 第 289 组：「站点 × 中继」成功率事实按「形状 / 先验 / 待发队列 / 表本体 / 门面」拆开（7.289）
@@ -8680,8 +8680,8 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   ].every((x) => orche.includes(x)), true);
   eq("批探活按 PROBE_CONC 切段且认合并键", orche.includes("chunks(keys, SC.PROBE_CONC)") && orche.includes("splitRelay(key, 443)"), true);
   eq("新候选执行器负责进存活表", orche.slice(orche.indexOf("class ScanProbe")).includes("S.alive.set("), true);
-  eq("复测执行器记探活失败", orche.slice(orche.indexOf("class ScanAlive")).includes("STATS.nsProbeFail("), true);
-  eq("收尾执行器做裁剪与落盘", orche.slice(orche.indexOf("class ScanHouse")).includes("this.board.trimToMax(") && orche.includes("SEEDS.write("), true);
+  eq("复测执行器记探活失败", orche.slice(orche.indexOf("class ScanAlive")).includes("NodeStatsTable.nsProbeFail("), true);
+  eq("收尾执行器做裁剪与落盘", orche.slice(orche.indexOf("class ScanHouse")).includes("this.board.trimToMax(") && orche.includes("SeedStore.write("), true);
   eq("scan.ts 仍在单文件上限内", orche.split(/\r?\n/).length <= 560, true);
   eq("三个执行器都能构造", [W.ScanProbe, W.ScanAlive, W.ScanHouse].every((f) => typeof f === "function"), true);
   eq("探活批处理可调用", typeof W.probeBatch === "function", true);
@@ -8928,7 +8928,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   const writes = ["nsEmptyClose", "nsOk", "nsProbe", "nsProbeFail", "nsFail", "nsSiteFail", "nsSpeed", "nsStall", "nsLatency"];
   ok(
     "九个写入都是类方法（签名缩进两格）",
-    writes.every((f) => new RegExp("\\n  " + f + "\\(", "m").test(src302)),
+    writes.every((f) => new RegExp("\\n  static " + f + "\\(", "m").test(src302)),
     true,
   );
   ok(
@@ -8937,20 +8937,20 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
       !/^export function (nsGet|invalidateRank)\(/m.test(src302),
     true,
   );
-  ok("取条目与打缓存仍是类方法", src302.includes("  nsGet(k: string): NodeStats {") && src302.includes("  invalidateRank() {"), true);
+  ok("取条目与打缓存仍是类方法", src302.includes("  static nsGet(k: string): NodeStats {") && src302.includes("  static invalidateRank() {"), true);
   ok("派生层仍是纯函数（不读 S）", /export function effView\(s: NodeStats/m.test(src302) && /export function pStallOf\(s: NodeStats/m.test(src302), true);
   ok("写入方法一律经 this.nsGet 取条目", (src302.match(/this\.nsGet\(/g) || []).length >= 9, true);
-  eq("单例仍然是 TypeScript 里那个类", W.STATS instanceof W.NodeStatsTable, true);
-  ok("测试窗口只剩单例、没有转发", typeof W.STATS.nsOk === "function" && W.nsOk === undefined, true);
+  eq("单例退场后仍能经类取统计", typeof W.NodeStatsTable.nsGet, "function");
+  ok("测试窗口只剩类、没有转发", typeof W.NodeStatsTable.nsOk === "function" && W.nsOk === undefined, true);
 
   // 行为面：写入走单例后仍然累加同一张表
   const k302 = "13.7.7.7:443";
   W.S.nstat.delete(k302);
-  W.STATS.nsOk(k302, 120, 80);
-  W.STATS.nsFail(k302);
-  W.STATS.nsSiteFail(k302);
-  W.STATS.nsStall(k302, 500, 2000);
-  const row302 = W.STATS.nsGet(k302);
+  W.NodeStatsTable.nsOk(k302, 120, 80);
+  W.NodeStatsTable.nsFail(k302);
+  W.NodeStatsTable.nsSiteFail(k302);
+  W.NodeStatsTable.nsStall(k302, 500, 2000);
+  const row302 = W.NodeStatsTable.nsGet(k302);
   eq(
     "成功 1 次、失败 1 次 + 站点失败 0.2 次（各自进 fail 与 failW）",
     [row302.ok, Math.round(row302.fail * 10) / 10, Math.round(row302.failW * 10) / 10],
@@ -8958,7 +8958,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   );
   eq("卡顿样本原样进表", [row302.stallMs, row302.runMs], [500, 2000]);
   ok("失败留下冷却（blackUntil > now）", row302.blackUntil > Date.now(), true);
-  W.STATS.nsLatency(k302, 300);
+  W.NodeStatsTable.nsLatency(k302, 300);
   ok("首字节样本写进矩", row302.pSum > 0 && row302.msLocal > 0, true);
 }
 
@@ -8972,7 +8972,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   for (const n of gone) ok("旧入口已删除：" + n, W[n] === undefined);
 
   // 能力仍然在，而且挂在它们操作的那张表上
-  ok("冷却表自己判跳过", typeof W.PROBE_COOL.skip === "function" && typeof W.PROBE_COOL.sweep === "function");
+  ok("冷却表自己判跳过", typeof W.ProbeCooldown.skip === "function" && typeof W.ProbeCooldown.sweep === "function");
   ok("画像表自己给排行", typeof W.HOSTS.rank === "function" && typeof W.HOSTS.untried === "function");
   ok("容量表自己给因子与记账", typeof W.CAP.factor === "function" && typeof W.CAP.note === "function");
   ok("实测表自己给代价与快照", typeof W.RELPERF.cost === "function" && typeof W.RELPERF.costFor === "function" && typeof W.RELPERF.snap === "function");
@@ -8984,7 +8984,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("没量过的直连代价也是 1e6", W.RELPERF.cost("no-such-303.test", "203.0.113.203"), 1e6);
   eq("没量过的站点快照为空", W.RELPERF.snap("no-such-303.test"), []);
   eq("懒模式容量因子恒 1", W.CAP.factor("203.0.113.204", "lat"), 1);
-  eq("没有冷却记录的键不跳过", W.PROBE_COOL.skip("cool303.test:443"), false);
+  eq("没有冷却记录的键不跳过", W.ProbeCooldown.skip("cool303.test:443"), false);
   ok("丢弃计数是个数字", typeof W.ERRS.dropped() === "number");
 
   // 源码锁：这些名字只以「对象.方法」的形态出现，不再有同名模块函数
@@ -9398,7 +9398,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("候选表给出排行", first.length > 0, String(first.length));
   const stamp = W.CANDS.cache.at.lat;
   ok("排行写了时间戳", typeof stamp === "number" && stamp > 0, String(stamp));
-  W.STATS.invalidateRank();
+  W.NodeStatsTable.invalidateRank();
   eq("作废后代际号变了", W.S.rankGen > 0, true);
   W.CANDS.list("lat");
   ok("作废只换代际号，不清排行", W.CANDS.cache.v.lat.length > 0, "");
@@ -9420,7 +9420,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("分派顺序与原来一致（只读在前、动作在后）", pipSrc316.indexOf("this.dayReport()") < pipSrc316.indexOf("this.resetPool()") && pipSrc316.indexOf("this.sourceReport()") < pipSrc316.indexOf("this.refreshPool()"));
   ok("只读报表不改内存（?day 不碰 S.alive）", pipSrc316.slice(pipSrc316.indexOf("private async dayReport"), pipSrc316.indexOf("private async sourceReport")).indexOf("S.alive") < 0);
   ok("两个写动作都要管理员", pipSrc316.slice(pipSrc316.indexOf("private async resetPool"), pipSrc316.indexOf("private async poolReport")).split("adminOnly(this.c)").length - 1 === 2);
-  ok("refresh 被 cron 占住时如实回绝（带持有毫秒）", pipSrc316.includes("heldMs: CRONLOCK.age()"));
+  ok("refresh 被 cron 占住时如实回绝（带持有毫秒）", pipSrc316.includes("heldMs: CronLock.age()"));
   ok("视图持有本次请求的上下文", pipSrc316.includes("private readonly url: URL;") && pipSrc316.includes("private readonly id: string;"));
 }
 
@@ -9721,7 +9721,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok(
     "[322] 拨一次那一段负责上限、记账与冷却",
     att322.includes("withTimeout(pk, CONNECT_MS)") &&
-      att322.includes("STATS.nsFail(cand.key)") &&
+      att322.includes("NodeStatsTable.nsFail(cand.key)") &&
       att322.includes("conn.pxTries = tries;"),
     "attemptRelay",
   );
@@ -9918,7 +9918,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     ok("[326] run 只做装配（≤30 行）",
       runBody.split("\n").length <= 30 && runBody.includes("releaseAll(conn)") && runBody.includes("pipeBack("));
     ok("[326] run 不再自己记账 / 挑中继 / 拨号",
-      !runBody.includes("cnt(") && !runBody.includes("STATS.") && !runBody.includes("parseProxyIp(") &&
+      !runBody.includes("cnt(") && !runBody.includes("NodeStatsTable.") && !runBody.includes("parseProxyIp(") &&
         !runBody.includes("dialAnother(") && !runBody.includes("SOCKET_DIALER.open("));
     ok("[326] run 把收尾整个交给 onClose",
       (runBody.match(/this\.onClose\(o, gotData\)/g) || []).length === 1);
@@ -9926,7 +9926,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
       closeBody.includes("WS_OPEN") && closeBody.includes("SEL.resetFail(") &&
         closeBody.includes("this.viaRelayFailed(o)") && closeBody.includes("this.directEmpty(o)"));
     ok("[326] onClose 不记账、不拨号",
-      !closeBody.includes("cnt(") && !closeBody.includes("SOCKET_DIALER.open(") && !closeBody.includes("STATS."));
+      !closeBody.includes("cnt(") && !closeBody.includes("SOCKET_DIALER.open(") && !closeBody.includes("NodeStatsTable."));
     ok("[326] 中转失败段自带记账与「只换一条」",
       viaBody.includes('cnt("eCloseP")') && (viaBody.match(/dialAnother\(/g) || []).length === 1 &&
         viaBody.includes('cnt(region ? "rgFail" : "dead")') && viaBody.includes("await SEL.softFail("));
@@ -9938,7 +9938,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
         v6Body.includes("SOCKET_DIALER.open(expandV6(v6), port)"));
     ok("[326] proxyip 兜底只剩一份挑中继与一处上限",
       (pxBody.match(/parseProxyIp\(/g) || []).length === 1 && pxBody.includes("trimAged(S.needPx, SC.PX_MAX);") &&
-        pxBody.includes("STATS.nsFail("));
+        pxBody.includes("NodeStatsTable.nsFail("));
     eq("[326] 五段都挂在同一个实例上",
       ["onClose", "viaRelayFailed", "directEmpty", "tryV6", "tryProxyip"].every((n) => typeof new W.Attacher()[n] === "function"), true);
     ok("[326] 关闭客户端仍只有一个出口（endClient）",
@@ -10262,7 +10262,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     "[330] 影子：预算 + 未试节点 + 记账",
     sh330.includes("shadowRate(env)") &&
       sh330.includes("HOSTS.untried(host, mode)") &&
-      sh330.includes("STATS.nsGet(t0).lastTry"),
+      sh330.includes("NodeStatsTable.nsGet(t0).lastTry"),
   );
   ok("[330] 画像够 3 个节点就不投影子", sh330.includes("hm.size >= 3"));
   const smp330 = body330("  private bySample(");
@@ -10978,9 +10978,9 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   // 行为：四个闸门标签各走一支
   W.S.alive.set(k335b, { h: "g335b.test", p: 443, ms: 90 });
   eq("第335组·活着有证据时闸门 ok", W.scoreParts(k335b, "lat", t335, true).gate, "ok");
-  W.STATS.nsGet(k335b).blackUntil = t335 + 60000;
+  W.NodeStatsTable.nsGet(k335b).blackUntil = t335 + 60000;
   eq("第335组·冷却中判 black", W.scoreParts(k335b, "lat", t335, true).gate, "black");
-  W.STATS.nsGet(k335c).freeUntil = t335 + 60000;
+  W.NodeStatsTable.nsGet(k335c).freeUntil = t335 + 60000;
   W.S.alive.set(k335c, { h: "g335c.test", p: 443, ms: 90 });
   eq("第335组·冻结判 frozen", W.scoreParts(k335c, "lat", t335, true).gate, "frozen");
   eq("第335组·不在存活表判 not-alive", W.scoreParts(k335d, "lat", t335, true).gate, "not-alive");
@@ -11629,9 +11629,9 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
       !/export const (prefsOf|chanPref|prefsJson) =/.test(prefsSrc349),
       prefsSrc349.split("\n").filter((l) => /export const (prefsOf|chanPref|prefsJson)/.test(l)).join(" | "),
     );
-    eq("349·仍导出唯一实例 PREFS", /export const PREFS = new Prefs\(\);/.test(prefsSrc349), true);
-    ok("349·策略注册直接用 PREFS 的方法", wiring349.includes("=> PREFS.chan(ip, host)") && !wiring349.includes("chanPref(ip, host)"), "");
-    ok("349·?prefs=1 直接用 PREFS.json(60)", debugSrc349.includes("PREFS.json(60)") && !debugSrc349.includes("prefsJson("), "");
+    eq("349·偏好视图不再有模块级实例（7.360 全改静态）", /export const PREFS = new Prefs\(\);/.test(prefsSrc349), false);
+    ok("349·策略注册直接用 PREFS 的方法", wiring349.includes("=> Prefs.chan(ip, host)") && !wiring349.includes("chanPref(ip, host)"), "");
+    ok("349·?prefs=1 直接用 Prefs.json(60)", debugSrc349.includes("Prefs.json(60)") && !debugSrc349.includes("prefsJson("), "");
     // 全仓不再有「转发函数」的调用形态（`chanPref(` 只剩 HOOK 槽位上的 `HOOK.chanPref(`）
     // 本组自带遍历（`walk` 是别的组块作用域里的辅助函数，这里取不到）
     const walk349 = (d, acc = []) => {
@@ -11645,21 +11645,21 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     const all349 = walk349("src").map((f) => fs.readFileSync(f, "utf8")).join("\n");
     eq("349·src 里不再调用 prefsOf()", all349.split("prefsOf(").length - 1, 0);
     eq("349·src 里不再调用 prefsJson()", all349.split("prefsJson(").length - 1, 0);
-    eq("349·src 里只有策略注册那一处直接走 PREFS.chan()", all349.split("PREFS.chan(").length - 1, 1);
+    eq("349·src 里只有策略注册那一处直接走 Prefs.chan()", all349.split("Prefs.chan(").length - 1, 1);
     // 行为：三个入口仍然可用，语义与删包装前一致
     W.VT.clear();
-    eq("349·没测过的通道不降权（未知 = 1）", W.PREFS.chan("9.9.9.1", "p349.com"), 1);
-    eq("349·不传站点一律「未知」", W.PREFS.chan("9.9.9.1"), 1);
+    eq("349·没测过的通道不降权（未知 = 1）", W.Prefs.chan("9.9.9.1", "p349.com"), 1);
+    eq("349·不传站点一律「未知」", W.Prefs.chan("9.9.9.1"), 1);
     W.VT.setState("p349.com", "r:9.9.9.2", 1, 1);
-    eq("349·实测能打通 = 0", W.PREFS.chan("9.9.9.2", "p349.com"), 0);
-    eq("349·别的站点看不到这条证据", W.PREFS.chan("9.9.9.2", "q349.com"), 1);
+    eq("349·实测能打通 = 0", W.Prefs.chan("9.9.9.2", "p349.com"), 0);
+    eq("349·别的站点看不到这条证据", W.Prefs.chan("9.9.9.2", "q349.com"), 1);
     W.VT.setState("p349.com", "r:9.9.9.3", 2, 1);
-    eq("349·实测打不通 = 2", W.PREFS.chan("9.9.9.3", "p349.com"), 2);
-    const j349 = W.PREFS.json(20);
+    eq("349·实测打不通 = 2", W.Prefs.chan("9.9.9.3", "p349.com"), 2);
+    const j349 = W.Prefs.json(20);
     eq("349·json 的总数是两栏之和", j349.n, j349.ok.length + j349.bad.length);
-    const o349 = W.PREFS.of("p349.com", 5);
+    const o349 = W.Prefs.of("p349.com", 5);
     ok("349·of 的两栏都不超过 limit", o349.ok.length <= 5 && o349.bad.length <= 5, `${o349.ok.length}/${o349.bad.length}`);
-    ok("349·测试窗口只留 PREFS", W.PREFS !== undefined && W.prefsOf === undefined && W.chanPref === undefined && W.prefsJson === undefined, "");
+    ok("349·测试窗口只留 PREFS", W.Prefs !== undefined && W.prefsOf === undefined && W.chanPref === undefined && W.prefsJson === undefined, "");
     W.VT.clear();
   }
 

@@ -40,7 +40,7 @@ function reset() {
   S.probeWhy = {};
   S.reProbe = [];
   for (const n of nodes) {
-    const s = W.STATS.nsGet(n.k);
+    const s = W.NodeStatsTable.nsGet(n.k);
     s.at = NOW;
   }
 }
@@ -48,10 +48,10 @@ function reset() {
 function probe(n, strategy, round, queue) {
   const spike = rnd() < SPIKE_P ? SPIKE_X : 1;
   const ms = Math.round(trueMs(n) * spike * (0.9 + 0.2 * rnd()));
-  W.STATS.nsProbe(n.k, ms, ms * 0.75, ms * 0.25);
+  W.NodeStatsTable.nsProbe(n.k, ms, ms * 0.75, ms * 0.25);
   if (strategy === "A") return;
   // B/C：比同 /24 中位数慢 3 倍以上（且 >250ms）→ 下一轮再测一次
-  const peers = nodes.filter((x) => x.group === n.group).map((x) => W.STATS.nsGet(x).tcp * 1.33).sort((a, b) => a - b);
+  const peers = nodes.filter((x) => x.group === n.group).map((x) => W.NodeStatsTable.nsGet(x).tcp * 1.33).sort((a, b) => a - b);
   const med = peers[Math.floor(peers.length / 2)] || 0;
   if (ms > Math.max(3 * med, 250)) queue.push({ k: n.k, first: ms, round });
 }
@@ -65,8 +65,8 @@ function applyRecheck(strategy, queue) {
     const ms2 = Math.round(trueMs(n) * (rnd() < SPIKE_P ? SPIKE_X : 1) * (0.9 + 0.2 * rnd()));
     const v = strategy === "C" ? Math.min(q.first, ms2) : ms2;
     // C 想的是"取两次里更好的那个"，B 只是再测一次让 EWMA 自己往回收
-    if (strategy === "C") W.STATS.nsProbe(n.k, v, v * 0.75, v * 0.25);
-    else W.STATS.nsProbe(n.k, ms2, ms2 * 0.75, ms2 * 0.25);
+    if (strategy === "C") W.NodeStatsTable.nsProbe(n.k, v, v * 0.75, v * 0.25);
+    else W.NodeStatsTable.nsProbe(n.k, ms2, ms2 * 0.75, ms2 * 0.25);
   }
   for (const q of due) queue.splice(queue.indexOf(q), 1);
 }
@@ -91,7 +91,7 @@ for (const strategy of ["A", "B", "C"]) {
     for (const n of nodes) probe(n, strategy, r, queue);
   }
   const rows = nodes.map((n) => {
-    const s = W.STATS.nsGet(n.k);
+    const s = W.NodeStatsTable.nsGet(n.k);
     const est = s.tcp + s.tls * 1.2;
     return est / trueMs(n);
   });

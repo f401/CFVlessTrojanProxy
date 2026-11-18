@@ -663,7 +663,7 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
 {
   const keys = [];
   for (let i = 0; i < 70; i++) keys.push(`n${i}:443`);
-  for (const k of keys) W.STATS.nsGet(k);
+  for (const k of keys) W.NodeStatsTable.nsGet(k);
   eq("nsOf 默认最多 64 条", Object.keys(W.nsOf(keys)).length, 64);
   eq("nsOf 可放开到全部", Object.keys(W.nsOf(keys, 70)).length, 70);
   for (const k of keys) W.S.nstat.delete(k);
@@ -671,9 +671,9 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
 
 /* ---------- nsOk 必须推进 at（否则衰减基准永远停在旧时刻） ---------- */
 {
-  const s = W.STATS.nsGet("at-check:443");
+  const s = W.NodeStatsTable.nsGet("at-check:443");
   s.at = Date.now() - 1000;
-  W.STATS.nsOk("at-check:443", 50, 20);
+  W.NodeStatsTable.nsOk("at-check:443", 50, 20);
   ok("nsOk 更新 at", Date.now() - s.at < 500, String(Date.now() - s.at));
   W.S.nstat.delete("at-check:443");
 }
@@ -799,7 +799,7 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
       },
     },
   };
-  await W.SEEDS.write(envSeed, true, true);
+  await W.SeedStore.write(envSeed, true, true);
   const doc = JSON.parse(saved);
   const names = doc.byColo["*"].nodes.map((n) => n.k);
   eq("名单不超过 SEED_MAX（200）", names.length, 45);
@@ -824,7 +824,7 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
       },
     },
   };
-  const rw = await W.SEEDS.write(envDown, true, true);
+  const rw = await W.SeedStore.write(envDown, true, true);
   eq("seed 读失败时拒绝落盘", rw.ok, false);
   eq("seed 读失败时一次都没写", puts, 0);
 
@@ -833,7 +833,7 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   W.S.seedReadFail = false;
   puts = 0;
   const envBad = { STATS: { get: async () => "not-json", put: async () => puts++ } };
-  const rb = await W.SEEDS.write(envBad, true, true);
+  const rb = await W.SeedStore.write(envBad, true, true);
   eq("seed 值损坏时拒绝落盘", rb.ok, false);
   eq("seed 值损坏时一次都没写", puts, 0);
 

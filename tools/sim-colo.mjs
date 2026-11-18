@@ -96,7 +96,7 @@ function save() {
 
 function install(n, colo) {
   S.alive.set(n.key, { h: n.id, p: 443, cc: "", ms: Math.round(rttOf(colo, n)) });
-  const s = W.STATS.nsGet(n.key);
+  const s = W.NodeStatsTable.nsGet(n.key);
   s.at = NOW;
 }
 
@@ -104,7 +104,7 @@ function birth(colo, entries) {
   load(fresh());
   S.colo = colo;
   for (const n of pool) install(n, colo);
-  for (const e of entries) W.SEEDS.unpackNode(e);
+  for (const e of entries) W.SeedStore.unpackNode(e);
 }
 
 /* ---------------- 一次请求 / 一次探活 ---------------- */
@@ -124,10 +124,10 @@ function request(colo, mode, size) {
     if (size >= 32 * 1024 && dur >= 50 && (dur >= 300 || size >= MB)) {
       const bps = size / (dur / 1000);
       const w = Math.min(1, size / (512 * 1024)) * Math.min(1, dur / 1000);
-      if (w > 0) W.STATS.nsSpeed(k, bps, size, ENV, Math.min(4, w));
+      if (w > 0) W.NodeStatsTable.nsSpeed(k, bps, size, ENV, Math.min(4, w));
     }
-    W.STATS.nsOk(k, 0, 0);
-    W.STATS.nsLatency(k, rtt);
+    W.NodeStatsTable.nsOk(k, 0, 0);
+    W.NodeStatsTable.nsLatency(k, rtt);
   }
   // 上帝视角：本地最优 / 别的机房最优
   let best = Infinity,
@@ -149,8 +149,8 @@ function request(colo, mode, size) {
 
 function cron(colo) {
   for (const n of pool) {
-    if (rnd() < n.pFail * 0.4) W.STATS.nsProbeFail(n.key);
-    else W.STATS.nsProbe(n.key, rttOf(colo, n) * (0.9 + 0.2 * rnd()), n.tcp, 40);
+    if (rnd() < n.pFail * 0.4) W.NodeStatsTable.nsProbeFail(n.key);
+    else W.NodeStatsTable.nsProbe(n.key, rttOf(colo, n) * (0.9 + 0.2 * rnd()), n.tcp, 40);
   }
   SEL.afterScan(ENV);
 }
@@ -163,7 +163,7 @@ const die = (colo) => {
     const s = S.nstat.get(k);
     if (!s || (s.okW || 0) + (s.failW || 0) < 1) continue;
     if (!S.alive.has(k)) continue;
-    b.set(k, W.SEEDS.packNode(k));
+    b.set(k, W.SeedStore.packNode(k));
   }
   buckets[colo] = b;
 };

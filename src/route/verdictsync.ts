@@ -3,7 +3,7 @@
 import { S } from "../core/state";
 import { VT, VT_TTL_MS } from "./verdict";
 import { HEALTH } from "./relay-health";
-import { FACTS, type FactsBody } from "./factsstore";
+import { FactsStore, type FactsBody } from "./factsstore";
 import { EG } from "./egfacts";
 import { cnt } from "../core/counter";
 import { dropExpired, trimAged } from "../core/hostmem";
@@ -91,7 +91,7 @@ export async function vtLoad(env: Env): Promise<void> {
 /**
  * 远端事实的响应体形状：五张事实表的字段从 factsstore 借用，再叠上判定表与中继健康度。
  * 为什么不再本地重声明一遍：本文件原来有一份自己的 FactsBody，五张表里漏了 dns ——
- * factsOut 明明发七张表，类型却只承认六张。tsc 不会报错（FACTS.load 收更宽的类型），
+ * factsOut 明明发七张表，类型却只承认六张。tsc 不会报错（FactsStore.load 收更宽的类型），
  * 于是照这份声明写收发代码的人就会把 DNS 事实丢掉，而「跨界传值丢维度」正是这批缺陷的固定形状。
  */
 type WireBody = FactsBody & {
@@ -163,7 +163,7 @@ async function vtFetch(env: Env): Promise<void> {
     if (Array.isArray(jj.hl)) HEALTH.merge(jj.hl);
     // 只有真的拿到 DO 的回答才算「读过」：否则失败的 isolate 会一直带着空事实选路
     S.vtLoaded = true;
-    const nf = FACTS.load(jj);
+    const nf = FactsStore.load(jj);
     cnt("egDO", nf.eg);
     cnt("psDO", nf.ps);
     cnt("deadDO", nf.dead);

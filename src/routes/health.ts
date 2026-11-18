@@ -1,6 +1,6 @@
 import { P_T, VERSION } from "../core/util";
 import { S } from "../core/state";
-import { errHist, ERRS } from "../nodes/metrics";
+import { ERRS } from "../nodes/metrics";
 import { cntView } from "../core/counter";
 import { FACT } from "../route/factshadow";
 import { json, forbidden } from "../edge/respond";
@@ -31,7 +31,7 @@ export function health(c: RouteCtx): Response {
     hostPrefs: S.hostNode.size,
     candidates: S.candN,
     errors: S.errs.length,
-    errsByKind: errHist(),
+    errsByKind: ERRS.hist(),
     errsDup: ERRS.dropped(),
 cf: FACT.snap(),
     eg: EG.snap(),

@@ -20,12 +20,12 @@ export class SeedStore {
    * 功能：本 isolate 的分桶键（没探到机房时用默认桶，保证同机房共享、跨机房隔离）。
    * @returns 字符串
    */
-  coloKey() {
+  static coloKey() {
     return S.colo || BUCKET_DEF;
   }
 
   /** 当前机房的信誉桶 */
-  bucket() {
+  static bucket() {
     const m = (S.seed && S.seed.byColo) || {};
     return m[this.coloKey()] || { nodes: [] };
   }
@@ -35,7 +35,7 @@ export class SeedStore {
    * 不要再把 ms/tcp/tls/n/f/b/sb 写进来 —— 每个 isolate 的最优节点可能完全不同，
    * 别的 isolate 的延迟/吞吐/成功率对本地没有可迁移价值，只会把冷启动带偏。
    */
-  packName(k: string) {
+  static packName(k: string) {
     const a = (S.alive.get(k) || {}) as NodeEntry;
     const [partHost, partPort] = splitRelay(k, 443);
     return { k, h: a.h || partHost, p: a.p || partPort, cc: a.cc || "" };
@@ -46,7 +46,7 @@ export class SeedStore {
    * @param {object} env Worker 环境
    * @returns {Promise<object>} SEED
    */
-  async read(env: Env) {
+  static async read(env: Env) {
     if (S.seedAt && Date.now() - S.seedAt < SEED_READ_MS) return S.seed;
     let v = null;
     try {
@@ -102,7 +102,7 @@ export class SeedStore {
    * 所以代际单调：本地比锚点新才用本地；同代取较大的规模；本地更旧就原样沿用锚点。
    * @returns {{gen: number, n: number, builtAt: number}} 代际、规模、建池时间
    */
-  private poolAnchor() {
+  private static poolAnchor() {
     const gLocal = S.poolGen || 0;
     const gSeed = Number(S.seed.poolGen) || 0;
     const nSeed = Number(S.seed.poolN) || 0;
@@ -117,7 +117,7 @@ export class SeedStore {
    * @param {object} env Worker 环境
    * @returns {Promise<{ok:boolean,err?:string}>} 结果
    */
-  async write(env: Env, listOnly = false, force = false) {
+  static async write(env: Env, listOnly = false, force = false) {
     if (!env || !env.STATS) return { ok: true, skipped: true };
     // 必须先读到已有 seed 再写：否则一个"还没读过"的 isolate 会拿空对象覆盖，
     // 把 poolGen 和所有机房的桶一起抹掉（踩过一次，池子直接变 0）。
@@ -230,14 +230,12 @@ export class SeedStore {
   }
 }
 
-export const SEEDS = new SeedStore();
-
 /** 变化驱动的落盘节流：90 分钟地板，避免每条连接都打 KV */
 export function markSeedDirty(env: Env) {
   if (!env || !env.STATS) return;
   const last = Math.max(S.nsWriteAt, S.seed.ts || 0);
   if (Date.now() - last < SEED_WRITE_GAP) return;
   S.nsWriteAt = Date.now();
-  SEEDS.write(env).catch(() => {});
+  SeedStore.write(env).catch(() => {});
 }
 

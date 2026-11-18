@@ -116,7 +116,7 @@ export class FactsStore {
    * 用途：`/health` 与单测用它断言「五张表都在门面里」——没有这一步，漏登记的类别只能靠人眼发现。
    * @returns {string[]} 字段名（`eg`/`ps`/`dead`/`blk2`/`dns`）
    */
-  kinds(): string[] {
+  static kinds(): string[] {
     return TABLES.map((t) => t.kind);
   }
 
@@ -125,7 +125,7 @@ export class FactsStore {
    * @param b 远端车身
    * @returns {RowCounts} 各类实际并入的行数
    */
-  load(b: FactsBody): RowCounts {
+  static load(b: FactsBody): RowCounts {
     const out: RowCounts = { eg: 0, ps: 0, dead: 0, blk2: 0, dns: 0 };
     for (const t of TABLES) {
       const rows = b[t.kind];
@@ -139,7 +139,7 @@ export class FactsStore {
    * 功能：取出待上行的增量（未 ack 的行会原样再给一次：重发等于重试，不是重复计数）。
    * @returns {FactsDelta} 各类增量（空的那类不出现）
    */
-  delta(): FactsDelta {
+  static delta(): FactsDelta {
     const out: FactsDelta = {};
     // 逐类写入：`FactsDelta` 的每个字段类型不同，这里只按字段名赋值，类型由各表自己的 `delta()` 保证
     const bag = out as Record<string, unknown>;
@@ -154,7 +154,7 @@ export class FactsStore {
    * 功能：上报成功 —— 五张表的 pending 全部转正。
    * @returns {void}
    */
-  ack(): void {
+  static ack(): void {
     for (const t of TABLES) t.ack();
   }
 
@@ -162,7 +162,7 @@ export class FactsStore {
    * 功能：上报失败 —— 保留 pending，下一轮原样重发（`nack` 在各表里都是「不动 pending」的显式声明）。
    * @returns {void}
    */
-  nack(): void {
+  static nack(): void {
     for (const t of TABLES) t.nack();
   }
 
@@ -170,17 +170,14 @@ export class FactsStore {
    * 功能：给 `/health` 用的五类事实概览。
    * @returns {SnapView} 各类快照
    */
-  snap(): SnapView {
+  static snap(): SnapView {
     const out: Record<string, unknown> = {};
     for (const t of TABLES) out[t.kind] = t.snap();
     return out as SnapView;
   }
 
   /** 功能：清空五张表（测试用）。 @returns {void} */
-  clear(): void {
+  static clear(): void {
     for (const t of TABLES) t.clear();
   }
 }
-
-/** 全局事实门面。 */
-export const FACTS = new FactsStore();

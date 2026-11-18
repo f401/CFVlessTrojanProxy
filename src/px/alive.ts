@@ -6,7 +6,7 @@ import { S } from "../core/state";
 import { splitRelay } from "../core/http80";
 import { CANDS } from "../nodes/score";
 import { geoLabel } from "./probe";
-import { BUCKET_DEF, SEEDS } from "./seed";
+import { BUCKET_DEF, SeedStore } from "./seed";
 import { MODES } from "./const";
 
 /** 冷启动灌进 alive 的节点数：名单里只取前这么多，剩下的靠本机房探活补 */
@@ -37,7 +37,7 @@ export class ProbeCooldown {
    * @param now 当前时间（毫秒）
    * @returns 连续失败次数达标且未过 TTL 时为 true
    */
-  skip(key: string, now: number = Date.now()): boolean {
+  static skip(key: string, now: number = Date.now()): boolean {
     const entry = S.probeBad.get(key);
     if (!entry || entry.n < SC.SCAN_BAD_MAX) return false;
     // 过期的行按「没冷却」处理：清理留给 sweep()，读路径不顺手删（同一行会被高频读）
@@ -51,7 +51,7 @@ export class ProbeCooldown {
    * @param now 当前时间（毫秒）
    * @returns 无
    */
-  bump(key: string, ok: boolean, now: number = Date.now()): void {
+  static bump(key: string, ok: boolean, now: number = Date.now()): void {
     if (ok) {
       S.probeBad.delete(key);
       return;
@@ -71,7 +71,7 @@ export class ProbeCooldown {
    * @param now 当前时间（毫秒）
    * @returns 这一次删掉的行数
    */
-  sweep(now: number = Date.now()): number {
+  static sweep(now: number = Date.now()): number {
     let gone = 0;
     // ① 过期即无用：判据与 skip() 用同一个 TTL，避免两处口径漂移
     for (const [key, entry] of S.probeBad) {
@@ -95,18 +95,15 @@ export class ProbeCooldown {
   }
 }
 
-/** 进程内唯一实例：`S.probeBad` 只有这一张表 */
-export const PROBE_COOL = new ProbeCooldown();
-
 /**
- * 功能：记一次探活失败/成功（委托 `PROBE_COOL.bump`，cronScan 与测试共用，保证「过期重置」只写一遍）。
+ * 功能：记一次探活失败/成功（委托 `ProbeCooldown.bump`，cronScan 与测试共用，保证「过期重置」只写一遍）。
  * @param key 候选键（`host:port`）
  * @param ok 探活是否通过
  * @param now 当前时间（毫秒）
  * @returns 无
  */
 export function bumpProbeBad(key: string, ok: boolean, now: number = Date.now()): void {
-  PROBE_COOL.bump(key, ok, now);
+  ProbeCooldown.bump(key, ok, now);
 }
 
 /**
@@ -130,7 +127,7 @@ export class AliveBoard {
    * @returns 无
    */
   seedCold(): void {
-    let src: SeedNode[] = SEEDS.bucket().nodes || [];
+    let src: SeedNode[] = SeedStore.bucket().nodes || [];
     if (!src.length) {
       // 本机房还没数据：借名单桶（cron 写的全局候选），只取名字
       src = ((S.seed.byColo || {})[BUCKET_DEF] || {}).nodes || [];
@@ -235,7 +232,7 @@ export class AliveBoard {
  * @returns 当前游标、存活条目与面板状态
  */
 export async function pxGet(env: Env) {
-  await SEEDS.read(env);
+  await SeedStore.read(env);
   if (!S.alive.size) new AliveBoard().seedCold();
   for (const m of MODES) {
     if (!S.curs[m]) {

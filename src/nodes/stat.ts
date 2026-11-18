@@ -55,7 +55,7 @@ export class NodeStatsTable {
   * @param {string} k "host:port"
   * @returns {object} 统计对象
   */
-  nsGet(k: string): NodeStats {
+  static nsGet(k: string): NodeStats {
     let s: NodeStats | undefined = S.nstat.get(k);
     // 懒初始化：节点第一次被记样本时才建对象。字段分四组——可用性、探活样本、真实流量、
     // 字节直方图（hist 是 32 档对数刻度，pcts 在上面插值）
@@ -81,14 +81,14 @@ export class NodeStatsTable {
   /** 排行缓存作废：节点状态变了就调它（代际号 +1，候选表下次排行时惰性清时间戳）。
   *  排行本身与进行中的分片进度都留着：否则每次失败都退化成「只有前 128 名」的半张表，
   *  失败密集时还会把分片循环反复打回起点（永远算不完一轮）。 */
-  invalidateRank() {
+  static invalidateRank() {
     S.rankGen += 1;
   }
 
   /**
   * 记一次空关闭（连接建立后 0 字节结束）。viaP=true 表示已经过了中转。
   */
-  nsEmptyClose(k: string, viaP: boolean) {
+  static nsEmptyClose(k: string, viaP: boolean) {
     if (!k) return;
     const s = this.nsGet(k), now = Date.now();
     nsDecay(s, now);
@@ -109,7 +109,7 @@ export class NodeStatsTable {
   }
 
   /** 记一次成功（同时更新握手耗时 EWMA）。 */
-  nsOk(k: string, tcp: number, tls: number) {
+  static nsOk(k: string, tcp: number, tls: number) {
     if (!k) return;
     const s = this.nsGet(k), now = Date.now();
     nsDecay(s, now);
@@ -135,7 +135,7 @@ export class NodeStatsTable {
   * @param {number} tls TLS 往返
   * @returns {void}
   */
-  nsProbe(k: string, ms: number, tcp: number, tls: number) {
+  static nsProbe(k: string, ms: number, tcp: number, tls: number) {
     if (!k || !(ms > 0)) return;
     const s = this.nsGet(k), now = Date.now();
     nsDecay(s, now);
@@ -153,7 +153,7 @@ export class NodeStatsTable {
   * @param {string} k "host:port"
   * @returns {void}
   */
-  nsProbeFail(k: string) {
+  static nsProbeFail(k: string) {
     if (!k) return;
     const s = this.nsGet(k), now = Date.now();
     nsDecay(s, now);
@@ -172,7 +172,7 @@ export class NodeStatsTable {
   * @param {string} k "host:port"
   * @returns {void}
   */
-  nsFail(k: string) {
+  static nsFail(k: string) {
     if (!k) return;
     const s = this.nsGet(k), now = Date.now();
     nsDecay(s, now);
@@ -199,7 +199,7 @@ export class NodeStatsTable {
   * 站点侧失败：连上了节点，但目标站 0 字节关闭 / 拒绝。
   * 只轻记全局（0.2 次），不动连续失败阶梯 —— 一个站封了这个 IP，不该毁掉节点在别处的排名。
   */
-  nsSiteFail(k: string) {
+  static nsSiteFail(k: string) {
     if (!k) return;
     const s = this.nsGet(k), now = Date.now();
     nsDecay(s, now);
@@ -219,7 +219,7 @@ export class NodeStatsTable {
   * @param {object} _env 保留位（落盘已统一走 store 的调度，这里不再用）
   * @returns {void}
   */
-  nsSpeed(k: string, bps: number, bytes: number, _env: Env, w = 1) {
+  static nsSpeed(k: string, bps: number, bytes: number, _env: Env, w = 1) {
     if (!k || !(bps > 0)) return;
     const s = this.nsGet(k), now = Date.now();
     nsDecay(s, now);
@@ -253,7 +253,7 @@ export class NodeStatsTable {
   }
 
   /** 记录卡顿时长（背压累计） */
-  nsStall(k: string, stallMs: number, runMs: number) {
+  static nsStall(k: string, stallMs: number, runMs: number) {
     if (!k) return;
     const s = this.nsGet(k), now = Date.now();
     nsDecay(s, now);
@@ -263,7 +263,7 @@ export class NodeStatsTable {
   }
 
   /** 记录本地实测延迟（ttfb，主延迟信号）：winsorize 后进 EWMA，MAD 进 pSumSq，偏离累积进 cusumSum */
-  nsLatency(k: string, ms: number) {
+  static nsLatency(k: string, ms: number) {
     if (!k || !(ms > 0)) return;
     const s = this.nsGet(k);   // 必须走 nsGet，否则缺 stallMs/runMs 会让 pStall 变 NaN
     const base = s.pSum || ms;
@@ -282,8 +282,6 @@ export class NodeStatsTable {
     }
   }
 }
-
-export const STATS = new NodeStatsTable();
 
 
 // ---- 派生层（纯函数） ----
@@ -438,7 +436,7 @@ else s.winFail += 1;
 
 // ---- 对外导出面 ----
 // 表本体（`STATS`）是唯一有状态的东西；派生层是纯函数；十一个同名转发在 7.302 全删，
-// 调用点直接写 `STATS.nsOk(...)` / `STATS.nsFail(...)`，动词不再与实际对象脱节。
+// 调用点直接写 `NodeStatsTable.nsOk(...)` / `NodeStatsTable.nsFail(...)`，动词不再与实际对象脱节。
 // 节点统计的门面：文件曾经 484 行、24 个方法加 24 个同名薄包装，
 // 7.282 按「表 / 派生 / 观测」拆成三个模块，这里只做再导出，
 // 调用点（score.ts 的 `export *`、attacher/dialer/region 的 nsFail）一字未改。

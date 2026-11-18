@@ -1,13 +1,13 @@
 import { S } from "../core/state";
 import { logErr } from "../nodes/metrics";
-import { STATS, isBlack, isFrozen, CANDS } from "../nodes/score";
-import { PROBE_COOL, pxGet, bumpProbeBad, noteProbe, AliveBoard, ALIVE_MAX } from "./alive";
+import { NodeStatsTable, isBlack, isFrozen, CANDS } from "../nodes/score";
+import { ProbeCooldown, pxGet, bumpProbeBad, noteProbe, AliveBoard, ALIVE_MAX } from "./alive";
 import { POOL_TTL_MS, refillPool, probeSni, chunks, probeProxy } from "./probe";
 import { commitPool, ensurePool } from "./poolgen";
 import { SC } from "../core/const";
 import { keyOf } from "./const";
 import { HOOK } from "../core/hook";
-import { SEEDS } from "./seed";
+import { SeedStore } from "./seed";
 import { splitRelay } from "../core/http80";
 
 // ---- 并入自 scan-probe.ts ----
@@ -56,7 +56,7 @@ export class ScanProbe {
     // 不再占名额。公开池里九成以上是死的，纯轮转时它们每轮都被重复探一遍，好候选永远排不上。
     const open = this.pool.filter((c) => {
       const k = c.h + ":" + c.p;
-      return !S.alive.has(k) && !PROBE_COOL.skip(k);
+      return !S.alive.has(k) && !ProbeCooldown.skip(k);
     });
     // 全都有结论时退回「没进池的候选」做低频复检（能在池里的靠头部复测 + 真实流量，不用再探活）
     const live = this.pool.filter((c) => !S.alive.has(c.h + ":" + c.p));
@@ -126,7 +126,7 @@ export class ScanProbe {
         cc: x.cc || S.alive.get(k)?.cc || "",
         ms: x.ms,
       });
-      STATS.nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
+      NodeStatsTable.nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
     }
   }
 }
@@ -156,7 +156,7 @@ export class ScanAlive {
     for (const { k, r } of rows) {
       noteProbe(r);
       if (r && !r.bad) {
-        STATS.nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
+        NodeStatsTable.nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
         // 复测结果比历史更慢时不要把存活表里的延迟改大：这里只做「拉回来」
         const a = S.alive.get(k);
         if (a && r.ms < (a.ms || 1e9)) a.ms = r.ms;
@@ -216,12 +216,12 @@ export class ScanAlive {
     for (const { k, r } of rows) {
       noteProbe(r);
       if (r && !r.bad) {
-        STATS.nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
+        NodeStatsTable.nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
         // 存活表里的 `ms` 就是面板与池子裁剪用的「实测延迟」，成功即覆盖
         const a = S.alive.get(k);
         if (a) a.ms = r.ms;
       } else if (failCounts) {
-        STATS.nsProbeFail(k);
+        NodeStatsTable.nsProbeFail(k);
       }
     }
   }
@@ -319,7 +319,7 @@ export class ScanHouse {
    */
   async persistSeed(env: Env): Promise<void> {
     if (Date.now() - (S.seed.ts || 0) >= 55 * 60000) {
-      await SEEDS.write(env, S.colo ? undefined : true, true);
+      await SeedStore.write(env, S.colo ? undefined : true, true);
     }
   }
 }
@@ -414,7 +414,7 @@ export class PoolScan {
    */
   async run(): Promise<void> {
     // 每轮先收拾「暂时跳过」表：过期记录对跳过判断已无意义，表本身也没有自愈路径
-    PROBE_COOL.sweep();
+    ProbeCooldown.sweep();
     await pxGet(this.env);
     // 空池子直接结束这一轮：没有候选可探，写任何东西都是噪声
     if (!(await this.loadPool())) return;
@@ -425,7 +425,7 @@ export class PoolScan {
     // 裁剪动过存活表时，站点排行与分片排序里可能还留着刚被删的节点
     if (this.house.prune(this.pool)) {
       S.hostRankCache.clear();
-      STATS.invalidateRank();
+      NodeStatsTable.invalidateRank();
     }
     // 国家码只影响展示与地区分组，放在裁剪之后（被裁掉的节点不必再查一次）
     await this.house.countries();
