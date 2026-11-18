@@ -20,7 +20,7 @@ import { PS } from "./psfacts";
 import { DNS } from "./dnsfacts";
 import { egDerive } from "./egfacts";
 import { BLK } from "./blkfacts";
-import { relayIpOf } from "../core/http80";
+import { relayIpOf } from "../core/relay-addr";
 
 const BIG = PAGE_ABS.big; // 整页（含握手）的下限
 const SMALL_MAX = 12000; // 小响应上限：再大就不当封锁证据

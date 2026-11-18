@@ -1,4 +1,4 @@
-- 线上 **7.270**（已部署、可跑）｜仓库 **7.360**（架构重写完成：82 个导出类、模块级实例 57 → 29、8 个无字段门面改静态方法、Pool 门面删除，共 215 个缺陷皆已修复）：两者差 90 个版本。
+- 线上 **7.270**（已部署、可跑）｜仓库 **7.361**（明文 HTTP/80 探测不再是独立门面，而是 `ProbeTransport` 的第三个实现，共 215 个缺陷皆已修复）：两者差 91 个版本。
 
 # AGENTS.md
 
@@ -100,7 +100,7 @@ Account-level traps (all have happened):
 - **No thin-wrapper facades.** A class whose every method is one-line delegation, or a module-level instance with no fields and a single consumer, is a defect: hold the object where it is used instead. Enforced socially plus `check-dead`; `Store`/`STORE`, `SUBVIEW`, `ALIVE`, `REGION`, `ATTACHER`, `SETTLE`, `FAILS`, `ROTATION`, `WIRING` were removed this way, and 7.360 turned the eight field-less holders (`STATS`/`SEEDS`/`PREFS`/`PROBE_COOL`/`FACTS`/`ROUTES`/`CRONLOCK`/`POOL`) into static-method classes — then deleted `Pool` outright once its nine static methods were found to have zero production callers.
 - **Module-level instances must fit one of three buckets** (see `docs/命名约定.md`): owns cross-request state, a typed view over `S` with no fields, or a constant/encoder. Anything else belongs to an object. Current count: 29.
 - **Names must say what they hold.** No 1–2 character member names unless listed in the ALLOW table of `docs/命名约定.md`; units go in the name (`Ms`, `At`, `Bps`, `Count`, `Bytes`); closed sets use `St` / `Mode` from `src/core/enums.ts`; bounded tables use `BoundedMap` / `TimedMarks` from `src/core/table.ts`.
-- **No hardcoded transport.** Probing goes through the `ProbeTransport` interface and `TRANSPORTS` registry (`src/core/transport.ts`); exactly one file may import `tunnelfetch`.
+- **No hardcoded transport.** Probing goes through the `ProbeTransport` interface and `TRANSPORTS` registry (`src/core/transport.ts`), which carries three implementations: `TunnelFetchTransport` (userland TLS over a relay), `GatewayFetchTransport` (runtime fetch, direct only) and `Http80Transport` (plaintext HTTP/80 — cheapest real status-code evidence). Exactly one file may import `tunnelfetch`.
 - **Comments** are Chinese (matching the codebase); this file and `docs/` are English-optional but currently Chinese in places. JSDoc says what/params/returns; body comments say what a step does and *why* (protocol offsets, bounds, temporary workarounds). Never put `//` inside HTML template strings in `src/views/` — it ships to browsers.
 - **Bounded collections**: cap on insert, evict the least valuable entry, and never clear the whole table (that resets counters an attacker just tripped).
 

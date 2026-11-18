@@ -11,7 +11,8 @@ import { aliveList } from "../px/pool";
 import { BLK_TTL } from "../route/commitfact";
 import { VT, VT_TTL_MS } from "../route/verdict";
 import { doFetch } from "../store/index";
-import { probeHttp80, splitRelay } from "../core/http80";
+import { splitRelay } from "../core/relay-addr";
+import { HTTP80_TRANSPORT, probeTf } from "../core/transport";
 import { adminOnly } from "../edge/auth";
 import { SOCKET_DIALER } from "../proxy/socket-dialer";
 import { DIRECT, chanKey } from "../route/channel";
@@ -347,7 +348,7 @@ export class DebugProbe {
     if (!c.env.METER) return json({ ok: false, error: "no METER" });
     try {
       // 明文探测很便宜（connect + 读 ≤2KB），直接在请求路径做，不绕 DO（DO 那条会等 20s+ 才被重置）
-      const out = await withTimeout(probeHttp80(hh, rr, pp), 6000);
+      const out = await probeTf(hh, rr, pp, HTTP80_TRANSPORT, 6000);
       const chan = rr ? ({ kind: "r", ip: rr.split(":")[0] } as Chan) : DIRECT;
       return json({ ok: true, probe: out, note: "diagnostic only", chan: chanKey(chan), state: VT.state(hh, chanKey(chan)) });
     } catch (e) {

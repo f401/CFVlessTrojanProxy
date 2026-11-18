@@ -6,7 +6,7 @@ import { checkTarget } from "./dial";
 import { HOOK } from "../core/hook";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
-import { splitRelay } from "../core/http80";
+import { splitRelay } from "../core/relay-addr";
 
 /** CF 托管目标换节点时最多试几个候选：每个都是一次 connect()，别把免费计划的 6 并发吃光。 */
 const ALT_TRIES = 4;

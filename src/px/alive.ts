@@ -3,7 +3,7 @@
 
 import { SC } from "../core/const";
 import { S } from "../core/state";
-import { splitRelay } from "../core/http80";
+import { splitRelay } from "../core/relay-addr";
 import { CANDS } from "../nodes/score";
 import { geoLabel } from "./probe";
 import { BUCKET_DEF, SeedStore } from "./seed";

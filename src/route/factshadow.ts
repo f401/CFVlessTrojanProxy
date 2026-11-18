@@ -16,7 +16,7 @@ import { S } from "../core/state";
 import type { TrafficEvt } from "../core/hook";
 import { BIG_WIN, commitFact, factKey, type FactCtx, type FactObs, type FactOut } from "./commitfact";
 import type { SampleCount } from "../core/types";
-import { relayIpOf } from "../core/http80";
+import { relayIpOf } from "../core/relay-addr";
 
 /** 影子统计的一次快照 */
 export interface FactShadowSnap {

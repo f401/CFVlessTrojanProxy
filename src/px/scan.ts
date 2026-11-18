@@ -8,7 +8,7 @@ import { SC } from "../core/const";
 import { keyOf } from "./const";
 import { HOOK } from "../core/hook";
 import { SeedStore } from "./seed";
-import { splitRelay } from "../core/http80";
+import { splitRelay } from "../core/relay-addr";
 
 // ---- 并入自 scan-probe.ts ----
 // 新候选扫描：在「还没有结论」的候选里轮转，探一批，成功的进存活表并记样本。

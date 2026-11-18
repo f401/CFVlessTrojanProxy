@@ -3,7 +3,7 @@ type RouteCtx = { env: Env };
 import { S } from "../core/state";
 import { withTimeout } from "../core/util";
 import { VT } from "./verdict";
-import { splitRelay } from "../core/http80";
+import { splitRelay } from "../core/relay-addr";
 import { logErr } from "../nodes/metrics";
 /**
  * 功能：把主机拼成 `host:port`（IPv6 要加方括号，否则下游拆分会把它当裸地址）。

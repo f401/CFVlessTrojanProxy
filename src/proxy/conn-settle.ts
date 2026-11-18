@@ -7,7 +7,7 @@ import { NodeStatsTable } from "../nodes/score";
 import { markSeedDirty } from "../px/seed";
 import { S } from "../core/state";
 import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";
-import { relayIpOf } from "../core/http80";
+import { relayIpOf } from "../core/relay-addr";
 
 // ---- 并入自 src\proxy\conn-sample.ts ----
 /** 低于这个下行字节数的窗口不构成「吞吐样本」（512KB / 1s 算一个标准样本） */

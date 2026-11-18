@@ -4107,8 +4107,8 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carry.owner = String(id).
   const tfSrc = fs.readFileSync("src/core/transport.ts", "utf8");
   const tfImpl272 = fs.readFileSync("src/core/transport.ts", "utf8");
   ok("probeTf 的实现在传输层里，且整段包在超时里", tfSrc.includes("PROBE_BUDGET_MS") && tfImpl272.includes("withTimeout(work, timeoutMs"));
-  const h80 = fs.readFileSync("src/core/http80.ts", "utf8");
-  ok("probeHttp80 用 splitRelay 解析中继", /relay \? splitRelay\(relay, 80\)/.test(h80));
+  const h80 = fs.readFileSync("src/core/transport.ts", "utf8");
+  ok("HTTP/80 传输同样用 splitRelay 解析中继", /relay \? splitRelay\(relay, 80\)/.test(h80));
   // ps 行的线格式只有一份（psfacts.ts 的 PsWire），出站必须真的带上 top（7.163 漏的跟随）
   const psSrc = psAll();
   ok("PsWire 带上 top（曾经行过的证据要能跨 isolate）", /\/\*\*[\s\S]*?\*\/[\s\S]*?top\?:/.test(psSrc) && psSrc.includes("export interface PsWire"));
@@ -5420,13 +5420,13 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   const ps = await bounded(() => W.probeSni("1.2.3.4", 443, "example.com", 1200));
   ok("probeSni 挂死时按自己的 ms 返回", Boolean(ps.r && ps.r.x && ps.r.x.err === "tcp"), JSON.stringify(ps.r));
   ok("probeSni 的等待上限跟随 ms 参数", ps.ms < 3000, String(ps.ms));
-  const ph = await bounded(() => W.probeHttp80("example.com", "1.2.3.4:80"));
-  ok("probeHttp80 挂死时返回 io: timeout", Boolean(ph.r && ph.r.x && ph.r.x.ok === false && ph.r.x.err === "io: timeout"), JSON.stringify(ph.r));
+  const ph = await bounded(() => new W.Http80Transport().probe("example.com", "1.2.3.4:80", "/", 6000));
+  ok("HTTP/80 传输挂死时返回 io: timeout", Boolean(ph.r && ph.r.x && ph.r.x.ok === false && ph.r.x.err === "io: timeout"), JSON.stringify(ph.r));
   ok("三次探测都把挂死的 socket 关掉", closedWr >= 3, String(closedWr));
   globalThis.__simConnect = prevSimWr;
   // 源码锁：三处 write 都必须带 withTimeout，且不许再出现裸的 await w.write(
   const probeSrc = fs.readFileSync("src/px/probe.ts", "utf8");
-  const httpSrc = fs.readFileSync("src/core/http80.ts", "utf8");
+  const httpSrc = fs.readFileSync("src/core/transport.ts", "utf8");
   // 写超时现在收在 RawProbe.send 里（两个探测只传各自的报文与预算），判据不变：
   // 「写报文必须带时限」由类里那一处 withTimeout 保证，两个探测都经它发。
   ok(
@@ -5435,8 +5435,8 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
       probeSrc.includes('withTimeout(w.write(bytes), budgetMs, "timeout")'),
   );
   ok("probeSni 的 write 跟随 ms", probeSrc.includes("probe.send(tlsHello(sni), ms)"));
-  ok("http80 的 write 有超时", httpSrc.includes('withTimeout(w.write(new TextEncoder().encode(req)), CONNECT_MS, "timeout")'));
-  ok("http80 引入了 withTimeout", httpSrc.includes('import { CONNECT_MS, withTimeout } from "./util";'));
+  ok("HTTP/80 的 write 有超时（预算取 timeoutMs 与 CONNECT_MS 的小者）", httpSrc.includes('withTimeout(w.write(new TextEncoder().encode(req)), budget, "timeout")'));
+  ok("传输层引入了 CONNECT_MS 与 withTimeout", httpSrc.includes('import { CONNECT_MS, withTimeout } from "./util";'));
   ok(
     "探活路径不再有裸 write",
     !/await w\.write\((?!.*withTimeout)/.test(probeSrc) && !/await w\.write\((?!.*withTimeout)/.test(httpSrc),
@@ -7662,7 +7662,7 @@ ok("临时文档已清理", !fs.existsSync(tmpDoc258));
   ok("judge.ts 用 relayIpOf", src264("src/route/judge.ts").includes("relayIpOf(e.node)"));
   ok("结算模块用 relayIpOf", src264("src/proxy/conn-settle.ts").includes("relayIpOf(v.node)"));
   ok("fallback.ts 用 splitRelay 拆补救链地址", src264("src/proxy/fallback.ts").includes("const [host, port] = splitRelay(alt, 443);"));
-  ok("四份文件都从 core/http80 取解析", ["src/route/judge.ts", "src/route/factshadow.ts", "src/proxy/conn-settle.ts", "src/proxy/fallback.ts"].every((f) => src264(f).includes('from "../core/http80"')));
+  ok("四份文件都从 core/relay-addr 取解析", ["src/route/judge.ts", "src/route/factshadow.ts", "src/proxy/conn-settle.ts", "src/proxy/fallback.ts"].every((f) => src264(f).includes('from "../core/relay-addr"')));
 }
 
 ﻿// 第 265 组：拆地址只准有一份实现（7.265）
@@ -7702,7 +7702,7 @@ const walk265 = (d, acc = []) => {
   }
   return acc;
 };
-const allow265 = ["src/core/http80.ts", "src/px/seed.ts"];
+const allow265 = ["src/core/relay-addr.ts", "src/px/seed.ts"];
 const bad265 = walk265("src")
   .filter((p) => !allow265.includes(p.replace(/\\/g, "/")))
   .filter((p) => code265(p).includes('lastIndexOf(":")'));
@@ -7841,8 +7841,8 @@ ok("首包上限确实比数据面短", W.FIRST_UP_MS < W.UP_STALL_MS);
 
 ﻿// 第 271 组：探测传输层（7.271 起 probeTf 不再写死 tunnelfetch）
 {
-  eq("注册表里有两个传输", W.TRANSPORTS.names().length, 2);
-  ok("tunnelfetch 与 gateway 都在", W.TRANSPORTS.names().includes("tunnelfetch") && W.TRANSPORTS.names().includes("gateway"));
+  eq("注册表里有三种传输", W.TRANSPORTS.names().length, 3);
+  ok("tunnelfetch / gateway / http80 都在", ["tunnelfetch", "gateway", "http80"].every((n) => W.TRANSPORTS.names().includes(n)));
   eq("默认传输是 tunnelfetch", W.TRANSPORTS.current(), "tunnelfetch");
   eq("拼错的名字不生效", W.TRANSPORTS.use("nope"), false);
   eq("拼错之后仍是原传输", W.TRANSPORTS.current(), "tunnelfetch");
@@ -7852,6 +7852,8 @@ ok("首包上限确实比数据面短", W.FIRST_UP_MS < W.UP_STALL_MS);
   W.TRANSPORTS.use("tunnelfetch");
   ok("tunnelfetch 承认自己能落中继", W.TRANSPORTS.get("tunnelfetch").relayAware === true);
   ok("gateway 承认自己不能落中继", W.TRANSPORTS.get("gateway").relayAware === false);
+  ok("http80 能落中继（明文，不需要 TLS）", W.TRANSPORTS.get("http80").relayAware === true);
+  ok("不写 transportName 时取默认，点名 http80 才换实现", W.TRANSPORTS.get().transportName === "tunnelfetch" && W.TRANSPORTS.get("http80").transportName === "http80");
   const gw271 = await W.TRANSPORTS.get("gateway").probe("example.com", "1.2.3.4:443", "/", 500);
   ok("gateway 遇到中继会如实报错而不是静默直连", gw271.ok === false && String(gw271.err).includes("relay"));
   const tfSrc271 = fs.readFileSync("src/core/transport.ts", "utf8");
@@ -8427,7 +8429,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok(`[${g}] 只读表层不建连、不写状态`, !tabs.includes("SOCKET_DIALER.open(") && !tabs.includes("pxSet(") && !tabs.includes("flushPx(") && !tabs.includes("refillPool("));
   // 测网层：三种「花钱」的能力都留了上限
   ok(`[${g}] 测网层的测速有 20 秒封顶`, nets.includes("const ac = new AbortController();") && nets.includes(", 20000)"));
-  ok(`[${g}] 测网层的明文 HTTP 有 6 秒上限`, nets.includes("withTimeout(probeHttp80(") && nets.includes(", 6000)"));
+  ok(`[${g}] 测网层的明文 HTTP 走传输层、并带 6 秒预算`, nets.includes("probeTf(hh, rr, pp, HTTP80_TRANSPORT, 6000)"));
   ok(`[${g}] 测网层建连走拨号器`, nets.includes("SOCKET_DIALER.open(") && !nets.includes("connect({"));
   ok(`[${g}] 测网层的判定批走 doFetch`, nets.includes("doFetch(c.env, \"tf-probe\""));
   // 写层：四个分支都必须先过 adminOnly（数量锁：少一个就意味着有条写操作不需要管理员）
@@ -9161,7 +9163,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok(`[${g}] 三个调试单例仍可用`,
     W.DEBUG.tables instanceof W.DebugTables && W.DEBUG.actions instanceof W.DebugActions && W.DEBUG.probes instanceof W.DebugMeterProbes);
   ok(`[${g}] 注册表仍能取到两个实现`,
-    W.TRANSPORTS.names().length === 2 && Boolean(W.TRANSPORTS.get("gateway")) && Boolean(W.TRANSPORTS.get("tunnelfetch")));
+    W.TRANSPORTS.names().length === 3 &&
+      ["tunnelfetch", "gateway", "http80"].every((n) => Boolean(W.TRANSPORTS.get(n))));
 }
 
 /* ---------- 310. 连接的采样窗口与背压两类住进 connection.ts ---------- */

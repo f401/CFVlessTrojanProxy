@@ -174,17 +174,19 @@ export { BLK_TTL, BIG_PEER, BIG_WIN, DEAD_TTL, TINY_ABS, WRITE_GAP, commitFact, 
 export { FACT, FactShadow, shadowCtx, shadowObs } from "./route/factshadow";
 /** 四类事实的门面（OOP 收口后唯一的上行/合并入口） */
 export { FactsStore } from "./route/factsstore";
-/** 探测传输层：抽象、两个实现与门面现在同住 `core/transport.ts`（出口族对照实验用） */
+/** 探测传输层：抽象与三个实现（userland TLS / 运行时 fetch / 明文 HTTP·80）同住 `core/transport.ts` */
 export {
   GATEWAY_TRANSPORT,
   GatewayFetchTransport,
+  HTTP80_TRANSPORT,
+  Http80Transport,
   TRANSPORTS,
   TUNNEL_TRANSPORT,
   TransportRegistry,
   TunnelFetchTransport,
   probeTf,
 } from "./core/transport";
-export { probeHttp80, relayIpOf, splitRelay } from "./core/http80";
+export { relayIpOf, splitRelay } from "./core/relay-addr";
 export { parseProxyIp } from "./proxy/dial";
 export { cfHttpCode, refreshCfHttp } from "./proxy/cfverdict";
 

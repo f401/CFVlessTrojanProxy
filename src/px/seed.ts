@@ -5,7 +5,7 @@ import { PX_TTL, SEED_KEY, SEED_MAX, SEED_READ_MS, SEED_VER } from "./const";
 import { cntDelta, cntUnsend } from "../core/counter";
 import { costOf } from "../nodes/score";
 import { S } from "../core/state";
-import { splitRelay } from "../core/http80";
+import { splitRelay } from "../core/relay-addr";
 import { kvGetStrict, kvSet } from "../store/index";
 
 /* 代理节点：信誉表分桶读写 */

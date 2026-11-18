@@ -2,7 +2,7 @@
 // 与判定表的区别：判定表回答「这条中继对这个站点行不行」，这里回答「这条中继本身还活着吗」。
 // 跨 isolate：计数走 /add 搭车上 DO，冷启动从 /hl 拉一次（与判定表的 vt 同一套路）。
 
-import { relayIpOf } from "../core/http80";
+import { relayIpOf } from "../core/relay-addr";
 import { RelayLedger } from "./relay-ledger";
 import { PAGE_ABS } from "../core/facts";
 

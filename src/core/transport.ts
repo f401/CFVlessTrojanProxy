@@ -1,7 +1,7 @@
 import { connect } from "cloudflare:sockets";
 import { Client } from "tunnelfetch";
-import { splitRelay } from "./http80";
-import { withTimeout } from "./util";
+import { splitRelay } from "./relay-addr";
+import { CONNECT_MS, withTimeout } from "./util";
 
 // ---- 并入自 transport-types.ts ----
 // 探测传输的契约：诊断路径要的是「给一个目标（可选中继），发一次请求并回报结果」，
@@ -140,6 +140,101 @@ export class GatewayFetchTransport implements ProbeTransport {
   }
 }
 
+// ---- 并入自 http80.ts ----
+/**
+ * 功能：明文 HTTP/80 探测 —— `connect` 到 `<relay|host>:80`，写一条 GET，只读状态行。
+ *
+ * 为什么它是第三种传输而不是一个独立函数：它和另外两种回答的是同一个问题（「这条腿能不能
+ * 拿到响应」），区别只在代价与能看到的证据 —— 免费计划跑不动 TLS 客户端（DO 会 CPU 超限），
+ * 但 CF 边缘在 :80 同样按 Host 路由，封锁/放行会体现为不同的状态码，于是这是**最便宜的
+ * 真实 HTTP 证据**。7.361 之前它叫 `probeHttp80`，住在 `src/core/http80.ts` 里，与传输层
+ * 各写一套「可选 relay、必带超时、close 要吞异常」的壳；合进来之后这些共同约定只有一份。
+ */
+export class Http80Transport implements ProbeTransport {
+  /** 注册表索引名 */
+  readonly transportName = "http80";
+  /** 能把 TCP 落到指定中继上（明文，不需要 TLS） */
+  readonly relayAware = true;
+
+  /**
+   * 功能：对目标发一次明文 HTTP 请求，只读到状态行为止。
+   * @param host 目标主机名（会写进 Host 头，边缘靠它路由）
+   * @param relay 中继 `host:port`；空串表示直连目标 :80
+   * @param path 请求路径
+   * @param timeoutMs 整段预算；写与读各取它与 `CONNECT_MS` 的小者
+   * @returns 探测结果：状态码在 `status`，状态行在 `head`
+   */
+  async probe(host: string, relay: string, path: string, timeoutMs: number): Promise<TransportOutcome> {
+    const startedAt = Date.now();
+    const budget = Math.max(1, Math.min(CONNECT_MS, timeoutMs));
+    // 拆 `host:port` 同样必须走 splitRelay：探测打错主机比超时更难发现
+    const [dialHost, dialPort] = relay ? splitRelay(relay, 80) : [host, 80];
+    let sock: ReturnType<typeof connect>;
+    try {
+      sock = connect({ hostname: dialHost, port: Number(dialPort) || 80 });
+    } catch (e) {
+      return { ok: false, err: "connect: " + String((e as Error).message).slice(0, 80), ms: Date.now() - startedAt };
+    }
+    const req =
+      "GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: Mozilla/5.0 (probe)\r\nAccept: */*\r\nConnection: close\r\n\r\n";
+    let buf = new Uint8Array(0);
+    const reader = sock.readable.getReader();
+    // 读端只认状态行：凑够 2KB 或对端关闭就停，绝不把整页读进来（那是计量 DO 的活）
+    const pump = (async () => {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) {
+          const n = new Uint8Array(buf.length + value.length);
+          n.set(buf);
+          n.set(value, buf.length);
+          buf = n;
+          if (buf.length > 2048) break;
+        }
+      }
+    })().catch(() => {});
+    try {
+      const w = sock.writable.getWriter();
+      // connect() 惰性：第一次 write 才真正建连，没有上限就会一直挂在这里
+      await withTimeout(w.write(new TextEncoder().encode(req)), budget, "timeout");
+      w.releaseLock();
+      await Promise.race([pump, new Promise((r) => setTimeout(r, budget))]);
+    } catch (e) {
+      try {
+        sock.close();
+      } catch (closeErr) {
+        /* 这条连接本来就没建起来 */
+      }
+      return { ok: false, err: "io: " + String((e as Error).message).slice(0, 80), ms: Date.now() - startedAt };
+    }
+    try {
+      reader.releaseLock();
+    } catch (lockErr) {
+      /* 读端可能已被 pump 关闭 */
+    }
+    try {
+      sock.close();
+    } catch (closeErr) {
+      /* 对端先关 */
+    }
+    const text = new TextDecoder().decode(buf.slice(0, 2048));
+    const line = (text.split("\r\n")[0] || "").slice(0, 64);
+    const hit = line.match(/^HTTP\/1\.[01] (\d{3})/);
+    const code = hit ? Number(hit[1]) : 0;
+    const srv = (text.match(/\r\nserver:\s*([^\r\n]+)/i) || [])[1] || "";
+    // 没有状态行 = 目标没按 HTTP 回话（端口关了 / 中间设备吐了别的东西），这是失败而不是 0 码成功
+    if (!code) return { ok: false, err: "no-status", ms: Date.now() - startedAt };
+    return {
+      ok: true,
+      status: code,
+      server: srv.trim().slice(0, 40),
+      bytes: buf.length,
+      head: line,
+      ms: Date.now() - startedAt,
+    };
+  }
+}
+
 // ---- 并入自 tf.ts ----
 /** 一次探测的总预算：userland TLS 走中继，卡住的那一刻不会自己回来。
  * 不设上限时，DO 里那个请求会一直挂着 —— 探测是诊断路径，绝不能拖住计量端点。 */
@@ -148,14 +243,14 @@ const PROBE_BUDGET_MS = 8000;
 /**
  * 功能：探测「目标（可选中继）能不能拿到响应」，实现由 `TRANSPORTS` 决定。
  *
- * 这里只留一层门面：具体怎么送（userland TLS 落中继 / 运行时自带 fetch 直连）在
- * `src/core/transport-tunnelfetch.ts` 的两个实现里，注册表在 `src/core/transport.ts`。
- * 这样加一个新的探测方式不需要改调用点，也不需要在这个文件里塞分支。
+ * 这里只留一层门面：具体怎么送（userland TLS 落中继 / 运行时自带 fetch 直连 / 明文 HTTP/80）
+ * 在本文件的三个 `ProbeTransport` 实现里，注册表也在本文件。加一种新探测方式不需要改调用点。
  *
  * @param host 目标主机名
  * @param relay 中继 `host:port`（空串表示直连）
  * @param path 请求路径
  * @param transportName 可选：指定用哪个传输（默认取注册表当前的；拼错则回落到默认）
+ * @param budgetMs 整段预算，默认 `PROBE_BUDGET_MS`
  * @returns 结果（ok/status/server/bytes/head/ms 或 ok:false/err/ms）
  */
 export async function probeTf(
@@ -163,10 +258,11 @@ export async function probeTf(
   relay = "",
   path = "/",
   transportName?: string,
+  budgetMs: number = PROBE_BUDGET_MS,
 ): Promise<TransportOutcome> {
   // 传输选择放在门面里做：调用点只关心「探测这件事」，不关心谁去送
   const transport = TRANSPORTS.get(transportName);
-  return transport.probe(host, relay, path, PROBE_BUDGET_MS);
+  return transport.probe(host, relay, path, budgetMs);
 }
 
 // ---- 门面（对外导出面保持不变） ----
@@ -240,14 +336,18 @@ export class TransportRegistry {
 export const GATEWAY_TRANSPORT = "gateway";
 /** 默认传输名：userland TLS，能落到中继上 */
 export const TUNNEL_TRANSPORT = "tunnelfetch";
+/** 明文 HTTP/80 的传输名：最便宜的真实状态码证据 */
+export const HTTP80_TRANSPORT = "http80";
 
 /**
  * 进程内唯一的传输注册表。
  *
- * 默认 tunnelfetch —— 只有它能把 TCP 落到中继上；gateway 那个实现留着是为了「同一目标、两条腿」
- * 的并排对照，不是替代品。
+ * 默认 tunnelfetch —— 只有它能把 TCP 落到中继上并做完整 TLS 握手；`gateway` 留着是为了
+ * 「同一目标、两条腿」的并排对照，`http80` 是不需要 TLS 时最便宜的那条证据（明文，只能看到
+ * 状态码与状态行）。三者都不替代彼此，诊断端点按需点名。
  */
 export const TRANSPORTS = new TransportRegistry(TUNNEL_TRANSPORT, [
   [TUNNEL_TRANSPORT, new TunnelFetchTransport()],
   [GATEWAY_TRANSPORT, new GatewayFetchTransport()],
+  [HTTP80_TRANSPORT, new Http80Transport()],
 ]);

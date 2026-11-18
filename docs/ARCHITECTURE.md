@@ -248,9 +248,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `RelayLedger` | `src/route/relay-ledger.ts` | 中继健康表的两张账本（已同步快照 + 待确认行）：`forget()` 是唯一删除入口，`counts()` 暴露规模以发现表外键 |
 | `CronLock` | `src/core/lock.ts` | cron 闸门，纯静态方法：持有时间戳 + `SC.CRON_STALE_MS` 截止；超时接管计 `cronStale`（布尔闩卡死即永久停摆）。7.360 起无模块级 `CRONLOCK` 实例 |
 | `TfbBook`（`TFB`） | `src/route/tfbbook.ts` | 起搏记账（上次开批时间 + 本窗口批数；`sweep` 是唯一清理入口，上限与 `SC.PX_MAX` 同源） |
-| `TransportRegistry`（`TRANSPORTS`） | `src/core/transport.ts` | 探测传输的注册表：业务侧只说「要一个能探测的传输」，具体实现（userland TLS / 运行时 fetch）由这里决定。7.271 起 `probeTf` 不再写死 tunnelfetch |
+| `TransportRegistry`（`TRANSPORTS`） | `src/core/transport.ts` | 探测传输的注册表：业务侧只说「要一个能探测的传输」，具体实现（userland TLS / 运行时 fetch / 明文 HTTP·80）由这里决定。7.271 起 `probeTf` 不再写死 tunnelfetch |
 | `TunnelFetchTransport` | `src/core/transport.ts` | 用 `tunnelfetch`（userland TLS 1.3）探测，能把 TCP 落到中继上 —— 唯一能回答「这条中继到目标行不行」的实现 |
 | `GatewayFetchTransport` | `src/core/transport.ts` | 用运行时自带 `fetch` 探测，只能直连；留着做「同一目标、两条腿」的对照，与上一条并排看才能分清「目标拒绝这个出口族」与「中继不可用」 |
+| `Http80Transport` | `src/core/transport.ts` | 明文 HTTP/80 探测：`connect` 到 `<relay|host>:80` 写一条 GET，只读状态行（≤2KB），返回状态码与状态行。最便宜的真实 HTTP 证据（免费计划跑不动 TLS 客户端）。7.361 前它是自由函数 `probeHttp80`（住在一个只做 80 端口探测的文件里，那个文件现在只剩地址解析、已改名 `relay-addr.ts`），与传输层各写一套「可选 relay / 必带超时 / close 要吞异常」的壳 |
 | `BoundedMap` | `src/core/table.ts` | 有界「键 → 行」表（容量 + 寿命 + 淘汰顺序）；`RelPerfTable` 与 `TfbBook` 继承的淘汰规则就这一份，7.251 前四处各写一遍，于是出现过「上限判在插入之前」那种偏差 |
 | `TimedMarks` | `src/core/table.ts` | 「键 → 标记时刻」的有界表：`mark()` 写一条标记，`on()` 判断还在不在寿命内；`set` 之后才裁（7.227 的单测抓到过 `alive=513`），过期的在 `on()` 里顺手删。7.359 起 `Judge` 的两张表用它，淘汰规则不再各写一遍 |
 | `HostProfile`（`HOSTS`） | `src/nodes/metrics.ts` | 站点画像（站点族 × 节点的成败/字节/ttfb/bps）；`markNode()` 只按「取行 `entryOf()` → 过期减半 `decay()` → 计数 `count()` → 采样 `measure()` → 打时间」编排，两张表的上限各自一个方法（`evictHost()` 按族内最近更新淘汰、`evictNode()` 按行内时间淘汰）；`siteKey`/`hostKey`/`hostScore` 与同名薄包装同在此文件 |
@@ -294,7 +295,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `SubscriptionView` / `PageView` / `PanelView` | `src/views/sub.ts`、`src/views/panel.ts` | 三种订阅格式与面板渲染（`PanelView` 六个分区各一方法、样式抽成 `PANEL_CSS`；`PageView` 无字段，7.353 起由 `SubscriptionRoutes` 自己持有实例，模块级 `PAGES` 已撤；`SubscriptionView` 同样无字段，7.358 起由 `SubscriptionRoutes` 自己持有（`this.view`），模块级 `SUBVIEW` 已撤） |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
 
-自由函数集中在 `src/core/{util,net,hist,quota,hosts,hostmem,http80,table,enums,types,facts,hook,state,const,counter,lock,latobs,firstobs,node-snapshot,transport}.ts`（编解码 / SHA-224 / WS / 超时 / 并发 / 环境解析 / 协议名 / 错误文本都在 `util.ts` 一个文件里，7.290 起不再拆分；SHA-224 内部按「补位 `sha224Pad()` / 展开 `sha224Words()` / 压缩 `sha224Mix()`」三步各自成函数，7.338 起）、`src/proxy/protocol.ts`、`src/views/{html,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。
+自由函数集中在 `src/core/{util,net,hist,quota,hosts,hostmem,relay-addr,table,enums,types,facts,hook,state,const,counter,lock,latobs,firstobs,node-snapshot,transport}.ts`（编解码 / SHA-224 / WS / 超时 / 并发 / 环境解析 / 协议名 / 错误文本都在 `util.ts` 一个文件里，7.290 起不再拆分；SHA-224 内部按「补位 `sha224Pad()` / 展开 `sha224Words()` / 压缩 `sha224Mix()`」三步各自成函数，7.338 起）、`src/proxy/protocol.ts`、`src/views/{html,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。
 
 ## 注释约定
 

@@ -13,7 +13,7 @@ import { hostKey, HOSTS } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { costOf, isBlack, isFrozen, usable, NodeStatsTable, CANDS } from "../nodes/score";
 import { ThompsonPicker } from "./ts";
-import { relayIpOf } from "../core/http80";
+import { relayIpOf } from "../core/relay-addr";
 import { HOOK } from "../core/hook";
 import { isCfIp } from "../core/net";
 import { keyOf } from "./const";

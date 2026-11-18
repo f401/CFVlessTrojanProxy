@@ -2,7 +2,7 @@ import { S } from "../core/state";
 import { connect } from "cloudflare:sockets";
 import { CONNECT_MS, timeoutSignal, withTimeout } from "../core/util";
 import { isCfIp, isPrivateHost } from "../core/net";
-import { splitRelay } from "../core/http80";
+import { splitRelay } from "../core/relay-addr";
 export { DENY_PORTS, checkTarget, isPrivateHost } from "../core/net";
 
 /** 查 AAAA 记录（用于绕过 CF 对 IPv4 的内部隔离） */

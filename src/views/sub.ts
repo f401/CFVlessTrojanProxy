@@ -1,6 +1,6 @@
 import { X_EDGE_IPS, edgeCount, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf, renderLinks, renderSingbox } from "./sub-common";
 import { S } from "../core/state";
-import { splitRelay } from "../core/http80";
+import { splitRelay } from "../core/relay-addr";
 
 // ---- 并入自 src\views\subview.ts ----
 /** 订阅输出格式：Clash/Mihomo YAML、sing-box JSON、纯链接列表 */
