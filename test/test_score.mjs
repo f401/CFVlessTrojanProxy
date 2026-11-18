@@ -1731,10 +1731,10 @@ ok("通配判定不再生效：写不进表，也不会外溢到别的站点", W
 W.VT.clear();
 ok("清空后不再 veto", W.HOOK.veto("x.com", "45.136.117.194") === false);
 // 第 34 组：连接证据钩子（traffic，差分判据）
-W.VT.clear(); W.S.needPx.clear(); W.S.smCnt.clear(); W.S.bigByHost.clear();
+W.VT.clear(); W.S.needPx.clear(); W.JUDGE.memory.smCnt.clear(); W.JUDGE.memory.bigByHost.clear();
 W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false, life: 800, up: 0 });
 eq("只有小响应时不判死（可能只是业务层 403）", W.VT.state("x.com", "r:45.136.117.194"), 0);
-ok("小响应按通道记进 smCnt（不再有复核队列，这条计数是它唯一的下游）", (W.S.smCnt.get("x.com|r:45.136.117.194") || 0) >= 1);
+ok("小响应按通道记进 smCnt（不再有复核队列，这条计数是它唯一的下游）", (W.JUDGE.memory.smCnt.get("x.com|r:45.136.117.194") || 0) >= 1);
 W.HOOK.traffic({ host: "x.com", via: "node", node: "89.22.227.132:443", down: 90000, ok: true, life: 4000, up: 900 });
 eq("同一站点别的通道能打通 → 记为 ok", W.VT.state("x.com", "r:89.22.227.132"), 1);
 W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false, life: 800, up: 0 });
@@ -1886,9 +1886,9 @@ ok("没有状态码证据时不会强行推翻池子判断", W.POLICY.decide({ h
 // 第 43 组：差分判据 —— 保护「正常的业务 403」
 W.VT.clear();
 W.S.needPx.clear();
-W.S.smCnt.clear();
-W.S.bigByHost.clear();
-W.S.bigChan.clear();
+W.JUDGE.memory.smCnt.clear();
+W.JUDGE.memory.bigByHost.clear();
+W.JUDGE.memory.bigChan.clear();
 // 1) 没有基线时，小响应不判死任何通道（业务 403 与封锁页在此不可区分）
 W.HOOK.traffic({ host: "api.biz.com", via: "node", node: "9.9.9.9:443", down: 4000, ok: false, life: 900, up: 300 });
 W.HOOK.traffic({ host: "api.biz.com", via: "node", node: "9.9.9.9:443", down: 4000, ok: false, life: 900, up: 300 });
@@ -1902,19 +1902,19 @@ eq("差分成立 → 判该中继被封", W.VT.bad("x.com", "r:185.253.117.147")
 eq("拿到整页的通道不受牵连", W.VT.bad("x.com", "r:45.136.117.194"), false);
 // 3) 同一通道「先整页、后小响应」不算差分（可能是站点自身行为变化）
 W.VT.clear();
-W.S.smCnt.clear();
-W.S.bigByHost.clear();
-W.S.bigChan.clear();
+W.JUDGE.memory.smCnt.clear();
+W.JUDGE.memory.bigByHost.clear();
+W.JUDGE.memory.bigChan.clear();
 W.HOOK.traffic({ host: "y.com", via: "node", node: "7.7.7.7:443", down: 60000, ok: true, life: 3000, up: 900 });
 W.HOOK.traffic({ host: "y.com", via: "node", node: "7.7.7.7:443", down: 4000, ok: false, life: 900, up: 300 });
 eq("同通道先大后小不判死", W.VT.bad("y.com", "r:7.7.7.7"), false);
 // 4) 中继假 200（nginx 默认页）攒够 3 次才判
 W.VT.clear();
-W.S.smCnt.clear();
+W.JUDGE.memory.smCnt.clear();
 for (let i = 0; i < 3; i++) W.HOOK.traffic({ host: "z.com", via: "node", node: "6.6.6.6:443", down: 4300, ok: true, life: 900, up: 200 });
 eq("假 200 攒 3 次判该中继不可用", W.VT.bad("z.com", "r:6.6.6.6"), true);
 // 第 44 组：1 次请求感知 + 站点自愈（判定只改路由，永不断路）
-W.VT.clear(); W.S.needPx.clear(); W.S.smCnt.clear(); W.S.bigByHost.clear(); W.S.bigChan.clear(); W.S.cfHttp.clear();
+W.VT.clear(); W.S.needPx.clear(); W.JUDGE.memory.smCnt.clear(); W.JUDGE.memory.bigByHost.clear(); W.JUDGE.memory.bigChan.clear(); W.S.cfHttp.clear();
 // 1) 本出口 fetch 根路径 200（站点活着）+ 小响应 → 一次即判该通道被封
 W.S.cfHttp.set("x.com", { code: 200, colo: "VIE", t: Date.now() });
 W.HOOK.traffic({ host: "x.com", via: "node", node: "5.5.5.5:443", down: 4200, ok: false, life: 900, up: 300 });
@@ -1929,7 +1929,7 @@ eq("没有通道可走时仍然给出中继（不断路）", dHeal.chan.kind, "r
 eq("自愈后该站点的封禁结论被清掉", W.VT.bad("y.com", "r:1.1.1.1"), false);
 // 3) 业务 403（站点根路径本身就不是 200）不会被单次判死
 W.VT.clear();
-W.S.smCnt.clear();
+W.JUDGE.memory.smCnt.clear();
 W.S.cfHttp.set("api.biz.com", { code: 403, colo: "AMS", t: Date.now() });
 W.HOOK.traffic({ host: "api.biz.com", via: "node", node: "8.8.8.8:443", down: 4200, ok: false, life: 900, up: 300 });
 eq("业务 403 站点不被单次判死", W.VT.bad("api.biz.com", "r:8.8.8.8"), false);
@@ -2549,7 +2549,7 @@ console.log("\n79) 同窗口对照与 bigTypical（影子从此能算出「本�
   W.FACT.clear();
   W.S.peers.clear();
   W.S.bigTyp.clear();
-  W.S.bigByHost.set(C, t0);
+  W.JUDGE.memory.bigByHost.set(C, t0);
   const cev = (x) => ({ host: C, via: "node", node: A, down: 0, ok: true, life: 900, up: 0, ...x });
   eq("先喂一条整页当对照", W.FACT.observe(cev({ node: B, down: 30000, ok: true }), t0), "ok");
   eq("同通道 tiny + 有对照 → B 级证据", W.FACT.observe(cev({ down: 737, ok: false }), t0 + 1000), "R_TINY_PEER");
@@ -2557,7 +2557,7 @@ console.log("\n79) 同窗口对照与 bigTypical（影子从此能算出「本�
   W.FACT.clear();
   W.S.peers.clear();
   W.S.bigTyp.clear();
-  W.S.bigByHost.delete(C);
+  W.JUDGE.memory.bigByHost.delete(C);
 }
 
 
@@ -3519,14 +3519,14 @@ ok(`[${g}] 设计阶段的临时名只在「更正」那句里出现`, !v8.inclu
   eq("过期清理只删 <= now 的", W.dropExpired(exp, 5000), 2);
   eq("剩下的就是还没过期的那条", [...exp.keys()].join(","), "future");
   // ③ judge 每条整页都会写 bigByHost/bigChan：600 个不同站点后必须被压回
-  W.S.bigByHost.clear();
-  W.S.bigChan.clear();
+  W.JUDGE.memory.bigByHost.clear();
+  W.JUDGE.memory.bigChan.clear();
   for (let i = 0; i < 600; i++) {
     const h = "big" + i + ".test";
     W.JUDGE.onTraffic({ host: h, chan: { kind: "r", ip: "198.51.100.9" }, via: "node", node: "198.51.100.9:443", ok: true, down: 45290, up: 800, life: 900, cf: false, at: 1_700_000_000_000 + i });
   }
-  eq("bigByHost 被压回上限", W.S.bigByHost.size, W.SC.HOST_MEM_MAX);
-  eq("bigChan 与 bigByHost 同步裁剪（落单的键会让判定读到别站点的通道）", W.S.bigChan.size, W.S.bigByHost.size);
+  eq("bigByHost 被压回上限", W.JUDGE.memory.bigByHost.size, W.SC.HOST_MEM_MAX);
+  eq("bigChan 与 bigByHost 同步裁剪（落单的键会让判定读到别站点的通道）", W.JUDGE.memory.bigChan.size, W.JUDGE.memory.bigByHost.size);
   // ④ vtAck 顺手清掉过期的记账行
   W.S.vtPend.clear();
   W.S.vtSent.clear();
@@ -3541,7 +3541,7 @@ ok(`[${g}] 设计阶段的临时名只在「更正」那句里出现`, !v8.inclu
   const jdSrc = fs.readFileSync("src/route/judge.ts", "utf8");
   ok("dialer 裁剪 cfHost", dialSrc.includes("dropExpired(S.cfHost)") && dialSrc.includes("trimAged(S.cfHost)"));
   ok("verdictsync 裁剪 vtSent", vtSrc.includes("dropExpired(S.vtSent)") && vtSrc.includes("trimAged(S.vtSent)"));
-  ok("judge 裁剪 bigByHost", jdSrc.includes("trimAged(S.bigByHost)"));
+  ok("judge 裁剪 bigByHost", jdSrc.includes("trimAged(this.bigByHost)"));
   ok("verdictsync 不再自己抄 TTL", !vtSrc.includes("v.at + 1800000"));
 }
 
@@ -3550,19 +3550,19 @@ ok(`[${g}] 设计阶段的临时名只在「更正」那句里出现`, !v8.inclu
 for (let i = 0; i < 700; i += 1) {
   W.JUDGE.onTraffic({ host: "sm" + i + ".test", via: "node", node: "198.51.100.9:443", down: 737, ok: true, life: 80, up: 400, cf: false, at: 1700000000000 + i });
 }
-ok("700 个「站点|通道」之后 smCnt 仍被压在上限内", W.S.smCnt.size <= W.SC.SM_CNT_MAX);
+ok("700 个「站点|通道」之后 smCnt 仍被压在上限内", W.JUDGE.memory.smCnt.size <= W.SC.SM_CNT_MAX);
 ok("上限就是 512", W.SC.SM_CNT_MAX === 512);
 // 计数大的行必须活下来：真在刷垃圾页的通道计数会涨上去，判死要看 n>=3
-W.S.smCnt.clear();
-W.S.smCnt.set("keep.test|r:198.51.100.9", 50);
-for (let i = 0; i < 700; i += 1) W.S.smCnt.set("flood" + i + ".test|r:198.51.100.9", 1);
-W.trimAged(W.S.smCnt, W.SC.SM_CNT_MAX);
-eq("裁剪后正好等于上限", W.S.smCnt.size, 512);
-ok("计数大的那行还在（这张表留大删小）", W.S.smCnt.has("keep.test|r:198.51.100.9"));
-ok("计数最小的那些先被删", !W.S.smCnt.has("flood0.test|r:198.51.100.9"));
+W.JUDGE.memory.smCnt.clear();
+W.JUDGE.memory.smCnt.set("keep.test|r:198.51.100.9", 50);
+for (let i = 0; i < 700; i += 1) W.JUDGE.memory.smCnt.set("flood" + i + ".test|r:198.51.100.9", 1);
+W.trimAged(W.JUDGE.memory.smCnt, W.SC.SM_CNT_MAX);
+eq("裁剪后正好等于上限", W.JUDGE.memory.smCnt.size, 512);
+ok("计数大的那行还在（这张表留大删小）", W.JUDGE.memory.smCnt.has("keep.test|r:198.51.100.9"));
+ok("计数最小的那些先被删", !W.JUDGE.memory.smCnt.has("flood0.test|r:198.51.100.9"));
 const judgeSrc = fs.readFileSync("src/route/judge.ts", "utf8");
-ok("judge 写入 smCnt 后就地裁剪（源码断言，防止被悄悄删掉）", judgeSrc.includes("trimAged(S.smCnt"));
-W.S.smCnt.clear();
+ok("judge 写入 smCnt 后就地裁剪（源码断言，防止被悄悄删掉）", judgeSrc.includes("trimAged(this.smCnt"));
+W.JUDGE.memory.smCnt.clear();
 
 
 // ---- 150. 中继存活度证据必须带时间：否则冷启动读回的行只能被当成「刚刚观测」 ----
@@ -6144,7 +6144,7 @@ const aliveSrc226 = fs.readFileSync("src/px/alive.ts", "utf8");
       return !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
     })
     .join("\n");
-  ok("neg / pos 两张表都由 TimedMarks 持有", code.includes("private neg = new TimedMarks(") && code.includes("private pos = new TimedMarks("));
+  ok("neg / pos 两张表都由 TimedMarks 持有", code.includes("readonly neg = new TimedMarks(") && code.includes("readonly pos = new TimedMarks("));
   ok("判定里不再各写一遍裁剪", !code.includes("trimAged(this.neg") && !code.includes("trimAged(this.pos"));
   ok("pos 不再整表清空", !code.includes("this.pos.clear();"));
   ok("淘汰规则移出判定（改由 TimedMarks 提供）", !code.includes("dropExpired("));
@@ -9801,26 +9801,26 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   const keepMax323 = W.SC.SM_CNT_MAX;
   W.SC.SM_CNT_MAX = 1000;
   const t323 = Date.now() - 60000;
-  const cnt323 = () => Array.from(W.S.smCnt.keys()).filter((k) => k.startsWith(H323 + "|")).length;
-  W.S.smCnt.clear();
-  W.S.bigByHost.delete(H323);
-  W.S.bigChan.delete(H323);
+  const cnt323 = () => Array.from(W.JUDGE.memory.smCnt.keys()).filter((k) => k.startsWith(H323 + "|")).length;
+  W.JUDGE.memory.smCnt.clear();
+  W.JUDGE.memory.bigByHost.delete(H323);
+  W.JUDGE.memory.bigChan.delete(H323);
   const ev323 = (o) => ({ host: H323, cf: false, ok: true, down: 0, up: 0, life: 500, via: "node", node: "198.51.100.9:443", ...o });
   W.JUDGE.onTraffic(ev323({ down: 60000, life: 1200, at: t323 }));
   eq("[323] 整页走 pageHit，小响应计数一条都不留", cnt323(), 0);
   W.JUDGE.onTraffic(ev323({ down: 900, at: t323 + 1000 }));
   ok("[323] 小响应走 small，留下一条计数", cnt323() >= 1, "cnt=" + cnt323());
   W.JUDGE.onTraffic(ev323({ down: 900, at: t323 + 2000 }));
-  ok("[323] 再来一次小响应，计数累加", (W.S.smCnt.get(H323 + "|r:198.51.100.9") || 0) >= 2, "n=" + String(W.S.smCnt.get(H323 + "|r:198.51.100.9")));
+  ok("[323] 再来一次小响应，计数累加", (W.JUDGE.memory.smCnt.get(H323 + "|r:198.51.100.9") || 0) >= 2, "n=" + String(W.JUDGE.memory.smCnt.get(H323 + "|r:198.51.100.9")));
   const n323 = cnt323();
   W.JUDGE.onTraffic(ev323({ down: 0, at: t323 + 3000 }));
   eq("[323] 零字节不进 small", cnt323(), n323);
   W.JUDGE.onTraffic(ev323({ down: 900, life: 9000, at: t323 + 4000 }));
   eq("[323] 超时形态不进 small", cnt323(), n323);
   W.SC.SM_CNT_MAX = keepMax323;
-  W.S.smCnt.clear();
-  W.S.bigByHost.delete(H323);
-  W.S.bigChan.delete(H323);
+  W.JUDGE.memory.smCnt.clear();
+  W.JUDGE.memory.bigByHost.delete(H323);
+  W.JUDGE.memory.bigChan.delete(H323);
 }
 
 // 第 324 组：面板页按「一个类六个分区」组织（7.324）
@@ -12010,7 +12010,7 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   ok("最新的仍在", marks359.on("k5", t359 + 10) === true);
   const other359 = new W.TimedMarks({ max: 4, ttlMs: 600000 });
   ok("两个实例互不影响", other359.on("k5", t359 + 10) === false);
-  ok("判定里的两张表也是这个类", W.JUDGE.neg instanceof W.TimedMarks && W.JUDGE.pos instanceof W.TimedMarks);
+  ok("判定里的两张表也是这个类", W.JUDGE.memory.neg instanceof W.TimedMarks && W.JUDGE.memory.pos instanceof W.TimedMarks);
 }
 
 
@@ -12168,6 +12168,36 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   eq("[363] rankOf 不写判定表", W.VT.at("rkro363.test", "r:" + rels363[0]), beforeAt);
   W.VT.clear();
   W.BLK.clear?.();
+}
+
+// ===== 第 365 组：Judge 的软记忆收进 JudgeMemory，三个 S 字段迁出 AppState（7.365）=====
+{
+  const jd365 = fs.readFileSync("src/route/judge.ts", "utf8");
+  const st365 = fs.readFileSync("src/core/state.ts", "utf8");
+  // 结构：类存在且被导出、Judge 自持、三个 S 字段已迁走、门面方法还在
+  ok("[365] JudgeMemory 是导出类", jd365.includes("export class JudgeMemory {"));
+  ok("[365] Judge 自持 memory 字段", jd365.includes("readonly memory = new JudgeMemory();"));
+  ok("[365] 三个字段已迁出 S", !st365.includes("bigByHost") && !st365.includes("bigChan") && !st365.includes("smCnt"));
+  ok("[365] Judge 保留四个门面方法", ["markNeg", "negOn", "markPos", "posOn"].every((n) => jd365.includes(n + "(")));
+  ok("[365] bigDiff 门槛仍是 6h", jd365.includes("now - BASE_TTL"));
+  ok("[365] 差分用搬运 done", typeof W.JUDGE.memory.bigDiff === "function");
+  // 行为：软记忆实例独立、门面委托、差分判据
+  const memA365 = new W.JudgeMemory();
+  const memB365 = new W.JudgeMemory();
+  ok("[365] 两个 JudgeMemory 互不影响", memA365 !== memB365);
+  const t365 = Date.now();
+  memA365.markNeg("a365.test", "198.51.100.7", t365);
+  ok("[365] markNeg/negOn 走同类", memA365.negOn("a365.test", "198.51.100.7", t365 + 100) === true);
+  ok("[365] 另一个实例看不到", memB365.negOn("a365.test", "198.51.100.7", t365 + 100) === false);
+  memA365.noteBig("a365.test", "r:198.51.100.9", t365);
+  ok("[365] bigDiff：别的通道出过整页", memA365.bigDiff("a365.test", "r:198.51.100.8", t365) === true);
+  ok("[365] bigDiff：同通道出过整页不算差分", memA365.bigDiff("a365.test", "r:198.51.100.9", t365) === false);
+  ok("[365] bigDiff：6h 之前不算", memA365.bigDiff("a365.test", "r:198.51.100.8", t365 + 6 * 3600_000 + 1) === false);
+  memA365.bumpSmall("h|r:1.2.3.4");
+  memA365.bumpSmall("h|r:1.2.3.4");
+  ok("[365] bumpSmall 按通道累加", memA365.smCnt.get("h|r:1.2.3.4") === 2);
+  memA365.clearSmall("h|r:1.2.3.4");
+  ok("[365] clearSmall 清掉连击", !memA365.smCnt.has("h|r:1.2.3.4"));
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

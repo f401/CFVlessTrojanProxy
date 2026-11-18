@@ -147,7 +147,7 @@ export { Prefs } from "./route/prefs";
 export { HEALTH, RelayHealth, ipOf } from "./route/relay-health";
 export { RelayLedger } from "./route/relay-ledger";
 export { VT, VerdictTable } from "./route/verdict";
-export { JUDGE, Judge } from "./route/judge";
+export { Judge, JudgeMemory, JUDGE, CF_NEG } from "./route/judge";
 export { POLICY, Policy } from "./route/policy";
 export { decideCf } from "./route/policy";
 export { rankOf } from "./route/policy";

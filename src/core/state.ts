@@ -41,12 +41,6 @@ export class AppState {
    * ② 日志去重（标签没变就不重复写 `/logs`）。键是客户端给的站点名，因此必须限量。
    */
   tfbV: Map<string, string> = new Map();
-  /** 站点最近一次「大响应」时间（用来做跨通道差分：别的通道能打通才算这条被封） */
-  bigByHost: Map<string, number> = new Map();
-  /** 最近一次大响应来自哪条通道（用于「差分」判封锁：同站点不同通道对比） */
-  bigChan: Map<string, string> = new Map();
-  /** 每「站点|通道」的小响应连击数 */
-  smCnt: Map<string, number> = new Map();
   /** 每个站点最近 120s 内各通道的观测（环形 8 条）：v8 的「同窗口对照」 */
   peers: Map<string, Array<{ ck: string; down: number; at: number }>> = new Map();
   /** 每个站点见过的最大响应字节数：v8 的 bigTypical（tiny 的相对判据要用） */

@@ -18,6 +18,7 @@ const steps = [
   ["缩进门禁", ["tools/check-indent.mjs"]],
   ["命名门禁", ["tools/check-names.mjs"]],
   ["插入序门禁", ["tools/check-insertorder.mjs"]],
+  ["状态归属门禁", ["tools/check-state-owner.mjs"]],
   ["打包", ["tools/bundle.js"]],
   ["测试包", ["test/mk_test.mjs"]],
   ["协议单测", ["test/test_v3.mjs"]],

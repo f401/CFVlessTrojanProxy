@@ -33,25 +33,23 @@ const POS_TTL = 600_000;
 // 不进判定表、不跨 isolate 共享 —— 它是一条统计倾向，不是封锁事实。
 export const CF_NEG = "*cf";
 
-/** 判定器：唯一写「流量证据」的地方，纯内存、无 IO */
-export class Judge {
-  /**
-   * 短负面记忆：键 `站点|通道`，值 = 到期时间戳。
-   *
-   * 存在的原因：公开中继背后是一组 egress，部分出口走 IPv6 或质量差，**同一条中继会逐连接漂移**；
-   * 选路层只按健康度/证据时间排序治不了它。这里用「刚刚这条通道对该站点回了异常小的响应」
-   * 作为 10 分钟的软降权依据，让突发流量中的下一条连接自动绕开它，但绝不写封禁
-   * （不放进判定表，因此不影响「无 2xx 不写封禁」的纪律，也不会污染 blockedRatio）。
-   */
-  private neg = new TimedMarks({ max: SC.HOST_MEM_MAX, ttlMs: NEG_TTL });
+/** 判定层的软记忆：逐连接的「倾向」，会过期、会淘汰，但绝不写判定表。 */
+export class JudgeMemory {
+  /** 短负面记忆：键 `站点|通道`，值 = 到期时间戳。 */
+  readonly neg = new TimedMarks({ max: SC.HOST_MEM_MAX, ttlMs: NEG_TTL });
   /** 正记忆：`站点|r:ip` → 到期时间戳（有界，见 markPos） */
-  private pos = new TimedMarks({ max: SC.HOST_MEM_MAX, ttlMs: POS_TTL });
+  readonly pos = new TimedMarks({ max: SC.HOST_MEM_MAX, ttlMs: POS_TTL });
+  /** 站点最近一次「大响应」时间（跨通道差分判封锁） */
+  readonly bigByHost = new Map<string, number>();
+  /** 最近一次大响应来自哪条通道 */
+  readonly bigChan = new Map<string, string>();
+  /** 每「站点|通道」的小响应连击数 */
+  readonly smCnt = new Map<string, number>();
 
-  /**
-   * 功能：记录一条短负面记忆（10 分钟），供选路层把该通道排到后面。
-   * @param host 目标站
+  /** 记一次短负面倾向：某中继对某站点刚失败过（只软降权，不落硬封锁）
+   * @param host 站点名
    * @param ip 中继出口 IP
-   * @param now 当前时间戳
+   * @param now 当前时间
    * @returns 无
    */
   markNeg(host: string, ip: string, now: number): void {
@@ -59,23 +57,19 @@ export class Judge {
     // 有界与寿命都在 `TimedMarks` 里：这里只负责「键怎么拼、TTL 取哪个」
     this.neg.mark(host + "|r:" + ip, now);
   }
-
-  /**
-   * 功能：查询该（站点, 中继）是否仍在负面记忆期内。
-   * @param host 目标站
+  /** 查询某中继对某站点是否还在负面记忆期内
+   * @param host 站点名
    * @param ip 中继出口 IP
-   * @param now 当前时间戳
-   * @returns 在期内返回 true（调用方应把它排到后面，而不是禁用它）
+   * @param now 当前时间
+   * @returns 是否命中负面记忆
    */
   negOn(host: string, ip: string, now = Date.now()): boolean {
     return this.neg.on(host + "|r:" + ip, now);
   }
-
-  /**
-   * 功能：记录一条「该中继刚给本站出过整页」的正记忆（10 分钟），供选路层优先复用。
-   * @param host 目标站
+  /** 记一次正倾向：某中继刚给本站出过整页，10 分钟内优先复用
+   * @param host 站点名
    * @param ip 中继出口 IP
-   * @param now 当前时间戳
+   * @param now 当前时间
    * @returns 无
    */
   markPos(host: string, ip: string, now: number): void {
@@ -83,17 +77,67 @@ export class Judge {
     // 与 neg 同一个实现、只是 TTL 与键相同：两处口径不会再各自演化
     this.pos.mark(host + "|r:" + ip, now);
   }
-
-  /**
-   * 功能：查询该（站点, 中继）是否仍在正记忆期内。
-   * @param host 目标站
+  /** 查询某中继对某站点是否还在正面记忆期内
+   * @param host 站点名
    * @param ip 中继出口 IP
-   * @param now 当前时间戳
-   * @returns 在期内返回 true（调用方应优先复用它）
+   * @param now 当前时间
+   * @returns 是否命中正面记忆
    */
   posOn(host: string, ip: string, now = Date.now()): boolean {
     return this.pos.on(host + "|r:" + ip, now);
   }
+  /** 记一次整页命中：两张表必须同步裁剪，否则 bigDiff 会读到别站点的通道 */
+  noteBig(host: string, ck: string, now: number): void {
+    this.bigByHost.set(host, now);
+    this.bigChan.set(host, ck);
+    if (this.bigByHost.size > SC.HOST_MEM_MAX) {
+      trimAged(this.bigByHost);
+      for (const h of this.bigChan.keys()) if (!this.bigByHost.has(h)) this.bigChan.delete(h);
+    }
+  }
+  /** 清掉某通道的小响应连击数（整页命中后调：此前的小响应不再算数）
+   * @param ck 通道键 `站点|通道`
+   * @returns 无
+   */
+  clearSmall(ck: string): void {
+    this.smCnt.delete(ck);
+  }
+  /** 累加某通道的小响应连击数，超上限按最旧淘汰
+   * @param ck 通道键 `站点|通道`
+   * @returns 累加后的连击数
+   */
+  bumpSmall(ck: string): number {
+    const n = (this.smCnt.get(ck) || 0) + 1;
+    this.smCnt.set(ck, n);
+    // 键是「站点|通道」，两个维度都会涨；这里删「计数最小」的：真在刷垃圾页的通道
+    // 计数会涨上去（判死看 n>=3），留大删小正是想要的语义。
+    if (this.smCnt.size > SC.SM_CNT_MAX) trimAged(this.smCnt, SC.SM_CNT_MAX);
+    return n;
+  }
+
+  /** 别的通道在 6 小时内是否出过整页（差分判封锁的旁证） */
+  bigDiff(host: string, ck: string, now: number): boolean {
+    return (this.bigByHost.get(host) || 0) > now - BASE_TTL && this.bigChan.get(host) !== ck;
+  }
+}
+
+/**
+ * 判定器：唯一写「流量证据」的地方，纯内存、无 IO。
+ * 7.365 起只做「观测 → 结论」的裁决；软记忆（正负倾向、整页/小响应记忆）交给自己的
+ * `JudgeMemory`，与 `VT`/`BLK` 的硬结论分层。
+ */
+export class Judge {
+  /** 本 isolate 的软记忆：不跨 isolate 共享，也不写判定表 */
+  readonly memory = new JudgeMemory();
+
+  /** 短负面记忆：委托给 JudgeMemory（保留门面方法，调用点不变） */
+  markNeg(host: string, ip: string, now: number): void { this.memory.markNeg(host, ip, now); }
+  /** 查询负面记忆 */
+  negOn(host: string, ip: string, now = Date.now()): boolean { return this.memory.negOn(host, ip, now); }
+  /** 记正记忆 */
+  markPos(host: string, ip: string, now: number): void { this.memory.markPos(host, ip, now); }
+  /** 查询正记忆 */
+  posOn(host: string, ip: string, now = Date.now()): boolean { return this.memory.posOn(host, ip, now); }
 
   /** 连接收尾的观测 */
   onTraffic(e: TrafficEvt): void {
@@ -174,20 +218,14 @@ export class Judge {
    */
   private pageHit(e: TrafficEvt, chan: Chan, ck: string, now: number): void {
     cnt("trHit");
-    S.bigByHost.set(e.host, now);
-    S.bigChan.set(e.host, ck);
-    // 键是客户端带过来的站点名，不是有限集合：超过上限先按最旧压回，
-    // 两张表必须同步裁剪（bigDiff 同时读这两张，落单的键会让判定读到别站点的通道）
-    if (S.bigByHost.size > SC.HOST_MEM_MAX) {
-      trimAged(S.bigByHost);
-      for (const h of S.bigChan.keys()) if (!S.bigByHost.has(h)) S.bigChan.delete(h);
-    }
-    S.smCnt.delete(ck);
+    // 两张表同步写+裁剪、并清掉该通道的小响应连击：都收在 JudgeMemory 里
+    this.memory.noteBig(e.host, ck, now);
+    this.memory.clearSmall(ck);
     recordTraffic({ target: e.host, chan, down: e.down, ok: true });
     recordPass({ target: e.host, chan, down: e.down, ok: true });
     // 正记忆：这条中继刚给本站出过整页 —— 10 分钟内优先复用它。
     // 依据只有本 isolate 的观测，不跨 isolate 共享（各 isolate 的出口质量不同）。
-    if (e.via === "node" && e.node) this.markPos(e.host, relayIpOf(e.node), now);
+    if (e.via === "node" && e.node) this.memory.markPos(e.host, relayIpOf(e.node), now);
     return;
   }
 
@@ -209,12 +247,7 @@ export class Judge {
       // 归因：小响应是「直连出口被拒」还是「中继出口被拒」——调参前必须知道钱花在哪条路上
       cnt(e.via === "node" ? "smN" : "smD");
     }
-    const n = (S.smCnt.get(ck) || 0) + 1;
-    S.smCnt.set(ck, n);
-    // 键是「站点|通道」，两个维度都会涨（站点名来自客户端、中继来自池子），不裁剪就是
-    // 一张只增不减的表。这里删「计数最小」的那些：这张表的值是次数而不是时间戳，
-    // 真在刷垃圾页的通道计数会涨上去（判死要看 n>=3），所以留大删小反而是想要的语义。
-    if (S.smCnt.size > SC.SM_CNT_MAX) trimAged(S.smCnt, SC.SM_CNT_MAX);
+    const n = this.memory.bumpSmall(ck);
 
     // 中继把自家默认页（nginx）当响应回：这个中继对任何站点都是废的，攒 3 次判死
     if (e.ok && e.via === "node" && e.down < JUNK_MAX && n >= 3) {
@@ -225,7 +258,7 @@ export class Judge {
     // ① 本出口 fetch 根路径 200 —— 站点活着，而这条通道只回了小响应；
     // ② 同站点**另一条**通道 6 小时内出过整页 —— 差分成因明确。
     const httpOk = cfHttpCode(e.host) === 200;
-    const bigDiff = (S.bigByHost.get(e.host) || 0) > now - BASE_TTL && S.bigChan.get(e.host) !== ck;
+    const bigDiff = this.memory.bigDiff(e.host, ck, now);
     const known = httpOk || bigDiff;
     // 短负面记忆：只要「站点确实能出整页」的旁证成立，就把这条通道对该站点软降权 10 分钟。
     // 它是选路层的排序依据，不是封锁结论 —— 突发负载下一条连接就会换别的通道。
@@ -235,10 +268,10 @@ export class Judge {
       // 曾经试过用 `*|r:<中继>` 把「这条中继出口走 v6」共享给其他 isolate，实测副作用更大 ——
       // 通配行 30 分钟才过期，几轮突发就能把大半中继标死，可用池变薄后连接反而更差（失败率 10→20%）。
       // 结论：出口地址族确实可以共享，但必须走「带节点名的软标记 + 有界表」，不能复用硬封锁通道。
-      if (nip) this.markNeg(e.host, nip, now);
+      if (nip) this.memory.markNeg(e.host, nip, now);
       // 同一份证据再记一份「这条中继对 CF 托管站点不友好」：出口地址族这类毛病与具体站点无关，
       // 学一次就能惠及所有 CF 托管目标（仍只在本 isolate 生效、10 分钟过期）。
-      if (nip && e.cf) this.markNeg(CF_NEG, nip, now);
+      if (nip && e.cf) this.memory.markNeg(CF_NEG, nip, now);
     }
     // 出口族只能从「这次真拿到了什么」反推：整页 ⇒ v4；同类小页且有整页对照 ⇒ v6。
     if (e.via === "node" && e.node) egDerive(relayIpOf(e.node), e.down, { peerBig: bigDiff, known, siteV4: DNS.v6Of(e.host) === 0, cf: !!e.cf }, now);
@@ -269,7 +302,7 @@ export class Judge {
    * @returns 无
    */
   private markBlocked(e: TrafficEvt, chan: Chan, ck: string, now: number): void {
-    S.smCnt.delete(ck);
+    this.memory.smCnt.delete(ck);
     recordBlock({ target: e.host, chan, down: e.down, ok: false });
     S.needPx.set(e.host, now + SC.PX_LEARN);
     trimAged(S.needPx, SC.PX_MAX);
