@@ -2,13 +2,13 @@ import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 import { NodeStatsTable } from "../nodes/stat";
 import { SOCKET_DIALER } from "./socket-dialer";
-import type { CallGate } from "../core/call-gate";
+import type { BudgetedIO } from "../core/budgeted-io";
 import { SEL } from "../px/selector";
 import { checkTarget } from "./dial";
 
 interface RegionOpts {
   /** 本次请求的额度：地区分流同样要从两个出口取号 */
-  budget: CallGate;
+  budget: BudgetedIO;
   env: Env;
   mode: Mode;
   /** 目标国家/地区码（?rg=xx），是硬要求：绝不跨地区回落 */

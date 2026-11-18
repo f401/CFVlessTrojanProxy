@@ -273,8 +273,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `FirstObs` | `src/core/obs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
 | `Attacher`（`ProxySession.attacher`） | `src/proxy/attacher.ts` | 上游挂载与补救链：`run()` 只装配，收尾交给 `onClose()`；中转再试一条 / IPv6 兜底 / proxyip 三段各一方法；无字段，7.354 起由 `ProxySession` 自己持有，模块级 `ATTACHER` 已撤 |
 | `ConnSettle`（`Connection.settle`） | `src/proxy/conn-settle.ts` | 一条连接结束时的结算流水线：收尾采样 → pStall 占比 → 节点观测聚合 → 首眼观测（含站点画像与通道证据）→ PEND 记账；只读 `SettleView`，状态仍归 `Connection`；7.348 起由连接自己持有，模块级 `SETTLE` 已撤 |
-| `CallGate` | `src/core/call-gate.ts` | 一次调用的额度闸门（connect / 子请求 / DO 三类计数）：请求与 cron 轮各 `new` 一份随 `ctx.budget` 下传，`openSocket()` 与 `fetch()` 是全仓唯一的建连与子请求出口 —— 判断依据从「记得写 take」变成「绕不过这两个门」；7.362 起没有模块级实例，额度也不进 `S` |
-| `BudgetExhausted` | `src/core/call-gate.ts` | 额度耗尽时抛的错误（`message` 为 `budget exhausted: <kind>`）：调用方靠它区分「这一轮额度不够」与真实网络错误 —— 前者应该放弃补救或整批延后，而不是记一次节点失败 |
+| `BudgetLedger` | `src/core/budget-ledger.ts` | 一次调用的额度**账本**（connect / 子请求 / DO 三类）：caps、used、refused、`snapshot()`，外加 `isBudgetExhausted()`。只有记账，不 import `cloudflare:sockets`、不碰 `S`；请求与 cron 轮各 `new` 一份随参数下传 |
+| `BudgetedIO` | `src/core/budgeted-io.ts` | 花钱的**出口**：`openSocket()` 与 `fetch()` 全仓唯二，出门先向账本取号 —— 判断依据从「记得写 take」变成「绕不过这两个门」。`BudgetExhausted` 是独立类型，调用方必须认出它并上抛，别当成坏腿（`dialer`/`fallback`/`dial`/`probe` 四处 catch 都有 `isBudgetExhausted()` 判断） |
 | `FirstFrame` | `src/proxy/protocol.ts` | 首帧解析器，**纯函数式**：只回答「这帧要打哪、是不是 UDP」，回 400 / 关连接 / 记账 / 设响应头都由调用方按固定顺序做（省掉 v7.187 那种「顺序错了但单测全绿」的坑） |
 | `SessionRouter` | `src/proxy/fallback.ts` | 把「这一跳往哪走」从会话里独立出来：`?rg=` 硬分流 → 拨号策略 → 补救一条中继三段各一方法，失败分别记 `rgFail` / `dead` / 节点 `bumpFail` |
 | `DnsLane` | `src/proxy/dns.ts` | 一条连接上的 DNS 转发通道：首包 `start(offset, trojan)` 记偏移与协议，之后 `feed(u8)` 直接转发；会话不再自己维护 `udp` / `udpTrojan` 两个标记 |

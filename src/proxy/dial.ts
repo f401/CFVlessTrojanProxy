@@ -2,7 +2,8 @@ import { S } from "../core/state";
 import { CONNECT_MS, timeoutSignal, withTimeout } from "../core/util";
 import { isCfIp, isPrivateHost } from "../core/net";
 import { splitRelay } from "../core/relay-addr";
-import { CallGate } from "../core/call-gate";
+import { BudgetedIO } from "../core/budgeted-io";
+import { isBudgetExhausted } from "../core/budget-ledger";
 
 export { DENY_PORTS, checkTarget, isPrivateHost } from "../core/net";
 
@@ -21,7 +22,7 @@ export const DOH_ENDPOINTS = [
  * @param {'A'|'AAAA'} type 记录类型
  * @returns {Promise<string|null>} 解析到的地址，全部失败返回 null
  */
-export async function dohQuery(domain: string, type: "A" | "AAAA", quota: CallGate = CallGate.unlimited()) {
+export async function dohQuery(domain: string, type: "A" | "AAAA", quota: BudgetedIO = BudgetedIO.unlimited()) {
   for (const base of DOH_ENDPOINTS) {
     try {
       const url = `${base}?name=${encodeURIComponent(domain)}&type=${type}`;
@@ -45,7 +46,7 @@ export async function dohQuery(domain: string, type: "A" | "AAAA", quota: CallGa
  * @param host 站点主机名
  * @returns {Promise<{ v6: boolean, answered: boolean }>} v6=是否有 AAAA；answered=是否至少一个 DoH 正常应答
  */
-export async function probeFam(host: string, quota: CallGate = CallGate.unlimited()): Promise<{ v6: boolean; answered: boolean }> {
+export async function probeFam(host: string, quota: BudgetedIO = BudgetedIO.unlimited()): Promise<{ v6: boolean; answered: boolean }> {
   for (const base of DOH_ENDPOINTS) {
     try {
       const url = `${base}?name=${encodeURIComponent(host)}&type=AAAA`;
@@ -68,7 +69,7 @@ export async function probeFam(host: string, quota: CallGate = CallGate.unlimite
  * @param {string} domain 域名
  * @returns {Promise<string|null>} IPv6 地址或 null
  */
-export async function resolveAAAA(domain: string, quota: CallGate = CallGate.unlimited()) {
+export async function resolveAAAA(domain: string, quota: BudgetedIO = BudgetedIO.unlimited()) {
   const hit = S.aaaaCache.get(domain);
   if (hit && Date.now() - hit.t < 300000) return hit.ip;
   const ip = await dohQuery(domain, "AAAA", quota);
@@ -84,7 +85,7 @@ export async function resolveAAAA(domain: string, quota: CallGate = CallGate.unl
  * @param {string} domain 域名
  * @returns {Promise<string[]>} IPv4 列表（可能为空）
  */
-export async function resolveV4All(domain: string, quota: CallGate = CallGate.unlimited()): Promise<string[]> {
+export async function resolveV4All(domain: string, quota: BudgetedIO = BudgetedIO.unlimited()): Promise<string[]> {
   const hit = S.v4AllCache.get(domain);
   if (hit && Date.now() - hit.t < 600000) return hit.ips;
   const ips: string[] = [];
@@ -128,7 +129,7 @@ export function expandV6(a: string) {
  * @param {string} domain 域名
  * @returns {Promise<string>} IPv4 地址
  */
-export async function resolveV4(domain: string, quota: CallGate = CallGate.unlimited()) {
+export async function resolveV4(domain: string, quota: BudgetedIO = BudgetedIO.unlimited()) {
   const hit = S.dnsCache.get(domain);
   if (hit && Date.now() - hit.t < 300000) return hit.ip;
   const ip = await dohQuery(domain, "A", quota);
@@ -176,7 +177,7 @@ export function parseProxyIp(raw: string) {
  * @param {number} port 目标端口
  * @returns {Promise<Socket>} 已建立的连接
  */
-export async function dial(host: string, port: number, quota: CallGate) {
+export async function dial(host: string, port: number, quota: BudgetedIO) {
   let lastErr = null;
 
   // IPv4 优先（仅 443）：connect({ hostname }) 走 A 还是 AAAA 由运行时决定，而 CF 边缘对「来自 CF
@@ -191,6 +192,7 @@ export async function dial(host: string, port: number, quota: CallGate) {
   try {
     return await quota.openSocket(host, port);
   } catch (e) {
+    if (isBudgetExhausted(e)) throw e;
     lastErr = e;
   }
 
@@ -198,6 +200,7 @@ export async function dial(host: string, port: number, quota: CallGate) {
     try {
       return await quota.openSocket(`${host}.sslip.io`, port);
     } catch (e) {
+      if (isBudgetExhausted(e)) throw e;
       lastErr = e;
     }
   }
@@ -220,7 +223,7 @@ export async function dial(host: string, port: number, quota: CallGate) {
 /** 用一次 HTTP 请求判定「本 isolate 的出口」访问该站点会被怎么对待。
  *  返回 {code, colo}：code 0 表示连 HTTP 都没拿到（当作未知）。
  *  只在 CF 托管目标上用：这些站点会把我们的出口 IP 透传给源站，403 就是被按 IP 拒。 */
-export async function httpProbe(host: string, ms = CONNECT_MS, quota: CallGate = CallGate.unlimited()): Promise<{ code: number; colo: string }> {
+export async function httpProbe(host: string, ms = CONNECT_MS, quota: BudgetedIO = BudgetedIO.unlimited()): Promise<{ code: number; colo: string }> {
   try {
     const r = await withTimeout(
       quota.fetch(`https://${host}/`, {
@@ -243,7 +246,7 @@ export async function httpProbe(host: string, ms = CONNECT_MS, quota: CallGate =
  * @param host 目标主机名或 IP 字面量
  * @returns 是 CF 托管为 true
  */
-export async function isCfHost(host: string, quota: CallGate = CallGate.unlimited()) {
+export async function isCfHost(host: string, quota: BudgetedIO = BudgetedIO.unlimited()) {
   if (isV4Literal(host)) return isCfIp(host);
   let ips: string[] = [];
   try {
@@ -261,7 +264,7 @@ export async function isCfHost(host: string, quota: CallGate = CallGate.unlimite
  * @param budget 解析+连接总预算毫秒，0 表示默认 3000
  * @returns socket；全部失败返回 null
  */
-export async function dial4(host: string, port: number, quota: CallGate, budget = 0) {
+export async function dial4(host: string, port: number, quota: BudgetedIO, budget = 0) {
   const raw = isV4Literal(host) ? [host] : await withTimeout(resolveV4All(host, quota), budget || 3000).catch(() => []);
   const list: string[] = Array.isArray(raw) ? raw : [];
   for (const ip of list.slice(0, 3)) {

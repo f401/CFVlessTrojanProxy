@@ -108,7 +108,8 @@ export {
   errCount,
 } from "./nodes/metrics";
 export { ERRS } from "./nodes/errlog";
-export { BudgetExhausted, CallGate } from "./core/call-gate";
+export { BUDGET_CAPS, BUDGET_KINDS, BudgetExhausted, BudgetLedger, isBudgetExhausted } from "./core/budget-ledger";
+export { BudgetedIO } from "./core/budgeted-io";
 export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES, pxPolicy, RawProbe } from "./px/probe";
 export { regionListAsync } from "./px/regions";
 export { PEND, RESTORE_MAX, getSnap, kvGetStrict, nodeSnapGet, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";

@@ -9,7 +9,8 @@ import { keyOf } from "./const";
 import { HOOK } from "../core/hook";
 import { SeedStore } from "./seed";
 import { splitRelay } from "../core/relay-addr";
-import { CallGate } from "../core/call-gate";
+import { BudgetLedger } from "../core/budget-ledger";
+import { BudgetedIO } from "../core/budgeted-io";
 
 // ---- 并入自 scan-probe.ts ----
 // 新候选扫描：在「还没有结论」的候选里轮转，探一批，成功的进存活表并记样本。
@@ -29,7 +30,7 @@ export class ScanProbe {
   /** 这一轮用的环境（`scanSub` 这类可调项从这里读） */
   private readonly env: Env;
   /** 这一轮探活能建几次连接：每次探活都从这里取号（cron 形态上限更大） */
-  private readonly gate = new CallGate("cron");
+  private readonly gate = new BudgetedIO(new BudgetLedger("cron"));
 
   /**
    * 功能：记下这一轮要扫的池子与配额。
@@ -145,7 +146,7 @@ export class ScanProbe {
  */
 export class ScanAlive {
   /** 复测也要建连：每次探活从这里取号（cron 形态上限更大） */
-  private readonly gate = new CallGate("cron");
+  private readonly gate = new BudgetedIO(new BudgetLedger("cron"));
 
   /**
    * 功能：复测上一轮「比同 /24 邻居慢一大截」的节点。
@@ -247,7 +248,7 @@ export class ScanHouse {
   // 存活表的读写器：无字段，状态全在 `S.alive`；7.350 前它是模块级 `ALIVE`。
   private readonly board = new AliveBoard();
   /** 中转实测与 SNI 复测都要建连：从这个闸门取号（cron 形态上限更大） */
-  private readonly gate = new CallGate("cron");
+  private readonly gate = new BudgetedIO(new BudgetLedger("cron"));
   /**
    * 功能：裁存活表 —— 先移出被重罚的（冷却 ≥30 分钟），再按上限裁到 `ALIVE_MAX`。
    * @param pool 这一轮的池子快照（裁剪时优先保留仍在池里的）
@@ -361,7 +362,7 @@ export interface ProbeHit extends NodeEntry {
  * @param key 候选键
  * @returns 探活结果；解析不出端口时回 `null`
  */
-export async function probeOne(key: string, gate: CallGate = CallGate.unlimited()): Promise<ProbeHit | null> {
+export async function probeOne(key: string, gate: BudgetedIO = BudgetedIO.unlimited()): Promise<ProbeHit | null> {
   const [probeHost, probePort] = splitRelay(key, 443);
   return (await probeProxy(probeHost, probePort, gate)) as ProbeHit | null;
 }
@@ -374,7 +375,7 @@ export async function probeOne(key: string, gate: CallGate = CallGate.unlimited(
  * @param keys 候选键
  * @returns 与 `keys` 一一对应的结果
  */
-export async function probeBatch(keys: string[], gate: CallGate = CallGate.unlimited()): Promise<Array<{ k: string; r: ProbeHit | null }>> {
+export async function probeBatch(keys: string[], gate: BudgetedIO = BudgetedIO.unlimited()): Promise<Array<{ k: string; r: ProbeHit | null }>> {
   const out: Array<{ k: string; r: ProbeHit | null }> = [];
   for (const seg of chunks(keys, SC.PROBE_CONC)) {
     const part = await Promise.all(seg.map(async (k) => ({ k, r: await probeOne(k, gate) })));

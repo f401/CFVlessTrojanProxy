@@ -5346,7 +5346,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   const runOne = async () => {
     const t = Date.now();
     const r = await Promise.race([
-      W.DIALER.open({ env: envD, request: reqD, conn: mkSt(), mode: "tput", host: "example.com", port: 80, pxForce: -1, budget: new W.CallGate("request") })
+      W.DIALER.open({ env: envD, request: reqD, conn: mkSt(), mode: "tput", host: "example.com", port: 80, pxForce: -1, budget: new W.BudgetedIO(new W.BudgetLedger("request")) })
         .then(() => "ok")
         .catch((e) => "err:" + String(e && e.message)),
       new Promise((res) => setTimeout(() => res("hang"), 4500)),
@@ -9302,7 +9302,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     }
   };
   walk312("src");
-  ok(`[${g}] 源码文件数已降到 113 以内（当前 ${tsFiles312.length}）`, tsFiles312.length <= 113);
+  ok(`[${g}] 源码文件数已降到 114 以内（当前 ${tsFiles312.length}）`, tsFiles312.length <= 114);
 
   // 行为面：一次失败就进冷却统计；成功清零后不再计入
   const src312 = "https://example.invalid/poolsrc-312.txt";
@@ -9374,7 +9374,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("计量探测的规格表是六个只读端点", W.DEBUG.probes.specs.length, 6);
   ok("规格表是只读声明", dbg.includes("readonly specs: readonly ProbeSpec[]"), "");
   eq("组合根是唯一实例", W.DEBUG === W.DEBUG, true);
-  ok("源码文件数仍在预算内", fs.readdirSync("src", { recursive: true }).filter((f) => String(f).endsWith(".ts")).length <= 113, "");
+  ok("源码文件数仍在预算内", fs.readdirSync("src", { recursive: true }).filter((f) => String(f).endsWith(".ts")).length <= 114, "");
 }
 
 // 第 315 组：候选表成为一个对象（缓存与分片游标不再是 S 上的全局变量）
@@ -12008,52 +12008,55 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
 }
 
 
-/* ===== 第 360 组：额度闸门（7.362） ===== */
+/* ===== 第 360 组：额度账本与花钱的出口（7.363 拆分后） ===== */
 {
-  const g360 = new W.CallGate("request");
-  eq("[360] 请求形态的 connect 上限", g360.cap("connect"), 4);
-  eq("[360] 请求形态的子请求上限", g360.cap("sub"), 6);
-  eq("[360] 请求形态的 DO 上限", g360.cap("do"), 2);
-  g360.take("connect");
-  eq("[360] 扣一次后剩三次", g360.left("connect"), 3);
-  eq("[360] tryTake 成功返回 true", g360.tryTake("connect", 3), true);
-  eq("[360] 全部扣完后剩 0", g360.left("connect"), 0);
-  eq("[360] 超额时 tryTake 返回 false", g360.tryTake("connect"), false);
+  // 账本只管记账：上限、已用、被拒、快照
+  const led360 = new W.BudgetLedger("request");
+  eq("[360] 请求形态的 connect 上限", led360.cap("connect"), 4);
+  eq("[360] 请求形态的子请求上限", led360.cap("sub"), 6);
+  eq("[360] 请求形态的 DO 上限", led360.cap("do"), 2);
+  led360.take("connect");
+  eq("[360] 扣一次后剩三次", led360.left("connect"), 3);
+  eq("[360] tryTake 成功返回 true", led360.tryTake("connect", 3), true);
+  eq("[360] 全部扣完后剩 0", led360.left("connect"), 0);
+  eq("[360] 超额时 tryTake 返回 false", led360.tryTake("connect"), false);
   let threw360 = "";
   try {
-    g360.take("connect");
-  } catch (e) {
-    threw360 = e && e.name;
+    led360.take("connect");
+  } catch (err) {
+    threw360 = err && err.name;
   }
   eq("[360] 超额时 take 抛 BudgetExhausted", threw360, "BudgetExhausted");
-  eq("[360] 拒绝次数被记账", g360.snapshot().refused.connect, 2);
-  eq("[360] 不限额闸门的上限是 MAX_SAFE_INTEGER", W.CallGate.unlimited().cap("sub"), Number.MAX_SAFE_INTEGER);
-  eq("[360] cron 形态的上限更大", new W.CallGate("cron").cap("connect"), 40);
+  eq("[360] 拒绝次数被记账", led360.snapshot().refused.connect, 2);
+  eq("[360] 不限额账本的上限是 MAX_SAFE_INTEGER", W.BudgetLedger.unlimited().cap("sub"), Number.MAX_SAFE_INTEGER);
+  eq("[360] cron 形态的上限更大", new W.BudgetLedger("cron").cap("connect"), 40);
+  ok("[360] isBudgetExhausted 能认出额度错误", W.isBudgetExhausted(new W.BudgetExhausted("connect")) === true && W.isBudgetExhausted(new Error("x")) === false, "recognise");
 
-  // 行为面：建连真的从闸门走，且计数与调用的 connect 次数一致
+  // 出口只管花钱：每次出门先取号，用尽就抛（且不再真的拨号）
   const prevSim360 = globalThis.__simConnect;
   let sim360 = 0;
   globalThis.__simConnect = () => {
     sim360 += 1;
     return { close: () => {}, closed: Promise.resolve(), opened: Promise.resolve({}) };
   };
-  const gA = new W.CallGate("request");
-  await gA.openSocket("127.0.0.1", 443);
-  await gA.openSocket("127.0.0.1", 80);
+  const ledIO = new W.BudgetLedger("request");
+  const ioA = new W.BudgetedIO(ledIO);
+  await ioA.openSocket("127.0.0.1", 443);
+  await ioA.openSocket("127.0.0.1", 80);
   eq("[360] openSocket 真的拨了两次", sim360, 2);
-  eq("[360] 两次都记在 connect 账上", gA.snapshot().used.connect, 2);
+  eq("[360] 两次都记在 connect 账上", ioA.snapshot().used.connect, 2);
   let threwB = "";
   try {
-    await gA.openSocket("127.0.0.1", 443);
-    await gA.openSocket("127.0.0.1", 443);
-    await gA.openSocket("127.0.0.1", 443);
-  } catch (e) {
-    threwB = e && e.message;
+    await ioA.openSocket("127.0.0.1", 443);
+    await ioA.openSocket("127.0.0.1", 443);
+    await ioA.openSocket("127.0.0.1", 443);
+  } catch (err) {
+    threwB = err && err.message;
   }
   ok("[360] 建连额度用完即拒绝（不再拨）", threwB === "budget exhausted: connect" && sim360 === 4, threwB + "/" + sim360);
   globalThis.__simConnect = prevSim360;
 
-  // 源码锁：connect( 只有一处出口，且没有模块级闸门实例
+  // 源码锁：connect( 只有一处出口；账本不碰 I/O；额度不落 S
   const walk360 = (dir) => {
     const out = [];
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -12065,12 +12068,19 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   };
   const src360 = walk360("src");
   const connSites = src360
-    .map((p) => ({ p, n: (fs.readFileSync(p, "utf8").replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").match(/\bconnect\(\{/g) || []).length }))
+    .map((p) => ({ p, n: fs.readFileSync(p, "utf8").split("\n").filter((line) => !line.trim().startsWith("//")).join("\n").split("connect({").length - 1 }))
     .filter((x) => x.n > 0);
-  eq("[360] 全仓只有额度闸门直接调 connect()", connSites.map((x) => x.p).join(","), "src/core/call-gate.ts");
-  ok("[360] 没有模块级闸门实例（额度随调用传递）", !src360.some((p) => /export const \w+ = new CallGate\(/.test(fs.readFileSync(p, "utf8"))), "CallGate singleton");
+  eq("[360] 全仓只有预算出口直接调 connect()", connSites.map((x) => x.p).join(","), "src/core/budgeted-io.ts");
+  ok("[360] 账本不碰 I/O（不 import cloudflare:sockets）", !fs.readFileSync("src/core/budget-ledger.ts", "utf8").includes("cloudflare:sockets"), "ledger purity");
+  ok("[360] 出口每次出门都取号", (fs.readFileSync("src/core/budgeted-io.ts", "utf8").match(/this\.ledger\.take\(/g) || []).length === 2, "two take sites");
+  ok("[360] 没有模块级出口实例（额度随调用传递）", !src360.some((p) => /export const \w+ = new BudgetedIO\(/.test(fs.readFileSync(p, "utf8"))), "BudgetedIO singleton");
   const dialSrc360 = fs.readFileSync("src/proxy/dial.ts", "utf8");
-  ok("[360] DoH 子请求只经闸门（不再自己 fetch）", !/[^.\w]fetch\(url/.test(dialSrc360) && dialSrc360.includes("quota.fetch("), "dial fetch");
+  ok("[360] DoH 子请求只经出口（不再自己 fetch）", !/[^.\w]fetch\(url/.test(dialSrc360) && dialSrc360.includes("quota.fetch("), "dial fetch");
+
+  // 额度用尽不能被当成「坏腿」吞掉：四处 catch 都要先认它
+  for (const p of ["src/proxy/dialer.ts", "src/proxy/fallback.ts", "src/proxy/dial.ts", "src/px/probe.ts"]) {
+    ok("[360] " + p + " 认出额度用尽并上抛", fs.readFileSync(p, "utf8").includes("isBudgetExhausted("), p);
+  }
 }
 
 /* ===== 第 361 组：会话变薄（7.362） ===== */

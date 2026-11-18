@@ -12,7 +12,7 @@ import { kickFlush } from "../store/pend";
 import { checkTarget, expandV6, isV6Literal, parseProxyIp } from "./dial";
 import { dialAnother } from "./fallback";
 import { SOCKET_DIALER } from "./socket-dialer";
-import type { CallGate } from "../core/call-gate";
+import type { BudgetedIO } from "../core/budgeted-io";
 import { pipeBack } from "./tunnel";
 
 export interface AttachOpts {
@@ -27,7 +27,7 @@ export interface AttachOpts {
   /** 客户端首个载荷（TLS ClientHello 含 SNI）：每接一条新上游都要重发 */
   payload: Uint8Array;
   /** 本次请求的额度：补救链的每一次建连都从这里取号 */
-  budget: CallGate;
+  budget: BudgetedIO;
 }
 
 /**

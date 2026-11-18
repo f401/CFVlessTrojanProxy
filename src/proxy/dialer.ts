@@ -14,7 +14,8 @@ import { SEL } from "../px/selector";
 import { refreshCfHttp } from "./cfverdict";
 import { checkTarget, dial, dial4, isCfHost, isV6Literal, parseProxyIp } from "./dial";
 import { pxDecision } from "./pxhook";
-import { CallGate } from "../core/call-gate";
+import { BudgetedIO } from "../core/budgeted-io";
+import { isBudgetExhausted } from "../core/budget-ledger";
 
 
 interface DialOpts {
@@ -27,7 +28,7 @@ interface DialOpts {
   /** 1 = 强制中转，-1 = 强制直连，0 = 按名单 + 失败学习（?px= 调试用） */
   pxForce: number;
   /** 本次请求的额度：建连只从它取号（额度用完即视为这条腿拨不动） */
-  budget: CallGate;
+  budget: BudgetedIO;
 }
 
 /**
@@ -225,7 +226,9 @@ export class Dialer {
       // 连上了：把这条中继的「连不上」计数清零（复活只可能由真实连接触发）
       HOOK.deadNote?.(cand.host, true);
       return sock;
-    } catch {
+    } catch (err) {
+      // 额度用尽不是「这条腿不通」：继续换只会把剩下的候选全试一遍，还会把好中继记成坏
+      if (isBudgetExhausted(err)) throw err;
       // 超时之后 connect 仍可能迟到成功：必须把它关掉，否则免费计划 6 个并发 connect 名额
       // 会被「已经超时、但真的连上了」的连接慢慢吃掉（现象是后面所有请求都失败）。
       void pk.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 本来就没连上 */ });

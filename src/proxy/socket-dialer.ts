@@ -1,6 +1,6 @@
 import type { Socket } from "cloudflare:sockets";
 import { CONNECT_MS, withTimeout } from "../core/util";
-import { CallGate } from "../core/call-gate";
+import { BudgetedIO } from "../core/budgeted-io";
 
 
 /**
@@ -30,9 +30,9 @@ export class SocketDialer {
    * @returns 已连上的 socket
    * @throws 建连失败或超过 `budgetMs`
    */
-  async open(hostname: string, port: number, budget: CallGate = CallGate.unlimited()): Promise<Socket> {
+  async open(hostname: string, port: number, budget: BudgetedIO = BudgetedIO.unlimited()): Promise<Socket> {
     // Cloudflare 的 connect() 自身没有超时：黑洞地址会一直挂着，所以预算由这里兜。
-    // 额度与 connect 都在 `CallGate.openSocket()` 里（全仓唯一的 connect 调用点）—— 这里只负责超时与迟到关闭。
+    // 额度与 connect 都在 `BudgetedIO.openSocket()` 里（全仓唯一的 connect 调用点）—— 这里只负责超时与迟到关闭。
     const pending = budget.openSocket(hostname, port);
     try {
       return await withTimeout(pending, this.budgetMs);

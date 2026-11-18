@@ -15,7 +15,7 @@ import { splitRelay } from "../core/relay-addr";
 import { HTTP80_TRANSPORT, probeTf } from "../core/transport";
 import { adminOnly } from "../edge/auth";
 import { SOCKET_DIALER } from "../proxy/socket-dialer";
-import { CallGate } from "../core/call-gate";
+import { BudgetedIO } from "../core/budgeted-io";
 import { DIRECT, chanKey } from "../route/channel";
 import type { Chan } from "../route/channel";
 import { runTfb } from "../route/tfb";
@@ -361,7 +361,7 @@ export class DebugProbe {
    * @param url 请求 URL（`?host=<域名>`，缺省 example.com）
    * @returns 解析与建连结果
    */
-  async host(url: URL, gate: CallGate = CallGate.unlimited()): Promise<Response> {
+  async host(url: URL, gate: BudgetedIO = BudgetedIO.unlimited()): Promise<Response> {
     const h = url.searchParams.get("host") || "example.com";
     const out: Record<string, unknown> = { host: h, aaaa: null, a: null, v6Connect: null };
     try {
@@ -532,7 +532,7 @@ export class DebugNets {
    * @param url 请求 URL（`?host=<域名>`，缺省 example.com）
    * @returns 解析与建连结果
    */
-  async host(url: URL, gate: CallGate = CallGate.unlimited()): Promise<Response> {
+  async host(url: URL, gate: BudgetedIO = BudgetedIO.unlimited()): Promise<Response> {
     return this.probeRunner.host(url, gate);
   }
 }

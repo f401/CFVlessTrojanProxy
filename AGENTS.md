@@ -1,4 +1,4 @@
-- 线上 **7.270**（已部署、可跑）｜仓库 **7.362**（会话变薄：首帧解析 / 路由决策 / DNS / 收尾各自成类，建连与子请求统一经 `CallGate` 扣额度，共 215 个缺陷皆已修复）：两者差 92 个版本。
+- 线上 **7.270**（已部署、可跑）｜仓库 **7.363**（预算拆成账本与出口：`BudgetLedger` 只记账、`BudgetedIO` 只在 `openSocket()`/`fetch()` 花钱，`BudgetExhausted` 不再被当坏腿吞掉，共 215 个缺陷皆已修复）：两者差 93 个版本。
 
 # AGENTS.md
 
@@ -18,7 +18,7 @@ Constraints of the free plan shape most of the design: ≤6 concurrent `connect(
 2. **No block without a 2xx.** Block evidence requires, inside one time window, the same site succeeding on one channel and failing on another. All-4xx / all-timeout may only `rotate` and re-sample. Business 403s pass through untouched.
 3. **Never deploy an unobfuscated bundle.** `tools/check-obf.js` is a hard gate (strict keywords must be 0, `a_0x >= 100`, no plaintext `class Meter`), wired into the deploy script; it refuses on failure.
 4. **Entry preference can only be measured by the client.** A Worker dialing its own hostname loops (522). Subscription emits `server: <ip>` entries plus an `🌐 入口优选` url-test group pointing at `/health`; `?e=0` disables it.
-5. **Mind the three free-plan budgets.** ① concurrent `connect()` ≤ 6 (`CONNECT_MS` in `src/core/util.ts` bounds every dial); ② subrequests ≤ 50 per invocation (`SCAN_SUB = 48`, `plan.sub` budget); ③ DO CPU is tens of ms — single-shot TLS handshakes go through `tunnelfetch` only. Since 7.362 the single arbiter for all three is the per-call `CallGate` (`src/core/call-gate.ts`): request and cron rounds each `new` one, it travels as `ctx.budget` / `DialOpts.budget`, and it spends budget **only** in `openSocket()` and `fetch()`. Do not call `connect()` or `fetch()` (for a subrequest) anywhere else, and never park a `CallGate` in `S`.
+5. **Mind the three free-plan budgets.** ① concurrent `connect()` ≤ 6 (`CONNECT_MS` in `src/core/util.ts` bounds every dial); ② subrequests ≤ 50 per invocation (`SCAN_SUB = 48`, `plan.sub` budget); ③ DO CPU is tens of ms — single-shot TLS handshakes go through `tunnelfetch` only. Since 7.363 the budgets are split in two: `BudgetLedger` (`src/core/budget-ledger.ts`) only accounts (caps / used / refused / snapshot), while `BudgetedIO` (`src/core/budgeted-io.ts`) is the single place that spends them — `openSocket()` and `fetch()` are the only call sites for `connect()` and subrequest `fetch()` in the whole repo. Request and cron rounds each `new` a ledger + IO pair and pass it down as `ctx.budget` / `DialOpts.budget`; never park one in `S`. A spent budget throws `BudgetExhausted`: recognise it with `isBudgetExhausted()` and rethrow — do not treat it as a dead leg, and remember the platform limit is *concurrent* `connect()` (≤6), which `SocketDialer` and `SC.PROBE_CONC` keep, not the counter.
 6. **Comments and docs are gates, not courtesy.** Every exported function/method/class needs `/** what / @param / @returns */`; non-trivial bodies explain *why*. `doc-audit`, `body-audit` and `check-arch` all fail the build.
 
 ## 3. Layout

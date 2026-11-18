@@ -13,7 +13,8 @@ import { loadUsers } from "./proxy/protocol";
 import { regionListAsync } from "./px/regions";
 
 import { S } from "./core/state";
-import { CallGate } from "./core/call-gate";
+import { BudgetLedger } from "./core/budget-ledger";
+import { BudgetedIO } from "./core/budgeted-io";
 import { PEND } from "./store/index";
 
 /**
@@ -31,7 +32,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     // 一次请求 = 一本新的额度账：额度对象随 ctx 交给拨号器与探测器，
     // 扣减只发生在 openSocket()（connect）与 HttpIO.get()（子请求）两个出口（7.362）
-    const budget = new CallGate("request");
+    const budget = new BudgetedIO(new BudgetLedger("request"));
     try {
       const url = new URL(request.url);
       // 用 URL 的 hostname：Host 头可能带 :port，直接拿去当节点 server 会生成

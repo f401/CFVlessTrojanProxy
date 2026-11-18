@@ -3,11 +3,9 @@ import { cnt } from "../core/counter";
 import { checkTarget } from "../core/net";
 import { timeoutSignal, CONNECT_MS, dec, enc, toHex, withTimeout } from "../core/util";
 import type { Socket } from "cloudflare:sockets";
-import { CallGate } from "../core/call-gate";
+import { BudgetedIO } from "../core/budgeted-io";
+import { isBudgetExhausted } from "../core/budget-ledger";
 
-// ---- 并入自 poolsrc.ts ----
-// 池子从哪来：公开源清单、去重解析、逐源抓取，以及「哪个源该排到最后」的健康度。
-// 这一层只管「拿到候选名单」，探活（能不能真的中转）在 ./rawprobe，地理标注在 ./geo。
 
 
 // 额外候选主机（不是列表，是"池域名"，解析后是多台机器）
@@ -283,7 +281,7 @@ export class RawProbe {
   private startedAt = 0;
   private connectedAt = 0;
   /** @param host 候选主机 @param port 候选端口 @param gate 建连额度闸门（默认不限额） */
-  constructor(readonly host: string, readonly port: number, private readonly gate: CallGate = CallGate.unlimited()) {}
+  constructor(readonly host: string, readonly port: number, private readonly gate: BudgetedIO = BudgetedIO.unlimited()) {}
 
   /** 建连；IPv4 字面量在 Workers 上常连不上时，可按需退回 sslip.io 让 DNS 承担一次。 */
   async open(sslipFallback = false): Promise<void> {
@@ -291,6 +289,8 @@ export class RawProbe {
     try {
       this.sock = await this.gate.openSocket(this.host, this.port);
     } catch (e0) {
+      // 额度不够时不要再试 sslip 回退：那也是一次建连
+      if (isBudgetExhausted(e0)) throw e0;
       if (!sslipFallback || !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(this.host)) throw e0;
       this.sock = await this.gate.openSocket(this.host + ".sslip.io", this.port);
     }
@@ -367,7 +367,7 @@ export class RawProbe {
  * @param {number} p 候选端口
  * @returns {Promise<{h:string,p:number,ms:number,ts:number,bad?:string}|null>} 成功返回节点信息，失败返回 null
  */
-export async function probeProxy(h: string, p: number, gate: CallGate = CallGate.unlimited()) {
+export async function probeProxy(h: string, p: number, gate: BudgetedIO = BudgetedIO.unlimited()) {
   if (checkTarget(h, p)) return null; // 纵深防御：任何路径都不许探内网
   const probe = new RawProbe(h, p, gate);
   try {
@@ -384,6 +384,8 @@ export async function probeProxy(h: string, p: number, gate: CallGate = CallGate
     }
     return { h, p, ms, tcp, tls: 0, ts: Date.now(), bad: "no-cf-cert", len: buf.length, head: toHex(buf.slice(0, 24)) };
   } catch (e) {
+    // 额度用尽不是「这条腿不通」：当成探测失败会把候选白白冷却
+    if (isBudgetExhausted(e)) throw e;
     return null;
   } finally {
     probe.close();
@@ -477,7 +479,7 @@ export function tlsHello(sni: string): Uint8Array {
  * @param {number} [ms] 超时毫秒
  * @returns {Promise<{tcp:number, hs?:number, err:string}>} 结果
  */
-export async function probeSni(nodeHost: string, nodePort: number, sni: string, ms = CONNECT_MS, gate: CallGate = CallGate.unlimited()): Promise<SniProbe> {
+export async function probeSni(nodeHost: string, nodePort: number, sni: string, ms = CONNECT_MS, gate: BudgetedIO = BudgetedIO.unlimited()): Promise<SniProbe> {
   if (checkTarget(nodeHost, nodePort)) return { err: "denied" };
   const probe = new RawProbe(nodeHost, nodePort, gate);
   try {
@@ -491,6 +493,7 @@ export async function probeSni(nodeHost: string, nodePort: number, sni: string, 
     if (buf[0] !== 0x16) return { err: "not-tls", head: toHex(buf.slice(0, 8)) };
     return { hs: probe.elapsedMs, err: "" };
   } catch (e) {
+    if (isBudgetExhausted(e)) throw e;
     return { err: "tcp" };
   } finally {
     probe.close();

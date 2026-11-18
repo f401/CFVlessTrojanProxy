@@ -7,9 +7,10 @@ import { SEL } from "../px/selector";
 import { cnt } from "../core/counter";
 import { kickFlush } from "../store/index";
 import { SOCKET_DIALER } from "./socket-dialer";
-import type { CallGate } from "../core/call-gate";
+import type { BudgetedIO } from "../core/budgeted-io";
 import { logErr } from "../nodes/metrics";
 import { isCfIp } from "../core/net";
+import { isBudgetExhausted } from "../core/budget-ledger";
 import { HOOK } from "../core/hook";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
@@ -33,7 +34,7 @@ export async function dialAnother(
   _env: Env,
   st: Connection,
   mode: Mode,
-  budget: CallGate,
+  budget: BudgetedIO,
   tag?: string | null,
   cc?: string | null,
 ): Promise<Socket | null> {
@@ -59,6 +60,7 @@ export async function dialAnother(
       logErr(`retry another node ${alt}`, tag || "");
       return socket;
     } catch (e) {
+      if (isBudgetExhausted(e)) throw e;
       NodeStatsTable.nsFail(alt); // 这条候选连不上：冷却它，下一轮别再挑回来
     }
   }
@@ -81,7 +83,7 @@ export interface RouterOpts {
   /** `?rg=` 地区（null 表示没有钉地区） */
   ipRegion: string | null;
   /** 本次调用的额度闸门（建连只从这里取号） */
-  budget: CallGate;
+  budget: BudgetedIO;
   /** 地区钉住时用的挑选器（会话持有，router 只借用） */
   regionPicker: RegionPicker;
   /** 关连接（会话负责：只有它知道客户端 socket 与关闭码语义） */
