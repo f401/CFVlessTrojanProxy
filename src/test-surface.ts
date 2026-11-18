@@ -157,7 +157,7 @@ export { runTfb, tfVerdict, tfClass, tfEscalate, tfBlockOk, tfRemember, pickFres
 export { TFB, TfbBook } from "./route/tfbbook";
 export { RELPERF, REL_SAMPLE_TTL, RelPerfTable, relCostFor, relCostOf, relNote } from "./route/relperf";
 export { Mode, St } from "./core/enums";
-export { BoundedMap } from "./core/table";
+export { BoundedMap, TimedMarks } from "./core/table";
 export { EG, EG_BIG, EG_TINY, EG_TTL, EgFacts, egCounts, egDerive } from "./route/egfacts";
 export { CAP, CAP_MAX, CAP_TTL, CapFacts } from "./route/capfacts";
 export { ALIVE_TARGET } from "./core/const";

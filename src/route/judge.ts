@@ -5,7 +5,8 @@
 import { S } from "../core/state";
 import { PAGE_ABS } from "../core/facts";
 import { SC } from "../core/const";
-import { dropExpired, trimAged } from "../core/hostmem";
+import { trimAged } from "../core/hostmem";
+import { TimedMarks } from "../core/table";
 import { TrafficEvt } from "../core/hook";
 import { Chan, DIRECT, chanKey } from "./channel";
 import { VT } from "./verdict";
@@ -42,9 +43,9 @@ export class Judge {
    * 作为 10 分钟的软降权依据，让突发流量中的下一条连接自动绕开它，但绝不写封禁
    * （不放进判定表，因此不影响「无 2xx 不写封禁」的纪律，也不会污染 blockedRatio）。
    */
-  private neg = new Map<string, number>();
+  private neg = new TimedMarks({ max: SC.HOST_MEM_MAX, ttlMs: NEG_TTL });
   /** 正记忆：`站点|r:ip` → 到期时间戳（有界，见 markPos） */
-  private pos = new Map<string, number>();
+  private pos = new TimedMarks({ max: SC.HOST_MEM_MAX, ttlMs: POS_TTL });
 
   /**
    * 功能：记录一条短负面记忆（10 分钟），供选路层把该通道排到后面。
@@ -55,15 +56,8 @@ export class Judge {
    */
   markNeg(host: string, ip: string, now: number): void {
     if (!host || !ip) return;
-    this.neg.set(host + "|r:" + ip, now + NEG_TTL);
-    // 键是「客户端带来的站点名 × 中继出口」，两个维度都会涨：过期清理只发生在
-    // `negOn` 里，而一个再也不会被重试的（站点, 中继）永远不会被查询到 ——
-    // 于是这张表在长命 isolate 里只增不减（7.227）。先删真正过期的，再按
-    // 「最早过期」压回上限：丢掉一条马上要过期的负面记忆没有代价。
-    if (this.neg.size > SC.HOST_MEM_MAX) {
-      dropExpired(this.neg);
-      trimAged(this.neg, SC.HOST_MEM_MAX);
-    }
+    // 有界与寿命都在 `TimedMarks` 里：这里只负责「键怎么拼、TTL 取哪个」
+    this.neg.mark(host + "|r:" + ip, now);
   }
 
   /**
@@ -74,12 +68,7 @@ export class Judge {
    * @returns 在期内返回 true（调用方应把它排到后面，而不是禁用它）
    */
   negOn(host: string, ip: string, now = Date.now()): boolean {
-    const k = host + "|r:" + ip;
-    const until = this.neg.get(k);
-    if (!until) return false;
-    if (until > now) return true;
-    this.neg.delete(k); // 过期即清，避免表随流量无限长
-    return false;
+    return this.neg.on(host + "|r:" + ip, now);
   }
 
   /**
@@ -91,13 +80,8 @@ export class Judge {
    */
   markPos(host: string, ip: string, now: number): void {
     if (!host || !ip) return;
-    this.pos.set(host + "|r:" + ip, now + POS_TTL);
-    // 与 neg 同一套口径：满表清空会连刚记下的正记忆一起扔掉，改成按「最早过期」淘汰。
-    // 裁剪必须在 set 之后：放在前面会让表停在 cap + 1（7.227 的单测抓到 alive=513）。
-    if (this.pos.size > SC.HOST_MEM_MAX) {
-      dropExpired(this.pos);
-      trimAged(this.pos, SC.HOST_MEM_MAX);
-    }
+    // 与 neg 同一个实现、只是 TTL 与键相同：两处口径不会再各自演化
+    this.pos.mark(host + "|r:" + ip, now);
   }
 
   /**
@@ -108,12 +92,7 @@ export class Judge {
    * @returns 在期内返回 true（调用方应优先复用它）
    */
   posOn(host: string, ip: string, now = Date.now()): boolean {
-    const k = host + "|r:" + ip;
-    const until = this.pos.get(k);
-    if (!until) return false;
-    if (until > now) return true;
-    this.pos.delete(k);
-    return false;
+    return this.pos.on(host + "|r:" + ip, now);
   }
 
   /** 连接收尾的观测 */

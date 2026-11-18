@@ -6144,11 +6144,10 @@ const aliveSrc226 = fs.readFileSync("src/px/alive.ts", "utf8");
       return !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
     })
     .join("\n");
-  ok("neg 写入后删过期", code.includes("dropExpired(this.neg);"));
-  ok("neg 写入后压回上限", code.includes("trimAged(this.neg, SC.HOST_MEM_MAX);"));
-  ok("pos 也走同一套淘汰", code.includes("trimAged(this.pos, SC.HOST_MEM_MAX);"));
+  ok("neg / pos 两张表都由 TimedMarks 持有", code.includes("private neg = new TimedMarks(") && code.includes("private pos = new TimedMarks("));
+  ok("判定里不再各写一遍裁剪", !code.includes("trimAged(this.neg") && !code.includes("trimAged(this.pos"));
   ok("pos 不再整表清空", !code.includes("this.pos.clear();"));
-  ok("hostmem 的 dropExpired 已引入", judgeSrc.includes("dropExpired"));
+  ok("淘汰规则移出判定（改由 TimedMarks 提供）", !code.includes("dropExpired("));
 
   const nowNeg = Date.now();
   const pairs228 = [];
@@ -11973,6 +11972,36 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     Object.getOwnPropertyNames(W.SubscriptionView.prototype).sort().join(","),
     "constructor,render,table",
   );
+}
+
+// ===== 第 359 组：两张「标记时刻」表共用一份有界实现（7.359）=====
+{
+  const tableSrc359 = fs.readFileSync("src/core/table.ts", "utf8");
+  const judgeSrc359 = fs.readFileSync("src/route/judge.ts", "utf8");
+  const markBody359 = (() => {
+    const at = tableSrc359.indexOf("  mark(key: string");
+    const body = tableSrc359.slice(at);
+    return body.slice(0, body.indexOf("\n  }"));
+  })();
+  ok("TimedMarks.mark 先写后裁", markBody359.includes("this.set(key, now);") && markBody359.indexOf("this.set(key, now);") < markBody359.indexOf("this.prune(now, false)"));
+  ok("TimedMarks 只在超限时才裁", markBody359.includes("if (this.size > this.capacity())"));
+  ok("judge 不再引入 dropExpired", !judgeSrc359.includes("dropExpired"));
+  ok("窗口里有 TimedMarks", typeof W.TimedMarks === "function");
+
+  const t359 = Date.now() - 1000;
+  const marks359 = new W.TimedMarks({ max: 4, ttlMs: 600000 });
+  marks359.mark("a", t359);
+  ok("标记之后查得到", marks359.on("a", t359 + 10) === true);
+  marks359.mark("b", t359);
+  ok("过了寿命就查不到", marks359.on("b", t359 + 600001) === false);
+  ok("过期项顺手删掉", marks359.size === 1);
+  ok("继承自有界表", marks359 instanceof W.BoundedMap === true);
+  for (let i = 0; i < 6; i++) marks359.mark("k" + i, t359 + i);
+  ok("满表时压回上限", marks359.size === 4);
+  ok("最新的仍在", marks359.on("k5", t359 + 10) === true);
+  const other359 = new W.TimedMarks({ max: 4, ttlMs: 600000 });
+  ok("两个实例互不影响", other359.on("k5", t359 + 10) === false);
+  ok("判定里的两张表也是这个类", W.JUDGE.neg instanceof W.TimedMarks && W.JUDGE.pos instanceof W.TimedMarks);
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

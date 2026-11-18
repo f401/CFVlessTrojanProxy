@@ -84,3 +84,48 @@ export class BoundedMap<Key, Row> extends Map<Key, Row> {
     return this.ttlMs;
   }
 }
+
+/**
+ * 「键 → 标记时刻」的有界表：写一条标记、判断还在不在寿命内。
+ *
+ * 为什么单独成类：`Judge` 里两张表（短负面记忆、正记忆）除了 TTL 与用途之外**逐行相同**
+ * ——写入、满表时先删过期再按最早过期淘汰、读到过期就顺手删。这段规则过去在
+ * `markNeg`/`markPos` 里各写一遍，7.227 修的「裁剪必须写在 set 之后」也只能修在其中一份里；
+ * 继承 `BoundedMap` 之后容量、寿命、淘汰顺序都只有一处实现，两处调用点只剩 TTL 与键名之别。
+ */
+export class TimedMarks extends BoundedMap<string, EpochMs> {
+  /**
+   * @param options 容量上限与寿命（毫秒）；行的「时间」就是它的标记时刻
+   */
+  constructor(options: { max: number; ttlMs: DurationMs }) {
+    // 行本身就是时间戳，所以取时间的函数是恒等
+    super({ max: options.max, ttlMs: options.ttlMs, timeOf: (row) => row });
+  }
+
+  /**
+   * 功能：记一条标记（覆盖旧值），必要时就地压回上限。
+   * @param key 标记键（调用方自己拼，例如 `站点|r:出口`）
+   * @param now 标记时刻（毫秒时间戳，测试可注入）
+   * @returns 无
+   */
+  mark(key: string, now: EpochMs): void {
+    this.set(key, now);
+    // 裁剪必须在 set 之后：放在前面会让表稳定停在 cap + 1（7.227 的单测抓到 alive=513）。
+    // 只有超限才动 prune，否则每次标记都要遍历整表排序。
+    if (this.size > this.capacity()) this.prune(now, false);
+  }
+
+  /**
+   * 功能：判断这条标记是否仍在寿命内；已过期的顺手删掉，避免表只增不减。
+   * @param key 标记键
+   * @param now 当前时刻（毫秒时间戳，测试可注入）
+   * @returns 仍在寿命内返回 true
+   */
+  on(key: string, now: EpochMs): boolean {
+    const at = this.get(key);
+    if (at === undefined) return false;
+    if (now - at < this.lifeMs()) return true;
+    this.delete(key);
+    return false;
+  }
+}
