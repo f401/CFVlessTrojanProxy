@@ -11,12 +11,12 @@ import type { Choice, Ctx } from "./policy-wiring";
 import { cnt } from "../core/counter";
 import { St } from "../core/enums";
 import { FACT_ALL } from "./factflags";
-import { BLK } from "./blkfacts";
 import { DEAD } from "./deadfacts";
 import { factMul } from "./factmul";
 import { RELPERF } from "./relperf";
 import { EG } from "./egfacts";
 import { cfHttpCode } from "../proxy/cfverdict";
+import { FactRegistry } from "./fact-registry";
 
 // ---- 并入自 policy-ctx.ts ----
 // 通道决策的输入/输出类型与共享上限：这里只有类型与常量，不含任何算法，
@@ -62,43 +62,21 @@ export interface Ranked {
 }
 
 /**
- * 功能：比例兜底 —— 被判死的通道超过 3/4 时只保留最近判死的两条，其余解除。
+ * 功能：算出这一次请求的候选视图（**纯只读**，不再写任何判定/封锁表）。
  *
- * 一次机房级风控不该让整池永久出局（5% 复检太慢，这里直接放开多数）。
- * 只看「被判死的」那批：7.268 之前这里对整个候选集排序，把唯一能打通那条的正证据
- * 也一起重置成 unknown（它的证据比最近四条判死更旧 ⇒ 排在后面 ⇒ 被 `slice(2)` 扫到）。
- * @param c 决策上下文
- * @param usable 当前可用的中继
- * @returns 兜底之后的可用集合
- */
-function healRatio(c: Ctx, usable: string[]): string[] {
-  const blockedRatio = c.relays.length ? (c.relays.length - usable.length) / c.relays.length : 0;
-  if (!(blockedRatio > 0.75 && usable.length < 2)) return usable;
-  const dead = c.relays.filter((ip) => VT.bad(c.host, "r:" + ip));
-  const sorted = dead.slice().sort((a, b) => VT.at(c.host, "r:" + b) - VT.at(c.host, "r:" + a));
-  for (const ip of sorted.slice(2)) VT.setState(c.host, "r:" + ip, 0, 1);
-  return c.relays.filter((ip) => !VT.bad(c.host, "r:" + ip));
-}
-
-/**
- * 功能：算出这一次请求的候选视图。
+ * 7.363 之前本函数顺手做了三条写动作（比例兜底 setState / 全死 clearHost / BLK.sweep），
+ * 于是「读候选」会有副作用、调用顺序一变就漏自愈。现在写动作统一由 decide() 在调用
+ * 本函数**之前**显式执行 `FactRegistry.housekeep(...)`；本函数只读表来分类。
  *
- * 顺序有讲究：自愈必须在**所有早返回之前**（5% 复检与「直连被判死」两条路径都不排序，
- * 把维护动作挂在它们后面等于「每次请求有 5% 概率跳过自愈」，7.154 在单测偶发失败里发现）。
+ * 注意比例兜底与全死自愈都会改变「哪些中继算可用」，为了让 rankOf 保持纯函数，
+ * 这里改为直接读表：housekeep 已经在本函数被调用前把该解除的都解除了，所以此刻读到的
+ * 就是自愈后的结果，不需要在本函数里再改一次表。
  * @param c 决策上下文
  * @returns 候选视图
  */
 export function rankOf(c: Ctx): Ranked {
-  let usable = c.relays.filter((ip) => !(c.host && VT.bad(c.host, "r:" + ip)));
-  usable = healRatio(c, usable);
-  // 自愈：全部通道都被判死 → 清掉该站点的结论（宁可再试一次，也不能让站点没路可走）
-  if (!usable.length && c.relays.length) {
-    VT.clearHost(c.host);
-    usable = c.relays.slice();
-  }
-  // 站点级自愈：整池都被同一站点写满 ⇒ 判据失效/站点在拒绝所有人，清空并静默 30 分钟。
-  // 分母必须是整池 `c.relays`（用 `usable` 时分子会被同一个事件剔掉，见 v7.143）。
-  BLK.sweep(c.host, c.relays);
+  // housekeep 已在 decide() 中先执行；这里只读当前判定表。
+  const usable = c.relays.filter((ip) => !(c.host && VT.bad(c.host, "r:" + ip)));
   const blocked = c.relays.filter((ip) => !usable.includes(ip));
 
   // 短负面记忆（10 分钟）优先于粘性：刚回过异常小响应的通道先让开一条连接，过期自动恢复。
@@ -406,7 +384,10 @@ export class Policy implements PinSource {
    * @returns 选中的通道与理由
    */
   decide(c: Ctx): Choice {
-    // 候选视图（排序 + 分类）由 policy-rank.ts 算，本函数只做「谁先谁后」的裁决。
+    // 显式自愈阶段：把三条写动作（比例兜底/全死自愈/站点级 sweep）放在排序之前。
+    // 必须在所有早返回之前执行，否则 5% 探索会跳过自愈（7.154 的历史缺陷）。
+    FactRegistry.housekeep(c.host, c.relays);
+    // 候选视图（排序 + 分类）现在是纯只读函数，本函数只做「谁先谁后」的裁决。
     const r = rankOf(c);
     // 探索：被判死的通道按 5% 概率复检 —— 判死只是「当前证据」，网络会变，不试就永远好不了。
     // 成功的大响应会经 Judge 把它改回 ok；失败只会刷新 TTL，代价是一次连接的尝试。

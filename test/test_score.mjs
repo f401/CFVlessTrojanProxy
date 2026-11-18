@@ -7771,9 +7771,10 @@ ok("文档写明判定状态只用枚举", fs.readFileSync("docs/命名约定.md
   eq("比例兜底后仍记得能打通的那条", W.VT.state(H268, "r:" + rels[4]), 1);
   ok("释放确实放开了被判死的中继", rels.slice(0, 4).some((ip) => W.VT.state(H268, "r:" + ip) === 0));
   ok("最近判死的两条仍然保留结论", rels.slice(0, 2).every((ip) => W.VT.state(H268, "r:" + ip) === 2));
-  const pol268 = policyAll();
-  ok("释放只在被判死的集合上做", pol268.includes("const dead = c.relays.filter((ip) => VT.bad(c.host, \"r:\" + ip));"));
-  ok("排序也只在被判死的集合上做", pol268.includes("const sorted = dead.slice()"));
+  // 7.363：三条写动作搬进 FactRegistry，行为断言不变，源码判据改指新位置。
+  const reg268 = fs.readFileSync("src/route/fact-registry.ts", "utf8");
+  ok("释放只在被判死的集合上做", reg268.includes("const dead = relays.filter((ip) => VT.bad(host, \"r:\" + ip));"));
+  ok("排序也只在被判死的集合上做", reg268.includes("const sorted = dead.slice()"));
 }
 
 const dialerSrc269 = fs.readFileSync("src/proxy/dialer.ts", "utf8");
@@ -8706,8 +8707,13 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   ok("决策本体把 CF 分支树交出去", polSrc.includes("const cf = decideCf(c, r, this);"));
   eq("policy.ts 仍在单文件上限内", polSrc.split("\n").length <= 560, true);
   ok("候选层导出视图与入口", polSrc.includes("export interface Ranked") && polSrc.includes("export function rankOf(c: Ctx): Ranked {"));
-  ok("候选层保留比例兜底", polSrc.includes("blockedRatio > 0.75 && usable.length < 2"));
-  ok("候选层保留自愈", polSrc.includes("VT.clearHost(c.host)") && polSrc.includes("BLK.sweep(c.host, c.relays)"));
+  // 7.363：rankOf 变纯只读函数，三条写动作搬进 FactRegistry.housekeep，decide 在排序前显式调用。
+  const polCode292 = polSrc.split("\n").filter((l) => !l.trim().startsWith("*") && !l.trim().startsWith("//")).join("\n");
+  ok("rankOf 已去写副作用", !polCode292.includes("VT.setState") && !polCode292.includes("VT.clearHost") && !polCode292.includes("BLK.sweep") && !polCode292.includes("healRatio"));
+  ok("decide 排序前显式自愈", polSrc.includes("FactRegistry.housekeep(c.host, c.relays);") && polSrc.indexOf("FactRegistry.housekeep") < polSrc.indexOf("const r = rankOf(c);"));
+  const regSrc = fs.readFileSync("src/route/fact-registry.ts", "utf8");
+  ok("registry 保留三条写动作", regSrc.includes("blockedRatio > 0.75 && usable.length < 2") && regSrc.includes("VT.clearHost(host)") && regSrc.includes("BLK.sweep(host, relays)"));
+  ok("registry 返回写动作清单", regSrc.includes("FactEffect[]") && regSrc.includes('kind: "verdict"') && regSrc.includes('kind: "blk"'));
   ok("候选层自己排序", polSrc.includes("const ranked = usable"));
   ok("CF 分支树只认 CF 目标", polSrc.includes("if (!c.cfHost) return null;"));
   ok("CF 分支树带 PinSource", polSrc.includes("export interface PinSource") && polSrc.includes("pinFor(host: string, list: string[]): string;"));
@@ -9302,7 +9308,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     }
   };
   walk312("src");
-  ok(`[${g}] 源码文件数已降到 114 以内（当前 ${tsFiles312.length}）`, tsFiles312.length <= 114);
+  ok(`[${g}] 源码文件数已降到 115 以内（当前 ${tsFiles312.length}）`, tsFiles312.length <= 115);
 
   // 行为面：一次失败就进冷却统计；成功清零后不再计入
   const src312 = "https://example.invalid/poolsrc-312.txt";
@@ -9374,7 +9380,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("计量探测的规格表是六个只读端点", W.DEBUG.probes.specs.length, 6);
   ok("规格表是只读声明", dbg.includes("readonly specs: readonly ProbeSpec[]"), "");
   eq("组合根是唯一实例", W.DEBUG === W.DEBUG, true);
-  ok("源码文件数仍在预算内", fs.readdirSync("src", { recursive: true }).filter((f) => String(f).endsWith(".ts")).length <= 114, "");
+  ok("源码文件数仍在预算内", fs.readdirSync("src", { recursive: true }).filter((f) => String(f).endsWith(".ts")).length <= 115, "");
 }
 
 // 第 315 组：候选表成为一个对象（缓存与分片游标不再是 S 上的全局变量）
@@ -12124,6 +12130,44 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   ok("[361] 合法首帧给出目标与偏移", trojan361.ok === true && trojan361.host === "example.com" && trojan361.port === 443 && trojan361.offset === head361.length, JSON.stringify(trojan361).slice(0, 120));
   ok("[361] 合法首帧标出协议", trojan361.ok === true && trojan361.proto === "trojan");
   void pwd361;
+}
+
+/* ---------- 第 363 组：事实写入注册表把 rankOf 的三条写动作收口（7.363） ---------- */
+{
+  const H363 = "reg363.test";
+  const rels363 = ["10.1.0.1", "10.1.0.2", "10.1.0.3", "10.1.0.4", "10.1.0.5"];
+  W.VT.clear();
+  W.BLK.clear?.();
+  // ① 比例兜底：5 条里判死 4 条（>3/4）、可用 1 条（<2）⇒ 只保留最近 2 条判死，其余解除。
+  for (const ip of rels363.slice(0, 4)) W.VT.setState(H363, "r:" + ip, 2, 1);
+  // 让第 3、4 条"最近"判死（updatedAt 更大）：setState 会刷新时间戳，按顺序后写更新。
+  W.VT.setState(H363, "r:" + rels363[2], 2, 1);
+  W.VT.setState(H363, "r:" + rels363[3], 2, 1);
+  const eff363 = W.FactRegistry.housekeep(H363, rels363);
+  ok("[363] 比例兜底返回 reset 动作", eff363.some((e) => e.kind === "verdict" && e.action === "reset"), JSON.stringify(eff363));
+  const dead363 = rels363.filter((ip) => W.VT.bad(H363, "r:" + ip));
+  // 只断言"留 2 条判死、放 3 条"这一语义 —— 具体留哪两条取决于 updatedAt 排序，
+  // 同一毫秒内 setState 的时间戳会并列（真实请求跨毫秒不会），不测这个细节。
+  eq("[363] 比例兜底只留两条判死", dead363.length, 2);
+  // ② 全死自愈：只有当候选 ≤2 条时 slice(2) 空、比例兜底放不开，才轮到 clearHost。
+  //    5 条全死时比例兜底会先放开 3 条（原 rankOf 也是这个顺序），不会走 clearHost。
+  W.VT.clear();
+  const two = rels363.slice(0, 2);
+  for (const ip of two) W.VT.setState(H363, "r:" + ip, 2, 1);
+  const effAllDead = W.FactRegistry.housekeep(H363, two);
+  ok("[363] 两条全死返回 clearHost 动作", effAllDead.some((e) => e.kind === "verdict" && e.action === "clearHost"), JSON.stringify(effAllDead));
+  eq("[363] 全死后判定表清空该站", W.VT.state(H363, "r:" + two[0]), 0);
+  // ③ 常态：没有任何判死时 housekeep 是纯 no-op。
+  W.VT.clear();
+  const effNone = W.FactRegistry.housekeep(H363, rels363);
+  eq("[363] 常态无写动作", effNone.filter((e) => e.kind === "verdict").length, 0);
+  // ④ rankOf 现在只读：调用它不改变判定表。
+  W.VT.setState("rkro363.test", "r:" + rels363[0], 2, 1);
+  const beforeAt = W.VT.at("rkro363.test", "r:" + rels363[0]);
+  W.rankOf({ host: "rkro363.test", cfHost: false, clientV6: false, relays: rels363.slice(), legacyWantsRelay: false, mode: "tput" });
+  eq("[363] rankOf 不写判定表", W.VT.at("rkro363.test", "r:" + rels363[0]), beforeAt);
+  W.VT.clear();
+  W.BLK.clear?.();
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
