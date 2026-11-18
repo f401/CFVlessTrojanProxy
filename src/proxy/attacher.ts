@@ -12,6 +12,7 @@ import { kickFlush } from "../store/pend";
 import { checkTarget, expandV6, isV6Literal, parseProxyIp } from "./dial";
 import { dialAnother } from "./fallback";
 import { SOCKET_DIALER } from "./socket-dialer";
+import { isBudgetExhausted } from "../core/budget-ledger";
 import type { BudgetedIO } from "../core/budgeted-io";
 import { pipeBack } from "./tunnel";
 
@@ -185,6 +186,8 @@ export class Attacher {
         await this.run(o, s6);
         return true;
       } catch (e) {
+        // 额度耗尽时 connect 根本没发出：别再空转剩余 v6 地址（F1.4）
+        if (isBudgetExhausted(e)) return false;
         // 这条候选不通就换下一个：迟到成功的 socket 已经由拨号器关掉了
       }
     }
@@ -231,6 +234,11 @@ export class Attacher {
       conn.via = "node";
       await this.run(o, s3);
     } catch (e) {
+      // 额度耗尽时 connect 根本没发出，不能把健康中继记成不可达（F1.1）
+      if (isBudgetExhausted(e)) {
+        this.endClient(clientSocket, 1011, "budget exhausted");
+        return;
+      }
       // 池子里能解析、但连不上：必须给这条中继记账，否则选择器会一直把它挑回来
       NodeStatsTable.nsFail(px.host + ":" + px.port);
       this.endClient(clientSocket, 1011, "proxyip failed");

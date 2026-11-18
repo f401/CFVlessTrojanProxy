@@ -8139,7 +8139,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   ok("socket 模块只留类型导入", aSrc277.includes('import type { Socket } from "cloudflare:sockets";') && !aSrc277.includes('import { connect } from "cloudflare:sockets"'));
   // 结构：关客户端只剩一处实现，五个放弃点都调它
   eq("关客户端只有一处 close", (aSrc277.match(/clientSocket\.close\(/g) || []).length, 1);
-  eq("五个放弃点都走 endClient", (aSrc277.match(/this\.endClient\(clientSocket,/g) || []).length, 5);
+  eq("六个放弃点都走 endClient", (aSrc277.match(/this\.endClient\(clientSocket,/g) || []).length, 6);
   ok("endClient 是私有方法", aSrc277.includes("private endClient(clientSocket: WebSocketLike, code: number, reason: string): void"));
   // 历史自伤：首包那条注释曾被脚本顶到第 0 列（块内层级读起来是断的）
   ok("没有第 0 列的注释行", !/^\/\//m.test(aSrc277));
@@ -12198,6 +12198,53 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   ok("[365] bumpSmall 按通道累加", memA365.smCnt.get("h|r:1.2.3.4") === 2);
   memA365.clearSmall("h|r:1.2.3.4");
   ok("[365] clearSmall 清掉连击", !memA365.smCnt.has("h|r:1.2.3.4"));
+}
+
+// 第 366 组（审查修复）：VT 导入不续期 + BudgetExhausted 不被吞 + 状态门禁覆盖 TS 写法
+{
+  const src366 = (p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8").replace(/\r\n/g, "\n") : "");
+  const verdict366 = src366("src/route/verdict.ts");
+  const sync366 = src366("src/route/verdictsync.ts");
+  const attach366 = src366("src/proxy/attacher.ts");
+  const scan366 = src366("src/px/scan.ts");
+  const dial366 = src366("src/proxy/dial.ts");
+  const gate366 = src366("tools/check-state-owner.mjs");
+
+  // --- 结构：修复确实落盘 ---
+  ok("[366] setState 第 5 参数带默认值", /setState\(t: string, c: string, state: VState, src: VSrc, updatedAt: EpochMs = Date\.now\(\)\)/.test(verdict366));
+  ok("[366] import 传 r.t 反推原始时间", verdict366.includes("r.t - VT_TTL_MS"));
+  ok("[366] import 内登记 vtSent", /S\.vtSent\.set\(r\.k, r\.t\)/.test(verdict366) && !sync366.includes("S.vtSent.set(r.k, r.t)"));
+  ok("[366] attacher tryV6 认额度耗尽", /isBudgetExhausted\(e\)\) return false/.test(attach366));
+  ok("[366] attacher tryProxyip 认额度耗尽", attach366.includes('this.endClient(clientSocket, 1011, "budget exhausted")'));
+  ok("[366] attacher 里 nsFail 前先认额度", /isBudgetExhausted\(e\).*?NodeStatsTable\.nsFail/s.test(attach366));
+  ok("[366] scan 不吞额度耗尽", /probeSni\([^)]*\)\.catch\(\(e\) => \{\s*if \(isBudgetExhausted\(e\)\) throw e;/.test(scan366));
+  const dialGuards366 = (dial366.match(/if \(isBudgetExhausted\(e\)\) throw e;/g) || []).length;
+  ok("[366] dial 里 7 处额度守卫", dialGuards366 >= 7, `got ${dialGuards366}`);
+  ok("[366] 门禁覆盖 private/public + !/?", /private\|public\|protected/.test(gate366) && /\[!\?\]/.test(gate366));
+
+  // --- 行为 D1：导入远端行不再续期，且不回传 ---
+  W.VT.clear(); W.S.vtSent.clear(); W.S.vtPend.clear();
+  const now366 = Date.now();
+  const exp366 = now366 + 60000; // 远端 1 分钟后过期
+  W.VT.import([{ k: "probe-366.example|r:198.51.100.8", s: 2, t: exp366 }]);
+  const row366 = W.VT.all("probe-366.example")[0];
+  ok("[366] 导入后仍是 blocked", !!row366 && row366.state === 2);
+  // updatedAt 应为 exp - VT_TTL（原始时间，约 now - 29min），不是 now，也不是 exp
+  ok("[366] 导入不续期（updatedAt 用原始时间）", !!row366 && row366.updatedAt <= now366 - 20 * 60000, `updatedAt=${row366 && row366.updatedAt}`);
+  ok("[366] 导入后 vtDelta 不回传该证据", W.vtDelta().every((r) => r.k !== "probe-366.example|r:198.51.100.8"));
+  ok("[366] 导入登记进 vtSent", (W.S.vtSent.get("probe-366.example|r:198.51.100.8") || 0) === exp366);
+  W.VT.clear(); W.S.vtSent.clear(); W.S.vtPend.clear();
+
+  // --- 行为：本地新证据仍正常续期（setState 默认 Date.now 未被改坏）---
+  W.VT.clear();
+  W.VT.setState("local-366.example", "r:198.51.100.9", 2, 1);
+  const local366 = W.VT.all("local-366.example")[0];
+  ok("[366] 本地新证据用当前时间", !!local366 && local366.updatedAt >= now366 - 5000);
+  W.VT.clear();
+
+  // --- 行为：额度耗尽是独立错误类型，不被当普通 Error 吞 ---
+  const be366 = new W.BudgetExhausted("connect");
+  ok("[366] BudgetExhausted 可识别", W.isBudgetExhausted(be366) && !W.isBudgetExhausted(new Error("x")));
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

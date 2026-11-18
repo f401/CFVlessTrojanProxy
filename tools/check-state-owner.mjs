@@ -20,7 +20,8 @@ const stateSrc = fs.readFileSync("src/core/state.ts", "utf8");
 const violations = [];
 for (const [field, owner] of MIGRATED) {
   // 按字段声明/赋值形态匹配，避免注释里提到名字就误报
-  const re = new RegExp(`^\\s+(?:readonly\\s+)?${field}\\s*[:=]`, "m");
+  // 覆盖合法 TS 类字段的各种写法：private/public/protected + readonly + !/? 后缀
+  const re = new RegExp(`^\\s*(?:(?:private|public|protected)\\s+)?(?:readonly\\s+)?${field}\\s*[!?]?\\s*[:=]`, "m");
   if (re.test(stateSrc)) violations.push(`${field} → 应由 ${owner} 持有，却又出现在 S 里`);
 }
 

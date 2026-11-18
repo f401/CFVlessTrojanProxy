@@ -157,6 +157,7 @@ async function vtFetch(env: Env): Promise<void> {
     if (Array.isArray(jj.vt)) {
       // 过滤掉历史版本外发出去的通配封锁：它们已经在别的 isolate 里造成过大面积误封，重新导入只会复发。
       const rows = jj.vt.filter((r) => !r.k.startsWith("*|"));
+      // import() 内部已把每行登记为 vtSent（已送达），vtDelta 不会回传续期（7.366）
       VT.import(rows);
       cnt("vtDO", rows.length);
     }

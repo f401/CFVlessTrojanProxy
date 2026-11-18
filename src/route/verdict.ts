@@ -5,6 +5,7 @@
 // 而那十二个 `v*` 只是「按函数调用的写法」——它们不让调用点更好读，只让「谁在改表」多一层转手。
 // 现在调用点直接写 `VT.set(...)` / `VT.state(...)` / `VT.bad(...)`：表的身份一眼可见。
 import { cnt } from "../core/counter";
+import { S } from "../core/state";
 import { BoundedMap } from "../core/table";
 import { St } from "../core/enums";
 import type { ChanToken, EpochMs, HostName, SampleCount } from "../core/types";
@@ -122,14 +123,15 @@ export class VerdictTable {
    * @param c 通道键
    * @param state 目标状态（2 被拦 / 3 连不上）
    * @param src 证据来源（1 探测 / 2 客户端）
+   * @param updatedAt 更新时间（毫秒）；导入远端行时传它的原始时间，避免续期
    * @returns 无
    */
-  setState(t: string, c: string, state: VState, src: VSrc): void {
+  setState(t: string, c: string, state: VState, src: VSrc, updatedAt: EpochMs = Date.now()): void {
     if (VerdictTable.blockWild(t)) return;
     const k = VerdictTable.key(t, c);
     const old = this.byKey.get(k);
     if (old && old.src > src) return;
-    this.byKey.set(k, { target: t, channel: c, state, code: old?.code || 0, ms: old?.ms || 0, observations: (old?.observations || 0) + 1, updatedAt: Date.now(), src });
+    this.byKey.set(k, { target: t, channel: c, state, code: old?.code || 0, ms: old?.ms || 0, observations: (old?.observations || 0) + 1, updatedAt, src });
     this.trim();
   }
 
@@ -255,7 +257,10 @@ export class VerdictTable {
       const t = r.k.slice(0, i);
       // 远端行是不可信输入（可能来自旧版本 isolate）：通配行在这里就丢掉，不靠上游过滤
       if (VerdictTable.blockWild(t)) continue;
-      this.setState(t, r.k.slice(i + 1), (r.s === St.Dead ? St.Dead : St.Blocked) as VState, 1);
+      // r.t 是到期时刻；反推原始 updatedAt，让本地到期时间仍等于 r.t，不因导入续期
+      this.setState(t, r.k.slice(i + 1), (r.s === St.Dead ? St.Dead : St.Blocked) as VState, 1, r.t - VT_TTL_MS);
+      // 从 DO 来的行视为已送达：登记 vtSent，vtDelta 不会把它们当新证据回传续期
+      S.vtSent.set(r.k, r.t);
       n++;
     }
     this.trim();

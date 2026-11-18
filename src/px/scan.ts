@@ -11,6 +11,7 @@ import { SeedStore } from "./seed";
 import { splitRelay } from "../core/relay-addr";
 import { BudgetLedger } from "../core/budget-ledger";
 import { BudgetedIO } from "../core/budgeted-io";
+import { isBudgetExhausted } from "../core/budget-ledger";
 
 // ---- 并入自 scan-probe.ts ----
 // 新候选扫描：在「还没有结论」的候选里轮转，探一批，成功的进存活表并记样本。
@@ -311,7 +312,10 @@ export class ScanHouse {
     for (const h of targets) {
       // 探测本身失败也只当「没转出去」：这里要的是可用的那条，不是错误分类
       const res = (await Promise.all(
-        pool4.map((x) => probeSni(x.h, x.p, h, 2200, this.gate).catch(() => ({ err: "tcp" }) as { hs?: number })),
+        pool4.map((x) => probeSni(x.h, x.p, h, 2200, this.gate).catch((e) => {
+          if (isBudgetExhausted(e)) throw e; // 额度耗尽不是探测失败，别上报成中继坏（F1.2）
+          return { err: "tcp" } as { hs?: number };
+        })),
       )) as { hs?: number }[];
       res.forEach((x, i) => {
         if (HOOK.relayProbe) HOOK.relayProbe(h, pool4[i].h, !!x.hs, x.hs || 0);

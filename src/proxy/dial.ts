@@ -33,6 +33,7 @@ export async function dohQuery(domain: string, type: "A" | "AAAA", quota: Budget
       const rec = ((j.Answer || []) as DohAnswer[]).find((x) => x.type === want);
       if (rec && rec.data) return rec.data;
     } catch (e) {
+      if (isBudgetExhausted(e)) throw e; // 额度耗尽不是 DNS 抖动（F1.3）
       /* 换下一个 */
     }
   }
@@ -59,6 +60,7 @@ export async function probeFam(host: string, quota: BudgetedIO = BudgetedIO.unli
       const rec = ((j.Answer || []) as DohAnswer[]).find((x) => x.type === 28 && !!x.data);
       return { v6: !!rec, answered: true };
     } catch (e) {
+      if (isBudgetExhausted(e)) throw e; // 额度耗尽不是 DoH 抖动（F1.3）
       /* 换下一个 DoH */
     }
   }
@@ -100,6 +102,7 @@ export async function resolveV4All(domain: string, quota: BudgetedIO = BudgetedI
       }
       if (ips.length) break;
     } catch (e) {
+      if (isBudgetExhausted(e)) throw e; // 额度耗尽不是 DoH 抖动（F1.3）
       /* 换下一个 DoH */
     }
   }
@@ -265,13 +268,17 @@ export async function isCfHost(host: string, quota: BudgetedIO = BudgetedIO.unli
  * @returns socket；全部失败返回 null
  */
 export async function dial4(host: string, port: number, quota: BudgetedIO, budget = 0) {
-  const raw = isV4Literal(host) ? [host] : await withTimeout(resolveV4All(host, quota), budget || 3000).catch(() => []);
+  const raw = isV4Literal(host) ? [host] : await withTimeout(resolveV4All(host, quota), budget || 3000).catch((e) => {
+    if (isBudgetExhausted(e)) throw e; // 额度耗尽不能伪装成「没有 A 记录」（F1.3）
+    return [];
+  });
   const list: string[] = Array.isArray(raw) ? raw : [];
   for (const ip of list.slice(0, 3)) {
     if (!ip || isPrivateHost(ip)) continue;
     try {
       return await quota.openSocket(ip, port);
-    } catch (_) {
+    } catch (e) {
+      if (isBudgetExhausted(e)) throw e; // connect 名额耗尽：不是这条 A 记录不通（F1.3）
       /* 换下一个 A 记录：x.com 这类站点有多个边缘 IP，单点失败不代表整站不可达 */
     }
   }
