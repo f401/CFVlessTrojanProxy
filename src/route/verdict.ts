@@ -5,10 +5,24 @@
 // 而那十二个 `v*` 只是「按函数调用的写法」——它们不让调用点更好读，只让「谁在改表」多一层转手。
 // 现在调用点直接写 `VT.set(...)` / `VT.state(...)` / `VT.bad(...)`：表的身份一眼可见。
 import { cnt } from "../core/counter";
-import { S } from "../core/state";
 import { BoundedMap } from "../core/table";
 import { St } from "../core/enums";
 import type { ChanToken, EpochMs, HostName, SampleCount } from "../core/types";
+
+/** 判定表同步账本：7.369 起从 AppState 下放，只有判定层读写 */
+export class VtSyncLedger {
+  /** 新学到、尚未上报成功的强证据 */
+  pending = new Map<string, { s: number; t: number }>();
+  /** 已上报成功的证据（去重） */
+  sent = new Map<string, number>();
+  /** 读失败后的冷却截止时刻 */
+  coolUntil = 0;
+  /** single-flight 的读 Promise */
+  flight: Promise<void> | null = null;
+}
+
+/** 进程内唯一的同步账本实例 */
+export const VT_SYNC = new VtSyncLedger();
 
 export type VState = 0 | 1 | 2 | 3;
 type VSrc = 0 | 1 | 2; // 0 traffic 弱证据 / 1 probe 强证据 / 2 client 端到端
@@ -260,7 +274,7 @@ export class VerdictTable {
       // r.t 是到期时刻；反推原始 updatedAt，让本地到期时间仍等于 r.t，不因导入续期
       this.setState(t, r.k.slice(i + 1), (r.s === St.Dead ? St.Dead : St.Blocked) as VState, 1, r.t - VT_TTL_MS);
       // 从 DO 来的行视为已送达：登记 vtSent，vtDelta 不会把它们当新证据回传续期
-      S.vtSent.set(r.k, r.t);
+      VT_SYNC.sent.set(r.k, r.t);
       n++;
     }
     this.trim();

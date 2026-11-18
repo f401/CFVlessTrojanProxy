@@ -7,25 +7,64 @@ import { doFetch, meterGet } from "./meter-client";
 /* 用量视图：Meter DO 读取 / 本地缓存 / 面板口径 */
 
 /**
+ * 跨 isolate 节点快照的持有者：60 秒缓存，失败也占一次时间窗。
+ */
+export class NodeSnapCache {
+  /** 写入时刻（0 = 还没取过） */
+  t = 0;
+  /** 最近一次成功（或失败时沿用）的快照 */
+  v: Record<string, NodeSnap> = {};
+
+  /**
+   * 功能：缓存未过期时直接返回旧快照。
+   * @returns 有效缓存；没有有效缓存时返回 null
+   */
+  fresh(): Record<string, NodeSnap> | null {
+    return this.t && Date.now() - this.t < 60000 ? this.v : null;
+  }
+
+  /**
+   * 功能：记下本轮结果（失败时只刷新时间，沿用旧值）。
+   * @param v 本轮读到的快照；失败传 null
+   * @returns 生效的快照
+   */
+  put(v: Record<string, NodeSnap> | null): Record<string, NodeSnap> {
+    this.t = Date.now();
+    if (v) this.v = v;
+    return this.v;
+  }
+
+  /**
+   * 功能：重置缓存（测试与显式失效用）。
+   * @returns 无
+   */
+  reset(): void {
+    this.t = 0;
+    this.v = {};
+  }
+}
+
+/** 节点快照缓存实例：只有 store/stats 读写 */
+export const NODE_SNAP = new NodeSnapCache();
+
+/**
  * 取 Meter DO 里的节点快照（跨 isolate）。
  * 面板跑在哪个 isolate 全看运气，只看本地 nstat 会永远显示"未用"。
  */
 export async function nodeSnapGet(env: Env, id: string): Promise<Record<string, NodeSnap>> {
   if (!env || !env.METER || !id) return {};
-  const hit = S.nodeSnapCache;
-  if (hit.t && Date.now() - hit.t < 60000) return hit.v;
+  const hit = NODE_SNAP.fresh();
+  if (hit) return hit;
   try {
     // 快照只写在主 uuid 的 DO 上：用别人的 id 去读永远是空的
     const r = await doFetch(env, PEND.id(env) || id, "https://meter/cnt");
     if (!r.ok) throw new Error("do " + r.status);
     const j = await r.json();
     const v = (j && j.s && typeof j.s === "object" ? j.s : {}) as Record<string, NodeSnap>;
-    S.nodeSnapCache = { t: Date.now(), v };
-    return v;
+    return NODE_SNAP.put(v);
   } catch (e) {
     // 失败也记时间：DO 挂掉时不要每个面板请求都重试一次
-    S.nodeSnapCache = { t: Date.now(), v: hit.v || {} };
-    return S.nodeSnapCache.v;
+    return NODE_SNAP.put(null);
   }
 }
 

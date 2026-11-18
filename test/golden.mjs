@@ -42,8 +42,8 @@ function seedState() {
   S.colo = "HKG";
   S.curs = { lat: "edge-a.example.com:443", tput: "edge-b.example.com:443" };
   S.funnel = { direct: 612, node: 3388, v6: 12 };
-  for (const k of S.cntKeys || []) { S.cnt[k] = 0; S.cntSent[k] = 0; }
-  S.cnt.conn = 412; S.cnt.node = 388; S.cnt.direct = 24;
+  for (const k of W.COUNTER.keys || []) { W.COUNTER.values[k] = 0; W.COUNTER.sent[k] = 0; }
+  W.COUNTER.values.conn = 412; W.COUNTER.values.node = 388; W.COUNTER.values.direct = 24;
   S.hostNode.clear();
   S.hostNode.set("x.com", new Map([
     ["edge-a.example.com:443", { n: 12, ok: 11, bad: 1, bytes: 8123456, ttfb: 193, at: Date.now() - 60000 }],

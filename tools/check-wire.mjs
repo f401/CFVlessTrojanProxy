@@ -65,10 +65,11 @@ for (const name of SLOTS) {
   }
 }
 fail += slotFail;
-// 计数字面量必须在 S.cntKeys 登记：漏登记时 cnt() 只打一行 `[cnt] unknown key` 就静默丢计数，
+// 计数字面量必须在 Counter.keys 登记：漏登记时 cnt() 只打一行 `[cnt] unknown key` 就静默丢计数，
 // 面板和 /health 会显示「这个功能从没触发过」——这类缺陷靠读代码很难看出来。
-const stSrc = fs.readFileSync("src/core/state.ts", "utf8");
-const keyBlock = (stSrc.match(/cntKeys = \[([\s\S]*?)\]/) || [])[1] || "";
+// 7.369 起这张表从 AppState 迁到 Counter 自己持有，门禁跟着改读 counter.ts。
+const stSrc = fs.readFileSync("src/core/counter.ts", "utf8");
+const keyBlock = (stSrc.match(/keys = \[([\s\S]*?)\]/) || [])[1] || "";
 const known = new Set([...keyBlock.matchAll(/"([^"]+)"/g)].map((m) => m[1]));
 let cntFail = 0;
 for (const f of prod) {

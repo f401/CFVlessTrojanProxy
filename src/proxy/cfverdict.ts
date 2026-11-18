@@ -6,6 +6,18 @@ const CF_HTTP_TTL = 180000;
 /** 探测失败后的负缓存：20 秒内不再重试（否则每个请求都会再探一次） */
 const CF_HTTP_NEG = 20000;
 
+/**
+ * CF HTTP 探测在途集合：本 isolate 内同一站点只放一条探测。
+ * 探测占一个 connect() 名额，冷启动并发必须靠它挡住重复探测。
+ */
+export class CfHttpState {
+  /** 正在探测的站点 */
+  readonly flight = new Set<string>();
+}
+
+/** CF HTTP 探测在途持有者 */
+export const CF_HTTP = new CfHttpState();
+
 /** 目标站点的 HTTP 判定缓存：200 = 本出口没被按 IP 拒，403 = 被拒（必须绕中继）。0 = 未知。 */
 export function cfHttpCode(host: string): number {
   const c = S.cfHttp.get(host);
@@ -27,10 +39,10 @@ export function refreshCfHttp(host: string, ctx: { waitUntil(p: Promise<unknown>
   const c = S.cfHttp.get(host);
   if (c && Date.now() - c.t < CF_HTTP_TTL) return;
   // 在途：已经有人在探这个站点，不要再发一次
-  if (S.cfHttpFlight.has(host)) return;
+  if (CF_HTTP.flight.has(host)) return;
   if (S.cfHttp.size > 200) S.cfHttp.clear();
-  if (S.cfHttpFlight.size > 200) S.cfHttpFlight.clear();
-  S.cfHttpFlight.add(host);
+  if (CF_HTTP.flight.size > 200) CF_HTTP.flight.clear();
+  CF_HTTP.flight.add(host);
   ctx.waitUntil(
     httpProbe(host)
       .then((v) => {
@@ -39,7 +51,7 @@ export function refreshCfHttp(host: string, ctx: { waitUntil(p: Promise<unknown>
       })
       .catch(() => {})
       .finally(() => {
-        S.cfHttpFlight.delete(host);
+        CF_HTTP.flight.delete(host);
       }),
   );
 }

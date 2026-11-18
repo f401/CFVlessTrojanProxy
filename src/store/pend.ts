@@ -33,6 +33,14 @@ interface PendCarry {
  * 攒到 16 MB 或有定时器到期再一次性推。失败必须回滚，否则字节账会凭空消失。
  */
 export class PendingLedger {
+  /** 上次实际上报的时刻 */
+  private flushedAt = 0;
+  /** 单飞守卫：一次只跑一轮 flush，避免跨 flush ack 串扰 */
+  private flushing = false;
+  /** flush 定时器句柄 */
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 轮转起点：下一轮从第几个用户开始读 */
+  private cursor = 0;
   /**
    * 功能：取主用户 id（env.uuid/uuids 的第一个，去空白）。
    * @param env 环境变量
@@ -72,15 +80,15 @@ export class PendingLedger {
    * @returns 无
    */
   schedule(env: Env, delay?: number): void {
-    if (S.tflush) {
+    if (this.flushTimer) {
       // 大流量触发 delay=0 时，不能被之前排好的 30 秒定时器压住
       if (delay !== 0) return;
-      clearTimeout(S.tflush);
-      S.tflush = null;
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
     }
     const d = delay === undefined ? S.pendMs : delay;
-    S.tflush = setTimeout(() => {
-      S.tflush = null;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
       this.flush(env, true).catch(() => {});
     }, d);
   }
@@ -112,11 +120,11 @@ export class PendingLedger {
     // 两批并发会各 carry 同一组事实增量：先回来的 ack() 把整张 pending 清空，
     // 后回来那批失败时 nack() 已无从撤销 —— 证据永久丢失。同一 isolate 只跑一批；
     // 被跳过的那批什么都没摘、也没登记 pending，证据仍在原表里等下一轮。
-    if (S.pendBusy) return;
-    S.pendBusy = true;
+    if (this.flushing) return;
+    this.flushing = true;
     try {
-      if (!force && Date.now() - S.pendAt < S.pendMs) return;
-      S.pendAt = Date.now();
+      if (!force && Date.now() - this.flushedAt < S.pendMs) return;
+      this.flushedAt = Date.now();
       const batch = this.take(max);
       if (!batch.length) return;
       // 快照固定挂在主 uuid 的对象上：挂到"批次第一个"会挂到另一个用户，
@@ -141,7 +149,7 @@ export class PendingLedger {
       });
       this.backoff(bad);
     } finally {
-      S.pendBusy = false;
+      this.flushing = false;
     }
   }
 
@@ -156,11 +164,11 @@ export class PendingLedger {
   private take(max: number): Array<[string, PendEntry]> {
     const all = [...S.pend.entries()];
     if (!all.length) return [];
-    const start = (S.pendIdx || 0) % all.length;
+    const start = (this.cursor || 0) % all.length;
     const rotated = all.slice(start).concat(all.slice(0, start));
     // 一轮最多带 PEND_MAX 个用户：每个用户 1 次 DO 往返，一轮总量不能超 50 子请求额度。
     const batch = rotated.slice(0, Math.max(1, Math.min(SC.PEND_MAX, max)));
-    S.pendIdx = (start + batch.length) % all.length;
+    this.cursor = (start + batch.length) % all.length;
     if (rotated.length > batch.length) cnt("pendSkip", rotated.length - batch.length);
     // 只摘掉这一批：在途期间新加的增量留在账本里，下一轮接着发（不是整表清空）
     for (const [bid] of batch) S.pend.delete(bid);

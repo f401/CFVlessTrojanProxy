@@ -14,6 +14,21 @@ export const FLUSH_MAX_MS = 7200000; // 最迟 2 小时必落一次
 export const FLUSH_GAP = 2700000; // 全局闸门：45 分钟内已有别的 isolate 写过就不再写
 export const SNAP_TTL = 300000;
 
+/** 快照模块的本地状态：7.369 起从 AppState 下放到这里，只有本模块读写 */
+export class SnapshotState {
+  /** 合成快照的短缓存 */
+  cache: { v: SnapDoc | null; t: number } = { v: null, t: 0 };
+  /** 全局写闸门：别人最近一次写的时刻 */
+  written = 0;
+  /** 上次检查闸门的时刻（5 分钟内不重复查 KV） */
+  checked = 0;
+  /** 单飞守卫 */
+  busy = false;
+}
+
+/** 快照模块本地状态的进程内唯一实例 */
+export const SNAP = new SnapshotState();
+
 /**
  * 功能：读用量快照（KV 里的 USAGE_SNAP_KEY）。
  * @param env 环境变量（STATS 为 KV）
@@ -247,7 +262,7 @@ export async function flushSnap(env: Env, force?: boolean): Promise<void> {
   if (!hasData) return;
 
   const now = Date.now();
-  const since = now - (S.snapWritten || 0);
+  const since = now - (SNAP.written || 0);
   // 关键：按"时间"节流，而不是按"脏字节"。
   // 以前 snapBytes >= 2MB 就写 —— 一天 12 GB 流量 = 6000 次写，直接把
   // 免费额度（1000/天）打爆。
@@ -256,16 +271,16 @@ export async function flushSnap(env: Env, force?: boolean): Promise<void> {
   // 全局闸门失败/跳过时不能每条连接都再去读一次 KV：5 分钟内只检查一次。
   // force 必须绕过它，否则 force 就是个死开关（v7.201：强制落盘连续调两次，第二次被
   // 这句静默吃掉，调用方以为已经写进 KV）。
-  if (!force && now - S.snapChecked < 5 * 60000) return;
-  S.snapChecked = now;
+  if (!force && now - SNAP.checked < 5 * 60000) return;
+  SNAP.checked = now;
   // 同一 isolate 只允许一个落盘在飞：连接收尾会并发调 flushSnap，
   // 没有这个闩时 50 条连接同时关闭就可能各写一次 KV（写额度 1000/天）。
-  if (S.snapBusy) return;
-  S.snapBusy = true;
+  if (SNAP.busy) return;
+  SNAP.busy = true;
   try {
     await writeSnap(env, now, !!force);
   } finally {
-    S.snapBusy = false;
+    SNAP.busy = false;
   }
 }
 
@@ -322,8 +337,8 @@ function gateHeld(prev: SnapDoc, now: number, force: boolean): boolean {
   if (!force && now - (prev.ts || 0) < FLUSH_GAP) {
     // 别人刚写过：把本地基线推进到那一次，并把下一次检查推到闸门结束，
     // 避免下一批连接反复走 getSnap 再跳过。
-    S.snapWritten = Math.max(S.snapWritten || 0, prev.ts || 0);
-    S.snapChecked = Math.max(S.snapChecked || 0, (prev.ts || 0) + FLUSH_GAP);
+    SNAP.written = Math.max(SNAP.written || 0, prev.ts || 0);
+    SNAP.checked = Math.max(SNAP.checked || 0, (prev.ts || 0) + FLUSH_GAP);
     return true;
   }
   return false;
@@ -425,14 +440,14 @@ function mergeErrs(next: SnapDoc): void {
  * 功能：落盘并在成功后清空本地读数（失败时本地原样留着，下一轮重试）。
  * @param env 环境变量
  * @param next 待写快照
- * @param now 当前时间（成功时记进 `S.snapWritten`）
+ * @param now 当前时间（成功时记进 `SNAP.written`）
  * @returns 无
  */
 async function commitSnap(env: Env, next: SnapDoc, now: number): Promise<void> {
   try {
     await kvSet(env, "snap", next, { expirationTtl: 86400 * 30 });
-    S.snapCache = { v: next, t: Date.now() };
-    S.snapWritten = now;
+    SNAP.cache = { v: next, t: Date.now() };
+    SNAP.written = now;
     S.snapBytes = 0;
     // 只有写成功才清：KV 抖动时这些增量必须留到下一轮，否则这一段流量永久消失
     S.stats.clear();
@@ -456,11 +471,11 @@ async function commitSnap(env: Env, next: SnapDoc, now: number): Promise<void> {
  * @returns 快照对象；键不存在时是空表，**读失败会抛错**（不进缓存）
  */
 export async function getSnap(env: Env, fresh?: boolean) {
-  if (!fresh && S.snapCache.v && Date.now() - S.snapCache.t < SNAP_TTL) return S.snapCache.v;
-  // 严格读：抛错路径不碰 S.snapCache，下一次调用会重新打 KV
+  if (!fresh && SNAP.cache.v && Date.now() - SNAP.cache.t < SNAP_TTL) return SNAP.cache.v;
+  // 严格读：抛错路径不碰 SNAP.cache，下一次调用会重新打 KV
   const v = await kvGetStrict<SnapDoc>(env, "snap");
   const out: SnapDoc = v || { v: 1, ts: 0, date: "", stats: {}, rtt: {}, errs: [] };
-  S.snapCache = { v: out, t: Date.now() };
+  SNAP.cache = { v: out, t: Date.now() };
   return out;
 }
 

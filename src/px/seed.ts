@@ -16,16 +16,22 @@ export const BUCKET_DEF = "*";
 
 /** 当前写入的桶名 */
 export class SeedStore {
+  /** 信誉表读取时刻（0=需要重读）：7.369 起由 SeedStore 自己持有 */
+  readAt = 0;
+  /** 上次读 KV 是否失败（失败时绝不能拿空表覆盖别的机房） */
+  readFailed = false;
+  /** 代际计数器（避免重启后节点名重复） */
+  gen: CounterDoc | null = null;
   /**
    * 功能：本 isolate 的分桶键（没探到机房时用默认桶，保证同机房共享、跨机房隔离）。
    * @returns 字符串
    */
-  static coloKey() {
+  coloKey() {
     return S.colo || BUCKET_DEF;
   }
 
   /** 当前机房的信誉桶 */
-  static bucket() {
+  bucket() {
     const m = (S.seed && S.seed.byColo) || {};
     return m[this.coloKey()] || { nodes: [] };
   }
@@ -35,7 +41,7 @@ export class SeedStore {
    * 不要再把 ms/tcp/tls/n/f/b/sb 写进来 —— 每个 isolate 的最优节点可能完全不同，
    * 别的 isolate 的延迟/吞吐/成功率对本地没有可迁移价值，只会把冷启动带偏。
    */
-  static packName(k: string) {
+  packName(k: string) {
     const a = (S.alive.get(k) || {}) as NodeEntry;
     const [partHost, partPort] = splitRelay(k, 443);
     return { k, h: a.h || partHost, p: a.p || partPort, cc: a.cc || "" };
@@ -46,15 +52,15 @@ export class SeedStore {
    * @param {object} env Worker 环境
    * @returns {Promise<object>} SEED
    */
-  static async read(env: Env) {
-    if (S.seedAt && Date.now() - S.seedAt < SEED_READ_MS) return S.seed;
+  async read(env: Env) {
+    if (this.readAt && Date.now() - this.readAt < SEED_READ_MS) return S.seed;
     let v = null;
     try {
       v = await kvGetStrict<Seed>(env, SEED_KEY);
-      S.seedReadFail = false;
+      this.readFailed = false;
     } catch (e) {
       // 读失败 ≠ 空表：记下来，write 绝不能拿空表覆盖别的机房
-      S.seedReadFail = true;
+      this.readFailed = true;
     }
     if (v && Array.isArray(v.nodes) && !v.byColo) {
       // 旧结构：整张表属于"当前机房"，迁移时不做跨机房假设
@@ -77,7 +83,7 @@ export class SeedStore {
         byColo: v.byColo || {},
         cnt: v.cnt || null,
       };
-      S.gcnt = (v.cnt || null) as CounterDoc | null;
+      this.gen = (v.cnt || null) as CounterDoc | null;
       // 只有锚点的代际不比本地旧时才认它的建池时间：本地刚建完第 7 代、锚点还停在第 6 代时，
       // 把 111 写回去等于把「这块池子是什么时候建的」也一起回退了（write 的池子锚点会拿它落盘）。
       if ((Number(v.poolGen) || 0) >= (S.poolGen || 0)) S.poolBuilt = Number(v.builtAt) || 0;
@@ -88,7 +94,7 @@ export class SeedStore {
     // 期间该机房所有连接都只能直连。
     const hasAny = !!(S.seed && S.seed.byColo && (this.bucket().nodes || []).length);
     // 读失败 / 读到空表都只当缓存 1 分钟（提前 29 分钟过期）
-    S.seedAt = S.seedReadFail || !hasAny ? Date.now() - SEED_READ_MS + 60000 : Date.now();
+    this.readAt = this.readFailed || !hasAny ? Date.now() - SEED_READ_MS + 60000 : Date.now();
     return S.seed;
   }
 
@@ -102,7 +108,7 @@ export class SeedStore {
    * 所以代际单调：本地比锚点新才用本地；同代取较大的规模；本地更旧就原样沿用锚点。
    * @returns {{gen: number, n: number, builtAt: number}} 代际、规模、建池时间
    */
-  private static poolAnchor() {
+  private poolAnchor() {
     const gLocal = S.poolGen || 0;
     const gSeed = Number(S.seed.poolGen) || 0;
     const nSeed = Number(S.seed.poolN) || 0;
@@ -117,20 +123,20 @@ export class SeedStore {
    * @param {object} env Worker 环境
    * @returns {Promise<{ok:boolean,err?:string}>} 结果
    */
-  static async write(env: Env, listOnly = false, force = false) {
+  async write(env: Env, listOnly = false, force = false) {
     if (!env || !env.STATS) return { ok: true, skipped: true };
     // 必须先读到已有 seed 再写：否则一个"还没读过"的 isolate 会拿空对象覆盖，
     // 把 poolGen 和所有机房的桶一起抹掉（踩过一次，池子直接变 0）。
     await this.read(env);
-    if (S.seedReadFail) return { ok: false, err: "seed read failed" };
+    if (this.readFailed) return { ok: false, err: "seed read failed" };
     // 全局写节流：任何 isolate 落盘前先看 seed 上的时间戳。
     // 8 个 isolate 各自 30 分钟一写 = 384/天，加上现有的就顶到额度了。
     if (!force && Date.now() - (S.seed.ts || 0) < 20 * 60000) return { ok: true, skipped: true };
     // KV 写失败时要能恢复内存状态：否则 seedAt/ts 被推进，调用方以为已落盘
     const prevSeed = S.seed,
-      prevG = S.gcnt,
+      prevG = this.gen,
       prevDirty = S.seedDirty,
-      prevAt = S.seedAt;
+      prevAt = this.readAt;
     let sentDelta: Record<string, number> | null = null;
     const bucket = this.bucket();
     const base = new Map();
@@ -164,9 +170,9 @@ export class SeedStore {
         return { ok: true, empty: true };
       } catch (e) {
         S.seed = prevSeed;
-        S.gcnt = prevG;
+        this.gen = prevG;
         S.seedDirty = prevDirty;
-        S.seedAt = prevAt;
+        this.readAt = prevAt;
         return { ok: false, err: String(errMsg(e)).slice(0, 80) };
       }
     }
@@ -213,22 +219,25 @@ export class SeedStore {
       byColo,
       cnt: gc,
     };
-    S.gcnt = gc as CounterDoc;
+    this.gen = gc as CounterDoc;
     S.seedDirty = false;
-    S.seedAt = Date.now();
+    this.readAt = Date.now();
     try {
       await kvSet(env, SEED_KEY, S.seed, { expirationTtl: PX_TTL });
       return { ok: true };
     } catch (e) {
       S.seed = prevSeed;
-      S.gcnt = prevG;
+      this.gen = prevG;
       S.seedDirty = prevDirty;
-      S.seedAt = prevAt;
+      this.readAt = prevAt;
       if (sentDelta) cntUnsend(sentDelta);
       return { ok: false, err: String(errMsg(e)).slice(0, 80) };
     }
   }
 }
+
+/** seed 表本地状态的进程内唯一实例 */
+export const SEED_STORE = new SeedStore();
 
 /** 变化驱动的落盘节流：90 分钟地板，避免每条连接都打 KV */
 export function markSeedDirty(env: Env) {
@@ -236,6 +245,6 @@ export function markSeedDirty(env: Env) {
   const last = Math.max(S.nsWriteAt, S.seed.ts || 0);
   if (Date.now() - last < SEED_WRITE_GAP) return;
   S.nsWriteAt = Date.now();
-  SeedStore.write(env).catch(() => {});
+  SEED_STORE.write(env).catch(() => {});
 }
 

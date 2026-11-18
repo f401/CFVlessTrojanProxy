@@ -1,7 +1,7 @@
 // 判定表的跨 isolate 同步：只同步「强证据」（blocked/dead），带 30 分钟 TTL。
 // 目标 isolate 冷启动时拉一次，之后靠本地的记录增量回传，避免每请求都读 DO。
 import { S } from "../core/state";
-import { VT, VT_TTL_MS } from "./verdict";
+import { VT, VT_TTL_MS, VT_SYNC } from "./verdict";
 import { HEALTH } from "./relay-health";
 import { FactsStore, type FactsBody } from "./factsstore";
 import { EG } from "./egfacts";
@@ -23,7 +23,7 @@ export function vtDelta(): VtRow[] {
   // 上次交出去、还没 ack 的强证据：原样再带上（DO 可能没收到）
   // 待发项记的是 `{ s, t }` 而不是只记到期时间：以前只存到期时间、重发时硬写 `s: 2`，
   // 于是一条 state=3（dead，硬排除）的证据在重试后会被降级成「blocked」，从硬排除变软降权。
-  for (const [k, p] of S.vtPend) {
+  for (const [k, p] of VT_SYNC.pending) {
     const bar = k.indexOf("|");
     if (bar <= 0 || p.t <= now) continue;
     out.push({ k, s: p.s, t: p.t });
@@ -40,10 +40,10 @@ export function vtDelta(): VtRow[] {
     // 7.154 把 `SC.VT_TTL` 删掉之后这种副本就会静默漂移
     const exp = v.updatedAt + VT_TTL_MS;
     if (exp <= now) continue;
-    if ((S.vtSent.get(k) || 0) >= exp) continue;
-    if ((S.vtPend.get(k)?.t || 0) >= exp) continue;
+    if ((VT_SYNC.sent.get(k) || 0) >= exp) continue;
+    if ((VT_SYNC.pending.get(k)?.t || 0) >= exp) continue;
     // 只登记 pending：DO 没收到时由调用方 nack，下轮还能再发一次
-    S.vtPend.set(k, { s: v.state, t: exp });
+    VT_SYNC.pending.set(k, { s: v.state, t: exp });
     out.push({ k, s: v.state, t: exp });
   }
   if (out.length) cnt("vtSent", out.length);
@@ -53,17 +53,17 @@ export function vtDelta(): VtRow[] {
 
 /** 上报成功：pending 正式生效 */
 export function vtAck(): void {
-  for (const [k, p] of S.vtPend) S.vtSent.set(k, p.t);
-  S.vtPend.clear();
+  for (const [k, p] of VT_SYNC.pending) VT_SYNC.sent.set(k, p.t);
+  VT_SYNC.pending.clear();
   // 键是「站点|通道」，判定表本身有上限、这张记账表没有：不同站点一路累加，
   // 过期行也永远不会被读端清掉（读端只做数值比较）。先删过期，再压回上限。
-  dropExpired(S.vtSent);
-  trimAged(S.vtSent);
+  dropExpired(VT_SYNC.sent);
+  trimAged(VT_SYNC.sent);
 }
 
 /** 上报失败：丢掉 pending，下一轮重新登记 */
 export function vtNack(): void {
-  S.vtPend.clear();
+  VT_SYNC.pending.clear();
 }
 /**
  * 功能：冷启动拉一次远端事实（失败静默：判定表本来就是「本 isolate 先信自己」）。
@@ -79,13 +79,13 @@ export function vtNack(): void {
 export async function vtLoad(env: Env): Promise<void> {
   if (S.vtLoaded) return;
   // 失败后 60 秒内不重试（一次抖动不该让首字节为坏运气反复排队），过期后允许再试一次
-  if (S.vtCool > Date.now()) return;
-  if (S.vtFlight) {
+  if (VT_SYNC.coolUntil > Date.now()) return;
+  if (VT_SYNC.flight) {
     cnt("factsJoin");
-    return S.vtFlight;
+    return VT_SYNC.flight;
   }
-  S.vtFlight = vtFetch(env);
-  return S.vtFlight;
+  VT_SYNC.flight = vtFetch(env);
+  return VT_SYNC.flight;
 }
 
 /**
@@ -175,10 +175,10 @@ async function vtFetch(env: Env): Promise<void> {
     cnt("dnsDO", nf.dns);
   } catch {
     // 读不到就当作没有事实（不阻塞连接），但记下冷却时间，60 秒后允许重试
-    S.vtCool = Date.now() + 60000;
+    VT_SYNC.coolUntil = Date.now() + 60000;
   } finally {
     // 订阅层（views）不能 import route，所以把「哪些中继已知是 v4 出口」放进 S，供渲染直接取用
     S.eg4Top = EG.v4List().slice(0, 8);
-    S.vtFlight = null;
+    VT_SYNC.flight = null;
   }
 }

@@ -11,9 +11,45 @@ import fs from "node:fs";
 
 /** 已从 `S` 迁出的字段：{ 字段名: 现在归谁持有 } */
 const MIGRATED = new Map([
+  // 7.365 判定层软记忆
   ["bigByHost", "JudgeMemory（src/route/judge.ts）"],
   ["bigChan", "JudgeMemory（src/route/judge.ts）"],
   ["smCnt", "JudgeMemory（src/route/judge.ts）"],
+  // 7.369 AppState 上帝对象下放：以下字段全部从 S 迁进各自模块的实例持有者
+  ["cntKeys", "Counter（src/core/counter.ts）"],
+  ["cnt", "Counter（src/core/counter.ts）"],
+  ["cntDay", "Counter（src/core/counter.ts）"],
+  ["cntSent", "Counter（src/core/counter.ts）"],
+  ["cronAt", "CronLock（src/core/lock.ts）"],
+  ["gcnt", "SeedStore（src/px/seed.ts）"],
+  ["seedAt", "SeedStore（src/px/seed.ts）"],
+  ["seedReadFail", "SeedStore（src/px/seed.ts）"],
+  ["pendAt", "PendingLedger（src/store/pend.ts）"],
+  ["pendBusy", "PendingLedger（src/store/pend.ts）"],
+  ["tflush", "PendingLedger（src/store/pend.ts）"],
+  ["pendIdx", "PendingLedger（src/store/pend.ts）"],
+  ["snapCache", "SnapshotState（src/store/snapshot.ts）"],
+  ["snapWritten", "SnapshotState（src/store/snapshot.ts）"],
+  ["snapBusy", "SnapshotState（src/store/snapshot.ts）"],
+  ["snapChecked", "SnapshotState（src/store/snapshot.ts）"],
+  ["lastManual", "ProxyipView（src/routes/proxyip.ts）"],
+  ["bigTyp", "ShadowTable（src/route/factshadow.ts）"],
+  ["poolAt", "PoolReadyClock（src/px/pickpath.ts）"],
+  ["aliveAt", "WarmPacer（src/px/warm.ts）"],
+  ["vtPend", "VtSyncLedger（src/route/verdict.ts）"],
+  ["vtSent", "VtSyncLedger（src/route/verdict.ts）"],
+  ["vtCool", "VtSyncLedger（src/route/verdict.ts）"],
+  ["vtFlight", "VtSyncLedger（src/route/verdict.ts）"],
+  ["dnsCache", "DnsCache（src/proxy/dial.ts）"],
+  ["v4AllCache", "DnsCache（src/proxy/dial.ts）"],
+  ["aaaaCache", "DnsCache（src/proxy/dial.ts）"],
+  ["cfHttpFlight", "CfHttpState（src/proxy/cfverdict.ts）"],
+  ["nodeSnapCache", "NodeSnapCache（src/store/stats.ts）"],
+  ["probeBad", "ProbeCooldown（src/px/alive.ts）"],
+  ["reProbe", "RetestQueue（src/px/scan.ts）"],
+  ["reProbeN", "RetestQueue（src/px/scan.ts）"],
+  ["usersCache", "UserCache（src/proxy/protocol.ts）"],
+  ["usersSig", "UserCache（src/proxy/protocol.ts）"],
 ]);
 
 const stateSrc = fs.readFileSync("src/core/state.ts", "utf8");

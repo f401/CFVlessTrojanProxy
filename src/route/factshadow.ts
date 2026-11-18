@@ -63,6 +63,14 @@ function chanKey(o: FactObs): string {
   return o.kind === "direct" ? o.host + "|d" : factKey(o);
 }
 
+/** 站点画像观察表：7.369 起从 AppState 下放，大响应只增不减（tiny 判据的尺度） */
+export class ShadowTable {
+  bigTypical = new Map<string, number>();
+}
+
+/** 影子站点画像表的进程内唯一实例 */
+export const SHADOW_TABLE = new ShadowTable();
+
 /**
  * 功能：把一条观测压进本站点的对照环形（同通道的旧观测会被覆盖）。
  * @param {FactObs} o 观测
@@ -77,9 +85,9 @@ export function notePeer(o: FactObs, now: number): void {
   S.peers.set(o.host, next.slice(-8));
   if (S.peers.size > 512) S.peers.clear();
   // bigTypical：只增不减地记录见过的最大响应（宁可把 tiny 判严，也别冤枉业务页）
-  const typ = S.bigTyp.get(o.host) || 0;
-  if ((o.down || 0) > typ) S.bigTyp.set(o.host, o.down || 0);
-  if (S.bigTyp.size > 512) S.bigTyp.clear();
+  const typ = SHADOW_TABLE.bigTypical.get(o.host) || 0;
+  if ((o.down || 0) > typ) SHADOW_TABLE.bigTypical.set(o.host, o.down || 0);
+  if (SHADOW_TABLE.bigTypical.size > 512) SHADOW_TABLE.bigTypical.clear();
 }
 
 /**
@@ -109,7 +117,7 @@ export function shadowCtx(o: FactObs, now: number, lastWriteAt = 0): FactCtx {
   // （那条分支在生产路径上不可达），后者的反向证据检查在 `BLK.note` 里自己做。
   const ctx: FactCtx = {
     now,
-    bigTypical: S.bigTyp.get(o.host) || 0,
+    bigTypical: SHADOW_TABLE.bigTypical.get(o.host) || 0,
     peers,
   };
   // 节流时钟：`commitFact` 用 `factKey` 查（中继腿是 `站点|中继`，直连腿是 `d`），

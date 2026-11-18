@@ -1,6 +1,5 @@
 import { SC } from "./const";
 import { cnt } from "./counter";
-import { S } from "./state";
 
 /**
  * 定时任务的互斥闸门（带截止时间）。
@@ -15,24 +14,26 @@ import { S } from "./state";
  * `cronStale`，一轮最多损失一次重投递窗口（cron 周期 30 分钟，远大于 8 分钟）。
  */
 export class CronLock {
+  /** 闸门持有时刻（0=空闲）：7.369 起由 CronLock 自己持有，不再放 AppState */
+  heldAt = 0;
   /**
    * 功能：尝试持有闸门。
    * @param now 当前时间（毫秒时间戳；测试可注入）
    * @returns 拿到返回 true；正被一轮**未超时**的任务持有则返回 false
    */
-  static claim(now = Date.now()): boolean {
-    const held = S.cronAt;
+  claim(now = Date.now()): boolean {
+    const held = this.heldAt;
     // 没被持有，或持有已超时（上一轮大概率卡死了）→ 可以跑
     if (held && now - held < SC.CRON_STALE_MS) return false;
     // 超时接管要留痕：正常收尾的一轮不会走到这里
     if (held) cnt("cronStale");
-    S.cronAt = now;
+    this.heldAt = now;
     return true;
   }
 
   /** 功能：释放闸门（只在该轮真正收尾时调用） */
-  static release(): void {
-    S.cronAt = 0;
+  release(): void {
+    this.heldAt = 0;
   }
 
   /**
@@ -40,7 +41,10 @@ export class CronLock {
    * @param now 当前时间
    * @returns 0 表示空闲
    */
-  static age(now = Date.now()): number {
-    return S.cronAt ? now - S.cronAt : 0;
+  age(now = Date.now()): number {
+    return this.heldAt ? now - this.heldAt : 0;
   }
 }
+
+/** cron 闸门的进程内唯一实例 */
+export const CRON_LOCK = new CronLock();

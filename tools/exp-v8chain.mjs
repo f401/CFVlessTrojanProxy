@@ -45,7 +45,7 @@ W.DEAD.clear();
 W.EG.clear();
 W.FO.clear();
 W.S.peers.clear();
-W.S.bigTyp.clear();
+W.SHADOW_TABLE.bigTypical.clear();
 
 // ── 1) eg：出口族事实写进去后，v4 的代价倍数应低于 v6 ─────────────────────────
 W.EG.note(IP4, 4, now);

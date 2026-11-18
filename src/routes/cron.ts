@@ -5,7 +5,7 @@ import { BudgetLedger } from "../core/budget-ledger";
 import { BudgetedIO } from "../core/budgeted-io";
 import { S } from "../core/state";
 import { cnt } from "../core/counter";
-import { CronLock } from "../core/lock";
+import { CRON_LOCK } from "../core/lock";
 import { cronScan, flushPx } from "../px/pool";
 import { DNS_BATCH, planRound } from "../route/budget";
 import { runTfb } from "../route/tfb";
@@ -27,13 +27,13 @@ export async function runCron(env: Env, ctx: ExecutionContext): Promise<void> {
   // 同一 isolate 内 JS 单线程，check + set 之间不会被打断。
   // 闸门是「持有时间戳 + 截止时间」：上一轮超过 CRON_STALE_MS 还没收尾就允许接管，
   // 否则一次卡死的 DO 子请求会让这个 isolate 的 cron 永久停摆（连手动 refresh 也被挡）。
-  if (!CronLock.claim()) return;
+  if (!CRON_LOCK.claim()) return;
   ctx.waitUntil(
     (async () => {
       try {
         await cronOnce(env);
       } finally {
-        CronLock.release();
+        CRON_LOCK.release();
       }
     })(),
   );

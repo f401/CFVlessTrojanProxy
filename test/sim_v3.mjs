@@ -150,8 +150,8 @@ function reset() {
   W.S.pend.clear();
   W.S.stats.clear();
   W.S.inflight.clear();
-  W.S.tflush && clearTimeout(W.S.tflush);
-  W.S.tflush = null;
+  W.PEND.flushTimer && clearTimeout(W.PEND.flushTimer);
+  W.PEND.flushTimer = null;
   created.length = 0;
 }
 

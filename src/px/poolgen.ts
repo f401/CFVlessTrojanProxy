@@ -6,7 +6,7 @@ import { NodeStatsTable } from "../nodes/score";
 import { kvGetStrict, kvSet } from "../store/index";
 import { PX_TTL, SEED_KEY } from "./const";
 import { POOL_MAX } from "./probe";
-import { SeedStore } from "./seed";
+import { SEED_STORE } from "./seed";
 
 /* 候选池的代际读写：单独一层，因为提交规则（跨 isolate 单调 + 两阶段锚点）本身就是一段逻辑 */
 
@@ -19,7 +19,7 @@ export async function ensurePool(env: Env) {
   // 内存空 → 读种子表拿当前代际号，再按代际键取池子；
   // 代际号是两阶段提交的锚点，读一个键比扫 px:pool:* 前缀便宜得多
   if (S.pool.length) return S.pool;
-  await SeedStore.read(env);
+  await SEED_STORE.read(env);
   const gen = S.seed.poolGen || 0;
   // 没有代际号说明从没成功提交过池子：返回空，交给 cronScan 去拉源重建
   if (!gen) return [];
@@ -89,9 +89,9 @@ export async function commitPool(env: Env, fresh: PoolEntry[], allowShrink = fal
   S.seed.poolGen = gen;
   // 第二阶段：把锚点写回 seed。写失败时新池子只活在本 isolate 里（冷启动会退回旧代际），
   // 所以失败要重试一次，还不成就记进错误环 —— 不能像以前那样返回 ok 就当已落盘。
-  let w = await SeedStore.write(env, S.colo ? undefined : true, true);
+  let w = await SEED_STORE.write(env, S.colo ? undefined : true, true);
   if (!w.ok) {
-    w = await SeedStore.write(env, S.colo ? undefined : true, true);
+    w = await SEED_STORE.write(env, S.colo ? undefined : true, true);
     if (!w.ok) logErr("pool anchor " + String(w.err || "write").slice(0, 60), "kv");
   }
   return { ok: true, gen, n: newN, anchored: w.ok };

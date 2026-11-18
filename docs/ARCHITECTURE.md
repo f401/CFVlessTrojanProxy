@@ -209,6 +209,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 
 | 类 | 文件 | 独占的可变状态 |
 | --- | --- | --- |
+| `Counter`（`COUNTER`） | `src/core/counter.ts` | 错误/诊断计数账本：键表、计数、当日计数、未送达数四个字段从 `S` 迁入；`cnt`/`cntView`/`cntDelta`/`cntUnsend` 是它的一行委托 |
 | `NodeStatsTable` | `src/nodes/stat.ts` | 全局节点统计表，**纯静态方法**：`nsGet()` / `invalidateRank()` 与九个写入（`nsOk`/`nsProbe`/`nsProbeFail`/`nsFail`/`nsSiteFail`/`nsSpeed`/`nsStall`/`nsLatency`/`nsEmptyClose`）；7.360 起不再有模块级 `STATS` 实例 —— 状态全在 `S.nstat`，实例本身就毫无意义。类型 / 派生纯函数 / 观测三块同在一个文件 |
 | `CandidateBoard`（`CANDS`） | `src/nodes/score.ts` | 候选表：排行（20 秒缓存 + 大池分片重建）、过滤、挑下一个、取最优；缓存与分片游标是它自己的字段，作废靠 `S.rankGen` 代际号（这样 `nodes/stat.ts` 不必反向 import 本文件） |
 | `ScoreModel` | `src/nodes/score.ts` | 一次评分的过程对象（活一次、不跨请求）：构造时取好条目 / 存活项 / 窗口当量，延迟 / 吞吐 / 风险 / 闸门各成一个方法，`parts()` 合成总分；`scoreParts()` 只是 `new ScoreModel(...).parts()` 的一行包装 |
@@ -219,21 +220,27 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `PendingLedger`（`PEND`） | `src/store/pend.ts` | 待上报账本与 flush 定时器：`flush` 只编排（摘批 → 拼体 → 发 → 确认或退回 → 退避），搭车增量由 `PendCarry` 记账（`owner`/`sync`/`rows`） |
 | 池子读写（自由函数 `nsOf` / `pxSet` / `flushPx` / `pxGet` / `aliveList` / `cronScan` / `ensurePool` / `commitPool`） | `src/px/pool.ts` | 候选池的读写口：`pool.ts` 只做再导出与「键 → 统计视图」的换算，存活表与探活冷却在 `alive.ts`、一轮维护在 `scan.ts`、代际提交在 `poolgen.ts`。这里原本还有个 `Pool` 类，9 个静态方法全是「转调同名模块函数」，`src/` 里**零调用点**（生产侧直接调那些函数），7.360 已删 |
 | `AliveBoard`（`ScanHouse.board`） | `src/px/alive.ts` | 存活表：冷启动从种子名单铺底（四档回退）、裁「重罚」、超 `ALIVE_MAX` 按先删不在池里的再删最慢的收缩、补国家码；无字段（状态全在 `S.alive`），7.350 起由收尾执行器 `ScanHouse` 自己持有、不再有模块级 `ALIVE`，`pxGet()`/`aliveList()` 里按需现造一个 |
-| `ProbeCooldown` | `src/px/alive.ts` | 探活坏点表，纯静态方法：`skip()` 判「暂时跳过」、`bump()` 记连续失败、`sweep()` 先删过期再按 `PROBE_BAD_MAX` 淘汰最久没更新的（7.360 起无模块级 `PROBE_COOL` 实例，表本体在 `S.probeCool`） |
+| `NodeSnapCache` (`NODE_SNAP`) | `src/store/stats.ts` | 跨 isolate 节点快照的 60 秒本地缓存：`fresh()` 读、`put()` 写（失败只刷新时间）、`reset()` 清；`nodeSnapGet` 仍是自由函数，只是把缓存交给这个实例 |
+| `ProbeCooldown` (`COOLDOWN`) | `src/px/alive.ts` | 探活坏点表：`rows` 自己持有，`skip()` 判「暂时跳过」、`bump()` 记连续失败、`sweep()` 先删过期再按 `PROBE_BAD_MAX` 淘汰最久没更新的（现由模块实例 `COOLDOWN` 独占，不再寄存在 `S`） |
 | `PoolScan` | `src/px/scan.ts` | 一轮池子维护的**编排**：取池子 → 准入复测 → 探新候选 → 头部复测 → 其余存活项环切刷新 → 裁剪与统计 → 中转实测 → 落盘；顺序只在这一处，三个执行器（`ScanProbe`/`ScanAlive`/`ScanHouse`）与批探活（`probeBatch`）都住在同一个文件里 |
 | `ScanProbe` | `src/px/scan.ts` | 新候选扫描：在「还没有结论」的候选里轮转（全都有结论时退回复检没进池的）、按 `PROBE_CONC` 切成段、成功进存活表并记节点统计、同 /24 慢 3 倍以上的排进下一轮复测 |
+| `RetestQueue`（`RETEST`） | `src/px/scan.ts` | 待复测队列：`ScanProbe` 写、`ScanAlive` 读、`/proxyip` 展示累计次数；键列表上限 8、每次取 4、去重，不再寄存在 `S` 里 |
 | `ScanAlive` | `src/px/scan.ts` | 存活节点复测：准入复测队列（每次 4 条）→ 头部（游标 + 吞吐前 3）→ 其余环切 12 条；只有头部与环切失败记探活失败，复测只做「把延迟拉回来」 |
 | `ScanHouse` | `src/px/scan.ts` | 一轮的收尾（存活表读写器由它自己持有，7.350 起不再有模块级 `ALIVE`）：裁存活表（重罚先出、再按 `ALIVE_MAX`）、补国家码、清节点统计表（6 小时无动静 + 75% 硬上限）、中转实测（每轮最多 2 站点 × 4 节点）、seed 落盘（≥55 分钟） |
 | `SourceHealth`（`SOURCES`） | `src/px/probe.ts` | 池子源健康度（连续失败降权、1 小时冷却、不删源） |
 | `RawProbe` | `src/px/probe.ts` | 一次原始探测的会话（建连 → 写报文 → 按预算收首段字节）：`open` 负责 sslip.io 回退、`tcpMs`/`elapsedMs` 只在建连时刻上算、`peek` 收够/到点/提前判据三选一退出、`close` 保证迟到连上的 socket 也被关（免费计划全局只有 6 个并发 `connect()`）；两个探测只保留「首段字节怎么判」 |
 | `SeedStore` | `src/px/seed.ts` | 跨 isolate 的种子表（只存名字 `{k,h,p,cc}`），纯静态方法（7.360 起无模块级 `SEEDS` 实例，读失败计 `seedReadFail` 的那条路径仍在） |
 | `Selector`（`SEL`） | `src/px/selector.ts` | 门面：十个方法各一行委托给三个执行器，本身不再有算法；失败记账器与换节点器都由它自己持有（7.347 起不再有模块级 `FAILS`，7.356 起不再有模块级 `ROTATION`，同一个 `rotation` 实例也交给记账器） |
+| `PoolReadyClock`（`READY`） | `src/px/pickpath.ts` | 候选池就绪时钟（`S.dnsCache` 那批一起下放）：`lastAttemptAt` 从 `S` 迁入，实例单例，冷启动 60 秒节流；`ensureReady` 经它读写 |
+| `WarmPacer`（`WARM`） | `src/px/warm.ts` | 存活表起搏时钟（`S.aliveAt` 迁入）：5 分钟节流，实例单例 |
 | `PickPath`（`PICK`） | `src/px/pickpath.ts` | 编排：地区硬要求（`?rg=`）与 `current` 的偏好顺序；同文件里还有下面两个类，7.345 起它们由门面自己持有（`PICK.site` / `PICK.paths`），模块级不再有 `SITE` / `PATHS` 两个单例 —— 画像与偏好都只在编排的调用栈里存活，拆成三个文件会让「这次为什么换了节点」分散在三处 import |
 | `SitePick`（`PICK.site`） | `src/px/pickpath.ts` | 站点画像这一层：`pick` 只做编排，五段各一方法 —— `syncCursor`（游标自愈）、`byProfile`（≥3 条样本、首选不超过 2 小时才覆盖全局）、`byShadow`（冷启动影子）、`bySample`（单层抽样 + 负载溢出）、`leastBad`（全池被罚时的兜底） |
 | `ThompsonPicker` | `src/px/ts.ts` | 单层 Thompson 抽样：构造时一次算清「池子大小 → 抽样宽度 → 乐观面 β → 目标流量 → 探活剪枝线 → 池内最快带宽」，`arms()` 逐候选算 σ 与乐观代价，`pickOf()` 按 `TS_BAND` 剪枝后取代价最小；样本不足的臂豁免剪枝（否则「没测过 → 先验慢 → 被剪掉 → 永远没测过」锁死） |
 | `PathPrefs`（`PICK.paths`） | `src/px/pickpath.ts` | 偏好过滤：判定层否决、入口族偏好（非 CF 出口优先，1.5x+50ms 带内）、站点通道偏好、拨号重试的「排除已试过」重扫；只读不写（7.345 起不再是模块级单例，由 `PICK` 持有；`PREFS` 那个名字仍归入口偏好） |
 | `Rotation`（`SEL.rotation`） | `src/px/rotation.ts` | 什么时候换：最短驻留时间（`dwellOf`）、切走判据、扫描后的观察窗与定时复查；无字段（状态在 `S.curs`/`S.lastSwitch`），7.356 起由 `Selector` 持有并注入给 `FailBook`，模块级 `ROTATION` 已撤 |
 | `FailBook`（`SEL.fails`） | `src/px/failbook.ts` | 失败怎么记：节点级失败推进快速失败窗口并重算分数，站点级失败只进站点画像；要切走时调构造注入的 `rotation.maybeSwitch`（7.356 起换节点器由门面持有并传进来，不再引模块级单例） |
+| `DnsCache`（`DNS_CACHE`） | `src/proxy/dial.ts` | DNS 解析缓存：`aaaa`/`v4All`/`aRecord` 三张 Map 从 `S` 迁入，TTL 与上限口径不变；三个 resolve 函数经它读写 |
+| `CfHttpState`（`CF_HTTP`） | `src/proxy/cfverdict.ts` | CF 托管探测的在飞去重表（`S.cfHttpFlight` 迁入）：size>200 清空 |
 | `Dialer` / `RegionPicker` | `src/proxy/dialer.ts`、`region.ts` | `Dialer.open()` 只分派三段：`classify`（CF 托管识别 + 一次 200ms 的事实预热，决定要不要绕中继）、`viaRelay`（循环骨架：`nextCand` 取候选并判四类跳过 —— 解析为空 / 内网地址 / 已试过 / 边缘中继，`attemptRelay` 只拨一次并记账冷却；名额按真实拨号次数算）、`direct`（CF 托管目标先按 A 记录拨 IPv4）；两条直连都走 `guarded` 的有限等待 |
 | `SocketDialer` | `src/proxy/socket-dialer.ts` | 按预算建连，超时后关掉「迟到成功」的 socket（四处手写过的同一条规则，现在只有一份实现） |
 | `MeterDiagnostics`（`MeterEndpoints.diagnostics`） | `src/store/meter-diagnostics.ts` | 计量 DO 的诊断端点（stage/tim/iter/burn/burnjs/crypto/tfb/tf）：每个端点一个方法，不落盘、不碰账目；无状态，7.352 起由端点对象自己持有，模块级 `METER_DIAGNOSTICS` 已撤 |
@@ -269,6 +276,9 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `DeadFacts` | `src/route/deadfacts.ts` | 中继「连不上」事实（唯一允许把候选挪到队尾的事实） |
 | `CapFacts` | `src/route/capfacts.ts` | 吞吐容量表（相对池内中位数的容量比，带噪声门） |
 | `FactShadow` | `src/route/factshadow.ts` | 事实写入决策器的影子统计（% 形，不参与决策） |
+| `ShadowTable`（`SHADOW_TABLE`） | `src/route/factshadow.ts` | 影子统计表本体：`bigTyp` 从 `S` 迁入，实例单例，由 `FactShadow` 使用 |
+| `VtSyncLedger`（`VT_SYNC`） | `src/route/verdict.ts` | 判定表的跨 isolate 同步账本：pending/sent/coolUntil/flight 从 `S` 迁入，7.369 起是实例单例（放 verdict.ts 避免 verdict↔verdictsync 循环 import） |
+| `SnapshotState`（`SNAP`） | `src/store/snapshot.ts` | 快照模块的本地状态：cache/written/checked/busy 从 `S` 迁入，7.369 起实例单例 |
 | `RelPerfTable` | `src/route/relperf.ts` | 站点 × 中继的实测性能表（首字节 / 吞吐，只有 ≥1 MB 的样本才记吞吐） |
 | `Prefs` | `src/route/prefs.ts` | 判定表折成「能打通 / 打不通」两栏，纯静态方法 `of` / `chan` / `json`；7.349 起不再有 `prefsOf`/`chanPref`/`prefsJson` 三个转发函数，7.360 起也不再需要 `PREFS` 实例（`HOOK.chanPref` 槽位注册到 `Prefs.chan`） |
 | `LatObs` | `src/core/obs.ts` | 首字节 / 总耗时 / 抖动三类窗口统计器 |
@@ -293,6 +303,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `ProxySession` | `src/proxy/session.ts` | WebSocket 数据面的会话对象，7.362 起只剩「解析参数 / 起管道 101 / 帧分派」：首帧解析交给 `FirstFrame`、路由决策交给 `SessionRouter`、DNS 交给 `DnsLane`、收尾交给 `SessionTail`；`?rg=` 用的 `RegionPicker` 与额度闸门也由它持有 |
 | `UploadStream` | `src/proxy/ws-in.ts` | 客户端 → 上游的上行字节流：积压计数、超限关连接（1013）、正常关闭与异常各自收尾；`wsToStream()` 只是 `new UploadStream(ws, early).stream` |
 | `UserIndex` | `src/proxy/protocol.ts` | 用户表装配器：env（`uuid`/`uuids`、`trojan` 单密码与 `user:pass` 多密码）与 KV 托管用户合成一张表，维护「启用 id 集合」与「密码摘要 → 稳定 owner」；托管记录最后写，因此能覆盖 env 的启用状态 |
+| `UserCache`（`USERS`） | `src/proxy/protocol.ts` | 用户表缓存：正常路径每次读 KV，内存表只在 KV 故障时兜底并返回 `ok=false`，故障后时间戳设成已过期以便下一请求立即重试 |
 | `DebugNets` | `src/routes/debug-nets.ts` | 会对外拨号的诊断分支门面：七个分支在四个组件里，这里只按「只读 → 测速 → 诊断 → 探活 → 抓源 → 钉住 → 明文 HTTP → 判定批 → 真握手 → 回填 → seed → 兜底」然后按顺序派发（顺序变了，`?diag=x&refill=1` 会先花一次抓源）。7.344 起四个组件（`benchRunner`/`diagRunner`/`probeRunner`/`tfRunner`）由它自己持有，不再是模块级单例 |
 | `DebugBench` | `src/routes/debug-nets.ts` | 出口测速（花 fetch 子请求，同文件） |
 | `DebugDiag`（`DIAGONE`） | `src/routes/debug-nets.ts` | 站点诊断：`diag()` 只编排，六段细节各一方法（取样本 / 主动探活 / 证据选择 / CF 事实 / 本 isolate 判定 / DO 封锁环） |

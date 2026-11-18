@@ -1,4 +1,3 @@
-import { S } from "../core/state";
 import { CONNECT_MS, timeoutSignal, withTimeout } from "../core/util";
 import { isCfIp, isPrivateHost } from "../core/net";
 import { splitRelay } from "../core/relay-addr";
@@ -7,7 +6,101 @@ import { isBudgetExhausted } from "../core/budget-ledger";
 
 export { DENY_PORTS, checkTarget, isPrivateHost } from "../core/net";
 
+/**
+ * DNS 解析缓存：本 isolate 内的 A / AAAA / 全部 A 记录。
+ * 每类缓存的 TTL 与上限不同（A/AAAA：5 分钟、500 条；全部 A：10 分钟、300 条），
+ * 超限沿用「整表清空」口径，避免热路径里排序淘汰的开销。
+ */
+export class DnsCache {
+  /** AAAA 记录缓存 */
+  readonly aaaa = new Map<string, { ip: string; t: number }>();
+  /** 全部 A 记录缓存 */
+  readonly v4All = new Map<string, { ips: string[]; t: number }>();
+  /** v4 单条 A 记录缓存 */
+  readonly aRecord = new Map<string, { ip: string; t: number }>();
 
+  /**
+   * 读 AAAA 缓存：命中且未过期才返回。
+   * @param domain 域名
+   * @param now 当前时刻（毫秒时间戳）
+   * @returns IPv6 地址，未命中或过期返回 null
+   */
+  aaaaHit(domain: string, now: number): string | null {
+    const hit = this.aaaa.get(domain);
+    return hit && now - hit.t < 300000 ? hit.ip : null;
+  }
+
+  /**
+   * 写 AAAA 缓存（超限整表清空）。
+   * @param domain 域名
+   * @param ip IPv6 地址
+   * @param now 当前时刻（毫秒时间戳）
+   * @returns 无
+   */
+  aaaaSet(domain: string, ip: string, now: number): void {
+    if (this.aaaa.size > 500) this.aaaa.clear();
+    this.aaaa.set(domain, { ip, t: now });
+  }
+
+  /**
+   * 读全部 A 记录缓存：命中且未过期才返回。
+   * @param domain 域名
+   * @param now 当前时刻（毫秒时间戳）
+   * @returns IPv4 列表，未命中或过期返回 null
+   */
+  v4AllHit(domain: string, now: number): string[] | null {
+    const hit = this.v4All.get(domain);
+    return hit && now - hit.t < 600000 ? hit.ips : null;
+  }
+
+  /**
+   * 写全部 A 记录缓存（超限整表清空）。
+   * @param domain 域名
+   * @param ips IPv4 列表
+   * @param now 当前时刻（毫秒时间戳）
+   * @returns 无
+   */
+  v4AllSet(domain: string, ips: string[], now: number): void {
+    if (this.v4All.size > 300) this.v4All.clear();
+    this.v4All.set(domain, { ips, t: now });
+  }
+
+  /**
+   * 读单条 A 记录缓存：命中且未过期才返回。
+   * @param domain 域名
+   * @param now 当前时刻（毫秒时间戳）
+   * @returns IPv4 地址，未命中或过期返回 null
+   */
+  v4Hit(domain: string, now: number): string | null {
+    const hit = this.aRecord.get(domain);
+    return hit && now - hit.t < 300000 ? hit.ip : null;
+  }
+
+  /**
+   * 写单条 A 记录缓存（超限整表清空）。
+   * @param domain 域名
+   * @param ip IPv4 地址
+   * @param now 当前时刻（毫秒时间戳）
+   * @returns 无
+   */
+  v4Set(domain: string, ip: string, now: number): void {
+    if (this.aRecord.size > 500) this.aRecord.clear();
+    this.aRecord.set(domain, { ip, t: now });
+  }
+
+  /**
+   * 清空三类缓存（测试与诊断用）。
+   * @returns 无
+   */
+  clear(): void {
+    this.aaaa.clear();
+    this.v4All.clear();
+    this.aRecord.clear();
+  }
+}
+
+/** DNS 缓存单例：只在本模块内使用，测试通过 test-surface 取同一个实例 */
+export const DNS = new DnsCache();
 
 /** 查 AAAA 记录（用于绕过 CF 对 IPv4 的内部隔离） */
 export const DOH_ENDPOINTS = [
@@ -72,12 +165,11 @@ export async function probeFam(host: string, quota: BudgetedIO = BudgetedIO.unli
  * @returns {Promise<string|null>} IPv6 地址或 null
  */
 export async function resolveAAAA(domain: string, quota: BudgetedIO = BudgetedIO.unlimited()) {
-  const hit = S.aaaaCache.get(domain);
-  if (hit && Date.now() - hit.t < 300000) return hit.ip;
+  const hit = DNS.aaaaHit(domain, Date.now());
+  if (hit) return hit;
   const ip = await dohQuery(domain, "AAAA", quota);
   if (!ip) return null;
-  if (S.aaaaCache.size > 500) S.aaaaCache.clear();
-  S.aaaaCache.set(domain, { ip, t: Date.now() });
+  DNS.aaaaSet(domain, ip, Date.now());
   return ip;
 }
 
@@ -88,8 +180,8 @@ export async function resolveAAAA(domain: string, quota: BudgetedIO = BudgetedIO
  * @returns {Promise<string[]>} IPv4 列表（可能为空）
  */
 export async function resolveV4All(domain: string, quota: BudgetedIO = BudgetedIO.unlimited()): Promise<string[]> {
-  const hit = S.v4AllCache.get(domain);
-  if (hit && Date.now() - hit.t < 600000) return hit.ips;
+  const hit = DNS.v4AllHit(domain, Date.now());
+  if (hit) return hit;
   const ips: string[] = [];
   for (const base of DOH_ENDPOINTS) {
     try {
@@ -107,8 +199,7 @@ export async function resolveV4All(domain: string, quota: BudgetedIO = BudgetedI
     }
   }
   if (!ips.length) return [];
-  if (S.v4AllCache.size > 300) S.v4AllCache.clear();
-  S.v4AllCache.set(domain, { ips, t: Date.now() });
+  DNS.v4AllSet(domain, ips, Date.now());
   return ips;
 }
 export const isV6Literal = (h: string) => typeof h === "string" && h.includes(":");
@@ -133,12 +224,11 @@ export function expandV6(a: string) {
  * @returns {Promise<string>} IPv4 地址
  */
 export async function resolveV4(domain: string, quota: BudgetedIO = BudgetedIO.unlimited()) {
-  const hit = S.dnsCache.get(domain);
-  if (hit && Date.now() - hit.t < 300000) return hit.ip;
+  const hit = DNS.v4Hit(domain, Date.now());
+  if (hit) return hit;
   const ip = await dohQuery(domain, "A", quota);
   if (!ip) throw new Error("DNS 无 A 记录");
-  if (S.dnsCache.size > 500) S.dnsCache.clear();
-  S.dnsCache.set(domain, { ip, t: Date.now() });
+  DNS.v4Set(domain, ip, Date.now());
   return ip;
 }
 

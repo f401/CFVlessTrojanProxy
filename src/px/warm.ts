@@ -5,7 +5,15 @@ import { S } from "../core/state";
 import { isCfIp } from "../core/net";
 import { NodeStatsTable } from "../nodes/score";
 import { chunks, probeProxy } from "./probe";
-import { bumpProbeBad, ensurePool, noteProbe, ProbeCooldown } from "./pool";
+import { bumpProbeBad, COOLDOWN, ensurePool, noteProbe } from "./pool";
+
+/** 冷启动起搏的节流时钟：7.369 起从 AppState 下放，只有本模块读写 */
+export class WarmPacer {
+  lastProbeAt = 0;
+}
+
+/** 冷启动起搏时钟的进程内唯一实例 */
+export const WARM = new WarmPacer();
 
 /**
  * 功能：冷 isolate 的按需起搏 —— 一条存活中继都没有时，就地探几个候选写进 `S.alive`。
@@ -20,9 +28,9 @@ export async function seedAlive(env: Env, n = SC.PROBE_CONC): Promise<number> {
   if (!pool.length || S.alive.size) return 0;
   const now = Date.now();
   // 节流 5 分钟：冷启动只该付一次代价，不能让每个冷请求都烧 6 条连接。
-  if (now - (S.aliveAt || 0) < 300000) return 0;
-  S.aliveAt = now;
-  const cand = pool.filter((c) => !ProbeCooldown.skip(c.h + ":" + c.p));
+  if (now - (WARM.lastProbeAt || 0) < 300000) return 0;
+  WARM.lastProbeAt = now;
+  const cand = pool.filter((c) => !COOLDOWN.skip(c.h + ":" + c.p));
   // 非 CF 网段优先：CF 边缘地址做中继时对 CF 托管站点是 CF→CF，改判不了地址族。
   const nonCf = cand.filter((c) => !isCfIp(c.h));
   const pick = (nonCf.length ? nonCf : cand).slice(0, Math.max(1, n));

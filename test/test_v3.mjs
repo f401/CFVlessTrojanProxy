@@ -331,15 +331,15 @@ eq("都没有返回空串", W.PEND.id({}), "");
 /* ---------- 用户表：托管启用状态 / 密码覆盖 ---------- */
 {
   const kv = (users) => ({ get: async (k) => (k === "users" ? JSON.stringify(users) : null) });
-  W.S.usersCache = { v: null, t: 0 };
-  W.S.usersSig = "";
+  W.USERS.v = null; W.USERS.t = 0;
+  W.USERS.sig = "";
   const envD = { uuid: UUID, STATS: kv([{ id: UUID, pwd: "pw-managed", enabled: false, managed: true }]) };
   const aD = await W.loadUsers(envD);
   eq("托管禁用覆盖 env 启用状态", aD.uuids.has(UUID), false);
   eq("禁用用户不注册 Trojan", aD.trojan.size, 0);
 
-  W.S.usersCache = { v: null, t: 0 };
-  W.S.usersSig = "";
+  W.USERS.v = null; W.USERS.t = 0;
+  W.USERS.sig = "";
   const envE = {
     uuid: UUID,
     pwd: "pw-env",
@@ -351,15 +351,15 @@ eq("都没有返回空串", W.PEND.id({}), "");
 
   // 单密码模式下多个 env 用户共享哈希：归属要稳定，禁用一人不能误删另一人
   const U2 = "df1af8dd-3efe-407b-a5b6-4950afa4ac6f";
-  W.S.usersCache = { v: null, t: 0 };
-  W.S.usersSig = "";
+  W.USERS.v = null; W.USERS.t = 0;
+  W.USERS.sig = "";
   const shared = { uuids: UUID + "," + U2, pwd: "same-pwd", STATS: kv([]) };
   const aS = await W.loadUsers(shared);
   eq("共享密码只注册一个哈希", aS.trojan.size, 1);
   eq("共享密码归属第一个用户", [...aS.trojan.values()][0], UUID);
 
-  W.S.usersCache = { v: null, t: 0 };
-  W.S.usersSig = "";
+  W.USERS.v = null; W.USERS.t = 0;
+  W.USERS.sig = "";
   const sharedOff = { uuids: UUID + "," + U2, pwd: "same-pwd", STATS: kv([{ id: U2, enabled: false, managed: true }]) };
   const aOff = await W.loadUsers(sharedOff);
   eq("禁用共享用户之一不撤掉另一人", [...aOff.trojan.values()][0], UUID);
@@ -373,8 +373,8 @@ eq("都没有返回空串", W.PEND.id({}), "");
     trojan: new Map(),
     list: [{ id: UUID, pwd: "pw", enabled: true, managed: true, note: "" }],
   };
-  W.S.usersCache = { v: fake, t: Date.now() - 400000 };
-  W.S.usersSig = UUID + "|pw";
+  W.USERS.v = fake; W.USERS.t = Date.now() - 400000;
+  W.USERS.sig = UUID + "|pw";
   const envFailUsers = {
     uuid: UUID,
     pwd: "pw",
@@ -386,8 +386,8 @@ eq("都没有返回空串", W.PEND.id({}), "");
   };
   const a = await W.loadUsers(envFailUsers);
   ok("KV 读失败沿用旧用户表", a.uuids.has(UUID));
-  W.S.usersCache = { v: null, t: 0 };
-  W.S.usersSig = "";
+  W.USERS.v = null; W.USERS.t = 0;
+  W.USERS.sig = "";
 }
 
 /* ---------- cron 并发闸：重投递 / 手动 refresh 撞车不双跑 ---------- */
@@ -396,7 +396,7 @@ eq("都没有返回空串", W.PEND.id({}), "");
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response("", { status: 200 });
   try {
-    W.S.cronAt = 0;
+    W.CRON_LOCK.heldAt = 0;
     let done = null;
     const ctx1 = {
       waitUntil: (p) => {
@@ -406,9 +406,9 @@ eq("都没有返回空串", W.PEND.id({}), "");
     const envCron = { STATS: { get: async () => null, put: async () => {} }, pxSchedH: "0" };
     await W.runCron(envCron, ctx1);
     await done; // 等 waitUntil 的任务真正跑完，闸门必须回到 false
-    eq("runCron 结束后闸门释放", W.S.cronAt, 0);
+    eq("runCron 结束后闸门释放", W.CRON_LOCK.heldAt, 0);
 
-    W.S.cronAt = Date.now();
+    W.CRON_LOCK.heldAt = Date.now();
     let skipped = null;
     await W.runCron(envCron, {
       waitUntil: (p) => {
@@ -416,11 +416,11 @@ eq("都没有返回空串", W.PEND.id({}), "");
       },
     });
     await new Promise((r) => setTimeout(r, 30));
-    ok("cron 忙时不重复跑（闸门保持）", W.S.cronAt > 0);
+    ok("cron 忙时不重复跑（闸门保持）", W.CRON_LOCK.heldAt > 0);
     eq("cron 忙时不排新任务", skipped, null);
   } finally {
     globalThis.fetch = realFetch;
-    W.S.cronAt = 0;
+    W.CRON_LOCK.heldAt = 0;
   }
 }
 
@@ -437,7 +437,7 @@ eq("都没有返回空串", W.PEND.id({}), "");
     cnt: null,
   };
   W.S.seed = seedDoc;
-  W.S.seedAt = now;
+  W.SEED_STORE.readAt = now;
   W.S.seedDirty = true;
   let puts = 0;
   const envSeed = {
@@ -740,8 +740,8 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
 
 /* ---------- KV 读失败且无缓存：loadUsers 必须标记 ok=false ---------- */
 {
-  W.S.usersCache = { v: null, t: 0 };
-  W.S.usersSig = "";
+  W.USERS.v = null; W.USERS.t = 0;
+  W.USERS.sig = "";
   const a = await W.loadUsers({
     uuid: UUID,
     pwd: "pw",
@@ -753,8 +753,8 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   });
   eq("KV 失败无缓存时 ok=false", a.ok, false);
   ok("仍然保留 env 用户", a.uuids.has(UUID));
-  W.S.usersCache = { v: null, t: 0 };
-  W.S.usersSig = "";
+  W.USERS.v = null; W.USERS.t = 0;
+  W.USERS.sig = "";
 }
 
 /* ---------- 地区列表：去重后再截断 ---------- */
@@ -783,7 +783,7 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
     byColo: { "*": { ts: 1, nodes: [] } },
     cnt: null,
   };
-  W.S.seedAt = 0;
+  W.SEED_STORE.readAt = 0;
   for (let i = 0; i < 40; i++) {
     W.S.seed.byColo["*"].nodes.push({ k: `old${i}:443`, h: `old${i}`, p: 443, cc: "", ms: 100 });
   }
@@ -799,7 +799,7 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
       },
     },
   };
-  await W.SeedStore.write(envSeed, true, true);
+  await W.SEED_STORE.write(envSeed, true, true);
   const doc = JSON.parse(saved);
   const names = doc.byColo["*"].nodes.map((n) => n.k);
   eq("名单不超过 SEED_MAX（200）", names.length, 45);
@@ -811,8 +811,8 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
 
 /* ---------- 落盘前读失败：不能拿空表覆盖旧快照 ---------- */
 {
-  W.S.seedAt = 0;
-  W.S.seedReadFail = false;
+  W.SEED_STORE.readAt = 0;
+  W.SEED_STORE.readFailed = false;
   let puts = 0;
   const envDown = {
     STATS: {
@@ -824,21 +824,21 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
       },
     },
   };
-  const rw = await W.SeedStore.write(envDown, true, true);
+  const rw = await W.SEED_STORE.write(envDown, true, true);
   eq("seed 读失败时拒绝落盘", rw.ok, false);
   eq("seed 读失败时一次都没写", puts, 0);
 
   // 有原始值但解不出来（损坏 / KEK 变了）也必须按读失败处理
-  W.S.seedAt = 0;
-  W.S.seedReadFail = false;
+  W.SEED_STORE.readAt = 0;
+  W.SEED_STORE.readFailed = false;
   puts = 0;
   const envBad = { STATS: { get: async () => "not-json", put: async () => puts++ } };
-  const rb = await W.SeedStore.write(envBad, true, true);
+  const rb = await W.SEED_STORE.write(envBad, true, true);
   eq("seed 值损坏时拒绝落盘", rb.ok, false);
   eq("seed 值损坏时一次都没写", puts, 0);
 
-  W.S.snapChecked = 0;
-  W.S.snapBusy = false;
+  W.SNAP.checked = 0;
+  W.SNAP.busy = false;
   W.S.stats.set("flush-u", { up: 1, down: 2, conns: 1, first: Date.now(), last: Date.now() });
   await W.flushSnap(envDown, true);
   eq("snap 读失败时不覆盖旧快照", puts, 0);

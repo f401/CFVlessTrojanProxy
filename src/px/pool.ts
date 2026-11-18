@@ -5,7 +5,7 @@ import { commitPool, ensurePool } from "./poolgen";
 
 import { SEED_WRITE_GAP } from "../core/const";
 import { capOf, p90Of, pFailOf, pStallOf, pctOf, scoreParts } from "../nodes/score";
-import { SeedStore } from "./seed";
+import { SEED_STORE } from "./seed";
 import { S } from "../core/state";
 import { pxGet } from "./alive";
 
@@ -13,7 +13,7 @@ import { pxGet } from "./alive";
 // 存活表与探活冷却搬去 ./alive；一轮维护搬去 ./scan。这里全部原样再导出，
 // 让 `../px/pool` 依旧是候选池的唯一入口（调用点与单测零改动）。
 export { commitPool, ensurePool };
-export { ALIVE_MAX, AliveBoard, ProbeCooldown, SEED_COLD_N, aliveList, bumpProbeBad, noteProbe, pxGet } from "./alive";
+export { ALIVE_MAX, AliveBoard, ProbeCooldown, COOLDOWN, SEED_COLD_N, aliveList, bumpProbeBad, noteProbe, pxGet } from "./alive";
 export { PoolScan, cronScan } from "./scan";
 
 /* 代理节点：状态 / 信誉分桶 / 选择 / cron */
@@ -94,5 +94,5 @@ export async function flushPx(env: Env, force?: boolean) {
     if (Date.now() - last < SEED_WRITE_GAP) return { ok: true, skipped: true };
   }
   S.nsWriteAt = Date.now();
-  return SeedStore.write(env, S.colo ? undefined : true, !!force);
+  return SEED_STORE.write(env, S.colo ? undefined : true, !!force);
 }

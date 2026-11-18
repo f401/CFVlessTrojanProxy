@@ -410,9 +410,9 @@ reset();
 const c3 = new W.Connection({}, {}, "tput", "");
 c3.id = "u-test";
 c3.node = "n9:443";
-const nBefore = W.S.cnt.node || 0;
+const nBefore = W.COUNTER.values.node || 0;
 c3.flush(true);
-eq("零字节收尾也计入 node", W.S.cnt.node, nBefore + 1);
+eq("零字节收尾也计入 node", W.COUNTER.values.node, nBefore + 1);
 
 // 面板明细按需生成：只算要展示的节点
 reset();
@@ -738,7 +738,7 @@ eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1
       }),
     },
   });
-  W.S.nodeSnapCache = { t: 0, v: {} };
+  W.NODE_SNAP.reset();
   const snap = await W.nodeSnapGet(mkEnv(), "u1");
   eq("nodeSnapGet 拿到 DO 里的节点快照", Object.keys(snap), ["a:443"]);
   const again = await W.nodeSnapGet(mkEnv(), "u1");
@@ -755,7 +755,7 @@ eq("别名域名按族选节点", W.SEL.pick({ pxShadow: 0 }, "lat", stFam), "g1
       }),
     },
   };
-  W.S.nodeSnapCache = { t: 0, v: {} };
+  W.NODE_SNAP.reset();
   eq("DO 挂了返回空表而不是抛错", await W.nodeSnapGet(bad, "u1"), {});
 }
 
@@ -930,8 +930,8 @@ W.hostNodeMark("site-seed.test", "hpb:443", { bps: 2 * 1048576 });
     },
   };
   W.S.colo = "TST";
-  W.S.seedAt = 0;
-  await W.SeedStore.write(env, false, true);
+  W.SEED_STORE.readAt = 0;
+  await W.SEED_STORE.write(env, false, true);
   const doc = JSON.parse(box.get([...box.keys()][0]));
   const row = doc.byColo.TST.nodes.find((x) => x.k === "hpb:443");
   eq("seed 只存候选名单的四个字段", row ? Object.keys(row).sort().join(",") : "", "cc,h,k,p");
@@ -940,9 +940,9 @@ W.hostNodeMark("site-seed.test", "hpb:443", { bps: 2 * 1048576 });
   W.S.alive.clear();
   W.S.nstat.clear();
   W.S.hostNode.clear();
-  W.S.seedAt = 0;
+  W.SEED_STORE.readAt = 0;
   W.S.seed = { v: 0, ts: 0, poolGen: 0, poolN: 0, builtAt: 0, byColo: {} };
-  await W.SeedStore.read(env);
+  await W.SEED_STORE.read(env);
   await W.pxGet(env);
   eq("别的 isolate 只用名字起步（延迟=先验）", (W.S.alive.get("hpb:443") || {}).ms, 250);
   eq("没有任何统计被灌进来", W.S.nstat.has("hpb:443"), false);
@@ -1044,7 +1044,7 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
 
 // rtt 老键不存在时只读一次 KV：订阅轮询不能每次都打一次
 {
-  W.S.snapCache = { v: { v: 1, ts: 1, date: "", stats: {}, rtt: {}, errs: [] }, t: Date.now() };
+  W.SNAP.cache = { v: { v: 1, ts: 1, date: "", stats: {}, rtt: {}, errs: [] }, t: Date.now() };
   W.S.rttMiss.clear();
   let reads = 0;
   const envR = {
@@ -1087,36 +1087,36 @@ eq("站点样本过期 → 退回全局", W.SEL.pick({ pxShadow: 0 }, "lat", { h
   };
   W.S.stats.set("snap-u", { up: 1, down: 2, conns: 1, first: Date.now(), last: Date.now() });
   W.S.snapBytes = 3 * 1048576;
-  W.S.snapWritten = Date.now() - 3 * 3600e3;
-  W.S.snapChecked = 0;
-  W.S.snapBusy = false;
+  W.SNAP.written = Date.now() - 3 * 3600e3;
+  W.SNAP.checked = 0;
+  W.SNAP.busy = false;
   await W.flushSnap(envS);
   await W.flushSnap(envS);
   eq("快照全局闸门只读一次 KV", gets, 1);
   eq("闸门命中不写 KV", puts, 0);
   W.S.stats.clear();
   W.S.snapBytes = 0;
-  W.S.snapWritten = 0;
-  W.S.snapChecked = 0;
+  W.SNAP.written = 0;
+  W.SNAP.checked = 0;
 }
 
 // 日计数批次失败要能退回基线，否则这批连接数永久丢
 {
-  W.S.cntDay = new Date().toISOString().slice(0, 10);
-  W.S.cnt.conn = 7;
-  W.S.cntSent.conn = 0;
+  W.COUNTER.day = new Date().toISOString().slice(0, 10);
+  W.COUNTER.values.conn = 7;
+  W.COUNTER.sent.conn = 0;
   const dl = W.cntDelta();
   eq("cntDelta 取出增量", dl.conn, 7);
-  eq("cntDelta 推进基线", W.S.cntSent.conn, 7);
+  eq("cntDelta 推进基线", W.COUNTER.sent.conn, 7);
   W.cntUnsend(dl);
-  eq("cntUnsend 退回基线", W.S.cntSent.conn, 0);
-  W.S.cnt.conn = 0;
-  W.S.cntSent.conn = 0;
+  eq("cntUnsend 退回基线", W.COUNTER.sent.conn, 0);
+  W.COUNTER.values.conn = 0;
+  W.COUNTER.sent.conn = 0;
   // 跨天出口也要清零，不能把昨天的计数继续发出去
-  W.S.cntDay = "2000-01-01";
-  W.S.cnt.conn = 9;
+  W.COUNTER.day = "2000-01-01";
+  W.COUNTER.values.conn = 9;
   eq("跨天后计数不再发送", Object.keys(W.cntDelta()).length, 0);
-  W.S.cntDay = new Date().toISOString().slice(0, 10);
+  W.COUNTER.day = new Date().toISOString().slice(0, 10);
 }
 
 // 真实成功要解除冻结，否则一个 30 分钟冻结只有等它自己过期
@@ -1161,8 +1161,8 @@ eq("影子失败冻结节点", W.isFrozen("tr:443"), true);
       }),
     },
   };
-  W.S.usersCache = { v: null, t: 0 };
-  W.S.usersSig = "";
+  W.USERS.v = null; W.USERS.t = 0;
+  W.USERS.sig = "";
   W.S.meterCache.clear();
   await W.usageSnapWrite(envU, [{ id: envU.uuid, pwd: "", note: "", enabled: true, managed: false }]);
   const doc = JSON.parse(box.get("usage:snap"));
@@ -1744,7 +1744,7 @@ W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 9
 eq("之后拿到大响应 → 解除误判", W.VT.state("x.com", "r:45.136.117.194"), 1);
 
 // 第 35 组：判定表跨 isolate 同步（只同步强证据）
-W.VT.clear(); W.S.vtSent.clear();
+W.VT.clear(); W.VT_SYNC.sent.clear();
 W.VT.set("x.com", "r:" + "45.136.117.194", 403, 60, 1);
 const dl = W.HOOK.vtDelta();
 eq("强证据进增量", dl.length, 1);
@@ -1759,7 +1759,7 @@ eq("远端强证据可导入", W.VT.state("x.com", "r:45.136.117.194"), 2);
 ok("导入后 veto 生效", W.HOOK.veto("x.com", "45.136.117.194") === true);
 W.VT.set("y.com", "r:" + "1.1.1.1", 200, 40, 1);
 ok("ok 证据不进增量", W.HOOK.vtDelta().every((r) => r.k !== "y.com|r:1.1.1.1"));
-W.VT.clear(); W.S.vtSent.clear();
+W.VT.clear(); W.VT_SYNC.sent.clear();
 // 第 36 组：策略分级（0 影子 / 1 只硬规则 / 2 全生效）
 reset(); node("n1:443", {});
 const reqV6 = new Request("https://x/", { headers: { "cf-connecting-ip": "2001:db8::1" } });
@@ -2284,21 +2284,21 @@ console.log("\n72) 探活失败过期");
   const t0 = 1_700_000_000_000;
   ok("阈值是 3", W.SC.SCAN_BAD_MAX === 3, String(W.SC.SCAN_BAD_MAX));
   ok("过期时长 30 分钟", W.SC.PROBE_BAD_TTL === 1800000, String(W.SC.PROBE_BAD_TTL));
-  ok("没失败过不跳过", W.ProbeCooldown.skip(key, t0) === false, "false");
+  ok("没失败过不跳过", W.COOLDOWN.skip(key, t0) === false, "false");
   W.bumpProbeBad(key, false, t0);
-  ok("失败 1 次不跳过", W.ProbeCooldown.skip(key, t0) === false, "false");
+  ok("失败 1 次不跳过", W.COOLDOWN.skip(key, t0) === false, "false");
   W.bumpProbeBad(key, false, t0 + 1000);
   W.bumpProbeBad(key, false, t0 + 2000);
-  ok("连续 3 次后跳过", W.ProbeCooldown.skip(key, t0 + 3000) === true, "true");
-  ok("30 分钟后自动作废", W.ProbeCooldown.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 1) === false, "false");
+  ok("连续 3 次后跳过", W.COOLDOWN.skip(key, t0 + 3000) === true, "true");
+  ok("30 分钟后自动作废", W.COOLDOWN.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 1) === false, "false");
   // 真正过了 TTL 之后再失败，才算新一轮
   W.bumpProbeBad(key, false, t0 + 2000 + W.SC.PROBE_BAD_TTL + 5000);
-  ok("过期后再失败从 1 重新数（还不跳过）", W.ProbeCooldown.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 5000) === false, "false");
+  ok("过期后再失败从 1 重新数（还不跳过）", W.COOLDOWN.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 5000) === false, "false");
   W.bumpProbeBad(key, false, t0 + 2000 + W.SC.PROBE_BAD_TTL + 6000);
   W.bumpProbeBad(key, false, t0 + 2000 + W.SC.PROBE_BAD_TTL + 7000);
-  ok("重新数满 3 次又跳过", W.ProbeCooldown.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 7000) === true, "true");
+  ok("重新数满 3 次又跳过", W.COOLDOWN.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 7000) === true, "true");
   W.bumpProbeBad(key, true, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000);
-  ok("探活成功立刻清除", W.ProbeCooldown.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000) === false, "false");
+  ok("探活成功立刻清除", W.COOLDOWN.skip(key, t0 + 2000 + W.SC.PROBE_BAD_TTL + 8000) === false, "false");
 }
 
 console.log("\n73) 业务 4xx 不被误升级成封锁");
@@ -2532,7 +2532,7 @@ console.log("\n79) 同窗口对照与 bigTypical（影子从此能算出「本�
 {
   W.FACT.clear();
   W.S.peers.clear();
-  W.S.bigTyp.clear();
+  W.SHADOW_TABLE.bigTypical.clear();
   const H = "cmp.example";
   const ev = (x) => ({ host: H, via: "node", node: "45.136.117.194:443", down: 0, ok: true, life: 900, up: 0, ...x });
   const A = "45.136.117.194:443";
@@ -2542,13 +2542,13 @@ console.log("\n79) 同窗口对照与 bigTypical（影子从此能算出「本�
   eq("另一条中继的 tiny + 有整页对照 → B 级证据", W.FACT.observe(ev({ node: B, down: 737, ok: false, life: 80 }), t0 + 1000), "R_TINY_PEER");
   eq("同一中继 ≥60s 后再来仍是 B 级（不写事实）", W.FACT.observe(ev({ node: B, down: 737, ok: false, life: 80 }), t0 + 70000), "R_TINY_PEER");
   eq("本会写封锁的仍然是 0 条（封锁只由 BLK.note 三批投票写）", W.FACT.snap().would.blk || 0, 0);
-  eq("bigTypical 取见过的最大响应", W.S.bigTyp.get(H), 45290);
+  eq("bigTypical 取见过的最大响应", W.SHADOW_TABLE.bigTypical.get(H), 45290);
   eq("737B 对 45KB 的典型页算 tiny", W.isTiny({ kind: "relay", host: H, relay: "1.2.3.4", at: t0, down: 737, status: 403 }, 45290), true);
   eq("1277B 对自身同尺寸的典型页不算 tiny", W.isTiny({ kind: "relay", host: H, relay: "1.2.3.4", at: t0, down: 1277, status: 415 }, 1277), false);
   const C = "contra.example";
   W.FACT.clear();
   W.S.peers.clear();
-  W.S.bigTyp.clear();
+  W.SHADOW_TABLE.bigTypical.clear();
   W.JUDGE.memory.bigByHost.set(C, t0);
   const cev = (x) => ({ host: C, via: "node", node: A, down: 0, ok: true, life: 900, up: 0, ...x });
   eq("先喂一条整页当对照", W.FACT.observe(cev({ node: B, down: 30000, ok: true }), t0), "ok");
@@ -2556,7 +2556,7 @@ console.log("\n79) 同窗口对照与 bigTypical（影子从此能算出「本�
   eq("同通道 3 分钟内出过整页：commitFact 仍只给 B 级，反向证据由 BLK.note 判", W.FACT.observe(cev({ down: 737, ok: false }), t0 + 62000), "R_TINY_PEER");
   W.FACT.clear();
   W.S.peers.clear();
-  W.S.bigTyp.clear();
+  W.SHADOW_TABLE.bigTypical.clear();
   W.JUDGE.memory.bigByHost.delete(C);
 }
 
@@ -2606,7 +2606,7 @@ console.log("\n80) 站点 × 中继成功率（ps）：只折价、不剔候选"
   eq("历史很差的通道仍然是候选（只折价不剔除）", d2.chan.ip, "203.0.113.11");
   W.PS.clear();
   W.S.peers.clear();
-  W.S.bigTyp.clear();
+  W.SHADOW_TABLE.bigTypical.clear();
 }
 
 
@@ -2653,7 +2653,7 @@ console.log("\n81) 中继「连不上」（dead）：唯一允许挪到队尾的
   eq("全池判死时仍返回候选（不返回空）", ["203.0.113.71", "203.0.113.72"].includes(d3.chan.ip), true);
   W.DEAD.clear();
   W.S.peers.clear();
-  W.S.bigTyp.clear();
+  W.SHADOW_TABLE.bigTypical.clear();
 }
 
 
@@ -2732,7 +2732,7 @@ console.log("\n83) 单 IP 封锁（blk）：三批 × 每批 3 次、只折价�
   eq("只剩被判封锁的一条时仍然用它（永不剔候选）", d2.chan.ip, "203.0.113.95");
   W.BLK.clear();
   W.S.peers.clear();
-  W.S.bigTyp.clear();
+  W.SHADOW_TABLE.bigTypical.clear();
 }
 
 console.log("\n84) 订阅的客户端链：实测组优先、域名入口兜底");
@@ -2951,13 +2951,13 @@ console.log("\n92) 远端事实读取：并发只读一次 + colo 缓存命中")
   let hits = 0;
   const mkEnv = () => ({ uuid: "u-test", METER: { idFromName: () => "id", get: () => ({ fetch: async () => { hits += 1; await new Promise((r) => setTimeout(r, 15)); return { ok: true, json: async () => ({ vt: [], hl: [], eg: [], ps: [], dead: [], blk2: [], dns: [] }) }; } }) } });
   W.S.vtLoaded = false;
-  W.S.vtFlight = null;
+  W.VT_SYNC.flight = null;
   const before = globalThis.caches;
   delete globalThis.caches;
   await Promise.all([W.vtLoad(mkEnv()), W.vtLoad(mkEnv()), W.vtLoad(mkEnv())]);
   eq("三条并发只发一次 DO 读", hits, 1);
   eq("读完标记为已加载", W.S.vtLoaded, true);
-  eq("句柄已释放", W.S.vtFlight, null);
+  eq("句柄已释放", W.VT_SYNC.flight, null);
   // 缓存命中：有 colo 缓存时不应再问 DO
   hits = 0;
   W.S.vtLoaded = false;
@@ -2967,7 +2967,7 @@ console.log("\n92) 远端事实读取：并发只读一次 + colo 缓存命中")
   eq("缓存命中后仍标记已加载", W.S.vtLoaded, true);
   globalThis.caches = before;
   W.S.vtLoaded = false;
-  W.S.vtFlight = null;
+  W.VT_SYNC.flight = null;
 }
 
 
@@ -3072,15 +3072,15 @@ W.EG.clear();
 
 
 // 97) 事实读失败必须能重试：失败一次不该把这个 isolate 的事实层永久关掉
-W.S.vtLoaded = false; W.S.vtCool = 0; W.S.vtFlight = null;
+W.S.vtLoaded = false; W.VT_SYNC.coolUntil = 0; W.VT_SYNC.flight = null;
 let factsCalls = 0;
 const badEnv = { uuid: "00000000-0000-0000-0000-000000000000", METER: { idFromName: () => "id", get: () => { factsCalls++; return { fetch: async () => { throw new Error("boom"); } }; } } };
 await W.vtLoad(badEnv);
 eq("读失败不置 vtLoaded", W.S.vtLoaded, false);
-eq("读失败开启 60 秒冷却", W.S.vtCool > Date.now(), true);
+eq("读失败开启 60 秒冷却", W.VT_SYNC.coolUntil > Date.now(), true);
 await W.vtLoad(badEnv);
 eq("冷却期内不再重试", factsCalls, 1);
-W.S.vtCool = 0;
+W.VT_SYNC.coolUntil = 0;
 await W.vtLoad(badEnv);
 eq("冷却过后允许重试", factsCalls, 2);
 
@@ -3100,7 +3100,7 @@ eq("空列表返回空", W.restorePick([], 12, 0).length, 0);
   const mk = (n, tag) => Array.from({ length: n }, (_x, i) => ({ h: tag + i, p: 443, cc: "" }));
   // 键名与 src/px/const.ts 的 SEED_KEY 一致；写错的话下面「代际号跟着锚点走」会立刻失败
   const putSeed = (gen, n) => mem.set("px:seed", JSON.stringify({ v: 7, ts: 0, poolGen: gen, poolN: n, builtAt: 0, byColo: {} }));
-  W.S.pool = mk(10, "old"); W.S.poolGen = 3; W.S.seed.poolGen = 3; W.S.seedAt = Date.now(); W.S.seedReadFail = false; W.S.colo = "TST";
+  W.S.pool = mk(10, "old"); W.S.poolGen = 3; W.S.seed.poolGen = 3; W.SEED_STORE.readAt = Date.now(); W.SEED_STORE.readFailed = false; W.S.colo = "TST";
   putSeed(9, 10);
   const c1 = await W.commitPool(envP, mk(60, "n"), true);
   eq("代际号以 KV 锚点为准（不是本地 +1）", c1.gen, 10);
@@ -3528,19 +3528,19 @@ ok(`[${g}] 设计阶段的临时名只在「更正」那句里出现`, !v8.inclu
   eq("bigByHost 被压回上限", W.JUDGE.memory.bigByHost.size, W.SC.HOST_MEM_MAX);
   eq("bigChan 与 bigByHost 同步裁剪（落单的键会让判定读到别站点的通道）", W.JUDGE.memory.bigChan.size, W.JUDGE.memory.bigByHost.size);
   // ④ vtAck 顺手清掉过期的记账行
-  W.S.vtPend.clear();
-  W.S.vtSent.clear();
-  W.S.vtPend.set("old.test|r:1.1.1.1", { s: 2, t: 1000 });
-  W.S.vtPend.set("new.test|r:2.2.2.2", { s: 2, t: Date.now() + 600000 });
+  W.VT_SYNC.pending.clear();
+  W.VT_SYNC.sent.clear();
+  W.VT_SYNC.pending.set("old.test|r:1.1.1.1", { s: 2, t: 1000 });
+  W.VT_SYNC.pending.set("new.test|r:2.2.2.2", { s: 2, t: Date.now() + 600000 });
   W.vtAck();
-  eq("vtAck 之后过期行没了、新鲜行还在", [W.S.vtSent.has("old.test|r:1.1.1.1"), W.S.vtSent.has("new.test|r:2.2.2.2")].join(","), "false,true");
-  W.S.vtSent.clear();
+  eq("vtAck 之后过期行没了、新鲜行还在", [W.VT_SYNC.sent.has("old.test|r:1.1.1.1"), W.VT_SYNC.sent.has("new.test|r:2.2.2.2")].join(","), "false,true");
+  W.VT_SYNC.sent.clear();
   // ⑤ 三处调用点都在（防止后续改动把裁剪悄悄删掉）
   const dialSrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
   const vtSrc = fs.readFileSync("src/route/verdictsync.ts", "utf8");
   const jdSrc = fs.readFileSync("src/route/judge.ts", "utf8");
   ok("dialer 裁剪 cfHost", dialSrc.includes("dropExpired(S.cfHost)") && dialSrc.includes("trimAged(S.cfHost)"));
-  ok("verdictsync 裁剪 vtSent", vtSrc.includes("dropExpired(S.vtSent)") && vtSrc.includes("trimAged(S.vtSent)"));
+  ok("verdictsync 裁剪 vtSent", vtSrc.includes("dropExpired(VT_SYNC.sent)") && vtSrc.includes("trimAged(VT_SYNC.sent)"));
   ok("judge 裁剪 bigByHost", jdSrc.includes("trimAged(this.bigByHost)"));
   ok("verdictsync 不再自己抄 TTL", !vtSrc.includes("v.at + 1800000"));
 }
@@ -3633,8 +3633,8 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
 {
   const T = "d.test", IP = "r:9.9.9.9";
   W.VT.clear();
-  W.S.vtPend.clear();
-  W.S.vtSent.clear();
+  W.VT_SYNC.pending.clear();
+  W.VT_SYNC.sent.clear();
   // state=3 是 dead（硬排除），比 blocked 更强：重试时必须原样带出去
   W.VT.setState(T, IP, 3, 1);
   const d1 = W.vtDelta();
@@ -3647,21 +3647,21 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   const row1b = d1b.filter((r) => r.k === T + "|" + IP)[0];
   ok("同一批没 ack 就再要一次，state 仍是 3（不会降级成 blocked）", !!row1b && row1b.s === 3);
   W.vtAck();
-  ok("ack 之后这条已经登记成「已上报」", (W.S.vtSent.get(T + "|" + IP) || 0) > Date.now());
+  ok("ack 之后这条已经登记成「已上报」", (W.VT_SYNC.sent.get(T + "|" + IP) || 0) > Date.now());
 }
 {
   // 每批严格 ≤60 行：以前上限判断写在 push 之后，pending 满 60 时会返回 61 行
   W.VT.clear();
-  W.S.vtPend.clear();
-  W.S.vtSent.clear();
+  W.VT_SYNC.pending.clear();
+  W.VT_SYNC.sent.clear();
   for (let i = 0; i < 100; i++) W.VT.setState("cap" + i + ".test", "r:198.51.100.7", 2, 1);
   ok("一批最多 60 行判定证据", W.vtDelta().length === 60);
   ok("pending 已满时再要一批也不会多出一行", W.vtDelta().length === 60);
 }
 {
   const vs = fs.readFileSync("src/route/verdictsync.ts", "utf8");
-  ok("待发项记的是 { s, t } 而不是只有到期时间", vs.includes("S.vtPend.set(k, { s: v.state, t: exp })"));
-  ok("上限判断在压入之前", vs.indexOf("if (out.length >= 60) break;") < vs.indexOf("S.vtPend.set(k, { s: v.state, t: exp })") + 2000);
+  ok("待发项记的是 { s, t } 而不是只有到期时间", vs.includes("VT_SYNC.pending.set(k, { s: v.state, t: exp })"));
+  ok("上限判断在压入之前", vs.indexOf("if (out.length >= 60) break;") < vs.indexOf("VT_SYNC.pending.set(k, { s: v.state, t: exp })") + 2000);
 }
 
 // 153. 「历史最好」必须跨 isolate 活着：只发当前均值的话，康复通道在每个新 isolate 里都要重新攒
@@ -3849,7 +3849,7 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   eq("地区分流的两条拨号都走同一个拨号器", (rgSrc.match(/SOCKET_DIALER\.open\(/g) || []).length, 2);
   eq("地区分流里不再有裸 connect（超时迟到成功的 socket 必须有人关）", (rgSrc.match(/await connect\(/g) || []).length, 0);
   ok("同一个节点一次失败只罚一次（否则冷却跳两档）", rgSrc.includes("conn.node !== failed"));
-  ok("地区失败单独计数，不混进「目标不可达」", fs.readFileSync("src/proxy/fallback.ts", "utf8").includes('cnt("rgFail")') && W.S.cntKeys.includes("rgFail"));
+  ok("地区失败单独计数，不混进「目标不可达」", fs.readFileSync("src/proxy/fallback.ts", "utf8").includes('cnt("rgFail")') && W.COUNTER.keys.includes("rgFail"));
 }
 
 // 第 161 组：会话层补救链的拨号超时与地区口径（v7.171）
@@ -4010,13 +4010,13 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carry.owner = String(id).
 {
   const pendSrc = fs.readFileSync("src/store/pend.ts", "utf8");
   eq("PEND_MAX 是 32：一轮最多 32 次 DO 往返，留出子请求余量", W.SC.PEND_MAX, 32);
-  ok("批次按轮转取，且夹在本轮额度与 PEND_MAX 之间", pendSrc.includes("rotated.slice(0, Math.max(1, Math.min(SC.PEND_MAX, max)))") && pendSrc.includes("(S.pendIdx || 0) % all.length"));
+  ok("批次按轮转取，且夹在本轮额度与 PEND_MAX 之间", pendSrc.includes("rotated.slice(0, Math.max(1, Math.min(SC.PEND_MAX, max)))") && pendSrc.includes("(this.cursor || 0) % all.length"));
   ok("只摘掉这一批，不整表清空（在途增量留在账本里）", pendSrc.includes("for (const [bid] of batch) S.pend.delete(bid);") && !pendSrc.includes("S.pend.clear();"));
   ok("被截断的人数会记进 pendSkip", pendSrc.includes('cnt("pendSkip", rotated.length - batch.length)'));
   const sent = [];
   const mkP = { METER: { idFromName: (x) => x, get: (id) => ({ fetch: async () => { sent.push(id); return new Response(JSON.stringify({ v: null }), { status: 200 }); } }) } };
   W.S.pend.clear();
-  W.S.pendIdx = 0;
+  W.PEND.cursor = 0;
   for (let i = 0; i < 40; i++) W.S.pend.set("p" + i, { up: 10, down: 20, conns: 1 });
   await W.PEND.flush(mkP, true);
   eq("一轮只发 PEND_MAX 个用户", sent.length, 32);
@@ -4094,13 +4094,13 @@ ok("挂增量时记下是哪一批", pSrc167.includes("carry.owner = String(id).
   const launches = [];
   const ctx = { waitUntil: (p) => launches.push(p) };
   W.S.cfHttp.clear();
-  W.S.cfHttpFlight.clear();
+  W.CF_HTTP.flight.clear();
   W.refreshCfHttp("dedupe.test", ctx);
   W.refreshCfHttp("dedupe.test", ctx);
   eq("同一站点在途时只探一次", launches.length, 1);
-  ok("在途集合里记着它", W.S.cfHttpFlight.has("dedupe.test"));
+  ok("在途集合里记着它", W.CF_HTTP.flight.has("dedupe.test"));
   await Promise.allSettled(launches);
-  ok("探测结束后清掉在途标记", !W.S.cfHttpFlight.has("dedupe.test"));
+  ok("探测结束后清掉在途标记", !W.CF_HTTP.flight.has("dedupe.test"));
   W.refreshCfHttp("dedupe.test", ctx);
   eq("刚探过一次就不再立刻重探（负缓存 20 秒）", launches.length, 1);
 
@@ -4635,7 +4635,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   const putSeed = (gen, n) => mem.set("px:seed", JSON.stringify({ v: 7, ts: 0, poolGen: gen, poolN: n, builtAt: 0, byColo: {} }));
   // 别的 isolate 已经提交过 200 条的池子；本 isolate 内存还停在上一代的小池子（10 条）
   W.S.pool = mk(10, "stale"); W.S.poolGen = 4; W.S.seed.poolGen = 4; W.S.seed.poolN = 10;
-  W.S.seedAt = Date.now(); W.S.seedReadFail = false; W.S.colo = "TST";
+  W.SEED_STORE.readAt = Date.now(); W.SEED_STORE.readFailed = false; W.S.colo = "TST";
   putSeed(5, 200);
   const c1 = await W.commitPool(envP, mk(80, "shrink"), false);
   eq("本地是小池子时仍按 KV 的真实规模判缩水", c1.ok, false);
@@ -4645,7 +4645,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   // 读失败：普通 kvGet 会把 get 抛错吞成 null，那条 logErr 永远写不出来
   // 错误环上限 50 条、满了 shift：只能按时间戳认「这条是刚写进去的」，不能按下标切
   const errAt = Date.now();
-  W.S.pool = []; W.S.poolGen = 0; W.S.seed.poolGen = 6; W.S.seedAt = 0; W.S.seedReadFail = false;
+  W.S.pool = []; W.S.poolGen = 0; W.S.seed.poolGen = 6; W.SEED_STORE.readAt = 0; W.SEED_STORE.readFailed = false;
   const downEnv = { uuid: "00000000-0000-0000-0000-000000000000", STATS: {
     get: async () => { throw new Error("kv down"); },
     put: async () => { throw new Error("kv down"); },
@@ -4654,7 +4654,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   eq("读失败按空池返回，不炸调用方", got.length, 0);
   const logged = W.S.errs.some((x) => x && x.t >= errAt && String(x.m || "").includes("pool gen 6"));
   ok("读失败写进了错误环", logged, JSON.stringify(W.S.errs.filter((x) => x && x.t >= errAt)));
-  W.S.pool = []; W.S.poolGen = 0; W.S.seed.poolGen = 0; W.S.seed.poolN = 0; W.S.colo = ""; W.S.seedAt = 0;
+  W.S.pool = []; W.S.poolGen = 0; W.S.seed.poolGen = 0; W.S.seed.poolN = 0; W.S.colo = ""; W.SEED_STORE.readAt = 0;
 }
 
 // 第 193 组：判定层与 pxDecision 闸门的口径（7.193）
@@ -5009,9 +5009,9 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   const snapWrites = () => puts.filter((k) => k === "snap").length;
   const mark = () => W.S.stats.set("force-u", { up: 3, down: 4, conns: 1, first: 1, last: 1 });
 
-  W.S.snapWritten = 0;
-  W.S.snapChecked = 0;
-  W.S.snapBusy = false;
+  W.SNAP.written = 0;
+  W.SNAP.checked = 0;
+  W.SNAP.busy = false;
   mark();
   await W.flushSnap(envF, true);
   eq("第一次强制落盘写了 snap", snapWrites(), 1);
@@ -5022,7 +5022,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   eq("紧接着再强制一次仍会落盘（不被 5 分钟检查闸门吃掉）", snapWrites(), 2);
 
   // 45 分钟全局闸门：把检查闸门的手动复位掉，单独验证第二道
-  W.S.snapChecked = 0;
+  W.SNAP.checked = 0;
   mark();
   await W.flushSnap(envF, true);
   eq("force 也绕过 45 分钟全局闸门", snapWrites(), 3);
@@ -5034,7 +5034,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   W.S.stats.delete("force-u");
 
   const srcSnap202 = fs.readFileSync("src/store/snapshot.ts", "utf8");
-  eq("检查闸门对 force 放行", srcSnap202.includes("if (!force && now - S.snapChecked < 5 * 60000) return;"), true);
+  eq("检查闸门对 force 放行", srcSnap202.includes("if (!force && now - SNAP.checked < 5 * 60000) return;"), true);
   eq("全局闸门对 force 放行", srcSnap202.includes("if (!force && now - (prev.ts || 0) < FLUSH_GAP) {"), true);
   eq("flushSnap 把 force 传下去", srcSnap202.includes("await writeSnap(env, now, !!force);"), true);
   eq("usageSnapWrite 文档不再承诺「不传就用本地状态」", srcSnap202.includes("不传则用本地状态"), false);
@@ -5060,12 +5060,12 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   ok("connection.ts 不再直接改 S.cnt.tput", !cn.includes("S.cnt.tput"));
   ok("check-wire 有动态键白名单", cw.includes("DYN_CNT"));
   ok("check-wire 会对死登记键报红", cw.includes("没有任何 cnt("));
-  W.S.cntDay = "1970-01-01";
-  W.S.cnt.tput = 5;
+  W.COUNTER.day = "1970-01-01";
+  W.COUNTER.values.tput = 5;
   W.cnt("tput");
-  eq("cnt() 跨天后从 1 开始", W.S.cnt.tput, 1);
+  eq("cnt() 跨天后从 1 开始", W.COUNTER.values.tput, 1);
   W.cnt("szBig");
-  ok("未登记的键不会凭空出现", !("szBig" in W.S.cnt));
+  ok("未登记的键不会凭空出现", !("szBig" in W.COUNTER.values));
 }
 // —— 第 204 组：池子锚点必须单调（本地旧池子不能把共享代际改小）——
 {
@@ -5085,36 +5085,36 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   };
   W.S.colo = "HKG";
   W.S.seed = { v: 7, ts: 0, poolGen: 0, poolN: 0, builtAt: 0, byColo: {}, cnt: null };
-  W.S.seedReadFail = false;
-  W.S.seedAt = 0;
+  W.SEED_STORE.readFailed = false;
+  W.SEED_STORE.readAt = 0;
   // 第一步：让这块「共享锚点」先到第 6 代 320 条（用写盘本身建立，不手搓 seal）
   W.S.poolGen = 6;
   W.S.poolBuilt = 111;
   W.S.pool = fakePool(320);
-  await W.SeedStore.write(envS, false, true);
+  await W.SEED_STORE.write(envS, false, true);
   eq("锚点建立到第 6 代", W.S.seed.poolGen, 6);
   eq("锚点规模 320", W.S.seed.poolN, 320);
   // 第二步：本地停在旧代（5 代 200 条）的 isolate 落盘，不得把锚点改小
-  W.S.seedAt = 0;
+  W.SEED_STORE.readAt = 0;
   W.S.poolGen = 5;
   W.S.poolBuilt = 100;
   W.S.pool = fakePool(200);
-  await W.SeedStore.write(envS, false, true);
+  await W.SEED_STORE.write(envS, false, true);
   eq("落后一个代际的 isolate 不会把锚点代际改小", W.S.seed.poolGen, 6);
   eq("也不会把锚点规模改小", W.S.seed.poolN, 320);
   eq("也不会把建池时间改小", W.S.seed.builtAt, 111);
   // 第三步：同代但本地池子更全 → 取较大值
-  W.S.seedAt = 0;
+  W.SEED_STORE.readAt = 0;
   W.S.poolGen = 6;
   W.S.pool = fakePool(400);
-  await W.SeedStore.write(envS, false, true);
+  await W.SEED_STORE.write(envS, false, true);
   eq("同代取较大规模", W.S.seed.poolN, 400);
   // 第四步：本地确实更新 → 用本地那一对
-  W.S.seedAt = 0;
+  W.SEED_STORE.readAt = 0;
   W.S.poolGen = 7;
   W.S.poolBuilt = 222;
   W.S.pool = fakePool(410);
-  await W.SeedStore.write(envS, false, true);
+  await W.SEED_STORE.write(envS, false, true);
   eq("本地更新时代际前移", W.S.seed.poolGen, 7);
   eq("本地更新时规模取本地", W.S.seed.poolN, 410);
   eq("本地更新时建池时间取本地", W.S.seed.builtAt, 222);
@@ -5235,7 +5235,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
     return { env, calls: () => box.n };
   };
 
-  W.S.snapCache = { v: null, t: 0 };
+  W.SNAP.cache = { v: null, t: 0 };
   const bad = mkKv(async () => {
     throw new Error("kv hiccup");
   });
@@ -5246,8 +5246,8 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
     thrown = true;
   }
   eq("快照读失败必须抛错（不能返回空表）", thrown, true);
-  eq("读失败不进缓存", W.S.snapCache.t, 0);
-  eq("读失败后缓存里没有空快照", W.S.snapCache.v, null);
+  eq("读失败不进缓存", W.SNAP.cache.t, 0);
+  eq("读失败后缓存里没有空快照", W.SNAP.cache.v, null);
 
   // KV 恢复：同一个 isolate 里不带 fresh 也必须能读到（旧代码会拿缓存糊弄 5 分钟）
   const good = mkKv(async () => null);
@@ -5256,7 +5256,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   eq("KV 恢复后真的重新打了一次", good.calls(), 1);
 
   // 键不存在是「还没有快照」，这种情况可以缓存（否则每次订阅都打一次 KV）
-  W.S.snapCache = { v: null, t: 0 };
+  W.SNAP.cache = { v: null, t: 0 };
   const miss = mkKv(async () => null);
   const m1 = await W.getSnap(miss.env);
   const m2 = await W.getSnap(miss.env);
@@ -5265,7 +5265,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
 
   // 路径一：快照读失败 ⇒ getSnap 抛错 ⇒ loadRtt 退回内存，不写 rttMiss
   W.S.rttMiss.clear();
-  W.S.snapCache = { v: null, t: 0 };
+  W.SNAP.cache = { v: null, t: 0 };
   const rttFail = mkKv(async () => {
     throw new Error("kv hiccup");
   });
@@ -5275,7 +5275,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
 
   // 路径二：快照有缓存（空表，属真值），但旧键 rtt:<id> 读失败 ⇒ 同样不能记「没有旧键」
   W.S.rttMiss.clear();
-  W.S.snapCache = { v: { v: 1, ts: 1, date: "", stats: {}, rtt: {}, errs: [] }, t: Date.now() };
+  W.SNAP.cache = { v: { v: 1, ts: 1, date: "", stats: {}, rtt: {}, errs: [] }, t: Date.now() };
   const legacyFail = mkKv(async () => {
     throw new Error("kv hiccup");
   });
@@ -5445,7 +5445,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
 // ---- 211: 数据面上游写必须有上限（黑洞中继接了连接却不读，write 永不返回） ----
 console.log("");
 const srcUtil211 = fs.readFileSync("src/core/util.ts", "utf8");
-const srcState211 = fs.readFileSync("src/core/state.ts", "utf8");
+const srcState211 = fs.readFileSync("src/core/counter.ts", "utf8");
 const srcConn211 = fs.readFileSync("src/proxy/connection.ts", "utf8");
 const srcSess211 = fs.readFileSync("src/proxy/session.ts", "utf8");
 const srcAtt211 = fs.readFileSync("src/proxy/attacher.ts", "utf8");
@@ -5472,12 +5472,12 @@ try {
     const sock = mkSock211();
     c.sock = sock;
     c.writer = { write: () => new Promise(() => {}) };
-    const before = Number(W.S.cnt.ustall || 0);
+    const before = Number(W.COUNTER.values.ustall || 0);
     const t0 = Date.now();
     await c.upWrite(new Uint8Array(16), 40);
     const ms = Date.now() - t0;
     ok("黑洞出口不会永远挂着", ms < 400, String(ms));
-    eq("超时记 ustall", Number(W.S.cnt.ustall || 0) - before, 1);
+    eq("超时记 ustall", Number(W.COUNTER.values.ustall || 0) - before, 1);
     eq("超时关掉 socket", sock.closed, 1);
     ok("超时后不再往死连接写", c.dead === true);
     ok("超时归因到中继节点", Number(W.NodeStatsTable.nsGet("203.0.113.211:443").failW || 0) > 0);
@@ -5499,9 +5499,9 @@ try {
     const sock = mkSock211();
     c.sock = sock;
     c.writer = { write: async () => {} };
-    const before = Number(W.S.cnt.ustall || 0);
+    const before = Number(W.COUNTER.values.ustall || 0);
     await c.upWrite(new Uint8Array(16), 40);
-    eq("正常写不记 ustall", Number(W.S.cnt.ustall || 0), before);
+    eq("正常写不记 ustall", Number(W.COUNTER.values.ustall || 0), before);
     eq("正常写不关 socket", sock.closed, 0);
   }
   // 普通写失败：只关 socket（与改造前一致），不算黑洞
@@ -5510,9 +5510,9 @@ try {
     const sock = mkSock211();
     c.sock = sock;
     c.writer = { write: async () => { throw new Error("broken pipe"); } };
-    const before = Number(W.S.cnt.ustall || 0);
+    const before = Number(W.COUNTER.values.ustall || 0);
     await c.upWrite(new Uint8Array(16), 40);
-    eq("写失败不记 ustall", Number(W.S.cnt.ustall || 0), before);
+    eq("写失败不记 ustall", Number(W.COUNTER.values.ustall || 0), before);
     eq("写失败关 socket", sock.closed, 1);
   }
 } catch (e) {
@@ -5630,8 +5630,8 @@ try {
   const mkEnv = (mk) => ({ uuid: "u215", METER: { idFromName: (n) => "id-" + n, get: () => ({ fetch: async () => mk() }) } });
   const reset = () => {
     W.S.vtLoaded = false;
-    W.S.vtCool = 0;
-    W.S.vtFlight = null;
+    W.VT_SYNC.coolUntil = 0;
+    W.VT_SYNC.flight = null;
   };
   const errBody = () => new Response(JSON.stringify({ error: "boom" }), { status: 500 });
   const shapeBad = () => new Response(JSON.stringify({ foo: 1 }), { status: 200 });
@@ -5644,7 +5644,7 @@ try {
   globalThis.caches = { default: { match: async () => undefined, put: async () => { writes += 1; } } };
   await W.vtLoad(mkEnv(() => { doHits += 1; return errBody(); }));
   ok("DO 5xx 不当成事实（不置 vtLoaded）", W.S.vtLoaded === false, String(W.S.vtLoaded));
-  ok("DO 5xx 记冷却，允许 60 秒后重试", W.S.vtCool > Date.now(), String(W.S.vtCool - Date.now()));
+  ok("DO 5xx 记冷却，允许 60 秒后重试", W.VT_SYNC.coolUntil > Date.now(), String(W.VT_SYNC.coolUntil - Date.now()));
   eq("DO 5xx 不回写缓存", writes, 0);
 
   // ② DO 200 但形状不对：同样算失败
@@ -5657,10 +5657,10 @@ try {
   // ③ 缓存里是坏体：当未命中，重新问 DO，且计数
   reset();
   writes = 0;
-  const beforeBad = Number(W.S.cnt.vtCacheBad || 0);
+  const beforeBad = Number(W.COUNTER.values.vtCacheBad || 0);
   globalThis.caches = { default: { match: async () => new Response(JSON.stringify({ error: "stale" }), { status: 200 }), put: async () => { writes += 1; } } };
   await W.vtLoad(mkEnv(good));
-  eq("坏缓存被当成未命中并计数", Number(W.S.cnt.vtCacheBad || 0), beforeBad + 1);
+  eq("坏缓存被当成未命中并计数", Number(W.COUNTER.values.vtCacheBad || 0), beforeBad + 1);
   ok("坏缓存之后照样拿到事实", W.S.vtLoaded === true, String(W.S.vtLoaded));
   eq("校验通过的快照才回写缓存", writes, 1);
 
@@ -5668,10 +5668,10 @@ try {
   reset();
   writes = 0;
   doHits = 0;
-  const beforeHit = Number(W.S.cnt.factsCacheHit || 0);
+  const beforeHit = Number(W.COUNTER.values.factsCacheHit || 0);
   globalThis.caches = { default: { match: async () => new Response(JSON.stringify({ vt: [], hl: [], eg: [], ps: [], dead: [], blk2: [], dns: [] }), { status: 200 }), put: async () => { writes += 1; } } };
   await W.vtLoad(mkEnv(() => { doHits += 1; return good(); }));
-  eq("好缓存直接命中", Number(W.S.cnt.factsCacheHit || 0), beforeHit + 1);
+  eq("好缓存直接命中", Number(W.COUNTER.values.factsCacheHit || 0), beforeHit + 1);
   eq("命中缓存不再问 DO", doHits, 0);
   eq("命中缓存不回写", writes, 0);
 
@@ -5886,10 +5886,10 @@ const GARBAGE = "ENC1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 // 解不开的旧值：构造时记一次计数，落盘前把原文备份走
 const badStore = new Map();
 badStore.set("a", GARBAGE);
-const before221 = W.S.cnt.doBad || 0;
+const before221 = W.COUNTER.values.doBad || 0;
 const badM = mkMeter(badStore, KEK221);
 await badM.fetch(new Request("https://m/get"));
-eq("解不开的账本会计数 doBad", (W.S.cnt.doBad || 0) - before221, 1);
+eq("解不开的账本会计数 doBad", (W.COUNTER.values.doBad || 0) - before221, 1);
 const badAdd = await badM.fetch(new Request("https://m/add", addBody));
 eq("解不开也要能继续记账（不 5xx）", badAdd.status, 200);
 eq("覆盖前把原文备份到 a_bak", badStore.get("a_bak"), GARBAGE);
@@ -5898,14 +5898,14 @@ ok("新值已写回 a", typeof badStore.get("a") === "string" && badStore.get("a
 const goodStore = new Map();
 const g1 = mkMeter(goodStore, KEK221);
 await g1.fetch(new Request("https://m/add", addBody));
-const before222 = W.S.cnt.doBad || 0;
+const before222 = W.COUNTER.values.doBad || 0;
 const g2 = mkMeter(goodStore, KEK221);
 await g2.fetch(new Request("https://m/get"));
-eq("能解开就不计 doBad", (W.S.cnt.doBad || 0) - before222, 0);
+eq("能解开就不计 doBad", (W.COUNTER.values.doBad || 0) - before222, 0);
 ok("能解开就不留底", goodStore.get("a_bak") === undefined);
 // 源码锁：这条链的三个关键点都得在
 const meterSrc221 = storeSrc();
-ok("配置里登记了 doBad", fs.readFileSync("src/core/state.ts", "utf8").includes("\"doBad\","));
+ok("配置里登记了 doBad", fs.readFileSync("src/core/counter.ts", "utf8").includes("\"doBad\","));
 ok("构造函数里有 else 分支", meterSrc221.includes("cnt(\"doBad\");"));
 ok("留底带着原值", meterSrc221.includes("this.ledger.keepBackup(all);"));
 ok("落盘前备份 a_bak", meterSrc221.includes("const bak = this.ledger.takeBackup();") && meterSrc221.includes("await this.state.storage.put(\"a_bak\", bak);"));
@@ -5940,7 +5940,7 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   eq("load 里按最后一个竖线切站点", blkSrc().includes("const cut = r.k.lastIndexOf(\"|\");"), true);
   eq("load 用 muted 挡远端事实", blkSrc().includes("if (this.muted(r.k.slice(0, cut), now)) {"), true);
   eq("静音丢弃有计数", blkSrc().includes("cnt(\"blkMutedSkip\")"), true);
-  eq("blkMutedSkip 已登记", fs.readFileSync("src/core/state.ts", "utf8").includes("\"blkMutedSkip\","), true);
+  eq("blkMutedSkip 已登记", fs.readFileSync("src/core/counter.ts", "utf8").includes("\"blkMutedSkip\","), true);
 }
 
 // ---------- 第 223 组：文档写了但代码没有的调试端点（v7.222） ----------
@@ -5979,17 +5979,17 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
 }
 /* ---------- 第 224 组：cron 闸门要有截止时间 ---------- */
 {
-  const L = W.CronLock;
+  const L = W.CRON_LOCK;
   ok("闸门对象存在", !!L && typeof L.claim === "function");
   const t0 = Date.now();
-  W.S.cronAt = 0;
+  W.CRON_LOCK.heldAt = 0;
   ok("空闲时能拿到闸门", L ? L.claim(t0) : false);
   ok("刚拿到时第二个来者被挡", L ? L.claim(t0 + 1000) === false : false);
   // 卡死 9 分钟（超过 CRON_STALE_MS=8 分钟）必须能被接管：旧版布尔闩永远挡死
-  W.S.cronAt = t0 - 9 * 60_000;
-  const staleBefore = Number(W.S.cnt.cronStale || 0);
+  W.CRON_LOCK.heldAt = t0 - 9 * 60_000;
+  const staleBefore = Number(W.COUNTER.values.cronStale || 0);
   ok("卡死超过 8 分钟后可以接管", L ? L.claim(t0) === true : false);
-  ok("接管要计 cronStale", Number(W.S.cnt.cronStale || 0) === staleBefore + 1);
+  ok("接管要计 cronStale", Number(W.COUNTER.values.cronStale || 0) === staleBefore + 1);
   ok("接管后持有时间归零", L ? L.age(t0) === 0 : false);
   if (L) L.release();
   ok("释放后 age 为 0", (L ? L.age(t0) : -1) === 0);
@@ -5999,29 +5999,30 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   const realFetch224 = globalThis.fetch;
   globalThis.fetch = async () => new Response("", { status: 200 });
   try {
-    W.S.cronAt = Date.now() - 9 * 60_000;
+    W.CRON_LOCK.heldAt = Date.now() - 9 * 60_000;
     let done = null;
     const envCron = { STATS: { get: async () => null, put: async () => {} }, pxSchedH: "0" };
     await W.runCron(envCron, { waitUntil: (pr) => (done = pr) });
     ok("卡死时 runCron 仍排任务", done !== null);
     if (done) await done;
-    eq("跑完后闸门回到空闲", W.S.cronAt, 0);
+    eq("跑完后闸门回到空闲", W.CRON_LOCK.heldAt, 0);
   } finally {
     globalThis.fetch = realFetch224;
-    W.S.cronAt = 0;
+    W.CRON_LOCK.heldAt = 0;
   }
   // 源码锁：闸门在 lock.ts，两个入口都走 claim/release，S 里不再有布尔闩
   const lockSrc = fs.existsSync("src/core/lock.ts") ? fs.readFileSync("src/core/lock.ts", "utf8") : "";
   const cronSrc = fs.readFileSync("src/routes/cron.ts", "utf8");
   const pipSrc = fs.readFileSync("src/routes/proxyip.ts", "utf8");
-  const stSrc = fs.readFileSync("src/core/state.ts", "utf8");
+  const stSrc = fs.readFileSync("src/core/counter.ts", "utf8");
+  const stateSrcLock = fs.readFileSync("src/core/state.ts", "utf8");
   const cnstSrc = fs.readFileSync("src/core/const.ts", "utf8");
   ok("lock.ts 用 SC.CRON_STALE_MS 判超时", lockSrc.includes("SC.CRON_STALE_MS"));
   ok("lock.ts 接管时计 cronStale", lockSrc.includes('cnt("cronStale")'));
-  ok("cron.ts 走 CronLock.claim", cronSrc.includes("if (!CronLock.claim()) return;"));
-  ok("proxyip.ts 报告持有毫秒", pipSrc.includes("heldMs: CronLock.age()"));
+  ok("cron.ts 走 CRON_LOCK.claim", cronSrc.includes("if (!CRON_LOCK.claim()) return;"));
+  ok("proxyip.ts 报告持有毫秒", pipSrc.includes("heldMs: CRON_LOCK.age()"));
   ok("两个入口都不再有布尔闩", !cronSrc.includes("S.cronBusy") && !pipSrc.includes("S.cronBusy"));
-  ok("S 里是时间戳而不是布尔", stSrc.includes("cronAt = 0;") && !stSrc.includes("cronBusy"));
+  ok("S 里是时间戳而不是布尔", lockSrc.includes("heldAt = 0;") && !stateSrcLock.includes("cronBusy"));
   ok("CRON_STALE_MS 已定义", /CRON_STALE_MS:\s*8 \* 60_000/.test(cnstSrc));
   ok("cronStale 已登记进 cntKeys", stSrc.includes('"cronStale",'));
 }
@@ -6054,10 +6055,10 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
 }
 /* ---------- 第 226 组：探活「暂时跳过」表 ---------- */
 {
-  const PB = W.S.probeBad;
+  const PB = W.COOLDOWN.rows;
   const key226 = (i) => `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}:443`;
   const t0 = Date.now();
-  const sw = (t) => W.ProbeCooldown.sweep(t);
+  const sw = (t) => W.COOLDOWN.sweep(t);
   eq("上限常量在位", W.SC.PROBE_BAD_MAX, 2048);
   // 过期记录：对 probeBadSkip 已经无意义，必须清掉
   PB.clear();
@@ -6086,13 +6087,13 @@ const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
   // 判据与 TTL 同源：过 TTL 后不再判「跳过」
   PB.clear();
   for (let i = 0; i < 3; i++) W.bumpProbeBad(key226(9), false, t0);
-  ok("连续 3 次失败后判跳过", W.ProbeCooldown.skip(key226(9), t0));
-  ok("过了 TTL 不再判跳过", W.ProbeCooldown.skip(key226(9), t0 + W.SC.PROBE_BAD_TTL + 1) === false);
+  ok("连续 3 次失败后判跳过", W.COOLDOWN.skip(key226(9), t0));
+  ok("过了 TTL 不再判跳过", W.COOLDOWN.skip(key226(9), t0 + W.SC.PROBE_BAD_TTL + 1) === false);
   PB.clear();
   // 源码锁：清理函数存在、且 cronScan 每轮都调它
   const poolSrc226 = scanAll();
 const aliveSrc226 = fs.readFileSync("src/px/alive.ts", "utf8");
-  ok("cronScan 每轮都扫这张表", poolSrc226.includes("ProbeCooldown.sweep();"));
+  ok("cronScan 每轮都扫这张表", poolSrc226.includes("COOLDOWN.sweep();"));
   ok("扫的时候先看 TTL", aliveSrc226.includes("if (now - entry.at > SC.PROBE_BAD_TTL) {"));
   ok("超上限按 at 升序淘汰", aliveSrc226.includes("sort((a, b) => a[1].at - b[1].at)"));
 }
@@ -6181,7 +6182,7 @@ const aliveSrc226 = fs.readFileSync("src/px/alive.ts", "utf8");
 // ===== 第 229 组：分片恢复失败不能静默（7.228 D185）=====
 {
   const shardSrc = fs.readFileSync("src/store/metershard.ts", "utf8");
-  const stateSrc = fs.readFileSync("src/core/state.ts", "utf8");
+  const stateSrc = fs.readFileSync("src/core/counter.ts", "utf8");
   ok("三处失败路径都计数", (shardSrc.match(/cnt\("shardBad"\)/g) || []).length === 3);
   ok("解不开的分片留底", shardSrc.includes("async function backUpShard("));
   ok("留底只写一次", shardSrc.includes("if (seen) return;"));
@@ -6403,7 +6404,7 @@ ok("verdictsync 的读事实走 doFetch", vs233.includes("doFetch(env, raw, \"ht
   ok("DO 读失败要计数", srcLogs234.includes("cnt(\"logsDoFail\");"), "");
   ok("DO 读失败要留痕（与快照失败同一口径）", srcLogs234.includes("logErr(\"logs do read failed\", \"kv\");"), "");
   ok("响应里带上 doSrc", srcLogs234.includes("doSrc, items: out }"), "");
-  const st234 = fs.readFileSync("src/core/state.ts", "utf8");
+  const st234 = fs.readFileSync("src/core/counter.ts", "utf8");
   ok("logsDoFail 已登记进 cntKeys", st234.includes("\"logsDoFail\","), "");
 }
 // ── 第 235 组：H6 表连续性 + 版本口径一致性（两条新门禁） ──
@@ -6628,14 +6629,14 @@ ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 D
   const env242 = mkEnv242(sent242);
   W.S.pend.clear();
   for (let i = 0; i < 20; i++) W.S.pend.set("p242-u" + i, { up: 10, down: 20, conns: 1 });
-  W.S.pendAt = 0;
+  W.PEND.flushedAt = 0;
   W.S.pendMs = 0;
   await W.PEND.flush(env242, true, 5);
   eq("给了 5 的额度就只发 5 次 DO 往返", sent242.length, 5);
   eq("剩下的留在账本里等下一轮", W.S.pend.size, 15);
   sent242.length = 0;
   for (let i = 0; i < 40; i++) W.S.pend.set("p242-v" + i, { up: 1, down: 1, conns: 1 });
-  W.S.pendAt = 0;
+  W.PEND.flushedAt = 0;
   W.S.pendMs = 0;
   await W.PEND.flush(env242, true);
   eq("不传额度时回到 PEND_MAX", sent242.length, W.SC.PEND_MAX);
@@ -6682,7 +6683,7 @@ ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 D
   // 账本上报：内层把每个用户的失败回滚 + 退避，以前一个计数都没有
   W.S.pend.clear();
   W.S.pend.set("u243a", { up: 10, down: 20, conns: 1 });
-  W.S.pendAt = 0;
+  W.PEND.flushedAt = 0;
   W.S.pendMs = 0;
   await W.PEND.flush(envDown, true, 5);
   ok("账本上报失败有计数", d243("pendFail") >= 1, String(d243("pendFail")));
@@ -6692,7 +6693,7 @@ ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 D
   await W.usageSnapWrite(envW, [{ id: "u243a" }], 2);
   ok("用量快照写失败有计数", d243("snapWriteFail") >= 1, String(d243("snapWriteFail")));
   // 整体快照：先塞一行本地数据（否则 hasData 提前返回是正常行为，不是失败）
-  const seed243 = () => { W.S.stats.set("n243", { up: 1, down: 2, conns: 1, first: 1, last: 2 }); W.S.snapBusy = false; W.S.snapChecked = 0; W.S.snapWritten = 0; };
+  const seed243 = () => { W.S.stats.set("n243", { up: 1, down: 2, conns: 1, first: 1, last: 2 }); W.SNAP.busy = false; W.SNAP.checked = 0; W.SNAP.written = 0; };
   seed243();
   await W.flushSnap(envDown, true);
   ok("整体快照读失败有计数", d243("snapFlushReadFail") >= 1, String(d243("snapFlushReadFail")));
@@ -6701,7 +6702,7 @@ ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 D
   ok("整体快照写失败有计数", d243("snapFlushFail") >= 1, String(d243("snapFlushFail")));
   // 计数键必须登记，否则 cnt() 会当成未知键丢掉
   for (const k243 of ["pendFail", "snapReadFail", "snapWriteFail", "snapFlushReadFail", "snapFlushFail", "snapUsersFail", "seedWriteFail"]) {
-    ok(`计数键已登记：${k243}`, W.S.cntKeys.includes(k243));
+    ok(`计数键已登记：${k243}`, W.COUNTER.keys.includes(k243));
   }
   // 源码锁：四处真实吞掉点与 cron 的返回值检查
   const srcPend = fs.readFileSync("src/store/pend.ts", "utf8");
@@ -6761,7 +6762,7 @@ ok("dnsRound 不再声称每个 1 次 DoH", !cronSrc241.includes("每个 1 次 D
   ok("失败记 dayDoFail", px244.includes('cnt("dayDoFail")'));
   ok("失败写错误环", px244.includes('logErr("day count read failed", "kv")'));
   ok("响应体带 doSrc", /\n\s+doSrc,/.test(px244));
-  const st244 = fs.readFileSync("src/core/state.ts", "utf8");
+  const st244 = fs.readFileSync("src/core/counter.ts", "utf8");
   ok("cntKeys 登记了 dayDoFail", st244.includes('"dayDoFail"'));
 }
 
@@ -6930,7 +6931,7 @@ const wsOf245 = (state = 1) => ({ readyState: state, bufferedAmount: 0, send() {
   eq("第246组·stats.ts 不再有裸空 catch", srcStats246.includes("} catch (e) {}"), false);
   // 7.332 起成功分支是「回填函数返回 seed: "ok"」，判据意图不变：成功这条路必须能标出来
   ok("第246组·成功分支标记 ok", srcStats246.includes('seed: "ok"'));
-  const srcState246 = fs.readFileSync("src/core/state.ts", "utf8");
+  const srcState246 = fs.readFileSync("src/core/counter.ts", "utf8");
   ok("第246组·statsSeedFail 已登记 cntKeys", srcState246.includes('"statsSeedFail"'));
 }
 
@@ -6990,7 +6991,7 @@ W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), f
     dsrc.includes('cand.why === "cf") cnt("skipCfRelay")') && !/logErr\(`skip cf-edge relay/.test(dsrc), true);
   ok("st.pxTries 记的是真实尝试次数（不再用下标 +1）",
     dsrc.includes("conn.pxTries = tries;") && !dsrc.includes("conn.pxTries = tries + 1;"), true);
-  ok("skipCfRelay 在 cntKeys 里登记", fs.readFileSync("src/core/state.ts", "utf8").includes('"skipCfRelay",'), true);
+  ok("skipCfRelay 在 cntKeys 里登记", fs.readFileSync("src/core/counter.ts", "utf8").includes('"skipCfRelay",'), true);
 }
 // ── 第 248 组：/debug 把 DO 的 5xx 当成成功（D202）────────────────────────────
 {
@@ -7805,7 +7806,7 @@ const dialerSrc269 = fs.readFileSync("src/proxy/dialer.ts", "utf8");
   const after269 = W.cntView ? W.cntView() : {};
   ok("非法候选之后继续问下一条中继", calls269 >= 2, "calls=" + calls269 + " seen=" + seen269.join(","));
   eq("第一条非法候选被记进 badRelay", (after269.badRelay || 0) - (before269.badRelay || 0) >= 1, true);
-  ok("cntKeys 登记了 badRelay", W.S.cntKeys.includes("badRelay"), "badRelay");
+  ok("cntKeys 登记了 badRelay", W.COUNTER.keys.includes("badRelay"), "badRelay");
   ok("dialer 对非法候选是 continue 而不是 break", dialerSrc269.includes("cnt(\"badRelay\");") && dialerSrc269.includes("continue;"), "continue");
   ok("dialer 不再把 checkTarget 和解析失败并成一次 break", !dialerSrc269.includes("checkTarget(p.host, p.port)) break;"), "无合并 break");
 }
@@ -8238,7 +8239,7 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   const scanSrc279 = scanAll();
   const aliveSrc279 = fs.readFileSync("src/px/alive.ts", "utf8");
   ok("pool.ts 只剩门面：不再有分并发的那一段", !poolSrc279.includes("for (const seg of chunks"), poolSrc279.length);
-  ok("pool.ts 不再摆弄复测队列", !poolSrc279.includes("S.reProbe.splice"), "");
+  ok("pool.ts 不再摆弄复测队列", !/RETEST\.take\(|S\.reProbe\.splice/.test(poolSrc279), "");
   ok("scan.ts 是一轮维护的执行器", scanSrc279.includes("export class PoolScan"), "");
   ok(
     "cronScan 只剩一行委托",
@@ -8270,25 +8271,25 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
 
   // 冷却表：连续失败到 SCAN_BAD_MAX 才跳过，成功一次就恢复；TTL 过了自动作废
   const cool = "cool279.test:443";
-  eq("没记录时不跳过", W.ProbeCooldown.skip(cool), false);
-  W.ProbeCooldown.bump(cool, false);
-  eq("失败一次还不跳过", W.ProbeCooldown.skip(cool), false);
-  W.ProbeCooldown.bump(cool, false);
-  W.ProbeCooldown.bump(cool, false);
-  eq("连续失败到上限才跳过", W.ProbeCooldown.skip(cool), true);
-  W.ProbeCooldown.bump(cool, true);
-  eq("成功一次就重新可探", W.ProbeCooldown.skip(cool), false);
+  eq("没记录时不跳过", W.COOLDOWN.skip(cool), false);
+  W.COOLDOWN.bump(cool, false);
+  eq("失败一次还不跳过", W.COOLDOWN.skip(cool), false);
+  W.COOLDOWN.bump(cool, false);
+  W.COOLDOWN.bump(cool, false);
+  eq("连续失败到上限才跳过", W.COOLDOWN.skip(cool), true);
+  W.COOLDOWN.bump(cool, true);
+  eq("成功一次就重新可探", W.COOLDOWN.skip(cool), false);
 
   const cool2 = "cool279b.test:443";
-  W.ProbeCooldown.bump(cool2, false);
-  W.ProbeCooldown.bump(cool2, false);
-  W.ProbeCooldown.bump(cool2, false);
-  eq("TTL 内仍然跳过", W.ProbeCooldown.skip(cool2, Date.now() + 1000), true);
-  eq("TTL 过了自动恢复", W.ProbeCooldown.skip(cool2, Date.now() + W.SC.PROBE_BAD_TTL + 1), false);
+  W.COOLDOWN.bump(cool2, false);
+  W.COOLDOWN.bump(cool2, false);
+  W.COOLDOWN.bump(cool2, false);
+  eq("TTL 内仍然跳过", W.COOLDOWN.skip(cool2, Date.now() + 1000), true);
+  eq("TTL 过了自动恢复", W.COOLDOWN.skip(cool2, Date.now() + W.SC.PROBE_BAD_TTL + 1), false);
 
   // 上限：越过 PROBE_BAD_MAX 时把最久没更新的淘汰掉（表没有别的裁剪路径）
-  for (let i = 0; i < W.SC.PROBE_BAD_MAX + 20; i++) W.ProbeCooldown.bump("cap279-" + i + ".test:443", false);
-  const dropped = W.ProbeCooldown.sweep();
+  for (let i = 0; i < W.SC.PROBE_BAD_MAX + 20; i++) W.COOLDOWN.bump("cap279-" + i + ".test:443", false);
+  const dropped = W.COOLDOWN.sweep();
   ok("越过上限会淘汰最久没更新的", dropped >= 20, "dropped=" + dropped);
 
   // 存活表裁剪：先删不在池子里的，再按延迟从慢到快删
@@ -8684,7 +8685,7 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   eq("批探活按 PROBE_CONC 切段且认合并键", orche.includes("chunks(keys, SC.PROBE_CONC)") && orche.includes("splitRelay(key, 443)"), true);
   eq("新候选执行器负责进存活表", orche.slice(orche.indexOf("class ScanProbe")).includes("S.alive.set("), true);
   eq("复测执行器记探活失败", orche.slice(orche.indexOf("class ScanAlive")).includes("NodeStatsTable.nsProbeFail("), true);
-  eq("收尾执行器做裁剪与落盘", orche.slice(orche.indexOf("class ScanHouse")).includes("this.board.trimToMax(") && orche.includes("SeedStore.write("), true);
+  eq("收尾执行器做裁剪与落盘", orche.slice(orche.indexOf("class ScanHouse")).includes("this.board.trimToMax(") && orche.includes("SEED_STORE.write("), true);
   eq("scan.ts 仍在单文件上限内", orche.split(/\r?\n/).length <= 560, true);
   eq("三个执行器都能构造", [W.ScanProbe, W.ScanAlive, W.ScanHouse].every((f) => typeof f === "function"), true);
   eq("探活批处理可调用", typeof W.probeBatch === "function", true);
@@ -8875,7 +8876,7 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   eq("缓冲未超限不累计背压毫秒", flow.stallMs, 0);
   const gone = { bufferedAmount: 1e9, readyState: 3, send() {}, close() {} };
   eq("客户端已断开时门禁返回假", await flow.gate(gone, null), false);
-  eq("走的路径记 ccut 不记 stall", (W.S.cnt.ccut || 0) > 0 && !(W.S.cnt.stall || 0), true);
+  eq("走的路径记 ccut 不记 stall", (W.COUNTER.values.ccut || 0) > 0 && !(W.COUNTER.values.stall || 0), true);
 }
 
 
@@ -8980,7 +8981,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   for (const n of gone) ok("旧入口已删除：" + n, W[n] === undefined);
 
   // 能力仍然在，而且挂在它们操作的那张表上
-  ok("冷却表自己判跳过", typeof W.ProbeCooldown.skip === "function" && typeof W.ProbeCooldown.sweep === "function");
+  ok("冷却表自己判跳过", typeof W.COOLDOWN.skip === "function" && typeof W.COOLDOWN.sweep === "function");
   ok("画像表自己给排行", typeof W.HOSTS.rank === "function" && typeof W.HOSTS.untried === "function");
   ok("容量表自己给因子与记账", typeof W.CAP.factor === "function" && typeof W.CAP.note === "function");
   ok("实测表自己给代价与快照", typeof W.RELPERF.cost === "function" && typeof W.RELPERF.costFor === "function" && typeof W.RELPERF.snap === "function");
@@ -8992,7 +8993,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("没量过的直连代价也是 1e6", W.RELPERF.cost("no-such-303.test", "203.0.113.203"), 1e6);
   eq("没量过的站点快照为空", W.RELPERF.snap("no-such-303.test"), []);
   eq("懒模式容量因子恒 1", W.CAP.factor("203.0.113.204", "lat"), 1);
-  eq("没有冷却记录的键不跳过", W.ProbeCooldown.skip("cool303.test:443"), false);
+  eq("没有冷却记录的键不跳过", W.COOLDOWN.skip("cool303.test:443"), false);
   ok("丢弃计数是个数字", typeof W.ERRS.dropped() === "number");
 
   // 源码锁：这些名字只以「对象.方法」的形态出现，不再有同名模块函数
@@ -9429,7 +9430,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("分派顺序与原来一致（只读在前、动作在后）", pipSrc316.indexOf("this.dayReport()") < pipSrc316.indexOf("this.resetPool()") && pipSrc316.indexOf("this.sourceReport()") < pipSrc316.indexOf("this.refreshPool()"));
   ok("只读报表不改内存（?day 不碰 S.alive）", pipSrc316.slice(pipSrc316.indexOf("private async dayReport"), pipSrc316.indexOf("private async sourceReport")).indexOf("S.alive") < 0);
   ok("两个写动作都要管理员", pipSrc316.slice(pipSrc316.indexOf("private async resetPool"), pipSrc316.indexOf("private async poolReport")).split("adminOnly(this.c)").length - 1 === 2);
-  ok("refresh 被 cron 占住时如实回绝（带持有毫秒）", pipSrc316.includes("heldMs: CronLock.age()"));
+  ok("refresh 被 cron 占住时如实回绝（带持有毫秒）", pipSrc316.includes("heldMs: CRON_LOCK.age()"));
   ok("视图持有本次请求的上下文", pipSrc316.includes("private readonly url: URL;") && pipSrc316.includes("private readonly id: string;"));
 }
 
@@ -9980,7 +9981,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
 
   const takeBody = body327("private take(max: number)");
   ok("[327] 摘批：轮转起点 + 只摘这一批 + 重算剩余字节",
-    takeBody.includes("S.pendIdx") && takeBody.includes('cnt("pendSkip"') &&
+    takeBody.includes("this.cursor") && takeBody.includes('cnt("pendSkip"') &&
     takeBody.includes("S.pend.delete(bid)") && takeBody.includes("S.pendBytes = 0"));
 
   const buildBody = body327("private body(");
@@ -10030,10 +10031,10 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   const resetPend327 = () => {
     W.S.pend.clear();
     W.S.pendBytes = 0;
-    W.S.pendIdx = 0;
+    W.PEND.cursor = 0;
     W.S.pendMs = 30000;
-    W.S.pendAt = 0;
-    W.S.tflush = null;
+    W.PEND.flushedAt = 0;
+    W.PEND.flushTimer = null;
   };
 
   resetPend327();
@@ -10142,8 +10143,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   }
 
   // ⑥ KV 读失败：env 用户仍然在，且 ok 为假（上层据此缩短缓存）
-  W.S.usersCache = { v: null, t: 0 };
-  W.S.usersSig = "";
+  W.USERS.v = null; W.USERS.t = 0;
+  W.USERS.sig = "";
   const failEnv = {
     uuid: "11111111-2222-3333-4444-555555555555",
     trojan: "pub",
@@ -10156,8 +10157,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   const aFail = await W.loadUsers(failEnv);
   ok("[328] KV 读失败仍给出 env 用户", aFail.uuids.has("11111111-2222-3333-4444-555555555555"));
   eq("[328] KV 读失败时 ok 为假", aFail.ok, false);
-  W.S.usersCache = { v: null, t: 0 };
-  W.S.usersSig = "";
+  W.USERS.v = null; W.USERS.t = 0;
+  W.USERS.sig = "";
 }
 
 // ── 329 单层抽样的七个前置量与「算臂 / 挑臂」分成方法 ──
@@ -10342,7 +10343,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
 
   const gateFn331 = body331("function gateHeld(");
   ok("全局闸门仍然对 force 放行", gateFn331.includes("if (!force && now - (prev.ts || 0) < FLUSH_GAP) {"));
-  ok("被闸门挡掉时把本地基线推进到别人那一次", gateFn331.includes("S.snapWritten = Math.max(") && gateFn331.includes("S.snapChecked = Math.max("));
+  ok("被闸门挡掉时把本地基线推进到别人那一次", gateFn331.includes("SNAP.written = Math.max(") && gateFn331.includes("SNAP.checked = Math.max("));
 
   const seedFn331 = body331("function seedSnap(");
   ok("骨架跨天重置用量", seedFn331.includes("prev.date === day ?"));
@@ -10389,19 +10390,19 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     stats: [...W.S.stats.entries()],
     rtt: [...W.S.rtt.entries()],
     errs: [...W.S.errs],
-    written: W.S.snapWritten,
-    checked: W.S.snapChecked,
+    written: W.SNAP.written,
+    checked: W.SNAP.checked,
     bytes: W.S.snapBytes,
-    busy: W.S.snapBusy,
+    busy: W.SNAP.busy,
   };
   const fresh331 = () => {
     W.S.stats.clear();
     W.S.rtt.clear();
     W.S.errs.length = 0;
-    W.S.snapWritten = 0;
-    W.S.snapChecked = 0;
+    W.SNAP.written = 0;
+    W.SNAP.checked = 0;
     W.S.snapBytes = 0;
-    W.S.snapBusy = false;
+    W.SNAP.busy = false;
     W.S.stats.set("a331", { up: 2, down: 3, conns: 1, first: 5, last: 9 });
   };
   const today331 = new Date().toISOString().slice(0, 10);
@@ -10422,7 +10423,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     store331.snap = { v: 1, ts: Date.now(), date: today331, stats: {}, rtt: {}, errs: [] };
     await W.flushSnap(env331);
     eq("别人刚写过就不写", puts331, 0);
-    ok("闸门把 snapWritten 推到别人那一次", W.S.snapWritten > 0, String(W.S.snapWritten));
+    ok("闸门把 snapWritten 推到别人那一次", W.SNAP.written > 0, String(W.SNAP.written));
 
     // ③ force 放行全局闸门
     fresh331();
@@ -10481,10 +10482,10 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     for (const [k, v] of keep331.stats) W.S.stats.set(k, v);
     for (const [k, v] of keep331.rtt) W.S.rtt.set(k, v);
     for (const e of keep331.errs) W.S.errs.push(e);
-    W.S.snapWritten = keep331.written;
-    W.S.snapChecked = keep331.checked;
+    W.SNAP.written = keep331.written;
+    W.SNAP.checked = keep331.checked;
     W.S.snapBytes = keep331.bytes;
-    W.S.snapBusy = keep331.busy;
+    W.SNAP.busy = keep331.busy;
   }
 }
 
@@ -10554,8 +10555,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     stats: [...W.S.stats.entries()],
     pend: [...W.S.pend.entries()],
     meterCache: [...W.S.meterCache.entries()],
-    cnt: W.S.cnt,
-    snapCache: W.S.snapCache,
+    cnt: W.COUNTER.values,
+    snapCache: W.SNAP.cache,
     ttl: W.S.meterCache ? W.S.meterCache.size : 0,
   };
   const ID332 = "id332";
@@ -10626,7 +10627,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     W.S.stats.clear();
     W.S.stats.set(ID332, { up: 5, down: 6, conns: 2, first: 7, last: 8 });
     // 清缓存不是赋 null：getSnap 会读 S.snapCache.v，null 会抛错并被 KV 兜底吞成「没有快照」
-    W.S.snapCache = { v: null, t: 0 };
+    W.SNAP.cache = { v: null, t: 0 };
     const kvNoSnap332 = await W.readStats({ STATS: kv332 }, ID332);
     eq("没有快照时 backend 仍是 kv", kvNoSnap332.backend, "kv");
     eq("KV 兜底声明 seed = none", kvNoSnap332.seed, "none");
@@ -10637,10 +10638,10 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     W.S.stats.clear();
     W.S.stats.set(ID332, { up: 40, down: 50, conns: 3, first: 100, last: 200 });
     // 清缓存不是赋 null：getSnap 会读 S.snapCache.v，null 会抛错并被 KV 兜底吞成「没有快照」
-    W.S.snapCache = { v: null, t: 0 };
+    W.SNAP.cache = { v: null, t: 0 };
     await W.flushSnap({ STATS: kv332 }, true);
     // 清缓存不是赋 null：getSnap 会读 S.snapCache.v，null 会抛错并被 KV 兜底吞成「没有快照」
-    W.S.snapCache = { v: null, t: 0 };
+    W.SNAP.cache = { v: null, t: 0 };
     W.S.stats.set(ID332, { up: 2, down: 1, conns: 1, first: 0, last: 300 });
     const kvSnap332 = await W.readStats({ STATS: kv332 }, ID332);
     eq("有快照时把快照与本地对加", kvSnap332.up, 42);
@@ -10652,8 +10653,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
     for (const [k, v] of kept332.stats) W.S.stats.set(k, v);
     for (const [k, v] of kept332.pend) W.S.pend.set(k, v);
     for (const [k, v] of kept332.meterCache) W.S.meterCache.set(k, v);
-    W.S.snapCache = kept332.snapCache;
-    if (kept332.cnt) W.S.cnt = kept332.cnt;
+    W.SNAP.cache = kept332.snapCache;
+    if (kept332.cnt) W.COUNTER.values = kept332.cnt;
   }
 }
 
@@ -11911,7 +11912,8 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   eq("[357] 全仓不再有 Store 类", src357.split("export class Store {").length - 1, 0);
   eq("[357] barrel 不再转出门面", fs.readFileSync("src/store/index.ts", "utf8").split("./store\"").length - 1, 0);
   ok("[357] 测试窗口不再导出 STORE", !/(^|[^A-Za-z0-9_])STORE([^A-Za-z0-9_]|$)/.test(fs.readFileSync("src/test-surface.ts", "utf8")), "窗口里还有 STORE");
-  eq("[357] 生产侧没有 STORE. 调用点", src357.split("STORE.").length - 1, 0);
+  // `SEED_STORE` 是新实例名，不是已删的 `STORE` 门面；只数独立单词 STORE.
+  eq("[357] 生产侧没有 STORE. 调用点", (src357.match(/(?<![A-Za-z0-9_])STORE\./g) || []).length, 0);
   // 行为：能力还在，只是挂在账本对象与模块函数上
   ok("[357] 窗口里没有门面了", W.STORE === undefined && W.Store === undefined, "门面还在");
   eq("[357] 主 uuid 仍由账本给出", W.PEND.id({ uuid: "AA,BB" }), "aa");
@@ -12214,7 +12216,7 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   // --- 结构：修复确实落盘 ---
   ok("[366] setState 第 5 参数带默认值", /setState\(t: string, c: string, state: VState, src: VSrc, updatedAt: EpochMs = Date\.now\(\)\)/.test(verdict366));
   ok("[366] import 传 r.t 反推原始时间", verdict366.includes("r.t - VT_TTL_MS"));
-  ok("[366] import 内登记 vtSent", /S\.vtSent\.set\(r\.k, r\.t\)/.test(verdict366) && !sync366.includes("S.vtSent.set(r.k, r.t)"));
+  ok("[366] import 内登记 vtSent", /VT_SYNC\.sent\.set\(r\.k, r\.t\)/.test(verdict366) && !sync366.includes("VT_SYNC.sent.set(r.k, r.t)"));
   ok("[366] attacher tryV6 认额度耗尽", /isBudgetExhausted\(e\)\) return false/.test(attach366));
   ok("[366] attacher tryProxyip 认额度耗尽", attach366.includes('this.endClient(clientSocket, 1011, "budget exhausted")'));
   ok("[366] attacher 里 nsFail 前先认额度", /isBudgetExhausted\(e\).*?NodeStatsTable\.nsFail/s.test(attach366));
@@ -12224,7 +12226,7 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   ok("[366] 门禁覆盖 private/public + !/?", /private\|public\|protected/.test(gate366) && /\[!\?\]/.test(gate366));
 
   // --- 行为 D1：导入远端行不再续期，且不回传 ---
-  W.VT.clear(); W.S.vtSent.clear(); W.S.vtPend.clear();
+  W.VT.clear(); W.VT_SYNC.sent.clear(); W.VT_SYNC.pending.clear();
   const now366 = Date.now();
   const exp366 = now366 + 60000; // 远端 1 分钟后过期
   W.VT.import([{ k: "probe-366.example|r:198.51.100.8", s: 2, t: exp366 }]);
@@ -12233,8 +12235,8 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   // updatedAt 应为 exp - VT_TTL（原始时间，约 now - 29min），不是 now，也不是 exp
   ok("[366] 导入不续期（updatedAt 用原始时间）", !!row366 && row366.updatedAt <= now366 - 20 * 60000, `updatedAt=${row366 && row366.updatedAt}`);
   ok("[366] 导入后 vtDelta 不回传该证据", W.vtDelta().every((r) => r.k !== "probe-366.example|r:198.51.100.8"));
-  ok("[366] 导入登记进 vtSent", (W.S.vtSent.get("probe-366.example|r:198.51.100.8") || 0) === exp366);
-  W.VT.clear(); W.S.vtSent.clear(); W.S.vtPend.clear();
+  ok("[366] 导入登记进 vtSent", (W.VT_SYNC.sent.get("probe-366.example|r:198.51.100.8") || 0) === exp366);
+  W.VT.clear(); W.VT_SYNC.sent.clear(); W.VT_SYNC.pending.clear();
 
   // --- 行为：本地新证据仍正常续期（setState 默认 Date.now 未被改坏）---
   W.VT.clear();
@@ -12256,9 +12258,9 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   const lu367 = i367 < 0 || j367 < 0 ? "" : protoSrc367.slice(i367, j367);
 
   // 结构：读 KV 之前不能再拿 sig 命中的旧表直接 return（跨 isolate 的根因）
-  ok("[367] loadUsers 不再用 sig 命中正向缓存", !/if \(S\.usersCache\.v && S\.usersSig === sig/.test(lu367));
+  ok("[367] loadUsers 不再用 sig 命中正向缓存", !/if \(USERS\.v && USERS\.sig === sig/.test(lu367));
   ok("[367] 每次都读 KV 的 users 键", lu367.includes('kvGetStrict<UserRec[]>(env, "users")'));
-  ok("[367] 旧表只在 KV 失败时兜底", lu367.includes("!readOk && S.usersCache.v && prevSig === sig"));
+  ok("[367] 旧表只在 KV 失败时兜底", lu367.includes("!readOk && USERS.v && prevSig === sig"));
 
   // 行为：KV 里新增托管用户后，env 不变（sig 相同）、也不调 invalidateUsers，
   // 下一次 loadUsers 必须立刻看到新用户 —— 这就是面板 A isolate 加用户、
@@ -12273,12 +12275,12 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
       put: async (k, v) => { box367.set(k, v); },
     },
   };
-  W.S.usersCache = { v: null, t: 0 };
-  W.S.usersSig = "";
+  W.USERS.v = null; W.USERS.t = 0;
+  W.USERS.sig = "";
   const first367 = await W.loadUsers(env367);
   ok("[367] 初始只有老用户", first367.uuids.has(OLD367) && !first367.uuids.has(NEW367));
 
-  // 模拟面板在另一个 isolate 上 saveUsers：只写 KV，不动本 isolate 的 S.usersCache
+  // 模拟面板在另一个 isolate 上 saveUsers：只写 KV，不动本 isolate 的 USERS 缓存
   box367.set("users", JSON.stringify([
     { id: NEW367, pwd: "newpass367", note: "", enabled: true, managed: true, ts: 1 },
   ]));
@@ -12295,8 +12297,8 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
   ok("[367] KV 故障仍返回上一份用户表", third367.uuids.has(NEW367));
   eq("[367] KV 故障时 ok 为假", third367.ok, false);
 
-  W.S.usersCache = { v: null, t: 0 };
-  W.S.usersSig = "";
+  W.USERS.v = null; W.USERS.t = 0;
+  W.USERS.sig = "";
 }
 
 console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
@@ -12311,13 +12313,13 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   const full368 = () => new Response(JSON.stringify({ vt: [], hl: [], eg: [], ps: [], dead: [], blk2: [], dns: [] }), { status: 200 });
   const partial368 = () => new Response(JSON.stringify({ vt: [], hl: [], eg: [], ps: [], dead: [], blk2: [] }), { status: 200 });
   const env368 = (mk) => ({ uuid: "u368", METER: { idFromName: () => "id368", get: () => ({ fetch: async () => mk() }) } });
-  const reset368 = () => { W.S.vtLoaded = false; W.S.vtCool = 0; W.S.vtFlight = null; };
+  const reset368 = () => { W.S.vtLoaded = false; W.VT_SYNC.coolUntil = 0; W.VT_SYNC.flight = null; };
 
   // 缺 dns 的响应：不能当成完整事实（否则本 isolate 余生看不到 dns）
   reset368();
   await W.vtLoad(env368(partial368));
   ok("[368] 缺一张事实表不置 vtLoaded", W.S.vtLoaded === false, String(W.S.vtLoaded));
-  ok("[368] 形状不对记 60 秒冷却", W.S.vtCool > Date.now(), String(W.S.vtCool - Date.now()));
+  ok("[368] 形状不对记 60 秒冷却", W.VT_SYNC.coolUntil > Date.now(), String(W.VT_SYNC.coolUntil - Date.now()));
 
   // 全七张：正常加载
   reset368();
@@ -12330,14 +12332,14 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   // ---- D2: 同一 isolate 的两个 flush 不并发 ----
   const psrc368 = fs.readFileSync("src/store/pend.ts", "utf8");
   const ssrc368 = fs.readFileSync("src/core/state.ts", "utf8");
-  ok("[368] S 有 pendBusy 标志", /pendBusy\s*=\s*false/.test(ssrc368));
-  ok("[368] flush 有单飞守卫", psrc368.includes("if (S.pendBusy) return;"));
-  ok("[368] flush finally 释放守卫", psrc368.includes("S.pendBusy = false;"));
+  ok("[368] 单飞守卫字段在 PendingLedger 上", /private flushing = false/.test(psrc368) && !/pendBusy/.test(ssrc368));
+  ok("[368] flush 有单飞守卫", psrc368.includes("if (this.flushing) return;"));
+  ok("[368] flush finally 释放守卫", psrc368.includes("this.flushing = false;"));
 
-  const savedPend368 = { at: W.S.pendAt, ms: W.S.pendMs, busy: W.S.pendBusy };
+  const savedPend368 = { at: W.PEND.flushedAt, ms: W.S.pendMs, busy: W.PEND.flushing };
   W.S.pend.clear();
-  W.S.pendBusy = false;
-  W.S.pendAt = 0;
+  W.PEND.flushing = false;
+  W.PEND.flushedAt = 0;
   W.S.pendMs = 0;
   W.PEND.add("u1-368", 10, 10, true);
   W.PEND.add("u2-368", 10, 10, true);
@@ -12367,13 +12369,13 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   ]);
   eq("[368] 并发 flush 只跑一个 POST", posts368, 1);
   eq("[368] 同时在途的上报不超过一批", maxActive368, 1);
-  ok("[368] 守卫已释放", W.S.pendBusy === false, String(W.S.pendBusy));
+  ok("[368] 守卫已释放", W.PEND.flushing === false, String(W.PEND.flushing));
   ok("[368] 被跳过的那批仍在账本里", W.S.pend.has("u2-368"), [...W.S.pend.keys()].join(","));
 
   W.S.pend.clear();
-  W.S.pendAt = savedPend368.at;
+  W.PEND.flushedAt = savedPend368.at;
   W.S.pendMs = savedPend368.ms;
-  W.S.pendBusy = savedPend368.busy;
+  W.PEND.flushing = savedPend368.busy;
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

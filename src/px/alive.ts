@@ -1,12 +1,12 @@
 // alive 存活表 + 探活冷却表 + 探活结果分类：池子侧「谁能用」的三件事都收在这里，
-// 免得 cronScan 与 warm 各自去摸 `S.alive` / `S.probeBad` 的字段。
+// 免得 cronScan 与 warm 各自去摸 `S.alive` / `COOLDOWN.rows` 的字段。
 
 import { SC } from "../core/const";
 import { S } from "../core/state";
 import { splitRelay } from "../core/relay-addr";
 import { CANDS } from "../nodes/score";
 import { geoLabel } from "./probe";
-import { BUCKET_DEF, SeedStore } from "./seed";
+import { BUCKET_DEF, SEED_STORE } from "./seed";
 import { MODES } from "./const";
 
 /** 冷启动灌进 alive 的节点数：名单里只取前这么多，剩下的靠本机房探活补 */
@@ -31,14 +31,17 @@ export function noteProbe(r: { bad?: string } | null): void {
  * 所以计数必须带时间戳：以前只记次数、永不衰减，一个节点冷启动时被拒 3 次就永远排在候选之外。
  */
 export class ProbeCooldown {
+  /** 候选键 → 连续失败次数 + 最后一次失败时间（带时间戳，超时自动作废） */
+  readonly rows = new Map<string, { n: number; at: number }>();
+
   /**
    * 功能：这个候选是否还在冷却期。
    * @param key 候选键（`host:port`）
    * @param now 当前时间（毫秒）
    * @returns 连续失败次数达标且未过 TTL 时为 true
    */
-  static skip(key: string, now: number = Date.now()): boolean {
-    const entry = S.probeBad.get(key);
+  skip(key: string, now: number = Date.now()): boolean {
+    const entry = this.rows.get(key);
     if (!entry || entry.n < SC.SCAN_BAD_MAX) return false;
     // 过期的行按「没冷却」处理：清理留给 sweep()，读路径不顺手删（同一行会被高频读）
     return now - entry.at <= SC.PROBE_BAD_TTL;
@@ -51,15 +54,15 @@ export class ProbeCooldown {
    * @param now 当前时间（毫秒）
    * @returns 无
    */
-  static bump(key: string, ok: boolean, now: number = Date.now()): void {
+  bump(key: string, ok: boolean, now: number = Date.now()): void {
     if (ok) {
-      S.probeBad.delete(key);
+      this.rows.delete(key);
       return;
     }
-    const cur = S.probeBad.get(key);
+    const cur = this.rows.get(key);
     // 跨过 TTL 就重新从 1 开始数，否则「上个月失败三次」会一直压着它
     const n = cur && now - cur.at <= SC.PROBE_BAD_TTL ? cur.n + 1 : 1;
-    S.probeBad.set(key, { n: Math.min(9, n), at: now });
+    this.rows.set(key, { n: Math.min(9, n), at: now });
   }
 
   /**
@@ -71,22 +74,22 @@ export class ProbeCooldown {
    * @param now 当前时间（毫秒）
    * @returns 这一次删掉的行数
    */
-  static sweep(now: number = Date.now()): number {
+  sweep(now: number = Date.now()): number {
     let gone = 0;
     // ① 过期即无用：判据与 skip() 用同一个 TTL，避免两处口径漂移
-    for (const [key, entry] of S.probeBad) {
+    for (const [key, entry] of this.rows) {
       if (now - entry.at > SC.PROBE_BAD_TTL) {
-        S.probeBad.delete(key);
+        this.rows.delete(key);
         gone += 1;
       }
     }
     // ② 还在 TTL 内但表已经太大：按最久没更新淘汰（值就是时间戳，不必额外维护淘汰序）
-    if (S.probeBad.size > SC.PROBE_BAD_MAX) {
-      const rows = [...S.probeBad.entries()].sort((a, b) => a[1].at - b[1].at);
-      let over = S.probeBad.size - SC.PROBE_BAD_MAX;
-      for (const [key] of rows) {
+    if (this.rows.size > SC.PROBE_BAD_MAX) {
+      const oldest = [...this.rows.entries()].sort((a, b) => a[1].at - b[1].at);
+      let over = this.rows.size - SC.PROBE_BAD_MAX;
+      for (const [key] of oldest) {
         if (over <= 0) break;
-        S.probeBad.delete(key);
+        this.rows.delete(key);
         over -= 1;
         gone += 1;
       }
@@ -95,15 +98,18 @@ export class ProbeCooldown {
   }
 }
 
+/** 探活冷却实例：只有本模块 / scan / warm 通过它读写 */
+export const COOLDOWN = new ProbeCooldown();
+
 /**
- * 功能：记一次探活失败/成功（委托 `ProbeCooldown.bump`，cronScan 与测试共用，保证「过期重置」只写一遍）。
+ * 功能：记一次探活失败/成功（委托 `COOLDOWN.bump`，cronScan 与测试共用，保证「过期重置」只写一遍）。
  * @param key 候选键（`host:port`）
  * @param ok 探活是否通过
  * @param now 当前时间（毫秒）
  * @returns 无
  */
 export function bumpProbeBad(key: string, ok: boolean, now: number = Date.now()): void {
-  ProbeCooldown.bump(key, ok, now);
+  COOLDOWN.bump(key, ok, now);
 }
 
 /**
@@ -127,7 +133,7 @@ export class AliveBoard {
    * @returns 无
    */
   seedCold(): void {
-    let src: SeedNode[] = SeedStore.bucket().nodes || [];
+    let src: SeedNode[] = SEED_STORE.bucket().nodes || [];
     if (!src.length) {
       // 本机房还没数据：借名单桶（cron 写的全局候选），只取名字
       src = ((S.seed.byColo || {})[BUCKET_DEF] || {}).nodes || [];
@@ -232,7 +238,7 @@ export class AliveBoard {
  * @returns 当前游标、存活条目与面板状态
  */
 export async function pxGet(env: Env) {
-  await SeedStore.read(env);
+  await SEED_STORE.read(env);
   if (!S.alive.size) new AliveBoard().seedCold();
   for (const m of MODES) {
     if (!S.curs[m]) {

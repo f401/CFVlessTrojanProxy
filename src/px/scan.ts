@@ -1,17 +1,52 @@
 import { S } from "../core/state";
 import { logErr } from "../nodes/metrics";
 import { NodeStatsTable, isBlack, isFrozen, CANDS } from "../nodes/score";
-import { ProbeCooldown, pxGet, bumpProbeBad, noteProbe, AliveBoard, ALIVE_MAX } from "./alive";
+import { COOLDOWN, pxGet, bumpProbeBad, noteProbe, AliveBoard, ALIVE_MAX } from "./alive";
 import { POOL_TTL_MS, refillPool, probeSni, chunks, probeProxy } from "./probe";
 import { commitPool, ensurePool } from "./poolgen";
 import { SC } from "../core/const";
 import { keyOf } from "./const";
 import { HOOK } from "../core/hook";
-import { SeedStore } from "./seed";
+import { SEED_STORE } from "./seed";
 import { splitRelay } from "../core/relay-addr";
 import { BudgetLedger } from "../core/budget-ledger";
 import { BudgetedIO } from "../core/budgeted-io";
 import { isBudgetExhausted } from "../core/budget-ledger";
+
+/**
+ * 待复测队列：上一轮探活比同 /24 邻居慢一大截的节点，跨扫描与存活复测共用一个队列。
+ */
+export class RetestQueue {
+  /** 待复测节点键（host:port），最多 8 条 */
+  keys: string[] = [];
+  /** 复测累计次数：线上用它判断这次抖动优化到底触发过多少次 */
+  count = 0;
+
+  /**
+   * 功能：把一个慢节点排进下一轮复测（上限 8、去重）。
+   * @param key 节点键 host:port
+   * @returns 是否真的排入（满员或重复时不记）
+   */
+  offer(key: string): boolean {
+    if (this.keys.length >= 8) return false;
+    if (this.keys.includes(key)) return false;
+    this.keys.push(key);
+    return true;
+  }
+
+  /**
+   * 功能：取走下一批复测节点（最多 4 条），累计复测次数。
+   * @returns 本次要复测的节点键数组
+   */
+  take(): string[] {
+    const again = this.keys.splice(0, 4);
+    this.count += again.length;
+    return again;
+  }
+}
+
+/** 待复测队列的进程内单例：ScanProbe 写、ScanAlive 读、proxyip 报表展示次数 */
+export const RETEST = new RetestQueue();
 
 // ---- 并入自 scan-probe.ts ----
 // 新候选扫描：在「还没有结论」的候选里轮转，探一批，成功的进存活表并记样本。
@@ -61,7 +96,7 @@ export class ScanProbe {
     // 不再占名额。公开池里九成以上是死的，纯轮转时它们每轮都被重复探一遍，好候选永远排不上。
     const open = this.pool.filter((c) => {
       const k = c.h + ":" + c.p;
-      return !S.alive.has(k) && !ProbeCooldown.skip(k);
+      return !S.alive.has(k) && !COOLDOWN.skip(k);
     });
     // 全都有结论时退回「没进池的候选」做低频复检（能在池里的靠头部复测 + 真实流量，不用再探活）
     const live = this.pool.filter((c) => !S.alive.has(c.h + ":" + c.p));
@@ -89,7 +124,7 @@ export class ScanProbe {
    *
    * 不用绝对阈值（不同 /24 的基线差很多），也不动选路，只是多测一次。
    * @param hits 这一批探活的成功结果
-   * @returns 无（写进 `S.reProbe`）
+   * @returns 无（写进 RETEST 队列）
    */
   private markLaggards(hits: ProbeHit[]): void {
     const by24 = new Map<string, number[]>();
@@ -104,12 +139,12 @@ export class ScanProbe {
     for (const x of hits) {
       const p = String(x.h).split(".");
       // 复测队列最多 8 条：再多就会把下一轮的探测预算全吃掉
-      if (p.length !== 4 || !(x.ms > 0) || S.reProbe.length >= 8) continue;
+      if (p.length !== 4 || !(x.ms > 0) || RETEST.keys.length >= 8) continue;
       const arr = by24.get(p.slice(0, 3).join(".")) || [];
       // 少于此数无法算「同 /24 的中位」，单条样本的偏差不值得再测一次
       if (arr.length < 3) continue;
       const med = arr.slice().sort((a, b) => a - b)[Math.floor(arr.length / 2)];
-      if (x.ms > Math.max(3 * med, 250) && !S.reProbe.includes(keyOf(x))) S.reProbe.push(keyOf(x));
+      if (x.ms > Math.max(3 * med, 250)) RETEST.offer(keyOf(x));
     }
   }
 
@@ -143,7 +178,7 @@ export class ScanProbe {
 
 
 /**
- * 存活节点复测器：三段各自一个方法，状态全在 `S.alive` / `S.reProbe` 里。
+ * 存活节点复测器：三段各自一个方法，状态在 `S.alive` 与 RETEST 队列里。
  */
 export class ScanAlive {
   /** 复测也要建连：每次探活从这里取号（cron 形态上限更大） */
@@ -156,9 +191,8 @@ export class ScanAlive {
    * @returns 无
    */
   async retestFlagged(): Promise<void> {
-    const again = S.reProbe.splice(0, 4);
+    const again = RETEST.take();
     if (!again.length) return;
-    S.reProbeN += again.length;
     // 这几条上一轮刚被测过，再慢也就一个建连预算，直接并发
     const rows = await Promise.all(again.map(async (k) => ({ k, r: await probeOne(k, this.gate) })));
     for (const { k, r } of rows) {
@@ -332,7 +366,7 @@ export class ScanHouse {
    */
   async persistSeed(env: Env): Promise<void> {
     if (Date.now() - (S.seed.ts || 0) >= 55 * 60000) {
-      await SeedStore.write(env, S.colo ? undefined : true, true);
+      await SEED_STORE.write(env, S.colo ? undefined : true, true);
     }
   }
 }
@@ -427,7 +461,7 @@ export class PoolScan {
    */
   async run(): Promise<void> {
     // 每轮先收拾「暂时跳过」表：过期记录对跳过判断已无意义，表本身也没有自愈路径
-    ProbeCooldown.sweep();
+    COOLDOWN.sweep();
     await pxGet(this.env);
     // 空池子直接结束这一轮：没有候选可探，写任何东西都是噪声
     if (!(await this.loadPool())) return;

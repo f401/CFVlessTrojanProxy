@@ -27,8 +27,8 @@ export { aesKey, b64d, b64e, seal, unseal } from "./store/crypto";
 export { factsOut, freshTop } from "./store/factout";
 export { MeterState } from "./store/meter-state";
 export { MeterEndpoints } from "./store/meter";
-export { FirstFrame, parseVLESS, parseTrojan, loadUsers, normAtyp, readAddr, UserIndex } from "./proxy/protocol";
-export { DOH_ENDPOINTS, checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
+export { FirstFrame, parseVLESS, parseTrojan, loadUsers, normAtyp, readAddr, UserIndex, UserCache, USERS } from "./proxy/protocol";
+export { DOH_ENDPOINTS, DNS as DNS_CACHE, DnsCache, checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
 export { isPxHost, pxHostList } from "./core/hosts";
 export { isCfIp } from "./core/net";
 export { isCfHost } from "./proxy/dial";
@@ -57,10 +57,10 @@ export { SC } from "./core/const";
 export { SEL, Selector } from "./px/selector";
 export { FailBook } from "./px/failbook";
 export { Rotation, dwellOf } from "./px/selector";
-export { PICK, PickPath } from "./px/pickpath";
+export { PoolReadyClock,  PICK, PickPath } from "./px/pickpath";
 export { ThompsonPicker } from "./px/ts";
 export { SitePick, PathPrefs } from "./px/pickpath";
-export { SeedStore } from "./px/seed";
+export { SeedStore, SEED_STORE } from "./px/seed";
 export { Connection } from "./proxy/connection";
 export { CAGG_MAX, ConnSettle, type SettleView } from "./proxy/conn-settle";
 export { FLOW_TICK_MS, NODE_EMIT_GAP_MS, NODE_WIN_MS, SITE_WIN_MS, SampleWindow, ClientFlow } from "./proxy/connection";
@@ -85,16 +85,16 @@ export {
   ScoreModel,
 } from "./nodes/score";
 export { commitPool, ensurePool, nsOf, pxGet, flushPx, noteProbe, bumpProbeBad } from "./px/pool";
-export { ALIVE_MAX, AliveBoard, ProbeCooldown, PoolScan, SEED_COLD_N, aliveList, cronScan } from "./px/pool";
-export { ScanAlive, ScanHouse, ScanProbe, probeBatch, probeOne } from "./px/scan";
+export { ALIVE_MAX, AliveBoard, ProbeCooldown, COOLDOWN, PoolScan, SEED_COLD_N, aliveList, cronScan } from "./px/pool";
+export { ScanAlive, ScanHouse, ScanProbe, probeBatch, probeOne, RetestQueue, RETEST } from "./px/scan";
 export type { ProbeHit } from "./px/scan";
 export { DIALER, Dialer } from "./proxy/dialer";
 export { SOCKET_DIALER, SocketDialer } from "./proxy/socket-dialer";
 export { MeterDiagnostics } from "./store/meter-diagnostics";
 export { Attacher } from "./proxy/attacher";
 export { RegionPicker } from "./proxy/region";
-export { cnt, cntDelta, cntUnsend, cntView } from "./core/counter";
-export { CronLock } from "./core/lock";
+export { cnt, cntDelta, cntUnsend, cntView, COUNTER, Counter } from "./core/counter";
+export { CronLock, CRON_LOCK } from "./core/lock";
 export {
   logErr,
   hostNodeMark,
@@ -111,8 +111,10 @@ export { ERRS } from "./nodes/errlog";
 export { BUDGET_CAPS, BUDGET_KINDS, BudgetExhausted, BudgetLedger, isBudgetExhausted } from "./core/budget-ledger";
 export { BudgetedIO } from "./core/budgeted-io";
 export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES, pxPolicy, RawProbe } from "./px/probe";
+export { WarmPacer, WARM } from "./px/warm";
 export { regionListAsync } from "./px/regions";
-export { PEND, RESTORE_MAX, getSnap, kvGetStrict, nodeSnapGet, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
+export { PEND, RESTORE_MAX, getSnap, kvGetStrict, nodeSnapGet, NODE_SNAP, NodeSnapCache, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
+export { SnapshotState, SNAP } from "./store/snapshot";
 export { doFetch, meterGet } from "./store/meter-client";
 export { runCron } from "./routes/cron";
 export { ProxyipView, proxyip } from "./routes/proxyip";
@@ -146,7 +148,7 @@ export { DNS_BATCH, SHARE_PEND, SHARE_SNAP, TFB_CALLS, SUB_FIXED, SUB_FIXED_N, p
 export { Prefs } from "./route/prefs";
 export { HEALTH, RelayHealth, ipOf } from "./route/relay-health";
 export { RelayLedger } from "./route/relay-ledger";
-export { VT, VerdictTable } from "./route/verdict";
+export { VT, VT_SYNC, VerdictTable } from "./route/verdict";
 export { Judge, JudgeMemory, JUDGE, CF_NEG } from "./route/judge";
 export { POLICY, Policy } from "./route/policy";
 export { decideCf } from "./route/policy";
@@ -174,7 +176,7 @@ export { MeterAdd } from "./store/meteradd";
 export { FactMerger } from "./store/factmerge";
 export type { FactTables } from "./store/factmerge";
 export { BLK_TTL, BIG_PEER, BIG_WIN, DEAD_TTL, TINY_ABS, WRITE_GAP, commitFact, factKey, isTiny } from "./route/commitfact";
-export { FACT, FactShadow, shadowCtx, shadowObs } from "./route/factshadow";
+export { ShadowTable, SHADOW_TABLE, FACT, FactShadow, shadowCtx, shadowObs } from "./route/factshadow";
 /** 四类事实的门面（OOP 收口后唯一的上行/合并入口） */
 export { FactsStore } from "./route/factsstore";
 /** 探测传输层：抽象与三个实现（userland TLS / 运行时 fetch / 明文 HTTP·80）同住 `core/transport.ts` */
@@ -191,7 +193,7 @@ export {
 } from "./core/transport";
 export { relayIpOf, splitRelay } from "./core/relay-addr";
 export { parseProxyIp } from "./proxy/dial";
-export { cfHttpCode, refreshCfHttp } from "./proxy/cfverdict";
+export { CF_HTTP, CfHttpState, cfHttpCode, refreshCfHttp } from "./proxy/cfverdict";
 
 export { handleDns, trojanUdpFrame } from "./proxy/dns";
 export { ProxySession, handleUpgrade } from "./proxy/session";

@@ -19,21 +19,13 @@ export class AppState {
   prev: Record<string, string> = { lat: "", tput: "" };
   lastSwitch: Record<string, number> = { lat: 0, tput: 0 };
   switchHits: Record<string, number[]> = { lat: [], tput: [] };
-  lastManual = 0;
   pxFailMem = 0;
   pxFailSeen = 0;
   probes = 0;
   hits = 0;
   // 探活结果按原因分类：区分"连不上"（可能是地区/线路）和"连上了但不是 CF 反代"（节点事实）
   probeWhy: Record<string, number> = {};
-  // 候选池的本地探活结论（只在本 isolate 有效，不写 KV）：连续失败的候选不再占探测名额
-  /** 探活连续失败次数 + 最后一次失败时间（带时间戳，超时自动作废） */
-  probeBad: Map<string, { n: number; at: number }> = new Map();
   probeColo = "";
-  /** 待复测：上一轮探活比同 /24 邻居慢一大截的节点（探活抖动一次不该定生死） */
-  reProbe: string[] = [];
-  /** 复测累计次数：线上用它判断"探活抖动"到底有多频繁（=0 说明这条优化没触发过） */
-  reProbeN = 0; // 这批探活是在哪个机房做的（cron 拿不到 colo，记 "cron"）
   needPx: Map<string, number> = new Map();
   /**
    * 每个站点上一批 tfb 的判定标签（`verdict/escalate`，例如 `chan/none`）。
@@ -44,7 +36,6 @@ export class AppState {
   /** 每个站点最近 120s 内各通道的观测（环形 8 条）：v8 的「同窗口对照」 */
   peers: Map<string, Array<{ ck: string; down: number; at: number }>> = new Map();
   /** 每个站点见过的最大响应字节数：v8 的 bigTypical（tiny 的相对判据要用） */
-  bigTyp: Map<string, number> = new Map();
   colo = "";
   funnel: Record<string, number> = { direct: 0, node: 0, v6: 0 };
   candN = 0; // 最近一次 candsFor 的候选数（观测用）
@@ -55,137 +46,32 @@ export class AppState {
   rankGen = 0;
 
   // —— 日计数 ——
-  cntKeys = [
-    "restore",
-    "restoreSkip",
-    "pendFail",
-    "snapWriteFail",
-    "snapReadFail",
-    "snapFlushReadFail",
-    "snapFlushFail",
-    "snapUsersFail",
-    "seedWriteFail",
-  "statsSeedFail",
-  "admStatsSkip",
-    "snapSkip",
-    "srcSkip",
-    "pendSkip",
-    "egSent",
-    "rgFail",
-    "psNote",
-    "psDO",
-    "deadNote",
-    "deadDO",
-    "deadClear",
-    "ftSkip",
-    "blkBatch",
-    "blkWrote",
-    "blkNoPeer",
-    "blkDO",
-    "bizSweeps",
-    "blkContra",
-    "blkMutedSkip",
-    "cronStale",
-    "factsJoin",
-    "factsDo",
-    "factsCacheHit",
-    "vtCacheBad",
-    // 账本解不开（换过 kek / 值被写坏）：次数不为 0 就说明有实例在从零记账，
-    // 原文会被 save() 备份到 `a_bak`，人工可抢救（v7.220）
-    "doBad",
-    "logsDoFail",
-  "dayDoFail",
-  "shardBad",
-    "capSet",
-    "capNoise",
-    "rehab",
-    "dnsProbe",
-    "dnsDO",
-    "egDO",
-    "cfObs",
-    "conn",
-    "direct",
-    "node",
-    "eCloseD",
-    "eCloseP",
-    "px4",
-    "tfb",
-    "skipCfRelay", "badRelay",
-  "pxf",
-    "sw",
-    "noCand",
-    "tput",
-"stall",
-    "ustall",
-    "cut",
-    "ccut",
-    "dead",
-    "noPayload",
-    "noAuth",
-    "wsFail",
-    "vtSent",
-    "vtDO",
-    "trHit",
-    "trSmall",
-    "smN",
-    "smD",
-    "sz1",
-    "sz2",
-    "sz3",
-    "sz4",
-    "vwild",
-  ];
-  cnt: Record<string, number> = {};
-  cntDay = "";
-  cntSent: Record<string, number> = {};
 
   // —— 信誉表与候选池 ——
   seed: Seed = { v: 0, ts: 0, poolGen: 0, poolN: 0, builtAt: 0, byColo: {}, cnt: null };
-  gcnt: CounterDoc | null = null;
-  seedAt = 0;
   seedDirty = false;
   /** 上一次读 seed 是否失败：失败时 write 必须跳过，不能拿空表覆盖别人的桶 */
-  seedReadFail = false;
   pool: PoolEntry[] = [];
-  /** 已交给上报、等待 ack 的强证据（k → 到期时间） */
-  vtPend: Map<string, { s: number; t: number }> = new Map();
-  /** 已上报到 DO 的判定（键 `target|chan`，值 = 到期时间） */
-  vtSent: Map<string, number> = new Map();
   vtLoaded = false;
-  /** 事实读失败后的冷却截止时间：失败一次不该把这个 isolate 的事实层永久关掉（v8 §20.5 允许 60 秒后重试） */
-  vtCool = 0;
   /** 最近一次从事实层读到的 v4 出口（订阅渲染要把它们发成可实测的中继条目） */
   eg4Top: string[] = [];
   /** 本 isolate 解析过的事实开关（`env.facts`，见 `src/route/factflags.ts`）。 */
   factSet: Set<string> | null = null;
   /** 冷启动事实读取的 single-flight 句柄：同一波次并发连接共用一次 DO 读（null = 没有在飞）。 */
-  vtFlight: Promise<void> | null = null;
   scanN = 12;
   poolIdx = 0;
   poolGen = 0;
   poolBuilt = 0;
-  poolAt = 0; // 上次「按需加载候选池」的尝试时间（冷 isolate 首次连接用，节流 60 秒）
-  aliveAt = 0; // 上次「按需起搏探活」的时间（冷 isolate 一条中继都没有时用，节流 5 分钟）
 
   // —— 计量 ——
   stats: Map<string, StatsLocal> = new Map();
   pend: Map<string, PendEntry> = new Map();
-  pendAt = 0;
   /** 上报批次在途：同一 isolate 同时只跑一批，避免两批各 carry 同一组事实、先 ack 的把后一批的在途行一起清掉 */
-  pendBusy = false;
   pendMs = 30000; // 推送间隔地板：30 秒（原来 10 秒，DO 请求量 ×3）
-  tflush: ReturnType<typeof setTimeout> | null = null;
   pendBytes = 0;
   doCalls = 0;
   /** 增量上报的游标：一轮只带 PEND_MAX 个用户，下一轮从上次停下的位置继续（否则尾部永远排不上） */
-  pendIdx = 0;
   meterCache: Map<string, { v: UsageMeter | null; t: number }> = new Map();
-  snapCache: { v: SnapDoc | null; t: number } = { v: null, t: 0 };
-  /** 跨 isolate 的节点快照（Meter DO 里的 s），面板用；60 秒缓存 */
-  nodeSnapCache: { t: number; v: Record<string, NodeSnap> } = { t: 0, v: {} };
-  snapWritten = 0;
-  snapBusy = false; // flushSnap 在飞：并发收尾只允许一个写
-  snapChecked = 0; // 上次检查全局闸门的时间（避免每条连接都读一次 KV）
   snapBytes = 0;
   kvw = 0;
   kvStat: { ok: boolean | null; key: string; at: number; err?: string; quota?: boolean; quotaAt?: number } = {
@@ -202,33 +88,18 @@ export class AppState {
   // 站点排行缓存（family|mode → 排好序的列表，30 秒），避免每次连接都重算
   hostRankCache: Map<string, { t: number; v: RankRow[] }> = new Map();
   nsWriteAt = 0;
-  cronAt = 0; // cron 闸门的持有时间戳（0 = 空闲）：读写统一走 src/core/lock.ts 的 CRONLOCK
 
   // —— 用户与观测 ——
-  usersCache: { v: Auth | null; t: number } = { v: null, t: 0 };
-  usersSig = "";
   rtt: Map<string, Record<string, RttEntry>> = new Map();
   rttMiss: Map<string, number> = new Map(); // rtt:<id> 不存在时的负缓存（省 KV 读）
   errs: ErrItem[] = [];
   cagg: Map<string, { n: number; ok: number; dn: number; v: number[] }> = new Map(); // 连接观测按节点聚合
 
-  // —— DNS 缓存 ——
-  dnsCache: Map<string, { ip: string; t: number }> = new Map();
-  v4AllCache: Map<string, { ips: string[]; t: number }> = new Map();
   /** 命中过 Cloudflare 托管的目标（host → 过期时间），省掉重复解析 */
   cfHost: Map<string, number> = new Map();
+  /** CF HTTP 判定缓存：跨模块共享，仍由 S 持有 */
   cfHttp: Map<string, { code: number; colo: string; t: number }> = new Map();
-  /** 正在探测的站点（`refreshCfHttp` 的在途集合）：探测要占 connect 名额，同一站点只能有一条在飞 */
-  cfHttpFlight: Set<string> = new Set();
-  aaaaCache: Map<string, { ip: string; t: number }> = new Map();
 
-  constructor() {
-    // 计数器按 CNT_KEYS 初始化成 0，避免"某个键忘了写"导致 undefined
-    for (const k of this.cntKeys) {
-      this.cnt[k] = 0;
-      this.cntSent[k] = 0;
-    }
-  }
 }
 
 export const S = new AppState();

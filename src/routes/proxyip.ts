@@ -10,11 +10,12 @@ import { cronScan, nsOf, pxGet } from "../px/pool";
 import { POOL_SOURCES, SOURCES } from "../px/probe";
 import { SEL } from "../px/selector";
 import { cnt, cntView } from "../core/counter";
-import { CronLock } from "../core/lock";
+import { CRON_LOCK } from "../core/lock";
 import { spdSnapshot } from "../core/obs";
 import { regionListAsync } from "../px/regions";
 import { PEND } from "../store/index";
 import { adminOnly } from "../edge/auth";
+import { RETEST } from "../px/scan";
 
 import type { RouteCtx } from "../edge/types";
 
@@ -28,6 +29,8 @@ type UserCtx = RouteCtx & { id: string };
  *   「哪一行会拨号 / 会清表」只能靠通读全文才知道。
  */
 export class ProxyipView {
+  /** 上次手动刷新池子的时刻（避免连点） */
+  private lastManualAt = 0;
   /** 路由上下文（`env`/`url`/`id` 都从它取） */
   private readonly c: UserCtx;
   /** 绑定与配置 */
@@ -133,7 +136,7 @@ export class ProxyipView {
     S.prev = { lat: "", tput: "" };
     S.lastSwitch = { lat: 0, tput: 0 };
     S.switchHits = { lat: [], tput: [] };
-    S.lastManual = 0;
+    this.lastManualAt = 0;
     S.funnel = { direct: 0, node: 0, v6: 0 };
     // 站点画像/排行缓存也必须一起清：否则 reset 后 pick 还会推荐已经不存在的节点
     S.hostNode.clear();
@@ -155,19 +158,19 @@ export class ProxyipView {
     S.scanN = Number.isFinite(sn) && sn > 12 ? sn : 12;
     // 与 cron 互斥：两轮 cronScan 并发会双跑探活、双写 seed、poolIdx 相互覆盖
     // 与 cron 共用同一个闸门（claim 带截止时间：卡死的一轮会被接管，手动 refresh 不再是死路）
-    if (Date.now() - S.lastManual <= 5000) {
+    if (Date.now() - this.lastManualAt <= 5000) {
       // 5 秒节流窗口内不动手：也不必占住闸门
       return null;
     }
-    if (!CronLock.claim()) {
-      return json({ ok: false, error: "cron in progress", heldMs: CronLock.age() });
+    if (!CRON_LOCK.claim()) {
+      return json({ ok: false, error: "cron in progress", heldMs: CRON_LOCK.age() });
     }
-    S.lastManual = Date.now();
+    this.lastManualAt = Date.now();
     try {
       await cronScan(this.env).catch((e) => logErr("cron: " + errMsg(e)));
       SEL.afterScan(this.env);
     } finally {
-      CronLock.release();
+      CRON_LOCK.release();
     }
     return null;
   }
@@ -312,7 +315,7 @@ export class ProxyipView {
       failCount: S.pxFailMem,
       probeWhy: S.probeWhy,
       probeColo: S.probeColo,
-      reProbeN: S.reProbeN,
+      reProbeN: RETEST.count,
       funnel: stat.funnel || { direct: 0, node: 0, v6: 0 },
       rotatePolicy: {
         minDwellSec: Math.round(SC.DWELL / 1000),
