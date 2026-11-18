@@ -110,8 +110,11 @@ type WireBody = FactsBody & {
 function vtShape(b: unknown): b is WireBody {
   if (!b || typeof b !== "object") return false;
   const o = b as WireBody;
-  // vt 是判定表、hl 是中继健康度：正常快照里这两张一定在（空的时候也是空数组）
-  return Array.isArray(o.vt) && Array.isArray(o.hl);
+  // 七张表必须都在：factsOut() 恒发全七张（空表也是空数组）。
+  // 只看 vt/hl 时，一个缺 eg/ps/dead/blk2/dns 的旧缓存或裁剪过的响应会被当成完整事实，
+  // 于是 S.vtLoaded 被置真、FactsStore.load 静默跳过缺的表 —— 本 isolate 余生看不到那五类事实。
+  const FACT_TABLES = ["vt", "hl", "eg", "ps", "dead", "blk2", "dns"];
+  return FACT_TABLES.every((k) => Array.isArray((o as unknown as Record<string, unknown>)[k]));
 }
 
 /**

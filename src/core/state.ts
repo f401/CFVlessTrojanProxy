@@ -171,6 +171,8 @@ export class AppState {
   stats: Map<string, StatsLocal> = new Map();
   pend: Map<string, PendEntry> = new Map();
   pendAt = 0;
+  /** 上报批次在途：同一 isolate 同时只跑一批，避免两批各 carry 同一组事实、先 ack 的把后一批的在途行一起清掉 */
+  pendBusy = false;
   pendMs = 30000; // 推送间隔地板：30 秒（原来 10 秒，DO 请求量 ×3）
   tflush: ReturnType<typeof setTimeout> | null = null;
   pendBytes = 0;

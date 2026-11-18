@@ -2949,7 +2949,7 @@ console.log("\n91) 活跃池目标：只作判据（加码函数已删）");
 console.log("\n92) 远端事实读取：并发只读一次 + colo 缓存命中");
 {
   let hits = 0;
-  const mkEnv = () => ({ uuid: "u-test", METER: { idFromName: () => "id", get: () => ({ fetch: async () => { hits += 1; await new Promise((r) => setTimeout(r, 15)); return { ok: true, json: async () => ({ vt: [], hl: [], eg: [], ps: [], dead: [], blk2: [] }) }; } }) } });
+  const mkEnv = () => ({ uuid: "u-test", METER: { idFromName: () => "id", get: () => ({ fetch: async () => { hits += 1; await new Promise((r) => setTimeout(r, 15)); return { ok: true, json: async () => ({ vt: [], hl: [], eg: [], ps: [], dead: [], blk2: [], dns: [] }) }; } }) } });
   W.S.vtLoaded = false;
   W.S.vtFlight = null;
   const before = globalThis.caches;
@@ -2961,7 +2961,7 @@ console.log("\n92) 远端事实读取：并发只读一次 + colo 缓存命中")
   // 缓存命中：有 colo 缓存时不应再问 DO
   hits = 0;
   W.S.vtLoaded = false;
-  globalThis.caches = { default: { match: async () => new Response(JSON.stringify({ vt: [], hl: [], eg: [], ps: [] })), put: async () => {} } };
+  globalThis.caches = { default: { match: async () => new Response(JSON.stringify({ vt: [], hl: [], eg: [], ps: [], dead: [], blk2: [], dns: [] })), put: async () => {} } };
   await W.vtLoad(mkEnv());
   eq("缓存命中不问 DO", hits, 0);
   eq("缓存命中后仍标记已加载", W.S.vtLoaded, true);
@@ -5635,7 +5635,7 @@ try {
   };
   const errBody = () => new Response(JSON.stringify({ error: "boom" }), { status: 500 });
   const shapeBad = () => new Response(JSON.stringify({ foo: 1 }), { status: 200 });
-  const good = () => new Response(JSON.stringify({ vt: [], hl: [] }), { status: 200 });
+  const good = () => new Response(JSON.stringify({ vt: [], hl: [], eg: [], ps: [], dead: [], blk2: [], dns: [] }), { status: 200 });
 
   // ① DO 5xx：不能置 vtLoaded，要记冷却，且不回写缓存
   reset();
@@ -5669,7 +5669,7 @@ try {
   writes = 0;
   doHits = 0;
   const beforeHit = Number(W.S.cnt.factsCacheHit || 0);
-  globalThis.caches = { default: { match: async () => new Response(JSON.stringify({ vt: [], hl: [] }), { status: 200 }), put: async () => { writes += 1; } } };
+  globalThis.caches = { default: { match: async () => new Response(JSON.stringify({ vt: [], hl: [], eg: [], ps: [], dead: [], blk2: [], dns: [] }), { status: 200 }), put: async () => { writes += 1; } } };
   await W.vtLoad(mkEnv(() => { doHits += 1; return good(); }));
   eq("好缓存直接命中", Number(W.S.cnt.factsCacheHit || 0), beforeHit + 1);
   eq("命中缓存不再问 DO", doHits, 0);
@@ -9975,7 +9975,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("[327] flush 里不再自己发请求", !flushBody.includes("doFetch("));
   ok("[327] flush 里不再有 carriedBy / attached 这类散落状态",
     !flushBody.includes("carriedBy") && !flushBody.includes("attached"));
-  ok("[327] flush 拆完不超过 30 行", (flushBody.match(/\n/g) || []).length <= 30);
+  // 7.368 加了单飞守卫（pendBusy）+ try/finally 释放，编排层多行约 10 行；仍远低于「不拆」时的 99 行
+  ok("[327] flush 拆完不超过 45 行", (flushBody.match(/\n/g) || []).length <= 45);
 
   const takeBody = body327("private take(max: number)");
   ok("[327] 摘批：轮转起点 + 只摘这一批 + 重算剩余字节",
@@ -12296,6 +12297,83 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
 
   W.S.usersCache = { v: null, t: 0 };
   W.S.usersSig = "";
+}
+
+console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
+{
+  // ---- D3: vtShape 必须要求全七张表，缺一张就不能置 vtLoaded ----
+  const vsrc368 = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+  ok("[368] vtShape 登记全七张表", ["vt", "hl", "eg", "ps", "dead", "blk2", "dns"].every((k) => vsrc368.includes(`"${k}"`)));
+  ok("[368] 形状校验用 every 遍历", vsrc368.includes("FACT_TABLES.every("));
+
+  const savedCaches368 = globalThis.caches;
+  delete globalThis.caches;
+  const full368 = () => new Response(JSON.stringify({ vt: [], hl: [], eg: [], ps: [], dead: [], blk2: [], dns: [] }), { status: 200 });
+  const partial368 = () => new Response(JSON.stringify({ vt: [], hl: [], eg: [], ps: [], dead: [], blk2: [] }), { status: 200 });
+  const env368 = (mk) => ({ uuid: "u368", METER: { idFromName: () => "id368", get: () => ({ fetch: async () => mk() }) } });
+  const reset368 = () => { W.S.vtLoaded = false; W.S.vtCool = 0; W.S.vtFlight = null; };
+
+  // 缺 dns 的响应：不能当成完整事实（否则本 isolate 余生看不到 dns）
+  reset368();
+  await W.vtLoad(env368(partial368));
+  ok("[368] 缺一张事实表不置 vtLoaded", W.S.vtLoaded === false, String(W.S.vtLoaded));
+  ok("[368] 形状不对记 60 秒冷却", W.S.vtCool > Date.now(), String(W.S.vtCool - Date.now()));
+
+  // 全七张：正常加载
+  reset368();
+  await W.vtLoad(env368(full368));
+  ok("[368] 全七张表正常加载", W.S.vtLoaded === true, String(W.S.vtLoaded));
+
+  globalThis.caches = savedCaches368;
+  reset368();
+
+  // ---- D2: 同一 isolate 的两个 flush 不并发 ----
+  const psrc368 = fs.readFileSync("src/store/pend.ts", "utf8");
+  const ssrc368 = fs.readFileSync("src/core/state.ts", "utf8");
+  ok("[368] S 有 pendBusy 标志", /pendBusy\s*=\s*false/.test(ssrc368));
+  ok("[368] flush 有单飞守卫", psrc368.includes("if (S.pendBusy) return;"));
+  ok("[368] flush finally 释放守卫", psrc368.includes("S.pendBusy = false;"));
+
+  const savedPend368 = { at: W.S.pendAt, ms: W.S.pendMs, busy: W.S.pendBusy };
+  W.S.pend.clear();
+  W.S.pendBusy = false;
+  W.S.pendAt = 0;
+  W.S.pendMs = 0;
+  W.PEND.add("u1-368", 10, 10, true);
+  W.PEND.add("u2-368", 10, 10, true);
+  let active368 = 0;
+  let maxActive368 = 0;
+  let posts368 = 0;
+  const cenv368 = {
+    uuid: "u1-368",
+    METER: {
+      idFromName: (n) => "id-" + n,
+      get: () => ({
+        fetch: async () => {
+          posts368 += 1;
+          active368 += 1;
+          maxActive368 = Math.max(maxActive368, active368);
+          await new Promise((r) => setTimeout(r, 25));
+          active368 -= 1;
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        },
+      }),
+    },
+  };
+  // max=1 => 第一批只摘走 u1，u2 仍留在账本里；若不单飞，第二个 flush 会并发再摘 u2
+  await Promise.all([
+    W.PEND.flush(cenv368, true, 1),
+    W.PEND.flush(cenv368, true, 1),
+  ]);
+  eq("[368] 并发 flush 只跑一个 POST", posts368, 1);
+  eq("[368] 同时在途的上报不超过一批", maxActive368, 1);
+  ok("[368] 守卫已释放", W.S.pendBusy === false, String(W.S.pendBusy));
+  ok("[368] 被跳过的那批仍在账本里", W.S.pend.has("u2-368"), [...W.S.pend.keys()].join(","));
+
+  W.S.pend.clear();
+  W.S.pendAt = savedPend368.at;
+  W.S.pendMs = savedPend368.ms;
+  W.S.pendBusy = savedPend368.busy;
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

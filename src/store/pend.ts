@@ -109,31 +109,40 @@ export class PendingLedger {
    */
   async flush(env: Env, force?: boolean, max: number = SC.PEND_MAX): Promise<void> {
     if (!env || !env.METER || !S.pend.size) return;
-    if (!force && Date.now() - S.pendAt < S.pendMs) return;
-    S.pendAt = Date.now();
-    const batch = this.take(max);
-    if (!batch.length) return;
-    // 快照固定挂在主 uuid 的对象上：挂到"批次第一个"会挂到另一个用户，
-    // 结果面板（读主 uuid）永远看不到更新。
-    const primary = this.id(env);
-    // 日计数只搭主 uuid 的车：主 uuid 这批没有流量时不要先 cntDelta（会推进基线），
-    // 否则计数会永久丢；等主 uuid 下次有批次再一起发。
-    const hasPrimary = !primary || batch.some(([bid]) => String(bid).toLowerCase() === primary);
-    const cd = hasPrimary ? cntDelta() : {};
-    const today = new Date().toISOString().slice(0, 10);
-    const carry: PendCarry = { owner: "", sync: false, rows: [] };
-    let bad = 0;
-    await eachLimit(batch, 8, async ([id, d]) => {
-      const mine = !primary || String(id).toLowerCase() === primary;
-      try {
-        await this.post(env, id, this.body(id, d, mine, cd, today, carry));
-        this.ack(id, carry);
-      } catch {
-        bad += 1;
-        this.rollback(id, d, cd, mine, carry);
-      }
-    });
-    this.backoff(bad);
+    // 两批并发会各 carry 同一组事实增量：先回来的 ack() 把整张 pending 清空，
+    // 后回来那批失败时 nack() 已无从撤销 —— 证据永久丢失。同一 isolate 只跑一批；
+    // 被跳过的那批什么都没摘、也没登记 pending，证据仍在原表里等下一轮。
+    if (S.pendBusy) return;
+    S.pendBusy = true;
+    try {
+      if (!force && Date.now() - S.pendAt < S.pendMs) return;
+      S.pendAt = Date.now();
+      const batch = this.take(max);
+      if (!batch.length) return;
+      // 快照固定挂在主 uuid 的对象上：挂到"批次第一个"会挂到另一个用户，
+      // 结果面板（读主 uuid）永远看不到更新。
+      const primary = this.id(env);
+      // 日计数只搭主 uuid 的车：主 uuid 这批没有流量时不要先 cntDelta（会推进基线），
+      // 否则计数会永久丢；等主 uuid 下次有批次再一起发。
+      const hasPrimary = !primary || batch.some(([bid]) => String(bid).toLowerCase() === primary);
+      const cd = hasPrimary ? cntDelta() : {};
+      const today = new Date().toISOString().slice(0, 10);
+      const carry: PendCarry = { owner: "", sync: false, rows: [] };
+      let bad = 0;
+      await eachLimit(batch, 8, async ([id, d]) => {
+        const mine = !primary || String(id).toLowerCase() === primary;
+        try {
+          await this.post(env, id, this.body(id, d, mine, cd, today, carry));
+          this.ack(id, carry);
+        } catch {
+          bad += 1;
+          this.rollback(id, d, cd, mine, carry);
+        }
+      });
+      this.backoff(bad);
+    } finally {
+      S.pendBusy = false;
+    }
   }
 
   /**
