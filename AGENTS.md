@@ -1,4 +1,4 @@
-- 线上 **7.270**（已部署、可跑）｜仓库 **7.370**（HTML 抽成独立 .html 模板加 esbuild text loader，5 页面逐字节不变；CF 探测与 NAT64 兜底的 DoH 也走请求额度、额度耗尽不再当坏腿；共 215 个缺陷皆已修复）：两者差 100 个版本。
+- 线上 **7.270**（已部署、可跑）｜仓库 **7.371**（debug ?do=1 写回判定证据后按状态 ack/nack，pending 不重复上报；共 215 个缺陷皆已修复）：两者差 101 个版本。
 
 # AGENTS.md
 
@@ -126,8 +126,8 @@ Account-level traps (all have happened):
 
 ## 9. Current state
 
-- Repo **7.360**; **live 7.270**. Everything from 7.271 to 7.360 is committed and pushed but **deliberately not deployed** (the user asked to keep CF pushes rare). Run the release flow above before shipping.
-- Architecture phase is closed: 112 source files, 82 exported classes, 29 module-level instances (from 57). `docs/ARCHITECTURE.md` lists every class and who owns it; `docs/命名约定.md` holds the naming rules and the singleton admission test.
+- Repo **7.371**; **live 7.270**. Everything from 7.271 to 7.371 is committed and pushed but **deliberately not deployed** (the user asked to keep CF pushes rare). Run the release flow above before shipping.
+- Architecture phase is closed: 115 source files, 103 exported classes, 47 module-level `new` expressions (of which 29 are actual state/view/encoder singletons; the rest are typed constants such as encoders and deny sets). `docs/ARCHITECTURE.md` lists every class and who owns it; `docs/命名约定.md` holds the naming rules and the singleton admission test.
 - Deliberately not done: merging the six fact tables (`VT`/`PS`/`EG`/`DNS`/`DEAD`/`BLK`) behind one root object. They appear ~540 times in `tests/` and `tools/`; the only gain is one less global. Rationale is recorded in `docs/命名约定.md`.
 - Open boundaries that only real traffic can answer: long-term benefit of relaying, subrequest / `connect()` exhaustion under load, and the paired `facts=eg` vs `none` gain (+6 ± 10.4 — not significant).
 - Historical audit ledger (defects 1–215 with root causes) lives in `docs/v8实现清单.md` (table H6), not here.

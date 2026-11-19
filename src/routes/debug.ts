@@ -1,5 +1,5 @@
 import { S } from "../core/state";
-import { vtDelta, vtLoad } from "../route/verdictsync";
+import { vtAck, vtDelta, vtLoad, vtNack } from "../route/verdictsync";
 import { doFetch, PEND, restoreUsage } from "../store/index";
 import { DebugNets } from "./debug-nets";
 import type { RouteCtx } from "../edge/types";
@@ -474,13 +474,18 @@ export async function debug(c: DebugCtx): Promise<Response> {
       if (rows.length) {
         // 走 `doFetch`：它同时把这次子请求记进 `S.doCalls`，绕过它 `/health` 的计数就少一块
         const userId = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
-        await doFetch(env, userId, "https://meter/add", {
+        const r = await doFetch(env, userId, "https://meter/add", {
           method: "POST",
           body: JSON.stringify({ vt: rows }),
         });
+        // 成功后必须 ack：否则 pending 一直留着，下次 cron flush 会把同一批证据重复上报。
+        // 非 2xx 当失败处理（nack），让下一轮重新登记；原来只看「没抛异常」就当成功。
+        if (r.ok) vtAck();
+        else vtNack();
       }
     } catch {
-      // 写回失败不影响本次诊断：下面的 vtLoad 会重新尝试读
+      // 写回失败不影响本次诊断：nack 让 pending 下轮重发，vtLoad 会重新尝试读
+      vtNack();
     }
     S.vtLoaded = false;
     await vtLoad(env);

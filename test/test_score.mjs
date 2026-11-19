@@ -12424,6 +12424,70 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   eq("[369] renderTemplate 保留未登记占位符", W.renderTemplate("a{{x}}b", {}), "a{{x}}b");
 }
 
+// ── 370. debug ?do=1 写回判定证据后 ack/nack，pending 不重复上报 ──
+{
+  const dbgSrc370 = fs.readFileSync("src/routes/debug.ts", "utf8");
+  ok("[370] ?do=1 成功时 ack", dbgSrc370.includes("if (r.ok) vtAck();"), "成功未 ack");
+  ok("[370] ?do=1 失败时 nack", dbgSrc370.includes("else vtNack();") && /catch \{[\s\S]{0,140}vtNack\(\);/.test(dbgSrc370), "失败未 nack");
+
+  const key370 = "do371.example.com|r:198.51.100.9";
+  const setup370 = (addStatus) => {
+    W.VT.clear();
+    W.VT_SYNC.pending.clear();
+    W.VT_SYNC.sent.clear();
+    W.VT_SYNC.coolUntil = 0;
+    W.S.vtLoaded = false;
+    W.VT.setState("do371.example.com", "r:198.51.100.9", 3, 1);
+    const adds = [];
+    const meter = {
+      idFromName: (n) => n,
+      get: () => ({
+        fetch: async (u) => {
+          if (String(u).includes("/meter/add")) {
+            adds.push(String(u));
+            return new Response("{}", { status: addStatus });
+          }
+          // /meter/vt 回 5xx，让 vtLoad 进 catch 而不污染判定表
+          return new Response("{}", { status: 500 });
+        },
+      }),
+    };
+    return { meter, adds };
+  };
+  const run370 = async (meter) => {
+    const url = new URL("https://sim.example.com/u/debug?do=1");
+    const request = new Request(url.toString());
+    const ctx = { request, url, env: { METER: meter, uuid: "do371-uuid" }, id: "do371-uuid", exec: { waitUntil() {}, passThroughOnException() {} } };
+    try { await W.debug(ctx); } catch { /* 后续诊断分支缺 env 绑定，忽略 */ }
+  };
+
+  // 成功：add 回 200 → pending 清空且登记进 sent，下轮不再上报
+  {
+    const { meter, adds } = setup370(200);
+    const before370 = W.vtDelta().some((r) => r.k === key370);
+    await run370(meter);
+    ok("[370] 写回前先登记了 pending", before370, "vtDelta 没登记");
+    ok("[370] 成功写回调用 /add", adds.length === 1, "没打 add");
+    ok("[370] 成功后 pending 清空", W.VT_SYNC.pending.size === 0, "pending 未清");
+    ok("[370] 成功后记进 sent", W.VT_SYNC.sent.has(key370), "sent 没有该行");
+  }
+  // 失败：add 回 500 → pending 清空但不进 sent，下一轮重新登记
+  {
+    const { meter, adds } = setup370(500);
+    W.vtDelta();
+    await run370(meter);
+    ok("[370] 失败写回也调用 /add", adds.length === 1, "没打 add");
+    ok("[370] 失败后 pending 清空", W.VT_SYNC.pending.size === 0, "pending 未清");
+    ok("[370] 失败后不记 sent", !W.VT_SYNC.sent.has(key370), "sent 不该有该行");
+  }
+
+  W.VT.clear();
+  W.VT_SYNC.pending.clear();
+  W.VT_SYNC.sent.clear();
+  W.VT_SYNC.coolUntil = 0;
+  W.S.vtLoaded = false;
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
