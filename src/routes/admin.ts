@@ -120,9 +120,37 @@ export class AdminView {
     if (cur.ok === false) {
       return new Response("用户表暂时读不到（KV 故障），为避免覆盖请稍后重试", { status: 503 });
     }
-    // 只回写托管用户：手动配置的用户在 env 里，不该被这一页的写回覆盖掉
+    // 只回写托管用户：手动配置的用户在 env 里，不该被这一页的写回覆盖掉。
+    // 例外：op=config 会把 env 用户「转成托管」写回（见下方 config 分支），这是用户
+    // 主动在面板选地区/节点的结果，KV 覆盖 env（UserIndex.fromManaged 最后写）。
     let list = cur.list.filter((x) => x.managed).map((x) => ({ ...x }));
-    if (op === "add") {
+    if (op === "config") {
+      // 用户在面板选地区 → 写回订阅配置。目标用户可能来自 env（managed=false），
+      // 此时复制一份成 managed 写进 KV；同名托管行最后由 fromManaged 覆盖 env。
+      const src = cur.list.find((x) => x.id === target);
+      if (!src) return new Response("用户不存在", { status: 404 });
+      const rawRegions = String(f.get("regions") || "")
+        .split(/[\s,]+/)
+        .map((s) => s.trim().toUpperCase())
+        .filter((s) => /^[A-Z0-9]{2,8}$/.test(s))
+        .slice(0, 32);
+      const topN = Math.max(1, Math.min(8, Number(f.get("topN")) || 3));
+      const targetHost = String(f.get("targetHost") || "").slice(0, 253);
+      const prev = list.find((x) => x.id === target);
+      const row = {
+        id: src.id,
+        pwd: prev ? prev.pwd : src.pwd,
+        note: prev ? prev.note : src.note,
+        enabled: prev ? prev.enabled : src.enabled,
+        managed: true,
+        ts: Date.now(),
+        regions: rawRegions,
+        regionTopN: topN,
+        targetHost,
+      };
+      list = list.filter((x) => x.id !== target);
+      list.push(row);
+    } else if (op === "add") {
       list.push({
         id: crypto.randomUUID(),
         pwd: randomPwd(16),
@@ -224,7 +252,16 @@ export function renderAdmin(
              <button name="op" value="reset">重置密码</button>
              <button name="op" value="del" onclick="return confirm('确定删除？')">删除</button>
            </form>`
-        : `<span class="mu">环境变量，不可改</span>`;
+        : `<span class="mu">环境变量${u.regions ? "（已配置地区，编辑后转托管）" : "，不可改"}</span>`;
+      // 地区订阅配置：用户可挑地区/每区节点数/目标站点；env 用户提交后转成托管写回 KV。
+      // 留空 regions=清除选择（回落全部地区的自动挑选）。
+      const cfgForm = `<form method="post" action="${escapeHtml(opAction)}" style="margin-top:5px;font-size:12px">
+        <input type="hidden" name="id" value="${u.id}"><input type="hidden" name="op" value="config">
+        地区 <input type="text" name="regions" size="10" placeholder="US,JP" value="${escapeHtml((u.regions || []).join(","))}">
+        每区 <input type="text" name="topN" size="2" value="${u.regionTopN || 3}">
+        站点 <input type="text" name="targetHost" size="12" placeholder="example.com" value="${escapeHtml(u.targetHost || "")}">
+        <button name="go" value="1">配置</button>
+      </form>`;
       // 控制页/订阅都要带 pageKey（设了访问口令时）
       const kq = pageKey ? "?k=" + encodeURIComponent(pageKey) : "";
       const base = url.origin + "/" + encodeURIComponent(u.id);
@@ -245,7 +282,7 @@ export function renderAdmin(
           <button data-copy="${escapeHtml(subSb)}" title="复制 sing-box 订阅">sb</button>
           <button data-copy="${escapeHtml(subTy)}" title="复制明文链接订阅">ty</button>
         </td>
-        <td>${ops}</td>
+        <td>${ops}${cfgForm}</td>
       </tr>`;
     })
     .join("");

@@ -1987,7 +1987,7 @@ ok("Attacher 可构造", typeof W.Attacher === "function", "Attacher");
 ok("SubscriptionView 是类实例且可 render()", typeof W.SubscriptionView === "function" && typeof W.SubscriptionView.prototype.render === "function" && W.SUBVIEW === undefined, "SUBVIEW");
 ok("SubscriptionView 可构造", typeof W.SubscriptionView === "function", "SubscriptionView");
 // ═══ 第 52 组：路由表（P6-2）═══
-ok("RouteTable 注册了四条用户级路由", W.RouteTable.names().join(",") === "subscription,logs,proxyip,debug", W.RouteTable.names().join(","));
+ok("RouteTable 注册了五条用户级路由", W.RouteTable.names().join(",") === "subscription,logs,proxyip,debug,regions", W.RouteTable.names().join(","));
 ok("cl 命中 subscription 且需要 RTT/统计", W.RouteTable.route("cl")?.name === "subscription" && W.RouteTable.needsRtt("cl") && W.RouteTable.needsStats("cl"), "cl");
 ok("裸 /<uuid> 也命中 subscription", W.RouteTable.route("")?.name === "subscription", "empty");
 ok("logs 命中但不需要 RTT", W.RouteTable.route("logs")?.name === "logs" && !W.RouteTable.needsRtt("logs"), "logs");
@@ -3846,7 +3846,8 @@ console.log("\n-- 判定表增量：待发项保留状态、每批严格 ≤60 �
   // 地区是硬要求，挂死不能靠「等客户端放弃」；失败也不能记到目标站头上。
   const rgSrc = fs.readFileSync("src/proxy/region.ts", "utf8");
   const ssSrc = fs.readFileSync("src/proxy/session.ts", "utf8");
-  eq("地区分流的两条拨号都走同一个拨号器", (rgSrc.match(/SOCKET_DIALER\.open\(/g) || []).length, 2);
+  // 7.372 加了 openPinned（?node= 硬钉）的第三条拨号，同样走 SOCKET_DIALER，口径不变
+  eq("地区分流与钉节点的拨号都走同一个拨号器", (rgSrc.match(/SOCKET_DIALER\.open\(/g) || []).length, 3);
   eq("地区分流里不再有裸 connect（超时迟到成功的 socket 必须有人关）", (rgSrc.match(/await connect\(/g) || []).length, 0);
   ok("同一个节点一次失败只罚一次（否则冷却跳两档）", rgSrc.includes("conn.node !== failed"));
   ok("地区失败单独计数，不混进「目标不可达」", fs.readFileSync("src/proxy/fallback.ts", "utf8").includes('cnt("rgFail")') && W.COUNTER.keys.includes("rgFail"));
@@ -7891,7 +7892,7 @@ const fbSrc272 = fs.readFileSync("src/proxy/fallback.ts", "utf8");
 ok("补救链改用 SOCKET_DIALER", fbSrc272.includes("SOCKET_DIALER.open(") && !fbSrc272.includes("Promise.resolve(connect("));
 const rgSrc272 = fs.readFileSync("src/proxy/region.ts", "utf8");
 ok("地区分流改用 SOCKET_DIALER", rgSrc272.includes("SOCKET_DIALER.open(") && !rgSrc272.includes("Promise.resolve(connect("));
-ok("地区分流的两条候选都走同一个拨号器", rgSrc272.split("SOCKET_DIALER.open(").length - 1 === 2);
+ok("地区分流与钉节点都走同一个拨号器", rgSrc272.split("SOCKET_DIALER.open(").length - 1 === 3);
 // ===== 273. 诊断端点从 Meter.handle 的 if 链搬进 MeterDiagnostics =====
 // 它们不落盘、不碰账目；混在账目分支里会让「哪些端点会写 DO」这件事看不出来。
 ok("诊断分派器存在、模块级单例已撤", typeof W.MeterDiagnostics === "function" && W.METER_DIAGNOSTICS === undefined);
@@ -8892,7 +8893,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   // 一个文件里要有四个单元：形状 + 三个类 + 一个就绪函数 + 三个单例
   ok("一个文件里四个单元齐备", pickSrc.includes("export interface PickState") && pickSrc.includes("export class PickPath") && pickSrc.includes("export class SitePick") && pickSrc.includes("export class PathPrefs") && pickSrc.includes("export async function ensureReady("));
   ok("只剩一个门面实例，组件由它持有", pickSrc.includes("export const PICK = new PickPath();") && !pickSrc.includes("export const SITE") && !pickSrc.includes("export const PATHS") && pickSrc.includes("readonly site = new SitePick();") && pickSrc.includes("readonly paths = new PathPrefs();"));
-  ok("文件头写清为什么合在一起", pickSrc.includes("为什么是一个文件四个类"));
+  ok("文件头写清为什么合在一起", pickSrc.includes("四段无独立生命周期"));
 
   // 编排仍然只做编排：抽样与画像调用只在画像那一段里
   ok("pick 四行内委托给持有的画像组件", /pick\([^)]*\)[^{]*\{[^}]*return this\.site\.pick\(/.test(pickSrc));
@@ -12488,6 +12489,275 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   W.S.vtLoaded = false;
 }
 
+// ── 第 371 组：地区节点质量层（枚举 / 6 源归一 / 合并 / 覆盖 / 连通性 / seed 传播）──
+{
+  // 结构：三个枚举与六个源注册表都挂在窗口上
+  ok("[371] IpKind 枚举五个成员", W.IpKind && W.IpKind.Residential === "residential" && W.IpKind.Hosting === "hosting" && W.IpKind.Unknown === "unknown", "IpKind 缺失");
+  ok("[371] IpLevel 枚举三个成员", W.IpLevel && W.IpLevel.Good === "good" && W.IpLevel.Normal === "normal" && W.IpLevel.Risky === "risky", "IpLevel 缺失");
+  ok("[371] IpFamily 用 IPv4/IPv6 全名", W.IpFamily && W.IpFamily.IPv4 === "v4" && W.IpFamily.IPv6 === "v6", "IpFamily 成员名不对");
+  eq("[371] 六源注册表齐备", W.QUALITY_SOURCES.length, 6);
+  ok("[371] 每源都有 name/url/parse", W.QUALITY_SOURCES.every((s) => s.name && typeof s.url === "function" && typeof s.parse === "function"), "源结构不全");
+
+  // 六源真实返回格式的解析（用 2026-11-19 实测样本）
+  const ipapi = W.QUALITY_SOURCES.find((s) => s.name === "ipapi-com");
+  const sigIpapi = ipapi.parse({ status: "success", isp: "Google LLC", mobile: false, proxy: true, hosting: true });
+  eq("[371] ip-api 机房→Hosting", sigIpapi.kind, W.IpKind.Hosting);
+  eq("[371] ip-api proxy 位", sigIpapi.proxy, true);
+  eq("[371] ip-api 失败行弃用", ipapi.parse({ status: "fail" }), null);
+  const ipLocate = W.QUALITY_SOURCES.find((s) => s.name === "iplocate");
+  const sigLoc = ipLocate.parse({ company: { type: "residential" }, privacy: { is_abuser: false, is_tor: true, is_proxy: false, is_vpn: true } });
+  eq("[371] iplocate 住宅→Residential", sigLoc.kind, W.IpKind.Residential);
+  eq("[371] iplocate tor→risky", sigLoc.risky, true);
+  eq("[371] iplocate vpn 位", sigLoc.vpn, true);
+
+  // mergeQuality：风险位优先、住宅/商企 Good、机房 Normal、无信号不臆测
+  const now371 = Date.now() - 60_000;
+  const qGood = W.mergeQuality([{ kind: W.IpKind.Residential, proxy: false, vpn: false, risky: false }], now371);
+  eq("[371] 住宅合并为 Good", qGood.level, W.IpLevel.Good);
+  const qHost = W.mergeQuality([{ kind: W.IpKind.Hosting, proxy: false, vpn: false, risky: false }], now371);
+  eq("[371] 机房合并为 Normal", qHost.level, W.IpLevel.Normal);
+  const qRisk = W.mergeQuality([{ kind: W.IpKind.Residential, proxy: false, vpn: false, risky: true }], now371);
+  eq("[371] 风险位压过 Good", qRisk.level, W.IpLevel.Risky);
+  const qNone = W.mergeQuality([], now371);
+  eq("[371] 无信号 kind 不臆测", qNone.kind, W.IpKind.Unknown);
+  eq("[371] 无信号按 Normal 用", qNone.level, W.IpLevel.Normal);
+
+  // IpQualityTable：读写、TTL 过期、单源冷却、快照只导有效行
+  {
+    const t = new W.IpQualityTable();
+    t.note("1.2.3.4:443", qGood);
+    eq("[371] 质量表读回", t.get("1.2.3.4:443", now371).level, W.IpLevel.Good);
+    eq("[371] 3 天后过期", t.get("1.2.3.4:443", now371 + 3 * 24 * 3600_000 + 1), null);
+    eq("[371] 源初始不冷却", t.sourceCooling("ipapi-com", now371), false);
+    t.failSource("ipapi-com", now371);
+    eq("[371] 失败后冷却", t.sourceCooling("ipapi-com", now371 + 1000), true);
+    eq("[371] 5 分钟后解除", t.sourceCooling("ipapi-com", now371 + 5 * 60_000 + 1), false);
+    // 直接塞一条已过期的行进表（绕过 get 的即时删除），验证 snapshot 只导有效行
+    t.rows.set("9.9.9.9:443", { kind: W.IpKind.Hosting, level: W.IpLevel.Normal, proxy: false, vpn: false, at: now371 - 4 * 24 * 3600_000 });
+    t.note("5.6.7.8:443", qGood);
+    const snap371 = t.snapshot(now371);
+    eq("[371] 快照只导有效行", Object.keys(snap371).length, 1);
+    ok("[371] 快照跳过过期行", !snap371["9.9.9.9:443"] && !!snap371["5.6.7.8:443"], "过期行不该出现在快照");
+  }
+
+  // ProbeCoverage：最旧优先轮转、分族统计、clear
+  {
+    const c = new W.ProbeCoverage();
+    c.note("a:443", W.IpFamily.IPv4, now371 - 2000);
+    c.note("b:443", W.IpFamily.IPv6, now371 - 1000);
+    eq("[371] 覆盖未探优先", c.pick(["a:443", "b:443", "c:443"], 2)[0], "c:443");
+    const st = c.stats(["a:443", "b:443", "c:443"]);
+    eq("[371] 覆盖总数", st.total, 3);
+    eq("[371] 覆盖已探", st.probed, 2);
+    eq("[371] 覆盖 v4/v6 分列", st.v4 + st.v6, 2);
+    c.clear();
+    eq("[371] 覆盖清空", c.rows.size, 0);
+  }
+
+  // ConnObservation：colo|node|site 键、rttOf、TTL
+  {
+    const co = new W.ConnObservation();
+    co.note("HKG", "1.2.3.4:443", "x.com", 200, 321, W.IpFamily.IPv4, now371);
+    eq("[371] 连通性 rttOf", co.rttOf("HKG", "1.2.3.4:443", "x.com", now371), 321);
+    eq("[371] 2xx 记 ok", co.get("HKG", "1.2.3.4:443", "x.com", now371).ok, true);
+    co.note("HKG", "9.9.9.9:443", "x.com", 403, 100, W.IpFamily.IPv4, now371);
+    eq("[371] 403 仍可达", co.get("HKG", "9.9.9.9:443", "x.com", now371).ok, true);
+    co.note("HKG", "8.8.8.8:443", "x.com", 0, 0, W.IpFamily.IPv4, now371);
+    eq("[371] code=0 不可达", co.get("HKG", "8.8.8.8:443", "x.com", now371).ok, false);
+    eq("[371] 6h 后过期", co.rttOf("HKG", "1.2.3.4:443", "x.com", now371 + 6 * 3600_000 + 1), null);
+  }
+
+  // QualityProbe：缓存命中零请求；注入的 io 未调用即证明
+  {
+    const t = new W.IpQualityTable();
+    const probe = new W.QualityProbe();
+    const saveRows = W.QUALITY.rows;
+    t.note("cached:443", qGood, now371);
+    W.QUALITY.rows = t.rows;
+    let calls = 0;
+    const io = { fetch: async () => { calls++; throw new Error("should not fetch"); } };
+    const r = await probe.qualityOf("cached:443", "1.1.1.1", io, W.IpFamily.IPv4, now371);
+    eq("[371] 缓存命中直接返回", r.level, W.IpLevel.Good);
+    eq("[371] 缓存命中零请求", calls, 0);
+    W.QUALITY.rows = saveRows;
+  }
+
+  // 清理：本组不污染后续分组
+  W.CONN_OBS.rows.clear();
+  W.COVERAGE.clear();
+}
+
+// 第 372 组：地区节点浏览器 /regions + ?node= 硬钉住（地区/质量重设计）
+{
+  const saveSeed372 = W.S.seed;
+  const saveAlive372 = new Map(W.S.alive);
+  const saveColo372 = W.S.colo;
+
+  W.S.alive.clear();
+  W.S.colo = "??";
+  W.S.seed = {
+    v: 7, ts: Date.now(), poolGen: 1, poolN: 3, builtAt: Date.now(),
+    byColo: {
+      US: { nodes: [{ k: "9.9.9.9:443", h: "9.9.9.9", p: 443, cc: "US" }] },
+      DE: { nodes: [{ k: "8.8.8.8:443", h: "8.8.8.8", p: 443, cc: "DE" }] },
+    },
+  };
+  W.S.alive.set("1.1.1.1:443", { h: "1.1.1.1", p: 443, cc: "JP", ms: 10, at: Date.now() });
+  W.QUALITY.note("9.9.9.9", { kind: W.IpKind.Residential, level: W.IpLevel.Good, proxy: false, vpn: false, at: Date.now() });
+  W.QUALITY.note("8.8.8.8", { kind: W.IpKind.Hosting, level: W.IpLevel.Risky, proxy: true, vpn: false, at: Date.now() });
+  W.COVERAGE.note("1.1.1.1:443", W.IpFamily.IPv4, Date.now());
+  W.CONN_OBS.note("??", "1.1.1.1:443", "example.com", 200, 42, W.IpFamily.IPv4, Date.now());
+
+  ok("[372] regions 端点已导出", typeof W.regions === "function" && typeof W.RegionsView === "function");
+  const ctx372 = { url: new URL("https://edge.example.com/regions?site=example.com"), env: {}, id: "u372" };
+  const resp372 = await W.regions(ctx372);
+  eq("[372] 返回 200", resp372.status, 200);
+  const body372 = await resp372.json();
+  eq("[372] target 来自查询串", body372.target, "example.com");
+  eq("[372] 覆盖统计总数", body372.coverage.total, 3);
+  eq("[372] 覆盖统计已探", body372.coverage.probed, 1);
+  eq("[372] alive∪seed 三节点都有", body372.nodes.length, 3);
+  // Good 优先、Risky 排后：住宅 9.9.9.9 第一，风险 8.8.8.8 最后
+  eq("[372] Good 排第一", body372.nodes[0].key, "9.9.9.9:443");
+  eq("[372] Risky 排最后", body372.nodes[body372.nodes.length - 1].key, "8.8.8.8:443");
+  const jp372 = body372.nodes.find((n) => n.key === "1.1.1.1:443");
+  eq("[372] 目标站点延迟回填", jp372.rtt, 42);
+  eq("[372] 地址族 v4", jp372.family, W.IpFamily.IPv4);
+  eq("[372] 已探标记", jp372.probed, true);
+  const us372 = body372.nodes.find((n) => n.key === "9.9.9.9:443");
+  eq("[372] 质量枚举住宅", us372.kind, W.IpKind.Residential);
+  eq("[372] 等级 Good", us372.level, W.IpLevel.Good);
+  eq("[372] 来源是 seed", us372.source, "seed");
+  const risky372 = body372.nodes.find((n) => n.key === "8.8.8.8:443");
+  eq("[372] 风险等级", risky372.level, W.IpLevel.Risky);
+  eq("[372] 代理标记透传", risky372.proxy, true);
+
+  // ?node= 硬钉住：session 解析形状白名单（非法字符/超长丢弃）
+  const sessSrc372 = fs.readFileSync("src/proxy/session.ts", "utf8");
+  ok("[372] session 解析 ?node=", sessSrc372.includes('q.get("node")') && sessSrc372.includes("this.pinnedNode"));
+  ok("[372] 钉住只收 host:port 白名单", /pinnedNode = qnode && \/\^\[0-9a-zA-Z/.test(sessSrc372));
+  const routerSrc372 = fs.readFileSync("src/proxy/fallback.ts", "utf8");
+  const routeBody372 = routerSrc372.slice(routerSrc372.indexOf("async route("));
+  ok("[372] 路由最高优先级走钉住", routeBody372.indexOf("if (this.o.pinnedNode) return this.viaPinned(") < routeBody372.indexOf("DIALER.open"));
+  ok("[372] 钉住失败不回落", routerSrc372.includes("不换节点、不回落"));
+
+  // 清理
+  W.S.seed = saveSeed372;
+  W.S.alive = saveAlive372;
+  W.S.colo = saveColo372;
+  W.QUALITY.rows.clear();
+  W.COVERAGE.clear();
+  W.CONN_OBS.rows.clear();
+}
+// 第 373 组：订阅按用户地区配置生成 ?node= 条目（地区/质量重设计）
+{
+  const saveAlive373 = new Map(W.S.alive);
+  const saveColo373 = W.S.colo;
+  W.S.alive.clear();
+  W.S.colo = "??";
+  W.S.alive.set("1.1.1.1:443", { h: "1.1.1.1", p: 443, cc: "JP", ms: 10, at: Date.now() });
+  W.S.alive.set("2.2.2.2:443", { h: "2.2.2.2", p: 443, cc: "JP", ms: 12, at: Date.now() });
+  W.S.alive.set("3.3.3.3:443", { h: "3.3.3.3", p: 443, cc: "US", ms: 8, at: Date.now() });
+  W.QUALITY.note("1.1.1.1", { kind: W.IpKind.Residential, level: W.IpLevel.Good, proxy: false, vpn: false, at: Date.now() });
+  W.QUALITY.note("2.2.2.2", { kind: W.IpKind.Hosting, level: W.IpLevel.Risky, proxy: true, vpn: false, at: Date.now() });
+
+  const uid373 = "373-user";
+  const auth373 = {
+    uuids: new Set([uid373]), trojan: new Map(), ok: true,
+    list: [{ id: uid373, pwd: "x", note: "", enabled: true, managed: true, regions: ["JP"], regionTopN: 3, targetHost: "example.com" }],
+  };
+  const url373 = new URL("https://edge.example.com/sub");
+  const subSrc373 = fs.readFileSync("src/views/sub-common.ts", "utf8");
+  ok("[373] REGION_SUB 类与单例已导出", typeof W.REGION_SUB === "object" && typeof W.RegionSubscription === "function");
+  ok("[373] 三个渲染点都走 RegionSubscription", (subSrc373.match(/REGION_SUB\.entries\(/g) || []).length === 2
+    && fs.readFileSync("src/views/sub.ts", "utf8").includes("REGION_SUB.entries("));
+
+  const picked373 = W.REGION_SUB.entries(["JP"], "edge.example.com", "pw", ["vless", "trojan"], url373, auth373, uid373);
+  // JP 两个节点：1.1.1.1(Good 保留) / 2.2.2.2(Risky 排除) → 每节点×2协议 = 2 条
+  eq("[373] Risky 被排除，只剩 Good 的两条协议", picked373.length, 2);
+  ok("[373] 都是 1.1.1.1 的硬钉条目", picked373.every((e) => e.server === "1.1.1.1" && e.path.includes("node=1.1.1.1")));
+  eq("[373] vless 条目质量名", picked373[0].name, "📍JP-good-v4-1.1.1.1-vless");
+  eq("[373] trojan 条目质量名", picked373[1].name, "📍JP-good-v4-1.1.1.1-trojan");
+  ok("[373] path 用 encodeURIComponent 编码冒号", picked373[0].path.includes("1.1.1.1%3A443"));
+
+  // topN=1 只出一个节点
+  const authTop1 = { ...auth373, list: [{ ...auth373.list[0], regionTopN: 1 }] };
+  eq("[373] topN=1 只出一条协议集", W.REGION_SUB.entries(["JP"], "edge.example.com", "pw", ["vless", "trojan"], url373, authTop1, uid373).length, 2);
+
+  // 无配置回落原 ?rg= 行为（golden 字节不变）
+  const fallback373 = W.REGION_SUB.entries(["JP"], "edge.example.com", "pw", ["vless"], url373, { list: [] }, "nobody");
+  eq("[373] 无配置回落一条", fallback373.length, 1);
+  ok("[373] 回落走 ?rg=", fallback373[0].path.includes("region-JP") && fallback373[0].path.includes("rg=jp"));
+
+  W.S.alive = saveAlive373;
+  W.S.colo = saveColo373;
+  W.QUALITY.rows.clear();
+}
+// 第 374 组：面板用户地区配置（op=config）+ env 用户转托管
+{
+  const admSrc374 = fs.readFileSync("src/routes/admin.ts", "utf8");
+  ok("[374] usersOp 有 config 分支", admSrc374.includes('op === "config"'));
+  ok("[374] config 校验地区白名单", admSrc374.includes('/^[A-Z0-9]{2,8}$/') && admSrc374.includes(".slice(0, 32)"));
+  ok("[374] topN 限 1-8", admSrc374.includes("Math.max(1, Math.min(8, Number(f.get(\"topN\")) || 3))"));
+  ok("[374] env 用户转托管", admSrc374.includes("managed: true") && admSrc374.includes("list.filter((x) => x.id !== target)"));
+  const htmlTpl374 = fs.readFileSync("src/views/html/admin.html", "utf8");
+  ok("[374] admin 模板有 {{rows}} 占位", htmlTpl374.includes("{{rows}}"));
+  // renderAdmin 每行带 config 表单
+  // 内存 KV 桩：put 必须真的存，否则 saveUsers→loadUsers 永远读不到刚写的配置
+  const kvStore374 = {};
+  // loadUsers 的 UserIndex.add 用 RE_UUID 过滤，测试 id 必须是真 UUID 才能落库回读
+  const uuidEnv374 = "37400000-0000-4000-8000-000000000001";
+  const uuidMgr374 = "37400000-0000-4000-8000-000000000002";
+  const env374 = {
+    uuid: uuidEnv374,
+    STATS: { get: async (k) => kvStore374[k] ?? null, put: async (k, v) => { kvStore374[k] = v; } },
+  };
+  W.USERS.invalidate();
+  const rec374 = [
+    { id: uuidEnv374, pwd: "e", note: "", enabled: true, managed: false },
+    { id: uuidMgr374, pwd: "m", note: "", enabled: true, managed: true, regions: ["US"], regionTopN: 2, targetHost: "example.com" },
+  ];
+  const rendered374 = W.renderAdmin(new URL("https://x/admin"), { list: rec374 }, {}, "");
+  ok("[374] env 用户显示可配置文案", rendered374.includes("环境变量") && rendered374.includes("配置"));
+  ok("[374] 配置表单带 op=config", rendered374.includes('name="op" value="config"'));
+  ok("[374] 已有地区回填到表单", rendered374.includes('name="regions"') && rendered374.includes("US"));
+
+  // 保存 + 重新加载：regions/topN/targetHost 写入 KV，managed=true
+  await W.saveUsers(env374, [
+    { id: uuidEnv374, pwd: "e", note: "", enabled: true, managed: true, regions: ["JP", "US"], regionTopN: 4, targetHost: "x.test" },
+  ]);
+  W.USERS.invalidate();
+  const loaded374 = await W.loadUsers(env374);
+  const cfg374 = loaded374.list.find((u) => u.id === uuidEnv374);
+  ok("[374] 配置写回后可在用户表读到", !!cfg374);
+  eq("[374] regions 落库", (cfg374.regions || []).join(","), "JP,US");
+  eq("[374] topN 落库", cfg374.regionTopN, 4);
+  eq("[374] targetHost 落库", cfg374.targetHost, "x.test");
+  eq("[374] 转托管", cfg374.managed, true);
+
+  W.USERS.invalidate();
+}
+// 第 375 组：面板地区/连通性入口 + 连通性观测写入路径
+{
+  const panelTpl375 = fs.readFileSync("src/views/html/panel.html", "utf8");
+  const panelSrc375 = fs.readFileSync("src/views/panel.ts", "utf8");
+  ok("[375] panel 模板有地区浏览器占位", panelTpl375.includes("{{regionsRow}}") && panelTpl375.includes("{{connTestRow}}"));
+  ok("[375] monitor 产出地区/连通性两行", panelSrc375.includes('regionsRow: this.link("/regions"') && panelSrc375.includes('connTestRow: this.link("/debug?tfb='));
+
+  // 连通性写入：runTfb 把每条通道的状态码/耗时写进 CONN_OBS（纯内存，零额外额度）
+  const tfbSrc375 = fs.readFileSync("src/route/tfb.ts", "utf8");
+  ok("[375] tfb 引入 CONN_OBS 与 IpFamily", tfbSrc375.includes('import { CONN_OBS } from "../px/regions"') && tfbSrc375.includes("IpFamily.IPv6"));
+  ok("[375] 每条通道写连通性观测", tfbSrc375.includes("CONN_OBS.note(S.colo, ip, host"));
+  ok("[375] 直连行跳过（无可展示节点）", tfbSrc375.includes('ip !== "direct"'));
+
+  // 行为：note 后能按 colo|node|site 读到目标站延迟
+  const colo375 = S.colo;
+  S.colo = "TEST375";
+  W.CONN_OBS.clear ? W.CONN_OBS.clear() : (W.CONN_OBS.rows && W.CONN_OBS.rows.clear());
+  W.CONN_OBS.note("TEST375", "5.5.5.5", "site375.test", 200, 123, W.IpFamily.IPv4, Date.now());
+  eq("[375] 连通性延迟可读", W.CONN_OBS.rttOf("TEST375", "5.5.5.5", "site375.test", Date.now()), 123);
+  S.colo = colo375;
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

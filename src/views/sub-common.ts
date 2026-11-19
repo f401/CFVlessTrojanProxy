@@ -1,4 +1,8 @@
 import { secretPwd } from "../core/util";
+import { S } from "../core/state";
+import { IpFamily, IpLevel } from "../core/enums";
+import { AliveBoard } from "../px/alive";
+import { QUALITY, CONN_OBS } from "../px/regions";
 
 // ---- 并入自 sub-links.ts ----
 /**
@@ -54,7 +58,7 @@ export function renderLinks(
       }
     }
   }
-  for (const e of regionEntries(regions, host, pass, protos, url)) {
+  for (const e of REGION_SUB.entries(regions, host, pass, protos, url, auth, id)) {
     const q = [
       "encryption=none",
       "security=tls",
@@ -122,7 +126,7 @@ export function renderSingbox(
     }
   }
 
-  for (const e of regionEntries(regions, host, pass, protos, url)) {
+  for (const e of REGION_SUB.entries(regions, host, pass, protos, url, auth, id)) {
     tags.push(e.name);
     regNames.push(e.name);
     const o: Record<string, unknown> = {
@@ -479,3 +483,73 @@ export function regionEntries(regions: string[], host: string, pass: string, pro
   }
   return out;
 }
+
+
+// ---- 地区节点订阅：用户在面板选的地区 → ?node= 硬钉条目（地区/质量重设计） ----
+/**
+ * 按用户配置把「地区 + 质量 + 目标站点延迟」变成 ?node= 订阅条目。
+ * views 在 px 之后，读 QUALITY/CONN_OBS/AliveBoard 都是向下依赖，无环；
+ * 无用户配置时 entries() 回落原 regionEntries()，老订阅逐字节不变。
+ */
+export class RegionSubscription {
+  /**
+   * 生成订阅条目：有用户选择就按地区+topN 挑具体节点（Good 优先、Risky 排除），
+   * 每个节点 × 每种协议一条；无配置回落原 ?rg= 行为。
+   * @param regions 地区列表（回落用）
+   * @param host 入口域名
+   * @param pass Trojan 密码
+   * @param protos 协议列表
+   * @param url 当前 URL
+   * @param auth 鉴权（含用户配置）
+   * @param id 用户 UUID
+   * @returns 订阅条目数组
+   */
+  entries(regions: string[], host: string, pass: string, protos: string[], url: URL | undefined, auth: Auth | undefined, id: string): RegionEntry[] {
+    const cfg = auth && auth.list ? auth.list.find((u) => u.id === id) : undefined;
+    if (!cfg || !cfg.regions || !cfg.regions.length) return regionEntries(regions, host, pass, protos, url);
+    const topN = Math.max(1, Math.min(8, cfg.regionTopN || 3));
+    const now = Date.now();
+    const live = new AliveBoard().list();
+    const out: RegionEntry[] = [];
+    for (const cc of cfg.regions) {
+      const ccUpper = cc.toUpperCase();
+      // Risky 直接排除，Unknown 按 Normal；再按质量与 key 稳定排序
+      const picked = live.filter((n) => String(n.cc || "").toUpperCase() === ccUpper && this.rank(n, now) < 3);
+      picked.sort((a, b) => this.rank(a, now) - this.rank(b, now) || a.h.localeCompare(b.h));
+      for (const n of picked.slice(0, topN)) {
+        const q = QUALITY.getFor(n.h, n.p, now);
+        const level = q ? q.level : IpLevel.Normal;
+        const fam = String(n.h).includes(":") ? IpFamily.IPv6 : IpFamily.IPv4;
+        const rtt = cfg.targetHost ? CONN_OBS.rttOf(S.colo || "", `${n.h}:${n.p}`, cfg.targetHost, now) : null;
+        const labelParts = [`${ccUpper}-${level}`, fam, n.h];
+        if (rtt != null) labelParts.push(`${rtt}ms`);
+        for (const proto of protos) {
+          if (proto === "trojan" && !pass) continue;
+          out.push({
+            proto,
+            name: `📍${labelParts.join("-")}-${proto}`,
+            server: n.h, port: n.p,
+            // node= 是硬钉住：用户点名即只走这条，失败不回落
+            path: `/?ed=2560&node=${encodeURIComponent(`${n.h}:${n.p}`)}`,
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 质量排序键：0=Good 最优先、1=Normal/Unknown、3=Risky 排除。
+   * @param n 节点
+   * @param now 当前时间
+   * @returns 排序键
+   */
+  private rank(n: NodeEntry, now: number): number {
+    const q = QUALITY.getFor(n.h, n.p, now);
+    if (!q) return 1;
+    return q.level === IpLevel.Good ? 0 : q.level === IpLevel.Risky ? 3 : 1;
+  }
+}
+
+/** 地区节点订阅单例（views 层，保留实例便于测试注入） */
+export const REGION_SUB = new RegionSubscription();

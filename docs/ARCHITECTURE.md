@@ -239,6 +239,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `PathPrefs`（`PICK.paths`） | `src/px/pickpath.ts` | 偏好过滤：判定层否决、入口族偏好（非 CF 出口优先，1.5x+50ms 带内）、站点通道偏好、拨号重试的「排除已试过」重扫；只读不写（7.345 起不再是模块级单例，由 `PICK` 持有；`PREFS` 那个名字仍归入口偏好） |
 | `Rotation`（`SEL.rotation`） | `src/px/rotation.ts` | 什么时候换：最短驻留时间（`dwellOf`）、切走判据、扫描后的观察窗与定时复查；无字段（状态在 `S.curs`/`S.lastSwitch`），7.356 起由 `Selector` 持有并注入给 `FailBook`，模块级 `ROTATION` 已撤 |
 | `FailBook`（`SEL.fails`） | `src/px/failbook.ts` | 失败怎么记：节点级失败推进快速失败窗口并重算分数，站点级失败只进站点画像；要切走时调构造注入的 `rotation.maybeSwitch`（7.356 起换节点器由门面持有并传进来，不再引模块级单例） |
+| `IpQualityTable`（`QUALITY`） | `src/px/regions.ts` | 节点 IP 质量表（住宅/移动/商企/机房 + good/normal/risky + proxy/vpn 位），按节点键缓存 3 天、单源失败冷却 5 分钟；质量结论是客观属性，由 `SeedStore.packName` 搭 seed 便车跨 isolate 传播，`get`/`note`/`snapshot` 供选路与面板读取 |
+| `QualityProbe`（`QUALITY_PROBE`） | `src/px/regions.ts` | 6 源 IP 质量探测器：按 `QUALITY_SOURCES` 注册表逐源经 `BudgetedIO.fetch` 查询（ident.me 只回自身出口故探测跳过），合并信号成 `IpQuality`；不可达的源只记冷却不硬失败 |
+| `ProbeCoverage`（`COVERAGE`） | `src/px/regions.ts` | 全池探测覆盖账本：记每个节点的 `lastProbeAt`/族，按最旧优先 `pick(keys, max)` 轮转以保证全池都被探过；纯本 isolate 内存，零 KV/DO 写 |
+| `ConnObservation`（`CONN_OBS`） | `src/px/regions.ts` | 按机房分桶的连通性观测表（colo\|node\|site → code/rtt/family/ok/at），服务面板的「目标站点延迟」；实测值不跨 isolate，上限 2000 + TTL 6 小时 |
 | `DnsCache`（`DNS_CACHE`） | `src/proxy/dial.ts` | DNS 解析缓存：`aaaa`/`v4All`/`aRecord` 三张 Map 从 `S` 迁入，TTL 与上限口径不变；三个 resolve 函数经它读写 |
 | `CfHttpState`（`CF_HTTP`） | `src/proxy/cfverdict.ts` | CF 托管探测的在飞去重表（`S.cfHttpFlight` 迁入）：size>200 清空 |
 | `Dialer` / `RegionPicker` | `src/proxy/dialer.ts`、`region.ts` | `Dialer.open()` 只分派三段：`classify`（CF 托管识别 + 一次 200ms 的事实预热，决定要不要绕中继）、`viaRelay`（循环骨架：`nextCand` 取候选并判四类跳过 —— 解析为空 / 内网地址 / 已试过 / 边缘中继，`attemptRelay` 只拨一次并记账冷却；名额按真实拨号次数算）、`direct`（CF 托管目标先按 A 记录拨 IPv4）；两条直连都走 `guarded` 的有限等待 |
@@ -297,6 +301,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `DebugMeterProbes` | `src/routes/debug.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
 | `DebugTables` | `src/routes/debug.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：`read()` 只按固定顺序编排，每个分支一个方法、只认自己那个参数键（`?blk=` 等自己取参数、自己拼载荷）；只读表、不拨号、不改状态，`&do=1` 时只有 `healthRows()` 与 `connRows()` 会多一次 DO 往返 |
 | `ProxyipView` | `src/routes/proxyip.ts` | `/proxyip` 的六个方法：只读报表（`?day`、`?src`）、两个管理员动作（`?reset` 清表、`?refresh` 跑一轮探活）、默认视图分三段——`liveRows()` 并内存表与跨 isolate 快照并按模式排序、`explain()` 只在 `?why=1` 时算画像与分项、`poolReport()` 只拼字段 |
+| `RegionsView` | `src/routes/tools.ts` | `/regions` 只读节点浏览器：把存活表 ∪ seed 名单按 key 合并，补质量枚举/地址族/覆盖/目标站点延迟，Good 优先 Risky 排后；全程只读内存表，净增 KV/DO 额度 0 |
 | `AdminView`（`admin` 门面） | `src/routes/admin.ts` | `/admin` 的四个分支各占一个方法：登出只清 cookie、登录做挑战-应答与限速、用户操作要读改写整份托管用户表（`cur.ok === false` 时必须拒绝，否则会把缺失用户整份删掉）、面板按用户数扇出 DO 往返并被 `ADMIN_STATS_MAX` 截断 |
 | `RateLimiter`（`RATE_LIMIT`） | `src/edge/auth.ts` | 登录尝试的固定窗口限流：`take` 判「这个来源这一分钟还能不能试」、`reset` 在成功登录后清零、`size` 供诊断；表按 `RL_MAX` 有界（超限只淘汰「计数最小且最旧」的一条，绝不整体清空、绝不淘汰刚写入的来源），7.355 起由类持有而不是裸 `Map` |
 | `SubscriptionRoutes`（`subscription` 门面） | `src/routes/subscription.ts` | 控制页与订阅：`page()` 读用量 + 存活表两次往返、`feed(kind)` 把 clash / sing-box / 明文链接三种格式收成一条路（差别只有渲染器与 content-type，见 `FEEDS` 表）、`stats()` 的 JSON 分支零额外往返、`statsHtml()` 才并跨 isolate 快照；页面视图 `PageView` 由它自己持有（7.353 起，不再有模块级 `PAGES`） |
@@ -312,6 +317,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `DebugActions` | `src/routes/debug.ts` | 会改状态的诊断操作（refill/cur/restore/seed）：全部先过 `adminOnly`，都会写 KV 或 DO |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表，纯静态方法（7.360 起无模块级 `ROUTES` 实例） |
 | `SubscriptionView` / `PageView` / `PanelView` | `src/views/sub.ts`、`src/views/panel.ts` | 三种订阅格式与面板渲染（`PanelView` 六个分区各一方法、样式抽成 `PANEL_CSS`；`PageView` 无字段，7.353 起由 `SubscriptionRoutes` 自己持有实例，模块级 `PAGES` 已撤；`SubscriptionView` 同样无字段，7.358 起由 `SubscriptionRoutes` 自己持有（`this.view`），模块级 `SUBVIEW` 已撤） |
+| `RegionSubscription`（`REGION_SUB`） | `src/views/sub-common.ts` | 按用户地区配置生成 `?node=` 硬钉订阅条目：从存活表按地区+topN 挑具体节点，Good 优先 / Risky 排除 / Unknown 按 Normal，条目名带质量/族/IP/目标站延迟；无配置时回落原 `?rg=` 地区自动条目（保持 golden 字节不变） |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
 
 自由函数集中在 `src/core/{util,net,hist,quota,hosts,hostmem,relay-addr,table,enums,types,facts,hook,state,const,counter,lock,latobs,firstobs,node-snapshot,transport}.ts`（编解码 / SHA-224 / WS / 超时 / 并发 / 环境解析 / 协议名 / 错误文本都在 `util.ts` 一个文件里，7.290 起不再拆分；SHA-224 内部按「补位 `sha224Pad()` / 展开 `sha224Words()` / 压缩 `sha224Mix()`」三步各自成函数，7.338 起）、`src/proxy/protocol.ts`、`src/views/{html,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。

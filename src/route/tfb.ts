@@ -2,6 +2,8 @@
 type RouteCtx = { env: Env };
 import { S } from "../core/state";
 import { withTimeout } from "../core/util";
+import { IpFamily } from "../core/enums";
+import { CONN_OBS } from "../px/regions";
 import { VT } from "./verdict";
 import { splitRelay } from "../core/relay-addr";
 import { logErr } from "../nodes/metrics";
@@ -147,6 +149,13 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): P
   const mayBlock = tfBlockOk(prevTag, verdict);
   for (const row of rows) {
     const ip = splitRelay(row.relay, 443)[0];
+    // 连通性观测：任意 URL 的状态码 + 耗时记进按 colo 分桶的内存表，供 /regions
+    // 与订阅节点名显示「目标站点延迟」。纯内存，不额外花 DO/KV 额度。
+    // 直连行没有节点 IP，跳过（它没有可展示的节点）；族按 IP 字面量判定。
+    if (ip && ip !== "direct") {
+      const family = ip.includes(":") ? IpFamily.IPv6 : IpFamily.IPv4;
+      CONN_OBS.note(S.colo, ip, host, Number(row.status || 0), Number(row.ms || 0), family, Date.now());
+    }
     if (verdict === "chan" && row.status === 403 && mayBlock) VT.setState(host, ip === "direct" ? "d" : "r:" + ip, 2, 1);
     // 正证据同样按 2xx/3xx 记（存真实状态码：判定表的 stateOf 本来就把 2xx/3xx 归成 ok）
     else if (row.ok && (row.status || 0) >= 200 && (row.status || 0) < 400)

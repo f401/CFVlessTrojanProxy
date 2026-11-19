@@ -7,6 +7,7 @@ import { costOf } from "../nodes/score";
 import { S } from "../core/state";
 import { splitRelay } from "../core/relay-addr";
 import { kvGetStrict, kvSet } from "../store/index";
+import { QUALITY } from "./regions";
 
 /* 代理节点：信誉表分桶读写 */
 /* ---- seed：按机房分桶 ---- */
@@ -44,7 +45,10 @@ export class SeedStore {
   packName(k: string) {
     const a = (S.alive.get(k) || {}) as NodeEntry;
     const [partHost, partPort] = splitRelay(k, 443);
-    return { k, h: a.h || partHost, p: a.p || partPort, cc: a.cc || "" };
+    // IP 质量是跨机房有意义的客观属性，搭 seed 便车传播（不增加 KV 写次数）。
+    // 连通性 RTT / 探测新鲜度是实测值，按硬约束留在本 isolate，不写进来。
+    const q = QUALITY.get(k);
+    return { k, h: a.h || partHost, p: a.p || partPort, cc: a.cc || "", q: q || undefined };
   }
 
   /**
@@ -89,6 +93,13 @@ export class SeedStore {
       if ((Number(v.poolGen) || 0) >= (S.poolGen || 0)) S.poolBuilt = Number(v.builtAt) || 0;
       // 老版本把延迟/吞吐/成功率/站点偏好写了进来：一律不读（每个 isolate 各自估自己的），
       // 下一轮 write 会用新结构整体覆盖，30 天 TTL 兜底。
+      // 唯一的例外是 IP 质量 q：它是客观属性（这地址是住宅/机房、风险位），跨机房有意义，
+      // 由 seed 携带传播。这里把它采纳进本 isolate 的质量表；连通性 RTT 仍不传播。
+      for (const bucket of Object.values(v.byColo)) {
+        for (const n of bucket.nodes || []) {
+          if (n && n.k && n.q) QUALITY.note(n.k, n.q);
+        }
+      }
     }
     // 读到空表时只缓存 1 分钟：否则一个刚部署的 isolate 会"空着"整整半小时，
     // 期间该机房所有连接都只能直连。

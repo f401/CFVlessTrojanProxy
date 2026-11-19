@@ -77,18 +77,24 @@ export class UserIndex {
    * @param managed 是否来自面板托管
    * @returns 无
    */
-  add(id: string, pwd?: string, note?: string, enabled?: boolean, managed?: boolean): void {
+  add(id: string, pwd?: string, note?: string, enabled?: boolean, managed?: boolean, cfg?: Partial<UserRec>): void {
     if (!RE_UUID.test(id)) return;
     let rec = this.byId.get(id);
     if (!rec) {
       rec = { id, pwd: "", note: note || "", enabled: enabled !== false, managed: !!managed };
       this.list.push(rec);
       this.byId.set(id, rec);
-    } else {
-      if (note && !rec.note) rec.note = note;
-      if (managed) rec.managed = true;
-      rec.enabled = enabled !== false; // 托管记录最后写，必须能覆盖 env 的启用状态
     }
+    // 订阅地区配置（regions/topN/目标站）从 KV 托管记录带进来；env 用户没有就不动。
+    // 放在合并段之前，确保托管记录覆盖 env 的同名字段。
+    if (cfg) {
+      if (Array.isArray(cfg.regions)) rec.regions = cfg.regions.slice(0, 32);
+      if (cfg.regionTopN) rec.regionTopN = cfg.regionTopN;
+      if (cfg.targetHost) rec.targetHost = cfg.targetHost;
+    }
+    if (note && !rec.note) rec.note = note;
+    if (managed) rec.managed = true;
+    rec.enabled = enabled !== false; // 托管记录最后写，必须能覆盖 env 的启用状态
     // 换密码要先撤销旧映射，否则旧摘要会一直指向这个用户
     if (pwd) {
       if (rec.pwd && rec.pwd !== pwd) this.dropOwner(id);
@@ -133,7 +139,7 @@ export class UserIndex {
   fromManaged(rows: Partial<UserRec>[]): void {
     for (const m of rows) {
       if (!m || !m.id) continue;
-      this.add(String(m.id).toLowerCase(), m.pwd, m.note || "", m.enabled !== false, true);
+      this.add(String(m.id).toLowerCase(), m.pwd, m.note || "", m.enabled !== false, true, m);
     }
   }
 
@@ -267,6 +273,11 @@ export async function saveUsers(env: Env, list: UserRec[]) {
       note: x.note || "",
       enabled: x.enabled !== false,
       ts: x.ts || 0,
+      // 订阅地区配置：必须和 id/pwd 一起落盘，否则面板选的地区/节点数/目标站
+      // 在下次 loadUsers 时被这里剥掉，用户永远看到的是未配置状态
+      ...(x.regions && x.regions.length ? { regions: x.regions } : {}),
+      ...(x.regionTopN ? { regionTopN: x.regionTopN } : {}),
+      ...(x.targetHost ? { targetHost: x.targetHost } : {}),
     }));
   await kvSet(env, "users", clean);
   invalidateUsers();

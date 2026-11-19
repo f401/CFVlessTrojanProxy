@@ -6,18 +6,11 @@ import type { Socket } from "cloudflare:sockets";
 import { BudgetedIO } from "../core/budgeted-io";
 import { isBudgetExhausted } from "../core/budget-ledger";
 
-
-
 // 额外候选主机（不是列表，是"池域名"，解析后是多台机器）
 export const EXTRA_HOSTS = ["pyip.ygkkk.dpdns.org"];
 
-// 候选池来源（按价值排序；单源失败不影响其余源）
-//   1. IPDB 官方 GitHub 镜像 —— API 站从 Worker 访问恒 403，镜像可通
-//   2. CB-X2-Jun —— IP:PORT:CC 格式，上游已做存活校验
-//   3. jsDelivr —— 与 2 同内容，防 raw.githubusercontent 429
-//   4. IPDB 精选带国家码
-//   5. 老源（唯一长期验证可用的原始源）
-//   6. 官方 API —— 目前 403，留作对方解封后的兜底
+// 候选池来源（按价值排序；单源失败不影响其余源）：1/4 走 GitHub 镜像（API 站恒 403），
+// 2/3 同一份 CB 列表（jsDelivr 防 429），5 是长期验证可用的老源，6 官方 API 待解封兜底。
 export const POOL_SOURCES = [
   "https://raw.githubusercontent.com/ymyuuu/IPDB/main/BestProxy/proxy.txt",
   "https://raw.githubusercontent.com/CB-X2-Jun/cf-proxyip-lists/main/proxyip.txt",
@@ -28,12 +21,8 @@ export const POOL_SOURCES = [
 ];
 
 /**
- * 一轮最多抓几个池子源。
- *
- * `env.poolSrc` 可以覆盖源列表，但抓取次数必须有个上界：一次 cron 调用的 fetch 子请求
- * 硬上限是 50（`SC.SCAN_SUB = 48` 留余量），而固定支出里「源」那一笔是按这个常量记的。
- * 7.240 之前自定义源列表不限条数、`refillPool` 又逐个抓 —— 配 30 个源就是 30 次 fetch，
- * 加上恢复用量（12）、DoH（6）与快照（4）会直接越过硬上限、整轮 cron 1102。
+ * 一轮最多抓几个池子源：cron 子请求硬上限 50（`SC.SCAN_SUB=48` 留余量），
+ * 自定义源列表必须夹住，否则配 30 个源会连同恢复/DoH/快照一起越界触发 1102。
  */
 export const REFILL_MAX = 6;
 
@@ -261,7 +250,6 @@ export async function refillPool(env: Env, keep = 0): Promise<PoolRefill> {
 // 原始 TLS 探活：一条候选到底能不能中转。
 // probeProxy 用「证书链里有没有 cloudflare」判开放反代；probeSni 用手写 ClientHello 看目标会不会回
 // ServerHello（诊断「某节点能不能把这个站转出去」）。两者都不完成握手 —— 那需要自己实现密钥交换。
-
 
 /* 代理节点：探活与池子抓取 */
 export const PROBE_HELLO = (() => {
@@ -501,19 +489,20 @@ export async function probeSni(nodeHost: string, nodePort: number, sni: string, 
 }
 
 // ---- 并入自 geo.ts ----
-// 地理标注：批量问第三方免费接口拿两位国家码（单次最多 100 个），查不到就不打标。
-
 
 /**
- * 批量查询 IP 归属国（第三方免费接口，单次最多 100 个）。
- * @param {string[]} ips IP 列表
- * @returns {Promise<Record<string,string>>} IP → 两位国家码
+ * 批量查国家码，并把 ISP/hosting/proxy 行交给可选回调 —— 字段与国码在同一次请求返回，
+ * 多要字段不增加子请求（KV/DO 与请求数净增 0 的关键）。无回调时行为与原来逐字一致。
+ * @param ips IP 列表
+ * @param onQuality 每行成功时的回调（ip, 原始行），抛错不影响国码补全
+ * @returns IP → 两位国家码
  */
-export async function geoLabel(ips: string[]) {
+export async function geoLabel(ips: string[], onQuality?: (ip: string, row: IpApiRow) => void) {
   const out: Record<string, string> = {};
   if (!ips.length) return out;
   try {
-    const r = await fetch("http://ip-api.com/batch?fields=status,countryCode", {
+    // 多要 4 个质量字段：字段数不影响免费版配额（仍是每 IP 一次、单次 ≤100）
+    const r = await fetch("http://ip-api.com/batch?fields=status,countryCode,isp,org,as,mobile,proxy,hosting", {
       signal: timeoutSignal(5000),
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -522,7 +511,16 @@ export async function geoLabel(ips: string[]) {
     if (r.ok) {
       const arr = await r.json();
       (arr as IpApiRow[]).forEach((x, i) => {
-        if (x && x.status === "success" && x.countryCode) out[ips[i]] = String(x.countryCode).toUpperCase();
+        if (x && x.status === "success") {
+          if (x.countryCode) out[ips[i]] = String(x.countryCode).toUpperCase();
+          if (onQuality) {
+            try {
+              onQuality(ips[i], x);
+            } catch {
+              /* 质量记账失败不影响国家码补全 */
+            }
+          }
+        }
       });
     }
   } catch (e) {
@@ -533,7 +531,6 @@ export async function geoLabel(ips: string[]) {
 
 // ---- 并入自 failpolicy.ts ----
 // 失败阈值策略：连续失败几次判坏、失败到几次无视驻留时间强制换（都可用 env 覆盖）。
-
 
 // 换节点策略（可用环境变量覆盖；驻留时间见 selector.dwellOf）
 //   pxFailMax  : 连续失败多少次才允许换（默认 3）
@@ -556,4 +553,3 @@ export function pxPolicy(env: Env) {
 // 探活与池子抓取的门面：`probe.ts` 曾经 524 行、把四件事挤在一起，现在只做再导出。
 // 实现分别在 ./poolsrc（源清单与抓取）、./rawprobe（原始 TLS 探活）、
 // ./geo（国家码）、./failpolicy（失败阈值策略）—— 调用点与单测一行都不用改。
-

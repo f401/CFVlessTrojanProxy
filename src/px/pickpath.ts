@@ -1,6 +1,4 @@
-// 挑路的全部逻辑：编排、池子就绪、站点画像抽样、判定层偏好。为什么是一个文件四个类：四段没有独立生命周期 ——
-// 编排把「让池子可读 → 问画像要一条 → 让偏好过滤 → 必要时重扫」按固定顺序串起来，
-// 都只在编排调用栈里存活；合成一个文件才能一次滚屏看完「这次为什么换了节点」。
+// 挑路编排：池子就绪 → 站点画像 → 判定偏好 → 重扫。四段无独立生命周期，同文件一次看完换节点的原因。
 
 import { ensurePool, pxGet, aliveList } from "./pool";
 import { seedAlive } from "./warm";
@@ -14,6 +12,8 @@ import { relayIpOf } from "../core/relay-addr";
 import { HOOK } from "../core/hook";
 import { isCfIp } from "../core/net";
 import { keyOf } from "./const";
+import { QUALITY } from "./regions";
+import { IpLevel } from "../core/enums";
 
 // ---- 来自 pick-types.ts ----
 /** 一次请求的上下文：站点、已选节点、是否已重试过、目标流量 */
@@ -449,12 +449,10 @@ export class PickPath {
   }
 
   /**
-   * 功能：按国家挑一个节点（地区硬要求：调用方不得回落到直连/全球）。
-   * @param {object} env Worker 环境
-   * @param {string|null} cc 国家码（两位）
-   * @param {'lat'|'tput'} mode 选路模式
-   * @param {string} avoid 要避开的候选键（重试时传上次那条）
-   * @returns {Promise<object|null>} 存活表条目；该国没有可用节点时返回 null（交给上层 1011）
+   * 按国家挑一个节点（地区硬要求：不回落到直连/全球）。
+   * @param env Worker 环境 @param cc 两位国家码 @param mode 选路模式
+   * @param avoid 要避开的候选键（重试时传上次那条）
+   * @returns 存活表条目；该国无可用节点返回 null（上层 1011）
    */
   async region(env: Env, cc: string | null, mode: Mode = "tput", avoid = "") {
     const want = String(cc || "").toUpperCase();
@@ -468,10 +466,14 @@ export class PickPath {
     if (!live.length) return null;
     // 低可用/空关闭可疑是软排除：全国只剩它们时仍然要选一个（地区是硬要求）
     const ok = live.filter((x) => usable(keyOf(x)));
-    const pool = ok.length ? ok : live;
-    // 一次算分，别在 sort 比较器里反复调 costOf（30 个节点会算 150 次）
+    let pool = ok.length ? ok : live;
+    // 质量分层：Good 优先、Risky 排除、Unknown 按 Normal；无 Good 才退回全池
+    const nowQ = Date.now();
+    const good = pool.filter((x) => QUALITY.getFor(x.h, x.p, nowQ)?.level === IpLevel.Good);
+    const notRisky = pool.filter((x) => QUALITY.getFor(x.h, x.p, nowQ)?.level !== IpLevel.Risky);
+    if (notRisky.length) pool = good.length ? good : notRisky;
+    // 先算分（别在 sort 比较器里反复调 costOf），再在最优 1.5 倍内挑在途最少的
     const scored = pool.map((x) => ({ x, v: costOf(keyOf(x), mode) })).sort((a, b) => a.v - b.v);
-    // 负载感知：最优代价 1.5 倍内挑在途最少的，避免全国连接全压在第一名
     const band = scored.filter((r) => r.v <= scored[0].v * 1.5 + 50).slice(0, 8);
     let pick = band[0];
     let load = S.inflight.get(keyOf(pick.x)) || 0;

@@ -82,6 +82,8 @@ export interface RouterOpts {
   pxForce: number;
   /** `?rg=` 地区（null 表示没有钉地区） */
   ipRegion: string | null;
+  /** `?node=` 用户钉住的单个节点 key（null 表示没钉；钉住时硬失败不回落） */
+  pinnedNode: string | null;
   /** 本次调用的额度闸门（建连只从这里取号） */
   budget: BudgetedIO;
   /** 地区钉住时用的挑选器（会话持有，router 只借用） */
@@ -111,6 +113,8 @@ export class SessionRouter {
    * @returns {Promise<Socket | null>} socket；地区路径失败或没有可用中继时返回 null（连接已被关）
    */
   async route(host: string, port: number): Promise<Socket | null> {
+    // 钉单个节点的优先级最高：用户点名要这一条，节点失效就明确失败，不换节点不回落直连
+    if (this.o.pinnedNode) return this.viaPinned(host);
     // 地区钉住是硬分流：找不到 / 连不上就明确失败，绝不回落到策略拨号（`?rg=` 的语义）
     if (this.o.ipRegion) return this.viaRegion(host);
     try {
@@ -149,6 +153,27 @@ export class SessionRouter {
       o.onHangUp(1011, msg);
     };
     const picked = await o.regionPicker.open({ env: o.env, mode: o.mode, region, conn: o.conn, onFail, budget: o.budget });
+    return picked || null;
+  }
+
+  /**
+   * 功能：拨用户点名的单个节点（`?node=`）—— 失效就明确失败，不换节点、不回落直连。
+   * @param host 目标主机（只用于失败日志）
+   * @returns socket 或 null（已记账并关连接）
+   */
+  private async viaPinned(host: string): Promise<Socket | null> {
+    const o = this.o;
+    // 用户点名节点：失败回调里记 rgFail 并关连接，绝不换节点/回落（?node= 的硬语义）
+    const node = o.pinnedNode || "";
+    const onFail = (msg: string) => {
+      o.conn.dead = true;
+      o.conn.failed = true;
+      cnt("rgFail");
+      kickFlush(o.env, o.conn.id);
+      logErr(`node ${node}: ${msg}`, host);
+      o.onHangUp(1011, msg);
+    };
+    const picked = await o.regionPicker.openPinned(o.env, node, o.conn, o.budget, onFail);
     return picked || null;
   }
 

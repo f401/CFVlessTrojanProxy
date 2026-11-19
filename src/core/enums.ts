@@ -27,3 +27,40 @@ export enum Mode {
   Latency = "lat",
 }
 
+/**
+ * 节点 IP 的线路类型（6 源质量探测的归一化结果）。
+ *
+ * 为什么用枚举而不是裸字符串：`residential`/`hosting` 这类值要在「探测 → seed 落盘 →
+ * 订阅命名 → 选路分层」四个环节之间传递，任何一处写错字符串都会静默退化成 Unknown。
+ * 用枚举后 `tsc` 能拦住拼错的成员名。
+ */
+export enum IpKind {
+  Residential = "residential",
+  Mobile = "mobile",
+  Business = "business",
+  Hosting = "hosting",
+  Unknown = "unknown",
+}
+
+/**
+ * 节点 IP 的质量等级。判定口径（与 FlClash 一致）：
+ * - residential / mobile / business → Good
+ * - hosting → Normal
+ * - isTor / isAbuser → Risky（硬排除）
+ * - isProxy / isVpn 只标记、不降级（很多住宅出口本身就是代理）
+ */
+export enum IpLevel {
+  Good = "good",
+  Normal = "normal",
+  Risky = "risky",
+}
+
+/**
+ * 地址族。成员名写成 `IPv4`/`IPv6` 而不是 `V4`/`V6`：仓库的命名门禁要求成员名 ≥3 字符，
+ * 两字符名会被拦（历史上有 `op` → `action` 的先例）。值仍用短写 `v4`/`v6` 便于落盘。
+ */
+export enum IpFamily {
+  IPv4 = "v4",
+  IPv6 = "v6",
+}
+

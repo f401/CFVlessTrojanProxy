@@ -310,6 +310,8 @@ export class PanelView {
    * @returns 监控表八行的值
    */
   private monitor(): Record<string, string> {
+    // 每一行都是「一个只读/诊断端点 + 它做什么」。地区浏览器与连通性测试是
+    // 地区质量重设计新增的两个入口：前者列全部已知节点，后者经 ?tfb= 实探任意网站。
     return {
       healthRow: this.topLink("/health", "服务健康：UUID 数、池子大小、错误数、当前机房", "GET"),
       statsRow: this.link("/stats", "用量 JSON（上行/下行/连接数）", "JSON"),
@@ -319,6 +321,8 @@ export class PanelView {
       refreshRow: this.link("/proxyip?refresh=1", "手动触发一轮扫描（验 20 个候选，约 20–40 秒）", "ACTION"),
       debugHostRow: this.link("/debug?host=example.com", "查某域名的 A / AAAA 解析结果", "DEBUG"),
       debugProbeRow: this.link("/debug?probe=1.2.3.4:443", "单点探测某个候选 proxyip 是否可用", "DEBUG"),
+      regionsRow: this.link("/regions", "地区节点浏览器：pool 全部已知/可用节点的质量、IPv4/IPv6、覆盖与目标站延迟", "JSON"),
+      connTestRow: this.link("/debug?tfb=example.com&n=2", "连通性测试：任意网站经直连+中继实探，结果写入目标站延迟", "DEBUG"),
     };
   }
 

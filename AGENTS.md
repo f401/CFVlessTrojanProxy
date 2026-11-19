@@ -1,4 +1,4 @@
-- 线上 **7.270**（已部署、可跑）｜仓库 **7.371**（debug ?do=1 写回判定证据后按状态 ack/nack，pending 不重复上报；共 215 个缺陷皆已修复）：两者差 101 个版本。
+- 线上 **7.270**（已部署、可跑）｜仓库 **7.372**（代理池地区/质量重设计：6 源 IP 质量枚举 + 跨 isolate 传播、地区节点浏览器、订阅 ?node= 质量优选、用户面板选地区、连通性观测；共 215 个缺陷皆已修复）：两者差 102 个版本。
 
 # AGENTS.md
 
@@ -126,7 +126,7 @@ Account-level traps (all have happened):
 
 ## 9. Current state
 
-- Repo **7.371**; **live 7.270**. Everything from 7.271 to 7.371 is committed and pushed but **deliberately not deployed** (the user asked to keep CF pushes rare). Run the release flow above before shipping.
+- Repo **7.372**; **live 7.270**. Everything from 7.271 to 7.372 is committed and pushed but **deliberately not deployed** (the user asked to keep CF pushes rare). Run the release flow above before shipping.
 - Architecture phase is closed: 115 source files, 103 exported classes, 47 module-level `new` expressions (of which 29 are actual state/view/encoder singletons; the rest are typed constants such as encoders and deny sets). `docs/ARCHITECTURE.md` lists every class and who owns it; `docs/命名约定.md` holds the naming rules and the singleton admission test.
 - Deliberately not done: merging the six fact tables (`VT`/`PS`/`EG`/`DNS`/`DEAD`/`BLK`) behind one root object. They appear ~540 times in `tests/` and `tools/`; the only gain is one less global. Rationale is recorded in `docs/命名约定.md`.
 - Open boundaries that only real traffic can answer: long-term benefit of relaying, subrequest / `connect()` exhaustion under load, and the paired `facts=eg` vs `none` gain (+6 ± 10.4 — not significant).

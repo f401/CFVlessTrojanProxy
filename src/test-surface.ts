@@ -27,7 +27,7 @@ export { aesKey, b64d, b64e, seal, unseal } from "./store/crypto";
 export { factsOut, freshTop } from "./store/factout";
 export { MeterState } from "./store/meter-state";
 export { MeterEndpoints } from "./store/meter";
-export { FirstFrame, parseVLESS, parseTrojan, loadUsers, normAtyp, readAddr, UserIndex, UserCache, USERS } from "./proxy/protocol";
+export { FirstFrame, parseVLESS, parseTrojan, loadUsers, saveUsers, normAtyp, readAddr, UserIndex, UserCache, USERS } from "./proxy/protocol";
 export { DOH_ENDPOINTS, DNS as DNS_CACHE, DnsCache, checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
 export { isPxHost, pxHostList } from "./core/hosts";
 export { isCfIp } from "./core/net";
@@ -44,7 +44,7 @@ export {
   trojanPasswordOf,
   edgeCount,
 } from "./views/sub";
-export { regionEntries } from "./views/sub-common";
+export { regionEntries, REGION_SUB, RegionSubscription } from "./views/sub-common";
 export { SubscriptionView } from "./views/sub";
 export { RouteTable } from "./routes/table";
 export { PageView } from "./views/panel";
@@ -112,7 +112,7 @@ export { BUDGET_CAPS, BUDGET_KINDS, BudgetExhausted, BudgetLedger, isBudgetExhau
 export { BudgetedIO } from "./core/budgeted-io";
 export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES, pxPolicy, RawProbe } from "./px/probe";
 export { WarmPacer, WARM } from "./px/warm";
-export { regionListAsync } from "./px/regions";
+export { regionListAsync, QUALITY_SOURCES, mergeQuality, IpQualityTable, QUALITY, QualityProbe, QUALITY_PROBE, ProbeCoverage, COVERAGE, ConnObservation, CONN_OBS } from "./px/regions";
 export { PEND, RESTORE_MAX, getSnap, kvGetStrict, nodeSnapGet, NODE_SNAP, NodeSnapCache, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
 export { SnapshotState, SNAP } from "./store/snapshot";
 export { doFetch, meterGet } from "./store/meter-client";
@@ -121,6 +121,7 @@ export { ProxyipView, proxyip } from "./routes/proxyip";
 export { AdminView, admin } from "./routes/admin";
 export { SubscriptionRoutes, subscription } from "./routes/subscription";
 export { debug, DEBUG, DebugActions, DebugMeterProbes, DebugTables, DebugSuite } from "./routes/debug";
+export { regions, RegionsView } from "./routes/tools";
 export {
   DebugBench,
   DebugDiag,
@@ -159,7 +160,7 @@ export { recordBlock, recordPass } from "./route/observe";
 export { runTfb, tfVerdict, tfClass, tfEscalate, tfBlockOk, tfRemember, pickFresh } from "./route/tfb";
 export { TFB, TfbBook } from "./route/tfbbook";
 export { RELPERF, REL_SAMPLE_TTL, RelPerfTable, relCostFor, relCostOf, relNote } from "./route/relperf";
-export { Mode, St } from "./core/enums";
+export { Mode, St, IpKind, IpLevel, IpFamily } from "./core/enums";
 export { BoundedMap, TimedMarks } from "./core/table";
 export { EG, EG_BIG, EG_TINY, EG_TTL, EgFacts, egCounts, egDerive } from "./route/egfacts";
 export { CAP, CAP_MAX, CAP_TTL, CapFacts } from "./route/capfacts";

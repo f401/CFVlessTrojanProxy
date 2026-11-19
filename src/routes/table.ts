@@ -1,7 +1,7 @@
 import type { UserCtx } from "../edge/types";
 import { logs } from "./logs";
 import { subscription } from "./subscription";
-import { debug, proxyip } from "./tools";
+import { debug, proxyip, regions } from "./tools";
 
 /** 用户级路由定义：谁匹配、处理前要准备什么、交给谁 */
 interface SubRoute {
@@ -26,6 +26,7 @@ const TABLE: SubRoute[] = [
   { name: "logs", subs: ["logs"], stats: false, rtt: false, handle: (c) => logs(c) },
   { name: "proxyip", subs: ["proxyip"], stats: false, rtt: false, handle: (c) => proxyip(c) },
   { name: "debug", subs: ["debug"], stats: false, rtt: false, handle: (c) => debug(c) },
+  { name: "regions", subs: ["regions"], stats: false, rtt: false, handle: (c) => regions(c) },
 ];
 
 /**

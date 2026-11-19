@@ -7,6 +7,27 @@
 interface IpApiRow {
   status?: string;
   countryCode?: string;
+  isp?: string;
+  org?: string;
+  as?: string;
+  mobile?: boolean;
+  proxy?: boolean;
+  hosting?: boolean;
+}
+
+/**
+ * 节点 IP 的质量结论（6 源探测归一化后的结果）。
+ *
+ * `kind`/`level` 用 `src/core/enums.ts` 的枚举：跨「探测 → seed 落盘 → 订阅命名 → 选路」传递，
+ * 拼错成员名要能被 tsc 抓住。`proxy`/`vpn` 只标记不降级（住宅出口本身常是代理），
+ * `at` 是结论时刻，用于 3 天缓存与新鲜度展示。
+ */
+interface IpQuality {
+  kind: IpKind;
+  level: IpLevel;
+  proxy: boolean;
+  vpn: boolean;
+  at: number;
 }
 
 /** 站点诊断的一行（真实样本或主动探测） */
@@ -152,6 +173,8 @@ interface SeedNode {
   h?: string;
   p?: number;
   cc?: string;
+  /** IP 质量结论（跨 isolate 传播的客观属性；老数据缺此字段按 Unknown 处理） */
+  q?: IpQuality;
 }
 
 /** 一个机房的桶 */
@@ -283,6 +306,12 @@ interface UserRec {
   enabled: boolean;
   managed: boolean;
   ts?: number;
+  /** 面板选择的地区国家码列表（订阅只输出这些地区的节点；空=全部） */
+  regions?: string[];
+  /** 每个地区最多输出几个节点（1–8，默认 3） */
+  regionTopN?: number;
+  /** 连通性测试/订阅节点名里显示延迟的目标站点（用户自定义，不假设 generate204） */
+  targetHost?: string;
 }
 
 /** loadUsers 的返回：鉴权用的索引 + 面板展示用的列表 */

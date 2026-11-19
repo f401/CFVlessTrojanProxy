@@ -6,6 +6,7 @@ import { S } from "../core/state";
 import { splitRelay } from "../core/relay-addr";
 import { CANDS } from "../nodes/score";
 import { geoLabel } from "./probe";
+import { QUALITY, qualityFromIpApi } from "./regions";
 import { BUCKET_DEF, SEED_STORE } from "./seed";
 import { MODES } from "./const";
 
@@ -217,7 +218,13 @@ export class AliveBoard {
   async fillCountries(): Promise<void> {
     const need = this.missingCountryHosts();
     if (!need.length) return;
-    const geo = await geoLabel(need);
+    const now = Date.now();
+    // 同一批响应里顺手 harvest 质量（零新增请求）：ip-api 一次给出国家码 + ISP/hosting/proxy
+    const geo = await geoLabel(need, (ip, row) => {
+      const q = qualityFromIpApi(row as unknown as Record<string, unknown>, now);
+      // 纯 IP 作键；选路/订阅读时按 getFor(host, port) 回落到它
+      if (q && !QUALITY.getFor(ip, undefined, now)) QUALITY.note(ip, q);
+    });
     // 只填还空着的那几条：这一批查询期间可能已经有节点被别的路径填过
     for (const x of S.alive.values()) if (!x.cc && geo[x.h]) x.cc = geo[x.h];
   }

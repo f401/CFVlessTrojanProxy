@@ -1,4 +1,4 @@
-import { X_EDGE_IPS, edgeCount, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, regionEntries, trojanPasswordOf, renderLinks, renderSingbox } from "./sub-common";
+import { X_EDGE_IPS, edgeCount, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, REGION_SUB, trojanPasswordOf, renderLinks, renderSingbox } from "./sub-common";
 import { S } from "../core/state";
 import { splitRelay } from "../core/relay-addr";
 
@@ -213,7 +213,7 @@ export function renderClash(
 
   // 地区出口节点（强制走该国的中转），不分模式
   const regNames = [];
-  for (const e of regionEntries(regions, host, pass, protos, url)) {
+  for (const e of REGION_SUB.entries(regions, host, pass, protos, url, auth, id)) {
     emit(e.name, e.proto, e.server, e.port, e.path, true, "");
     regNames.push(e.name);
     all.push(e.name);

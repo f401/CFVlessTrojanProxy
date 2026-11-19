@@ -41,6 +41,8 @@ export class ProxySession {
   private readonly rxPin: string;
   private readonly ipTag: string;
   private readonly ipRegion: string | null;
+  /** `?node=` 用户钉住的单个节点 key（host:port）；钉住时硬失败不回落 */
+  private readonly pinnedNode: string | null;
   // 地区钉住（`?rg=`）时的挑选器：只有 dialRegion 一个分支用它，所以挂在这个会话上，
   // 而不是留成模块级单例（7.346 起 —— 模块级实例在门面上看不出「谁在用」）。
   private readonly regionPicker = new RegionPicker();
@@ -83,6 +85,9 @@ export class ProxySession {
     const q = this.queryParams();
     this.ipTag = (q.get("ip") || "").slice(0, 48); // 标签只用于统计，别让超长 ?ip= 把快照撑大
     this.ipRegion = (q.get("rg") || "").trim().toUpperCase() || null;
+    // ?node=host:port：用户点名的单个节点。只接受 host:port 形状、限长，防止超长串进日志/内存
+    const qnode = (q.get("node") || "").trim();
+    this.pinnedNode = qnode && /^[0-9a-zA-Z.:\[\]-]{3,128}$/.test(qnode) ? qnode : null;
     this.mode = this.readMode(q.get("mode"));
     // 目标流量 S：交互 i=64KB / 流媒体 s=1MB / 批量 b=16MB（不传就按模式默认：160KB / 10MB）
     const qs = q.get("sz");
@@ -105,6 +110,7 @@ export class ProxySession {
       mode: this.mode,
       pxForce: this.pxForce,
       ipRegion: this.ipRegion,
+      pinnedNode: this.pinnedNode,
       budget: this.budget,
       regionPicker: this.regionPicker,
       onHangUp: (code, reason) => this.hangUp(code, reason),

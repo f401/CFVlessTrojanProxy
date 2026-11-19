@@ -5,6 +5,9 @@ import { SOCKET_DIALER } from "./socket-dialer";
 import type { BudgetedIO } from "../core/budgeted-io";
 import { SEL } from "../px/selector";
 import { checkTarget } from "./dial";
+import { aliveList } from "../px/pool";
+import { keyOf } from "../px/const";
+import { isBlack, isFrozen } from "../nodes/score";
 
 interface RegionOpts {
   /** 本次请求的额度：地区分流同样要从两个出口取号 */
@@ -65,6 +68,44 @@ export class RegionPicker {
       // 再调一次 nsFail 会让它的 streak 跳两档（小池子里一节冷却直接变成十分钟）。
       if (conn.node && conn.node !== failed) NodeStatsTable.nsFail(conn.node);
       onFail(`地区 ${region} 节点连接失败`);
+      return null;
+    }
+  }
+
+  /**
+   * 功能：拨一条用户明确钉住的节点（`?node=host:port`），硬失败不回落。
+   *
+   * 为什么独立成方法：钉节点是「我要的就是这一条」——节点不在存活表/被黑或冻结/连不上，
+   * 都明确失败，绝不换别的节点或回落直连（用户拍板的语义）。与 `?rg=` 的地区硬分流同源，
+   * 但校验更严（必须精确匹配 key，不做同国补救）。
+   * @param env Worker 环境（查存活表用）
+   * @param node 节点 key（`host:port`）
+   * @param conn 连接状态（成功时写 node/via/retried）
+   * @param budget 本次调用的额度闸门
+   * @param onFail 明确失败时的回调（由会话关连接/记账）
+   * @returns socket 或 null（已调用 onFail）
+   */
+  async openPinned(env: Env, node: string, conn: Connection, budget: BudgetedIO, onFail: (msg: string) => void): Promise<Socket | null> {
+    const list = await aliveList(env);
+    const hit = list.find((x) => keyOf(x) === node);
+    if (!hit) {
+      onFail(`节点 ${node} 不在存活表`);
+      return null;
+    }
+    const k = keyOf(hit);
+    if (isBlack(k) || isFrozen(k) || checkTarget(hit.h, hit.p)) {
+      onFail(`节点 ${node} 被封禁或地址不允许`);
+      return null;
+    }
+    conn.node = k;
+    try {
+      const sock = await SOCKET_DIALER.open(hit.h, hit.p, budget);
+      conn.via = "node";
+      conn.retried = true;
+      return sock;
+    } catch {
+      NodeStatsTable.nsFail(k);
+      onFail(`节点 ${node} 连接失败`);
       return null;
     }
   }
