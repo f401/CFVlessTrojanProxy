@@ -102,7 +102,7 @@ export class Dialer {
       // DoH 抖动会偶发失败，而这是判定层的关键输入：给两次机会（不做负缓存）。
       for (let k = 0; k < 2 && !cfHost; k++) {
         try {
-          cfHost = await withTimeout(isCfHost(host), 1200);
+          cfHost = await withTimeout(isCfHost(host, o.budget), 1200);
         } catch {
           cfHost = false;
         }
@@ -123,7 +123,7 @@ export class Dialer {
     }
     const win = HOOK.win ? HOOK.win(host) : { d: false, r: false };
     const relWin = win.r;
-    if (cfHost) refreshCfHttp(host, conn.ctx);
+    if (cfHost) refreshCfHttp(host, conn.ctx, o.budget);
     // 判定层要知道目标是 CF 托管：直连被自家边缘拒时一次即判，所以放在分支外
     conn.cf = cfHost;
     // CF 托管目标：直连与中继谁更可能被拒，取决于**出口地址族**，与客户端族无关

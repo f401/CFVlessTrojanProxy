@@ -31,7 +31,7 @@ export { FirstFrame, parseVLESS, parseTrojan, loadUsers, normAtyp, readAddr, Use
 export { DOH_ENDPOINTS, DNS as DNS_CACHE, DnsCache, checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
 export { isPxHost, pxHostList } from "./core/hosts";
 export { isCfIp } from "./core/net";
-export { isCfHost } from "./proxy/dial";
+export { httpProbe, isCfHost } from "./proxy/dial";
 export {
   renderClash,
   renderSingbox,
@@ -129,7 +129,7 @@ export {
   DebugTf,
 } from "./routes/debug-nets";
 export { renderStatsHtml } from "./views/panel";
-export { PanelView, renderHtml } from "./views/panel";
+export { PanelView, renderHtml, renderTemplate } from "./views/panel";
 export { statsNodeRows } from "./nodes/stats-rows";
 export { randomPwd } from "./edge/auth";
 

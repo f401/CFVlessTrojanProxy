@@ -1,0 +1,39 @@
+<!doctype html><html lang="zh"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录</title>
+<style>
+body{font:15px/1.6 -apple-system,system-ui,sans-serif;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#f7f8fa;color:#1f2328}
+.box{background:#fff;border:1px solid #e3e6ea;border-radius:12px;padding:26px 24px;width:320px;box-shadow:0 2px 12px rgba(0,0,0,.04)}
+h1{font-size:17px;margin:0 0 16px}
+input{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #d1d5db;border-radius:7px;font-size:14px}
+button{margin-top:12px;width:100%;padding:9px;border:0;border-radius:7px;background:#2563eb;color:#fff;font-size:14px;cursor:pointer}
+button:disabled{background:#9ca3af}
+.err{color:#dc2626;font-size:13px;margin-top:10px}
+.tip{color:#6b7280;font-size:12px;margin-top:14px;line-height:1.5}
+</style>
+<div class="box">
+  <h1>管理员登录</h1>
+  <form id="f" method="post" action="/admin/login">
+    <input type="hidden" name="n" value="{{nonce}}">
+    <input type="hidden" name="p" value="">
+    <input id="pw" type="password" placeholder="密码" autocomplete="current-password" autofocus>
+    <button id="btn" type="submit">登录</button>
+  </form>
+  {{errHtml}}
+  <div class="tip">密码只在浏览器里参与 SHA-256 计算，请求里只有哈希，且每次带随机 nonce 防重放。</div>
+</div>
+<script>
+const f=document.getElementById('f'),pw=document.getElementById('pw'),btn=document.getElementById('btn');
+f.addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(!pw.value) return;
+  btn.disabled=true; btn.textContent='校验中…';
+  try{
+    const data=new TextEncoder().encode(f.n.value+':'+pw.value);
+    const buf=await crypto.subtle.digest('SHA-256',data);
+    f.p.value=[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+    f.submit();
+  }catch(err){ btn.disabled=false; btn.textContent='登录'; alert('浏览器不支持 crypto.subtle（需要 HTTPS）'); }
+});
+</script>
+</body></html>

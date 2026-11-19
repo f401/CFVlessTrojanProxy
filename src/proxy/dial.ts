@@ -303,8 +303,9 @@ export async function dial(host: string, port: number, quota: BudgetedIO) {
     v4 = host;
   } else {
     try {
-      v4 = await resolveV4(host);
-    } catch (_) {
+      v4 = await resolveV4(host, quota); // NAT64 兜底的 DoH 也要扣 request.sub，不能走 unlimited
+    } catch (e) {
+      if (isBudgetExhausted(e)) throw e; // 额度耗尽不是 DNS 失败（2.3）
       throw lastErr || new Error("目标解析失败");
     }
   }

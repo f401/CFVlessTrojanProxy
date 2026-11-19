@@ -9703,7 +9703,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   eq("[322] 入口短到一眼看完（≤20 行）", open322.split("\n").filter((l) => l.trim()).length <= 20, true);
   ok(
     "[322] 判定段负责 CF 托管识别、事实预热与连接事实",
-    cls322.includes("isCfHost(host)") && cls322.includes("refreshCfHttp(host") && cls322.includes("conn.cf = cfHost") && cls322.includes("HOOK.vtLoad("),
+    cls322.includes("isCfHost(host, o.budget)") && cls322.includes("refreshCfHttp(host") && cls322.includes("conn.cf = cfHost") && cls322.includes("HOOK.vtLoad("),
     "classify",
   );
   ok(
@@ -9830,18 +9830,18 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   const panelSrc = fs.readFileSync("src/views/panel.ts", "utf8");
   ok("面板页成了 PanelView 类", panelSrc.includes("export class PanelView"), "");
   for (const m of ["header", "identity", "subscriptions", "statusTable", "monitor", "params", "behaviour", "footer"]) {
-    ok("分区方法存在：" + m, panelSrc.includes("private " + m + "(): string"), "");
+    ok("分区方法存在：" + m, panelSrc.includes("private " + m + "(): Record<string, string>"), "");
   }
   const fnAt = panelSrc.indexOf("export function renderHtml(");
   ok("renderHtml 仍是入口", fnAt > 0, "");
   const fnBody = panelSrc.slice(fnAt, fnAt + 260);
   ok("renderHtml 只做委托", fnBody.includes("return new PanelView(") && fnBody.includes("<!doctype") === false, "");
-  ok("静态样式抽成 PANEL_CSS", panelSrc.includes("const PANEL_CSS = `"), "");
-  eq("组装只有一次 join", (panelSrc.match(/\.join\("\\n\\n"\)/g) || []).length, 1);
+  ok("静态样式抽进 panel.html", fs.readFileSync("src/views/html/panel.html", "utf8").includes(":root{--bd"), "");
+  eq("组装只有一次 renderTemplate", (panelSrc.match(/renderTemplate\(panelTpl,/g) || []).length, 1);
   const clsBody = panelSrc.slice(panelSrc.indexOf("export class PanelView"), fnAt);
   ok("不再有 const i = info 这个别名", panelSrc.includes("const i = info") === false, "");
   ok("插值都走 this.info", clsBody.includes("this.info.") && /\$\{i\./.test(clsBody) === false, "");
-  ok("类的文档写清为什么成类", panelSrc.includes("为什么成类"), "");
+  ok("类的文档写清为什么改成", panelSrc.includes("为什么改成"), "");
 
   const env324 = { nodes: "", uuids: "" };
   const url324 = new URL("https://panel.example.com/u1");
@@ -12376,6 +12376,52 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   W.PEND.flushedAt = savedPend368.at;
   W.S.pendMs = savedPend368.ms;
   W.PEND.flushing = savedPend368.busy;
+}
+
+// ---- 第 369 组：HTML 模板抽取 + 预算额度传递（审查修复）----
+{
+  // 2.1/2.3：CF 探测与 NAT64 兜底的 DoH 都走 quota.fetch，额度耗尽不能被当网络错吞掉。
+  // 用一本 sub 上限=1 的账本 + stub fetch 证明「第二次 fetch 前就被账本拒绝」。
+  const budget369 = new W.BudgetLedger("request"); // sub cap=6
+  const originalFetch369 = globalThis.fetch;
+  let subCalls369 = 0;
+  try {
+    globalThis.fetch = async (_url, _init) => {
+      subCalls369 += 1;
+      return new Response("ok", { status: 200, headers: { "cf-ray": "abc-HKG" } });
+    };
+    // httpProbe 传 quota：每次调用扣一次 sub
+    const io369 = new W.BudgetedIO(budget369);
+    await W.httpProbe("probe369.example.com", 1000, io369);
+    eq("[369] httpProbe 走 quota.fetch 并扣 sub", io369.snapshot().used.sub, 1);
+    eq("[369] httpProbe 确实发了子请求", subCalls369, 1);
+
+    // 额度用尽的 io：第一次 fetch 即被拒，httpProbe 吞掉后返回 code 0，但账本 refused 记 1
+    const ioTight369 = new W.BudgetedIO(new W.BudgetLedger("request", { sub: 0 }));
+    const probe0 = await W.httpProbe("probe369b.example.com", 1000, ioTight369);
+    eq("[369] 额度为 0 时探测返回未知", probe0.code, 0);
+    eq("[369] 额度耗尽被账本记为拒绝", ioTight369.snapshot().refused.sub, 1);
+    eq("[369] 额度耗尽没有真的发 fetch", subCalls369, 1);
+  } finally {
+    globalThis.fetch = originalFetch369;
+  }
+
+  // 结构证据：refreshCfHttp 签名带 quota 并把 httpProbe 的第三参传下去；
+  // dial 的 NAT64 兜底把 quota 传给 resolveV4 且 catch 里上抛 BudgetExhausted。
+  const cfSrc369 = fs.readFileSync("src/proxy/cfverdict.ts", "utf8");
+  const dialSrc369 = fs.readFileSync("src/proxy/dial.ts", "utf8");
+  ok("[369] refreshCfHttp 接收 quota", cfSrc369.includes("quota: BudgetedIO = BudgetedIO.unlimited()"), "refreshCfHttp 没有 quota 参数");
+  ok("[369] httpProbe 收到 quota", cfSrc369.includes("httpProbe(host, CONNECT_MS, quota)"), "quota 未传给 httpProbe");
+  ok("[369] NAT64 兜底 resolveV4 传 quota", dialSrc369.includes("resolveV4(host, quota)"), "NAT64 DoH 仍走 unlimited");
+  ok("[369] NAT64 兜底上抛额度耗尽", /resolveV4\(host, quota\)[\s\S]{0,120}isBudgetExhausted\(e\)\)\s*throw e/.test(dialSrc369), "额度耗尽被当 DNS 失败");
+
+  // HTML 抽取：5 个模板都在，且 renderTemplate 占位符替换正确（未在 vars 的原样保留）
+  const tplDir369 = "src/views/html";
+  for (const name369 of ["panel", "stats", "admin", "login", "admin-hint"]) {
+    ok(`[369] 模板 ${name369}.html 存在`, fs.existsSync(`${tplDir369}/${name369}.html`), name369);
+  }
+  eq("[369] renderTemplate 替换已登记占位符", W.renderTemplate("a{{x}}b", { x: "1" }), "a1b");
+  eq("[369] renderTemplate 保留未登记占位符", W.renderTemplate("a{{x}}b", {}), "a{{x}}b");
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

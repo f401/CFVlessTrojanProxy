@@ -1,0 +1,95 @@
+<!doctype html><html lang="zh"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{host}}</title>
+<style>
+:root{--bd:#e3e6ea;--bg:#fafbfc;--tx:#1f2328;--mu:#6b7280;--ac:#2563eb}
+*{box-sizing:border-box}
+body{font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;margin:0;padding:20px;color:var(--tx);background:#fff;max-width:980px}
+h1{font-size:19px;margin:0 0 4px}
+h2{font-size:15px;margin:26px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--bd)}
+.sub{color:var(--mu);font-size:13px;margin-bottom:18px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+td,th{border:1px solid var(--bd);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--bg);font-weight:600}
+.u{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;word-break:break-all}
+.u a{color:var(--ac);text-decoration:none}
+.u a:hover{text-decoration:underline}
+.k{width:150px;color:var(--mu);white-space:nowrap}
+.t{width:62px;color:var(--mu);font-size:12px;white-space:nowrap}
+.d{color:var(--mu);font-size:13px}
+code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.badge{display:inline-block;padding:1px 7px;border-radius:10px;background:#e8f0fe;color:#1a56db;font-size:12px;margin-left:6px}
+.note{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:#374151;font-size:13.5px;margin-top:10px}
+.note b{color:var(--tx)}
+ul{margin:6px 0 0 18px;padding:0}
+li{margin:3px 0}
+</style>
+
+<h1>{{host}}<span class="badge">VLESS + Trojan</span></h1>
+<div class="sub">同一 WebSocket 端点，按首帧自动识别协议 · 出口默认 Cloudflare，失败降级 proxyip · v{{version}}</div>
+
+<h2>身份</h2>
+<table>
+{{idRow}}
+{{pwdRow}}
+<tr><td class="k">WS 路径</td><td class=""><code>/?ed=2560</code></td></tr>
+{{protoRow}}
+</table>
+
+<h2>订阅（导入客户端用这个）</h2>
+<table>
+<tr><th>类型</th><th>链接</th><th>说明</th></tr>
+{{clRow}}
+{{sbRow}}
+{{tyRow}}
+</table>
+<div class="note">别名：<code>/pcl</code> = <code>/cl</code>，<code>/psb</code> = <code>/sb</code>，<code>/pty</code> = <code>/ty</code>。
+加 <code>?proto=vless</code> 或 <code>?proto=trojan</code> 只导出单一协议。</div>
+
+<h2>状态</h2>
+<table>
+{{nodeCountRow}}
+{{regionRow}}
+{{coloRow}}
+{{curTputRow}}
+{{curLatRow}}
+{{aliveRow}}
+{{usedRow}}
+{{todayRow}}
+{{expireRow}}
+</table>
+
+<h2>监控与调试</h2>
+<table>
+<tr><th>方法</th><th>链接</th><th>说明</th></tr>
+{{healthRow}}
+{{statsRow}}
+{{statsHtmlRow}}
+{{logsRow}}
+{{poolRow}}
+{{refreshRow}}
+{{debugHostRow}}
+{{debugProbeRow}}
+</table>
+
+<h2>参数</h2>
+<table>
+<tr><td class="k">?ed=2560</td><td class="">早期数据长度，把首包塞进 WS 握手，省 1 个 RTT</td></tr>
+<tr><td class="k">?proto=</td><td class=""><code>vless</code> / <code>trojan</code> / <code>both</code>（订阅用）</td></tr>
+<tr><td class="k">?rg=</td><td class="">强制地区出口，如 <code>rg=de</code>、<code>rg=nl</code>（数据面用）</td></tr>
+<tr><td class="k">?ip=</td><td class="">入口标签，仅用于 RTT 统计，不影响功能</td></tr>
+<tr><td class="k">?k=</td><td class="">页面口令（配置了 pageKey 才生效）</td></tr>
+</table>
+
+<h2>行为说明</h2>
+<div class="note">
+<ul>
+<li><b>默认出口</b>：直连，出口是 Cloudflare 边缘 IP；连不上（Cloudflare 托管站点如 X）才降级到 proxyip。</li>
+<li><b>地区出口</b>：路径带 <code>&amp;rg=xx</code> 时跳过直连，直接用该国 proxyip，出口即该国 IP。</li>
+<li><b>切换策略</b>：<code>{{policy}}</code>，能通就一直用，不主动跳 IP。</li>
+<li><b>鉴权</b>：UUID（VLESS）/ 密码（Trojan），两者共用同一套统计。</li>
+</ul>
+</div>
+
+<div class="sub" style="margin-top:22px">path 里的 <code>ed=2560</code> 不要去掉；换客户端只改订阅链接即可。</div>
+</body></html>

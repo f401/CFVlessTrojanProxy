@@ -282,6 +282,9 @@ export class PendingLedger {
       if (mine) cntUnsend(cd); // 日计数搭车主批次失败 → 基线退回，下轮重发
       if (carry.sync && HOOK.syncNack) HOOK.syncNack(); // 判定/中继增量退回，下轮重发
     }
+    // 失败也要让用量缓存失效：在途期间别的 isolate 可能已经改了账本，
+    // 留着旧缓存会让 readStats 继续返回过期值（与 ack 分支对称，1.2）
+    S.meterCache.delete(id);
   }
 
   /**

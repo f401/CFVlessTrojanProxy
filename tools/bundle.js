@@ -15,6 +15,7 @@ const common = {
   keepNames: true,
   legalComments: "none",
   charset: "utf8",
+  loader: { ".html": "text" },
   absWorkingDir: ROOT,
   logLevel: "warning",
 };
