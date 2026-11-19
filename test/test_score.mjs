@@ -12758,6 +12758,51 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   eq("[375] 连通性延迟可读", W.CONN_OBS.rttOf("TEST375", "5.5.5.5", "site375.test", Date.now()), 123);
   S.colo = colo375;
 }
+// 第 376 组：HTML 模板经混淆链后必须保留真实换行，不能被压成字面 \n 文本。
+const SRC = [
+  "obf/pre.js",
+  "src/views/html/panel.html",
+  "src/views/html/stats.html",
+  "src/views/html/admin.html",
+  "src/views/html/login.html",
+  "src/views/html/admin-hint.html",
+];
+const rd = (p) => fs.readFileSync(p, "utf8").replace(/\r\n/g, "\n");
+
+// 结构：unescapeLiteral 存在且在编码前被调用
+const pre = rd("obf/pre.js");
+ok("[376] obf/pre.js 有 unescapeLiteral", pre.includes("function unescapeLiteral("));
+ok("[376] 字符串编码前先还原转义", pre.includes("b64(unescapeLiteral(body, q))"));
+ok("[376] 还原 \\n", pre.includes('c === "n"') && pre.includes('out += "\\n"'));
+ok("[376] 还原 \\r", pre.includes('c === "r"'));
+ok("[376] 还原 \\t", pre.includes('c === "t"'));
+
+// 结构：所有 .html 模板文件都是 LF（不依赖 core.autocrlf 翻回 CRLF）
+for (const name of ["panel", "stats", "admin", "login", "admin-hint"]) {
+  const raw = fs.readFileSync(`src/views/html/${name}.html`, "utf8");
+  ok(`[376] ${name}.html 无 CRLF`, !raw.includes("\r\n"));
+}
+ok("[376] .gitattributes 固定 *.html 为 LF", fs.readFileSync(".gitattributes", "utf8").includes("*.html text eol=lf"));
+
+// 行为：如果 _worker_v3.mid.js 存在（混淆链已跑），解码其中所有 base64 字符串，
+// 找出 HTML 模板，确认它们含真实换行而非字面 "\n" 文本。
+const midPath = "_worker_v3.mid.js";
+if (fs.existsSync(midPath)) {
+  const s = rd(midPath);
+  const cands = s.match(/[A-Za-z0-9+/]{40,}={0,2}/g) || [];
+  let templates = 0;
+  for (const c of cands) {
+    let d;
+    try { d = Buffer.from(c, "base64").toString("utf8"); } catch { continue; }
+    if (!/<!doctype html>|<style>|class="badge"/.test(d)) continue;
+    templates++;
+    const lit = (d.match(/\\r\\n/g) || []).length + (d.match(/\\n/g) || []).length;
+    ok(`[376] 混淆后模板#${templates} 无字面换行文本`, lit === 0);
+    ok(`[376] 混淆后模板#${templates} 含真实换行`, d.includes("\n"));
+  }
+  ok("[376] 至少解码出一个 HTML 模板", templates >= 1);
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
