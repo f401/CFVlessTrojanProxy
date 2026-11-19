@@ -11455,6 +11455,20 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     eq("[342] 早期数据先入流", text342(first.value), "hello");
     r.releaseLock();
   }
+  // ①b earlyData 必须逐字节还原：atob 出来是 Latin-1 字符串，若直接交给 push/decode 会走
+  //    TextEncoder.encode() 把每个 >127 的字节重新编成两字节。VLESS 头含 16 字节 UUID，
+  //    大量字节 >127，二次编码会让首包损坏（WS 握手成功、探测能过，但数据面完全不通）。
+  //    7.270 是逐字节还原；这是重构引入的回归，用这条锁住。
+  {
+    const raw = new Uint8Array([0, 0xb9, 0x8d, 0x4a, 0x17, 0x8f, 0xff, 0x80, 0x01, 0x02]);
+    const b64url = Buffer.from(raw).toString("base64url");
+    const ws = mkWs342();
+    const r = W.wsToStream(ws, b64url).getReader();
+    const first = await r.read();
+    eq("[342] earlyData 逐字节还原不损坏", Array.from(first.value).join(","), Array.from(raw).join(","));
+    eq("[342] earlyData 字节数不变（无 UTF-8 二次编码）", first.value.length, raw.length);
+    r.releaseLock();
+  }
   // ② 纯文本帧按 UTF-8、ws2 帧（首字节 0x02 + base64）按二进制、ArrayBuffer 原样
   {
     const ws = mkWs342();

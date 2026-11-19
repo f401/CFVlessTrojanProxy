@@ -192,7 +192,16 @@ export class UploadStream {
   private feedEarly(): void {
     if (!this.earlyData) return;
     try {
-      this.push(atob(this.earlyData));
+      // earlyData 是客户端塞进 Sec-WebSocket-Protocol 的 base64url 首包。
+      // 必须逐字节还原，不能把 atob 的字符串直接交给 push/decode：atob 返回 Latin-1 字符串，
+      // decode 对它走 TextEncoder.encode()，会把每个 >127 的字节重新编成两字节 UTF-8；
+      // VLESS 头里的 16 字节 UUID 大量 >127，一旦二次编码首包就损坏 —— 表现为 WS 握手成功、
+      // url-test 探测能过，但数据面完全不通（7.270 就是逐字节还原，此处是重构引入的回归）。
+      const b64 = this.earlyData.replace(/-/g, "+").replace(/_/g, "/");
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      this.push(bytes);
     } catch {
       // 早期数据不是合法 base64：丢掉，让客户端在正式帧里重发（协议层会判首帧）
     }
