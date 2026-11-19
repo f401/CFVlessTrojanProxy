@@ -1,5 +1,4 @@
 import { closeQuietly, enc, errMsg, safeSend, toU8 } from "../core/util";
-import { BudgetLedger } from "../core/budget-ledger";
 import { BudgetedIO } from "../core/budgeted-io";
 import type { Socket } from "cloudflare:sockets";
 import { Connection } from "./connection";
@@ -34,8 +33,8 @@ export class ProxySession {
   private readonly clientWS: WebSocketLike;
   private readonly serverWS: WebSocketLike;
   private readonly conn: Connection;
-  /** 本次调用的额度：建连只从它取号，用完即放弃补救（7.362 起额度随调用传递） */
-  private readonly budget = new BudgetedIO(new BudgetLedger("request"));
+  /** 数据面额度：与 7.270 一致不设请求级闸门（补救链可能拨 5 次，旧的 4 次上限会误杀） */
+  private readonly budget = BudgetedIO.unlimited();
   private readonly mode: Mode;
   private readonly pxForce: number;
   private readonly rxPin: string;

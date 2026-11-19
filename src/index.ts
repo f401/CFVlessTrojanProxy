@@ -13,7 +13,6 @@ import { loadUsers } from "./proxy/protocol";
 import { regionListAsync } from "./px/regions";
 
 import { S } from "./core/state";
-import { BudgetLedger } from "./core/budget-ledger";
 import { BudgetedIO } from "./core/budgeted-io";
 import { PEND } from "./store/index";
 
@@ -30,9 +29,12 @@ export default {
    * @returns 响应
    */
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    // 一次请求 = 一本新的额度账：额度对象随 ctx 交给拨号器与探测器，
-    // 扣减只发生在 openSocket()（connect）与 HttpIO.get()（子请求）两个出口（7.362）
-    const budget = new BudgetedIO(new BudgetLedger("request"));
+    // 请求侧恢复 7.270 的「无预算闸门」行为：一次 x.com 连接的补救链会拨
+    // 2 条中继 + dial4 的 3 个 A 记录 = 5 次 connect()，旧 request 账本上限 4，
+    // 第 5 次的 BudgetExhausted 被 catch 吞掉后 socket 为 null，客户端只能等到
+    // 自己 30s 定时器（实测默认 0/8、?px=1 却 3/6）。保留 BudgetedIO 这个唯一
+    // I/O 出口（架构不变），只是请求侧不限额；cron 侧仍用有限账本守免费额度。
+    const budget = BudgetedIO.unlimited();
     try {
       const url = new URL(request.url);
       // 用 URL 的 hostname：Host 头可能带 :port，直接拿去当节点 server 会生成
