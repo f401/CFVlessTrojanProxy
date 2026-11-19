@@ -9977,8 +9977,8 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("[327] flush 里不再自己发请求", !flushBody.includes("doFetch("));
   ok("[327] flush 里不再有 carriedBy / attached 这类散落状态",
     !flushBody.includes("carriedBy") && !flushBody.includes("attached"));
-  // 7.368 加了单飞守卫（pendBusy）+ try/finally 释放，编排层多行约 10 行；仍远低于「不拆」时的 99 行
-  ok("[327] flush 拆完不超过 45 行", (flushBody.match(/\n/g) || []).length <= 45);
+  // 7.368 单飞守卫 + 7.376 force 补排，编排层多行约 15 行；仍远低于「不拆」时的 99 行
+  ok("[327] flush 拆完不超过 50 行", (flushBody.match(/\n/g) || []).length <= 50);
 
   const takeBody = body327("private take(max: number)");
   ok("[327] 摘批：轮转起点 + 只摘这一批 + 重算剩余字节",
@@ -11477,6 +11477,28 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
     eq("[342] 文本帧按 UTF-8", text342((await r.read()).value), "abc");
     ws.fire("message", { data: "\u0002" + btoa("xy") });
     eq("[342] ws2 帧解 base64", text342((await r.read()).value), "xy");
+    // ws2 帧也必须逐字节还原：atob 的 Latin-1 字符串若走 toU8 会被 TextEncoder
+    // 把每个 >127 字节二次编码。与 earlyData 同型的回归，补真实字节样本锁住。
+    {
+      const raw = [0, 0xb9, 0x8d, 0x4a, 0x17, 0x8f, 0xff, 0x80, 0x01, 0x02];
+      const bin = raw.map((b) => String.fromCharCode(b)).join("");
+      ws.fire("message", { data: "\u0002" + btoa(bin) });
+      const got = Array.from((await r.read()).value);
+      eq("[342] ws2 帧 >127 字节逐字节还原", got.join(","), raw.join(","));
+      eq("[342] ws2 帧字节数不变（无 UTF-8 二次编码）", got.length, raw.length);
+    }
+    // 非法 base64 不能在 message 回调里抛（会升级成 1101），按空帧丢弃
+    {
+      let threw = "";
+      try {
+        ws.fire("message", { data: "\u0002!!!" });
+        const got = (await r.read()).value;
+        eq("[342] ws2 非法 base64 按空帧丢弃", got.length, 0);
+      } catch (e) {
+        threw = String(e);
+      }
+      eq("[342] ws2 非法 base64 不抛异常", threw, "");
+    }
     ws.fire("message", { data: new Uint8Array([1, 2]).buffer });
     eq("[342] 二进制帧原样", Array.from((await r.read()).value).join(","), "1,2");
     ws.fire("close", {});
@@ -12348,7 +12370,7 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   const psrc368 = fs.readFileSync("src/store/pend.ts", "utf8");
   const ssrc368 = fs.readFileSync("src/core/state.ts", "utf8");
   ok("[368] 单飞守卫字段在 PendingLedger 上", /private flushing = false/.test(psrc368) && !/pendBusy/.test(ssrc368));
-  ok("[368] flush 有单飞守卫", psrc368.includes("if (this.flushing) return;"));
+  ok("[368] flush 有单飞守卫", psrc368.includes("if (this.flushing) {"));
   ok("[368] flush finally 释放守卫", psrc368.includes("this.flushing = false;"));
 
   const savedPend368 = { at: W.PEND.flushedAt, ms: W.S.pendMs, busy: W.PEND.flushing };
@@ -12386,6 +12408,50 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   eq("[368] 同时在途的上报不超过一批", maxActive368, 1);
   ok("[368] 守卫已释放", W.PEND.flushing === false, String(W.PEND.flushing));
   ok("[368] 被跳过的那批仍在账本里", W.S.pend.has("u2-368"), [...W.S.pend.keys()].join(","));
+  ok("[368] 单飞跳过 force 时记一笔补排", psrc368.includes("this.forceSkipped = true"));
+  ok("[368] finally 补排被跳过的 force", /if \(this\.forceSkipped\)[\s\S]*this\.schedule\(env, 0\)/.test(psrc368));
+
+  // 在途 flush 期间定时器 force 到点：单飞跳过但记一笔，本轮结束后必须补排把剩余用户上报。
+  {
+    W.S.pend.clear();
+    W.PEND.flushedAt = 0;
+    W.PEND.flushing = false;
+    W.PEND.forceSkipped = false;
+    W.S.pendMs = 0;
+    W.PEND.add("fa-368", 10, 10, true);
+    W.PEND.add("fb-368", 10, 10, true);
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    let firstPosts = 0;
+    let allPosts = 0;
+    const cenv368b = {
+      uuid: "fa-368",
+      METER: {
+        idFromName: (n) => "id-" + n,
+        get: () => ({
+          fetch: async () => {
+            allPosts += 1;
+            if (allPosts === 1) { firstPosts += 1; await gate; }
+            return new Response(JSON.stringify({ ok: true }), { status: 200 });
+          },
+        }),
+      },
+    };
+    const inFlight = W.PEND.flush(cenv368b, true, 1); // 摘走 fa，卡在 post
+    // 等第一轮真正进入 post（flushing=true）
+    await new Promise((r) => setTimeout(r, 5));
+    ok("[368] 第一轮在途时 flushing 为真", W.PEND.flushing === true, String(W.PEND.flushing));
+    // 定时器到点：force flush 被单飞跳过，但记 forceSkipped
+    await W.PEND.flush(cenv368b, true, 1);
+    ok("[368] 单飞期间 force 被记下", W.PEND.forceSkipped === true, String(W.PEND.forceSkipped));
+    // 放行第一轮；finally 应补排，把 fb 也上报
+    release();
+    await inFlight;
+    await new Promise((r) => setTimeout(r, 20));
+    eq("[368] 被跳过的 force 已补排（两次 POST）", allPosts, 2);
+    ok("[368] 补排后剩余用户已上报", !W.S.pend.has("fb-368"), [...W.S.pend.keys()].join(","));
+    ok("[368] 补排后 forceSkipped 已清", W.PEND.forceSkipped === false, String(W.PEND.forceSkipped));
+  }
 
   W.S.pend.clear();
   W.PEND.flushedAt = savedPend368.at;

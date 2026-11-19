@@ -215,7 +215,21 @@ export class UploadStream {
   private decode(d: unknown): Uint8Array {
     // ws2 每帧是 1 字节类型 + base64 文本；ArrayBuffer 是二进制帧；字符串按 UTF-8
     if (typeof d === "string") {
-      if (d.length > 0 && d.charCodeAt(0) === 2) return toU8(atob(d.slice(1)));
+      if (d.length > 0 && d.charCodeAt(0) === 2) {
+        // 与 earlyData 同型：atob 返回 Latin-1 字符串，若交给 toU8 会走 TextEncoder，
+        // 把每个 >127 的字节重新编成两字节 —— ws2 首包里的 UUID 大量 >127，二次编码就损坏。
+        // 必须逐字节 charCodeAt 还原（7.270 的字节链口径）。
+        // 非法 base64 时 atob 抛 InvalidCharacterError：不能在 WS message 回调里冒出去
+        // （未捕获事件异常会升级成 1101），按空帧丢弃，交给协议层判首帧。
+        try {
+          const bin = atob(d.slice(1));
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          return bytes;
+        } catch {
+          return new Uint8Array(0);
+        }
+      }
       return toU8(new TextEncoder().encode(d));
     }
     return toU8(d);

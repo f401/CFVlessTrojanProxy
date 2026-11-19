@@ -37,6 +37,8 @@ export class PendingLedger {
   private flushedAt = 0;
   /** 单飞守卫：一次只跑一轮 flush，避免跨 flush ack 串扰 */
   private flushing = false;
+  /** 单飞期间被跳过的 force 上报：本轮结束后补排一次（否则定时器意图被吞） */
+  private forceSkipped = false;
   /** flush 定时器句柄 */
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   /** 轮转起点：下一轮从第几个用户开始读 */
@@ -120,7 +122,13 @@ export class PendingLedger {
     // 两批并发会各 carry 同一组事实增量：先回来的 ack() 把整张 pending 清空，
     // 后回来那批失败时 nack() 已无从撤销 —— 证据永久丢失。同一 isolate 只跑一批；
     // 被跳过的那批什么都没摘、也没登记 pending，证据仍在原表里等下一轮。
-    if (this.flushing) return;
+    if (this.flushing) {
+      // 单飞期间又来一次上报（定时器到点 / 大流量 kick）：记下来，等这轮结束补排。
+      // 不补排的话定时回调已经清掉 flushTimer，这一轮 force 意图就被单飞吞掉，
+      // 新到的字节账要等下一次外部请求/cron 才上报（7.270 无单飞，并发两批不会吞）。
+      if (force) this.forceSkipped = true;
+      return;
+    }
     this.flushing = true;
     try {
       if (!force && Date.now() - this.flushedAt < S.pendMs) return;
@@ -150,6 +158,12 @@ export class PendingLedger {
       this.backoff(bad);
     } finally {
       this.flushing = false;
+      // 本轮结束：若期间有 force 被单飞挡下（定时句柄已消费），补排一次尽快上报。
+      // 用定时器而非直接递归 flush，避免同步深递归；没有账本时 schedule 的回调会自然早退。
+      if (this.forceSkipped) {
+        this.forceSkipped = false;
+        this.schedule(env, 0);
+      }
     }
   }
 
