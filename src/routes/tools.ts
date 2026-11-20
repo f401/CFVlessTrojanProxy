@@ -11,7 +11,7 @@ export { debug } from "./debug";
 import { IpFamily, IpKind } from "../core/enums";
 import { S } from "../core/state";
 import { QUALITY, QUALITY_PROBE, COVERAGE, CONN_OBS } from "../px/regions";
-import { AliveBoard, nsOf } from "../px/pool";
+import { AliveBoard, aliveList, nsOf } from "../px/pool";
 import { html, json } from "../edge/respond";
 import { splitRelay } from "../core/relay-addr";
 import type { UserCtx } from "../edge/types";
@@ -417,6 +417,12 @@ export class RegionsView {
   async run(): Promise<Response> {
     // 有些只读探针只给 url/id、不带 request；缺 request 一律按 GET 处理
     if (this.c.request && this.c.request.method === "POST") return this.post();
+    // 冷 isolate 的 alive/seed 都还在内存里没载入：先看一眼名单与游标再渲染，
+    // 否则本机房刚起来时面板恒空（KV 里其实有节点）。aliveList 内部走 30 分钟缓存，
+    // 暖 isolate 上这一次几乎零成本，和 /proxyip、订阅的载入路径一致。
+    if (this.c.env && !S.alive.size && !(S.seed.byColo && Object.keys(S.seed.byColo).length)) {
+      await aliveList(this.c.env);
+    }
     const target = (this.c.url.searchParams.get("site") || "").slice(0, 256);
     const rows = this.rows(target);
     if (this.c.url.searchParams.get("format") === "json") return this.jsonView(rows, target);

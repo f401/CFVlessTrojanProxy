@@ -1,4 +1,4 @@
-- 线上 **7.378**（已部署、可跑）｜仓库 **7.379**（节点面板增强：列全量节点、已探优先按国家分组、展示出口族/成功率/判死/封锁/DNS 事实列、指定网站探测与逐节点质量重探皆限流；共 215 个缺陷皆已修复）：两者差 1 个版本。
+- 线上 **7.378**（已部署、可跑）｜仓库 **7.380**（修冷 isolate 地区面板恒空：/regions 首次进入按需载入 seed/alive，不再只读空内存；共 215 个缺陷皆已修复）：两者差 2 个版本。
 
 # AGENTS.md
 
@@ -126,7 +126,7 @@ Account-level traps (all have happened):
 
 ## 9. Current state
 
-- Repo **7.379**; **live 7.378** (both runnable; 7.379 is repo-only pending acceptance). Baseline is **7.270** — an audit against it found and fixed three byte/semantic regressions: 7.375 WS `earlyData` and 7.376 ws2 message frames both used `TextEncoder` on an `atob()` Latin-1 string (double-encoding every byte >127, corrupting VLESS UUIDs); 7.376 also fixed `PendingLedger.flush` single-flight swallowing a forced flush. 7.377 added the self-service region panel; 7.378 fixed three O(N²) panel/subscription hot spots behind the CPU-limit incident; 7.379 expands the node panel with fact columns and throttled probes.
+- Repo **7.380**; **live 7.378** (both runnable; later versions are repo-only pending acceptance). Baseline is **7.270** — an audit against it found and fixed three byte/semantic regressions: 7.375 WS `earlyData` and 7.376 ws2 message frames both used `TextEncoder` on an `atob()` Latin-1 string (double-encoding every byte >127, corrupting VLESS UUIDs); 7.376 also fixed `PendingLedger.flush` single-flight swallowing a forced flush. 7.377 added the self-service region panel; 7.378 fixed three O(N²) panel/subscription hot spots behind the CPU-limit incident; 7.379 expands the node panel with fact columns and throttled probes; 7.380 makes `/regions` lazily load seed/alive on a cold isolate so the panel is never falsely empty.
 - The panel lists all alive ∪ seed nodes, groups by country, and shows quality badge / IP kind / family / proxy-VPN flags / eg-ps-dead-blk-dns facts / optional per-site RTT (`?site=`). `?format=json` keeps the old JSON contract. POST writes the user's own `regions` / `regionTopN` / `targetHost` through the shared `regionConfigList()` helper in `src/proxy/protocol.ts` (also used by admin `op=config`); GET is read-only over in-memory tables. Specified-site probes and per-node quality rechecks are available by POST and each has a 60 s cooldown. Template lives in `src/views/html/regions.html` (esbuild text loader).
 - Architecture phase is closed: 115 source files, 109 exported classes, 29 module-level singleton instances. `docs/ARCHITECTURE.md` lists every class and who owns it; `docs/命名约定.md` holds the naming rules and the singleton admission test.
 - Deliberately not done: merging the six fact tables (`VT`/`PS`/`EG`/`DNS`/`DEAD`/`BLK`) behind one root object. They appear ~540 times in `tests/` and `tools/`; the only gain is one less global. Rationale is recorded in `docs/命名约定.md`.

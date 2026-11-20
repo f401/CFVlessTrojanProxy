@@ -13060,6 +13060,56 @@ if (fs.existsSync(midPath)) {
   W.S.seed = saveSeed378;
 }
 
+// 第 379 组回归：/regions 冷 isolate 必须按需载入 seed（不能只读空内存）
+{
+  const saveSeed379 = W.S.seed;
+  const saveAlive379 = new Map(W.S.alive);
+  const saveReadAt379 = W.SEED_STORE.readAt;
+  const saveReadFailed379 = W.SEED_STORE.readFailed;
+  const saveColo379 = W.S.colo;
+  // 冷 isolate 的真实状态：内存里的 seed/alive 全空，但 KV 里有行情
+  W.S.alive.clear();
+  W.S.seed = { v: 7, byColo: {} };
+  W.S.colo = "TST";
+  W.SEED_STORE.readAt = 0;
+  W.SEED_STORE.readFailed = false;
+  const kvSeed379 = {
+    v: 7,
+    ts: Date.now(),
+    poolGen: 1,
+    poolN: 1,
+    builtAt: Date.now(),
+    byColo: { TST: { nodes: [{ k: "203.0.113.79:443", h: "203.0.113.79", p: 443, cc: "TST" }], ts: Date.now() } },
+  };
+  const env379 = {
+    uuids: "u379",
+    STATS: {
+      get: async (k) => (k === "px:seed" ? JSON.stringify(kvSeed379) : null),
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [] }),
+    },
+  };
+  const ctx379 = {
+    url: new URL("https://edge.example.com/regions?format=json"),
+    request: { method: "GET" },
+    env: env379, id: "u379",
+  };
+  const resp379 = await W.regions(ctx379);
+  eq("[379] 冷 isolate 请求成功", resp379.status, 200);
+  const body379 = await resp379.json();
+  ok("[379] 冷 isolate 从 KV 载入节点（不再恒空）", body379.nodes.length > 0, JSON.stringify(body379.nodes));
+  eq("[379] 载入的是 KV 里的节点", body379.nodes[0].key, "203.0.113.79:443");
+  ok("[379] GET 触发了 seed 读取（readAt 已置）", W.SEED_STORE.readAt > 0, String(W.SEED_STORE.readAt));
+  // 恢复现场
+  W.S.alive.clear();
+  for (const [k, v] of saveAlive379) W.S.alive.set(k, v);
+  W.S.seed = saveSeed379;
+  W.SEED_STORE.readAt = saveReadAt379;
+  W.SEED_STORE.readFailed = saveReadFailed379;
+  W.S.colo = saveColo379;
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
