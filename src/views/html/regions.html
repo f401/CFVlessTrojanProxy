@@ -17,9 +17,17 @@ input[type=text]{padding:3px 6px}
 button{padding:4px 12px;cursor:pointer}
 .tip{color:#666;font-size:12.5px;margin:4px 0 12px}
 .lnk a{color:#2f7ad6;text-decoration:none;margin-right:12px}
+.lnkbtn{background:none;border:none;color:#2f7ad6;padding:0;text-decoration:underline;font-size:12px}
 </style>
 <h2>地区出口选择 · {{idShort}}</h2>
 <div class="tip">{{coverageText}} · <a href="{{jsonLink}}">JSON 数据</a> · <a href="{{backLink}}">返回面板</a></div>
+<form method="post" action="{{postAction}}" style="margin-bottom:12px">
+  <div class="bar" style="padding:8px">
+    指定网站探测（写入到站延迟） <input type="text" name="site" size="24" placeholder="example.com" value="{{siteValue}}">
+    <button type="submit" name="op" value="probe">开始探测</button>
+    <span class="mu">每个站点 1 分钟最多探一次</span>
+  </div>
+</form>
 <form method="post" action="{{postAction}}">
   <div style="margin-bottom:10px">
     目标站（填了才显示到该站的延迟） <input type="text" name="targetHost" size="24" placeholder="example.com" value="{{siteValue}}">

@@ -12697,8 +12697,9 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   eq("[372] 覆盖统计总数", body372.coverage.total, 3);
   eq("[372] 覆盖统计已探", body372.coverage.probed, 1);
   eq("[372] alive∪seed 三节点都有", body372.nodes.length, 3);
-  // Good 优先、Risky 排后：住宅 9.9.9.9 第一，风险 8.8.8.8 最后
-  eq("[372] Good 排第一", body372.nodes[0].key, "9.9.9.9:443");
+  // 已探优先（1.1.1.1 记过覆盖）→ 再按质量：seed 里 Good 早于 Risky
+  eq("[372] 已探排第一", body372.nodes[0].key, "1.1.1.1:443");
+  eq("[372] Good 早于 Risky", body372.nodes[1].key, "9.9.9.9:443");
   eq("[372] Risky 排最后", body372.nodes[body372.nodes.length - 1].key, "8.8.8.8:443");
   const jp372 = body372.nodes.find((n) => n.key === "1.1.1.1:443");
   eq("[372] 目标站点延迟回填", jp372.rtt, 42);
@@ -12972,11 +12973,11 @@ if (fs.existsSync(midPath)) {
   ok("[377] HTML 含质量徽章", html377.includes("良好") && html377.includes("b g"));
   ok("[377] HTML 含类型标签", html377.includes("住宅"));
   ok("[377] HTML 含 JSON 链接", html377.includes("/regions?format=json"));
-  ok("[377] 未带 site 不显示延迟列", !html377.includes("到站延迟"));
+  ok("[377] 未带 site 不显示延迟列", !html377.includes("<th>到站延迟</th>"));
   // 带 site 显示延迟列
   const ctxSite377 = { ...ctx377, url: new URL("https://edge.example.com/regions?site=example.com") };
   const htmlSite377 = await (await W.regions(ctxSite377)).text();
-  ok("[377] 带 site 显示延迟列", htmlSite377.includes("到站延迟"));
+  ok("[377] 带 site 显示延迟列", htmlSite377.includes("<th>到站延迟</th>"));
   // format=json 仍返回旧契约
   const ctxJson377 = { ...ctx377, url: new URL("https://edge.example.com/regions?format=json") };
   const json377 = await (await W.regions(ctxJson377)).json();
@@ -12986,6 +12987,77 @@ if (fs.existsSync(midPath)) {
   W.S.alive.clear();
   for (const [k, v] of saveAlive377) W.S.alive.set(k, v);
   W.S.seed = saveSeed377;
+}
+
+// 第 378 组：节点界面增强 —— 全量节点/已探优先分组、事实列、指定网站探测、质量重探、限流
+{
+  const tools378 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  const regionsTpl378 = fs.readFileSync("src/views/html/regions.html", "utf8");
+  const regionsSrc378 = fs.readFileSync("src/px/regions.ts", "utf8");
+  // 结构：事实列（纯内存查表）已在 rows() 里读取五张表
+  ok("[378] rows 读出口族事实", tools378.includes("egFamily: EG.famOf(ip, now)"));
+  ok("[378] rows 读成功率事实", tools378.includes("psOk: target ? PS.okOf(target, ip, now)"));
+  ok("[378] rows 读判死事实", tools378.includes("dead: DEAD.isDead(ip, now)"));
+  ok("[378] rows 读封锁事实", tools378.includes("blkPenalty: target ? BLK.penOf(target, ip, now)"));
+  ok("[378] rows 读 DNS 事实", tools378.includes("dnsV6: target ? DNS.v6Of(target, now)"));
+  // 已探优先 + 未探测单独分组（用户口径）
+  ok("[378] 已探优先排序", tools378.includes("Number(b.probed) - Number(a.probed)"));
+  ok("[378] 组级也按已探优先", tools378.includes("a[1].some((r) => r.probed) ? 1 : 0"));
+  // 探测按钮：指定网站（runTfb）+ 逐节点质量重探（qualityOf），且都限流
+  ok("[378] 指定网站探测复用 tfb", tools378.includes("runTfb({ env: this.c.env }, site, 2)"));
+  ok("[378] 质量重探复用 probe", tools378.includes("QUALITY_PROBE.qualityOf(key, h, this.c.budget, fam)"));
+  ok("[378] 两类探测都限流", tools378.includes('QUALITY.recheckReady(ck, 60_000)') && tools378.includes('QUALITY.recheckReady(qk, 60_000)'));
+  ok("[378] 冷却表放进状态持有者", regionsSrc378.includes("readonly recheckCool = new Map<string, number>()"));
+  // 模板：指定网站探测表单 + 重探按钮的样式类
+  ok("[378] 模板有网站探测表单", regionsTpl378.includes('name="site"') && regionsTpl378.includes('value="probe"'));
+  ok("[378] 模板有重探按钮样式", regionsTpl378.includes(".lnkbtn"));
+
+  // 展示标签
+  eq("[378] 出口族标签 v4", W.egLabel(4), "v4");
+  eq("[378] 出口族标签 v6", W.egLabel(6), "v6");
+  eq("[378] 出口族标签未知", W.egLabel(0), "—");
+  eq("[378] 成功率标签", W.psLabel(0.876), "88%");
+  eq("[378] 成功率无样本", W.psLabel(-1), "—");
+  eq("[378] DNS 标签", W.dnsLabel(1) + "/" + W.dnsLabel(0) + "/" + W.dnsLabel(-1), "有/无/—");
+
+  // 分组：所有国家都保留勾选框；有已探节点的国家在前，全未探的国家在后，各自按码序
+  const row378 = (over = {}) => ({ key: "1.1.1.1:443", country: "US", family: W.IpFamily.IPv4, alive: true, source: "alive", kind: W.IpKind.Residential, level: "good", proxy: false, vpn: false, probed: true, rtt: null, egFamily: 4, psOk: -1, dead: false, blkPenalty: 1, dnsV6: -1, ...over });
+  const grouped378 = W.groupRows([row378({ probed: false, country: "JP" }), row378({ country: "US" }), row378({ country: "DE" })]);
+  eq("[378] 分组数=国家数", grouped378.length, 3);
+  eq("[378] 全未探国家排最后", grouped378[grouped378.length - 1].country, "JP");
+  eq("[378] 已探组按码序", grouped378.slice(0, 2).map((g) => g.country).join(","), "DE,US");
+
+  // 限流行为：同一 key 1 分钟内只放行一次
+  const cool378 = new W.QUALITY.constructor();
+  eq("[378] 首探放行", cool378.recheckReady("q:1.1.1.1:443", 60000, 100000), true);
+  cool378.recheckMark("q:1.1.1.1:443", 100000);
+  eq("[378] 冷却中拒绝", cool378.recheckReady("q:1.1.1.1:443", 60000, 100001), false);
+  eq("[378] 过期后放行", cool378.recheckReady("q:1.1.1.1:443", 60000, 160001), true);
+  eq("[378] 不同 key 独立", cool378.recheckReady("s:example.com", 60000, 100001), true);
+
+  // 渲染：带 site 时 HTML 有事实列与重探按钮，且未探测组不产生勾选框
+  const saveSeed378 = W.S.seed;
+  const saveAlive378 = new Map(W.S.alive);
+  W.S.alive.clear();
+  W.S.seed = { v: 7, byColo: { US: { nodes: [{ k: "8.8.8.8:443", h: "8.8.8.8", p: 443, cc: "US" }] } } };
+  W.EG.note("8.8.8.8", 4, Date.now());
+  W.PS.note("example.com", "8.8.8.8", true, Date.now());
+  const ctx378 = {
+    url: new URL("https://edge.example.com/regions?site=example.com"),
+    request: { method: "GET" },
+    env: {}, id: "u378", pageKey: "",
+    auth: { list: [{ id: "u378", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
+  };
+  const html378 = await (await W.regions(ctx378)).text();
+  ok("[378] HTML 有出口族事实列", html378.includes("出口族事实"));
+  ok("[378] HTML 有成功率列", html378.includes("成功率") && html378.includes("100%"));
+  ok("[378] HTML 有重探按钮", html378.includes('value="requality"') && html378.includes("重探质量"));
+  ok("[378] HTML 有网站探测表单", html378.includes('value="probe"') && html378.includes("开始探测"));
+  ok("[378] formaction 无模板占位", !html378.includes("{{postAction}}"));
+  W.EG.clear && W.EG.clear();
+  W.S.alive.clear();
+  for (const [k, v] of saveAlive378) W.S.alive.set(k, v);
+  W.S.seed = saveSeed378;
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

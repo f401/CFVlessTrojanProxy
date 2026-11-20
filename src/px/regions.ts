@@ -206,6 +206,8 @@ export class IpQualityTable {
   readonly rows = new Map<string, IpQuality>();
   /** 源名 → 上次失败的时刻（冷却用） */
   readonly sourceCool = new Map<string, number>();
+  /** 手动重探/站点探测的节流：前缀 key → 上次触发时刻（面板按钮不能无限点） */
+  readonly recheckCool = new Map<string, number>();
 
   /**
    * 功能：读一条仍然有效的质量结论，过期即删并返回 null。
@@ -273,6 +275,36 @@ export class IpQualityTable {
    */
   failSource(name: string, now = Date.now()): void {
     this.sourceCool.set(name, now);
+  }
+
+  /**
+   * 功能：判断一次手动探测（质量重探 / 指定网站探测）是否过了冷却期。
+   *
+   * 为什么放这里：面板按钮是客户端可控的，不设限流就能被连点刷爆免费计划的
+   * 子请求（6 源质量）与 DO 往返（tfb 探测）；把冷却表放在质量表这个状态持有者里，
+   * 避免再往 AppState 塞新字段。调用方用不同前缀区分两类探测。
+   * @param key 带前缀的操作键（如 `q:host:port` / `s:site`）
+   * @param cooldownMs 冷却时长
+   * @param now 当前时刻
+   * @returns 可以探测返回 true
+   */
+  recheckReady(key: string, cooldownMs: number, now = Date.now()): boolean {
+    const at = this.recheckCool.get(key);
+    if (at !== undefined && now - at < cooldownMs) return false;
+    return true;
+  }
+
+  /**
+   * 功能：登记一次手动探测的触发时刻（配合 recheckReady 做限流）。
+   * @param key 带前缀的操作键
+   * @param now 当前时刻
+   */
+  recheckMark(key: string, now = Date.now()): void {
+    this.recheckCool.set(key, now);
+    // 顺手清理过期项，避免客户端构造海量不同 key 让表无限涨
+    if (this.recheckCool.size > COVERAGE_CAP) {
+      for (const [k, at] of this.recheckCool) if (now - at > QUALITY_TTL) this.recheckCool.delete(k);
+    }
   }
 
   /**
