@@ -69,6 +69,34 @@ export async function nodeSnapGet(env: Env, id: string): Promise<Record<string, 
 }
 
 /**
+ * 功能：把跨 isolate 快照按「取大」并进本地 nsMap。
+ *
+ * 为什么单独抽出来：/proxyip 与 /subscription 的统计页都做同一件事——本地只见过
+ * 这一跳、别的 isolate 见过另一条路径，两边都是真实观测，合并口径只能是逐字段取大。
+ * 这段此前在两个路由里逐字重复，改一处漏一处会让两个页面的节点速率对不上。
+ * @param nsMap 本地 nsOf 摊平出来的明细（原地修改）
+ * @param snap Meter DO 的跨 isolate 快照
+ * @returns 合并后的 nsMap（同一个对象，便于调用点继续用）
+ */
+export function mergeNodeSnap(
+  nsMap: Record<string, Record<string, number | string>>,
+  snap: Record<string, NodeSnap>,
+): Record<string, Record<string, number | string>> {
+  for (const [key, value] of Object.entries(snap)) {
+    if (!value) continue;
+    const cur = nsMap[key] || {};
+    nsMap[key] = {
+      ...cur,
+      bps: Math.max(Number(cur.bps) || 0, value.p90 || 0),
+      bpsMed: Math.max(Number(cur.bpsMed) || 0, value.med || 0),
+      bpsCap: Math.max(Number(cur.bpsCap) || 0, value.cap || 0),
+      n: Math.max(Number(cur.n) || 0, value.n || 0),
+    };
+  }
+  return nsMap;
+}
+
+/**
  * 功能：记流量：先记进全局待上报账本，再落到本地统计。
  * @param id 用户 id
  * @param up 上行字节

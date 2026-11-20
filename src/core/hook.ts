@@ -11,10 +11,51 @@ export interface DecisionIn {
   facts?: ReadonlySet<string>;
 }
 
+/**
+ * 决策理由的封闭集合。
+ *
+ * 为什么必须是联合类型而不是裸 string：proxy 侧的硬规则（`src/proxy/pxhook.ts`）
+ * 过去直接拿字符串字面量比对 `out.why`，而 route 侧负责产生这些字面量。两边分家后，
+ * 任何一边改了拼写都不会有编译错——7.123 的 `HOOK.facts` 就是这样静默失效的。
+ * 把字面量收进 core、两侧都引用同一份常量，拼错会在 tsc 阶段被拦住。
+ */
+export const DECISION_WHY = {
+  V6Cf: "v6-cf",
+  V6CfNone: "v6-cf-none",
+  Http403: "http403",
+  Http200: "http200",
+  DirBlocked: "dir-blocked",
+  Explore: "explore",
+  RelRot: "rel-rot",
+  ColdPin: "cold-pin",
+  CfNonCf: "cf-noncf",
+  CfAny: "cf-any",
+  EgPin: "eg-pin",
+  Rehab: "rehab",
+  DirectOk: "direct-ok",
+  Direct: "direct",
+} as const;
+
+/** 决策理由的封闭类型：拼错的成员名过不了 tsc。 */
+export type DecisionWhy = (typeof DECISION_WHY)[keyof typeof DECISION_WHY];
+
+/**
+ * 「CF 托管目标必须走中继」的硬规则理由集合。
+ * 放在 core 而不是 proxy：proxy 只引用这份集合，不再自己抄一遍字面量。
+ */
+export const HARD_DECISION_WHY: ReadonlySet<DecisionWhy> = new Set<DecisionWhy>([
+  DECISION_WHY.V6Cf,
+  DECISION_WHY.V6CfNone,
+  DECISION_WHY.Http403,
+  DECISION_WHY.Http200,
+  DECISION_WHY.DirBlocked,
+  DECISION_WHY.Explore,
+]);
+
 export interface DecisionOut {
   via: "d" | "r"; // 直连 / 走中继（含入口 IP 偏好时不改变这个值）
   ip?: string;
-  why: string;
+  why: DecisionWhy;
 }
 
 interface Hooks {

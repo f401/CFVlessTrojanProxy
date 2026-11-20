@@ -6,7 +6,7 @@ import { PageView, fmtBytes } from "../views/panel";
 import { effectiveQuota, subHeaders } from "../core/quota";
 import { SubscriptionView, trojanPasswordOf } from "../views/sub";
 import type { SubKind } from "../views/sub";
-import { readStats, nodeSnapGet } from "../store/index";
+import { readStats, mergeNodeSnap, nodeSnapGet } from "../store/index";
 import { statsNodeRows } from "../nodes/stats-rows";
 import { aliveList, nsOf } from "../px/pool";
 import { CSP_STATIC, html, json, text } from "../edge/respond";
@@ -167,17 +167,7 @@ export class SubscriptionRoutes {
     );
     const snap = await nodeSnapGet(env, id);
     // 合并口径是「取大」：本地只见过这一跳、别的 isolate 见过另一条路径，两个都是真实观测
-    for (const [k, v] of Object.entries(snap)) {
-      if (!v) continue;
-      const cur = nsMap[k] || {};
-      nsMap[k] = {
-        ...cur,
-        bps: Math.max(Number(cur.bps) || 0, v.p90 || 0),
-        bpsMed: Math.max(Number(cur.bpsMed) || 0, v.med || 0),
-        bpsCap: Math.max(Number(cur.bpsCap) || 0, v.cap || 0),
-        n: Math.max(Number(cur.n) || 0, v.n || 0),
-      };
-    }
+    mergeNodeSnap(nsMap, snap);
     const nodeRows = statsNodeRows(alive, nsMap);
     // 错误环只留最近 20 条并倒序：面板上一次刷屏会把更早的挤压掉，那是刻意的
     const errs = S.errs.slice(-20).reverse();

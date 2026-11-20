@@ -4,7 +4,7 @@
 // 把二十个注册点写在决策类里，会让「一个类一件事」变成「一个类还兼着接线」，
 // 而漏注册一个槽位从来不会有门禁报错（7.123 的 `HOOK.facts` 就是这样静默失效的）。
 import { HOOK } from "../core/hook";
-import type { DecisionIn, DecisionOut, TrafficEvt } from "../core/hook";
+import type { DecisionIn, DecisionOut, DecisionWhy, TrafficEvt } from "../core/hook";
 import { S } from "../core/state";
 import { HEALTH } from "./relay-health";
 import { JUDGE } from "./judge";
@@ -39,7 +39,7 @@ export interface Ctx {
 /** 决策结果：选中的通道与一句可读理由（理由会进日志与影子统计）。 */
 export interface Choice {
   chan: Chan;
-  why: string;
+  why: DecisionWhy;
 }
 
 /**

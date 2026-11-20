@@ -13110,6 +13110,53 @@ if (fs.existsSync(midPath)) {
   W.S.colo = saveColo379;
 }
 
+// 7.381：架构低风险收敛——决策理由封闭类型 + 节点快照合并去重。
+{
+  // 结构：决策理由收进 core 的封闭集合，proxy 侧只引用硬规则集合，不再抄字面量。
+  const hookSrc = fs.readFileSync("src/core/hook.ts", "utf8");
+  const pxhookSrc = fs.readFileSync("src/proxy/pxhook.ts", "utf8");
+  const polSrc = fs.readFileSync("src/route/policy.ts", "utf8");
+  const statsSrc = fs.readFileSync("src/store/stats.ts", "utf8");
+  const proxyipSrc = fs.readFileSync("src/routes/proxyip.ts", "utf8");
+  const subSrc = fs.readFileSync("src/routes/subscription.ts", "utf8");
+  ok("[380] core 定义决策理由常量与封闭类型",
+    hookSrc.includes("export const DECISION_WHY = {") && hookSrc.includes("export type DecisionWhy"));
+  ok("[380] DecisionOut.why 用封闭类型", hookSrc.includes("why: DecisionWhy;"));
+  ok("[380] 硬规则集合集中在 core", hookSrc.includes("export const HARD_DECISION_WHY"));
+  ok("[380] proxy 侧不再逐字比对 why",
+    pxhookSrc.includes("HARD_DECISION_WHY.has(out.why)") && !pxhookSrc.includes('out.why === "v6-cf"'));
+  // 所有 policy 产生的 why 字面量都在 DECISION_WHY 里（tsc 已强制，这里再锁运行时集合）。
+  const whyVals = Object.values(W.DECISION_WHY || {});
+  eq("[380] 决策理由共 14 个", whyVals.length, 14);
+  const hardSet380 = W.HARD_DECISION_WHY || new Set();
+  ok("[380] 硬规则理由全在封闭集合内",
+    [...hardSet380].every((w) => whyVals.includes(w)) && hardSet380.size > 0);
+  eq("[380] 硬规则共 6 条", hardSet380.size, 6);
+  // 合并去重：单一 helper，两个路由都不再各自抄 Math.max 循环。
+  eq("[380] mergeNodeSnap 只有一处定义", (statsSrc.match(/export function mergeNodeSnap\(/g) || []).length, 1);
+  ok("[380] proxyip 与订阅都改用共享 helper",
+    proxyipSrc.includes("mergeNodeSnap(nsMap, snapS)") && subSrc.includes("mergeNodeSnap(nsMap, snap)"));
+  ok("[380] 两路由不再内联取大循环",
+    !proxyipSrc.includes("bpsMed: Math.max") && !subSrc.includes("bpsMed: Math.max"));
+  // 行为：取大、原地、保留其它字段、跳过空行。
+  const m380 = { "a:443": { bps: 100, bpsMed: 50, bpsCap: 200, n: 1, extra: "keep" } };
+  const snap380 = {
+    "a:443": { med: 90, p90: 140, cap: 180, n: 3, at: 1 },
+    "b:443": { med: 10, p90: 20, cap: 30, n: 2, at: 1 },
+    "c:443": null,
+  };
+  const before380 = JSON.stringify(m380);
+  if (typeof W.mergeNodeSnap === "function") W.mergeNodeSnap(m380, snap380);
+  ok("[380] 合并确实发生（旧代码无 helper 不变）", JSON.stringify(m380) !== before380);
+  eq("[380] 逐字段取大 p90", m380["a:443"].bps, 140);
+  eq("[380] 逐字段取大 med", m380["a:443"].bpsMed, 90);
+  eq("[380] 逐字段取大 cap", m380["a:443"].bpsCap, 200);
+  eq("[380] 逐字段取大 n", m380["a:443"].n, 3);
+  eq("[380] 保留调用方额外字段", m380["a:443"].extra, "keep");
+  eq("[380] 新节点插入", m380["b:443"].bps, 20);
+  ok("[380] 空快照行被跳过", !("c:443" in m380));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

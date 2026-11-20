@@ -5,7 +5,7 @@ import { S } from "../core/state";
 import { json } from "../edge/respond";
 import { HOSTS, logErr } from "../nodes/metrics";
 import { costOf, scoreParts, NodeStatsTable } from "../nodes/score";
-import { nodeSnapGet } from "../store/index";
+import { mergeNodeSnap, nodeSnapGet } from "../store/index";
 import { cronScan, nsOf, pxGet } from "../px/pool";
 import { POOL_SOURCES, SOURCES } from "../px/probe";
 import { SEL } from "../px/selector";
@@ -193,17 +193,7 @@ export class ProxyipView {
     const nsMap = nsOf(aliveKeys, aliveKeys.length);
     // 并上 DO 里的跨 isolate 快照：否则换一个 isolate 看就是一片 kbps=0
     const snapS = await nodeSnapGet(env, this.id);
-    for (const [k, v] of Object.entries(snapS)) {
-      if (!v) continue;
-      const cur = nsMap[k] || {};
-      nsMap[k] = {
-        ...cur,
-        bps: Math.max(Number(cur.bps) || 0, v.p90 || 0),
-        bpsMed: Math.max(Number(cur.bpsMed) || 0, v.med || 0),
-        bpsCap: Math.max(Number(cur.bpsCap) || 0, v.cap || 0),
-        n: Math.max(Number(cur.n) || 0, v.n || 0),
-      };
-    }
+    mergeNodeSnap(nsMap, snapS);
     const modeQ: "lat" | "tput" = this.url.searchParams.get("mode") === "lat" ? "lat" : "tput";
     const blacklist = [...S.nstat.entries()].filter(([, s]) => s.blackUntil > Date.now()).map(([k]) => k);
     // 黑名单一律建 Set：alive×blacklist 的 includes 是 O(n²)，满池时 64 万次字符串比较，足以单独吃满 CPU 预算

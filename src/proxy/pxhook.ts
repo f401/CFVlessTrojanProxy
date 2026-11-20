@@ -1,5 +1,5 @@
 // proxy 侧的决策入口：只依赖 core 的 HOOK，不反向依赖 route。
-import { HOOK } from "../core/hook";
+import { HARD_DECISION_WHY, HOOK } from "../core/hook";
 
 /** 返回「这一条连接要不要走中转」。level = 策略生效级别：0 只影子统计、1 只硬规则、2 全生效。 */
 export function pxDecision(request: Request, host: string, cfHost: boolean, wantPx: boolean, level: number, mode = "tput"): boolean {
@@ -10,12 +10,7 @@ export function pxDecision(request: Request, host: string, cfHost: boolean, want
   const fx = new URL(request.url).searchParams.get("fx");
   const facts = fx !== null && HOOK.factsFor ? HOOK.factsFor(fx) : HOOK.facts ? HOOK.facts() : undefined;
   const out = fn({ host, cfHost, clientV6: cip.includes(":"), legacyWantsRelay: wantPx, mode, facts });
-  const hard =
-    out.why === "v6-cf" ||
-    out.why === "v6-cf-none" ||
-    out.why === "http403" ||
-    out.why === "http200" ||
-    out.why === "dir-blocked" || out.why === "explore";
+  const hard = HARD_DECISION_WHY.has(out.why);
   // CF 托管目标（x.com 这类）：直连与 CF 中继都是 CF→CF，客户端出口原样透传，
   // 只有非 CF 主机能改判。**只在判定层自己选了中继时**才把它硬生效：
   // 无条件的 `return true` 会把判定层的 `direct-ok` 一起盖掉 —— 那条分支要的证据是
