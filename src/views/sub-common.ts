@@ -511,12 +511,16 @@ export class RegionSubscription {
     const now = Date.now();
     const live = new AliveBoard().list();
     const out: RegionEntry[] = [];
+    // 一次算好每个节点的 rank：原写法在 filter 与 sort comparator 里反复调 rank()（内部走 QUALITY.getFor），
+    // 32 地区 × 800 节点 × 排序比较会放大成几十万次画像查询；缓存后降为 O(alive) 次。
+    const ranked = live.map((n) => ({ n, r: this.rank(n, now) }));
     for (const cc of cfg.regions) {
       const ccUpper = cc.toUpperCase();
-      // Risky 直接排除，Unknown 按 Normal；再按质量与 key 稳定排序
-      const picked = live.filter((n) => String(n.cc || "").toUpperCase() === ccUpper && this.rank(n, now) < 3);
-      picked.sort((a, b) => this.rank(a, now) - this.rank(b, now) || a.h.localeCompare(b.h));
-      for (const n of picked.slice(0, topN)) {
+      // Risky 直接排除，Unknown 按 Normal；再按质量与 key 稳定排序（用缓存的 rank）
+      const picked = ranked
+        .filter((x) => String(x.n.cc || "").toUpperCase() === ccUpper && x.r < 3)
+        .sort((a, b) => a.r - b.r || a.n.h.localeCompare(b.n.h));
+      for (const { n } of picked.slice(0, topN)) {
         const q = QUALITY.getFor(n.h, n.p, now);
         const level = q ? q.level : IpLevel.Normal;
         const fam = String(n.h).includes(":") ? IpFamily.IPv6 : IpFamily.IPv4;

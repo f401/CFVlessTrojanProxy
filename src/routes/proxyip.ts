@@ -206,6 +206,8 @@ export class ProxyipView {
     }
     const modeQ: "lat" | "tput" = this.url.searchParams.get("mode") === "lat" ? "lat" : "tput";
     const blacklist = [...S.nstat.entries()].filter(([, s]) => s.blackUntil > Date.now()).map(([k]) => k);
+    // 黑名单一律建 Set：alive×blacklist 的 includes 是 O(n²)，满池时 64 万次字符串比较，足以单独吃满 CPU 预算
+    const blackSet = new Set(blacklist);
     const rows = alive
       .map((x) => {
         const k = x.h + ":" + x.p;
@@ -225,7 +227,7 @@ export class ProxyipView {
           pStall: ns.pStall || 0,
           ok: ns.ok || 0,
           fail: ns.fail || 0,
-          black: blacklist.includes(k),
+          black: blackSet.has(k),
         };
       })
       .sort((a, b) => (modeQ === "lat" ? a.lat - b.lat : a.tput - b.tput))

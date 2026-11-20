@@ -12904,6 +12904,13 @@ if (fs.existsSync(midPath)) {
   ok("[377] admin 复用共享 helper", admin377.includes("regionConfigList(") && admin377.includes("/regions"));
   ok("[377] regions 默认渲染 HTML + format=json 兼容", tools377.includes('get("format") === "json"') && tools377.includes("renderTemplate(regionsTpl"));
   ok("[377] POST 走 saveUsers 写回", tools377.includes("await saveUsers(this.c.env, chosen.list)"));
+  // CPU 门禁：地区面板 800 节点时逐 key alive.find 是 O(N²)（基准 23ms/op，实测吃满免费计划 CPU），必须走 Map 查表
+  ok("[377] 地区面板不再 O(N²) find", tools377.includes("liveByKey = new Map<") && tools377.includes("liveByKey.get(key)") && !tools377.includes("alive.find("));
+  // CPU 门禁：/proxyip 黑名单查表与地区订阅 rank 都不能在 map/comparator 里做线性或重复计算
+  const proxyip377 = fs.readFileSync("src/routes/proxyip.ts", "utf8");
+  const subcommon377 = fs.readFileSync("src/views/sub-common.ts", "utf8");
+  ok("[377] proxyip 黑名单走 Set", proxyip377.includes("new Set(blacklist)") && proxyip377.includes("blackSet.has(k)") && !proxyip377.includes("blacklist.includes("));
+  ok("[377] 地区订阅 rank 只算一次", subcommon377.includes("live.map((n) => ({ n, r: this.rank(n, now) }))") && !subcommon377.includes("picked.sort((a, b) => this.rank("));
 
   // 展示映射：带文字徽章，不只靠颜色
   ok("[377] good 徽章带文字", W.levelBadge("good").includes("良好") && W.levelBadge("good").includes("b g"));

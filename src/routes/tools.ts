@@ -171,11 +171,14 @@ export class RegionsView {
     const seeds = this.seedNodes();
     // alive 与 seed 可能重复，按 key 去重后逐个补画像/覆盖/延迟
     const keys = [...new Set([...alive.map((n) => `${n.h}:${n.p}`), ...seeds.keys()])];
+    // 一次建表：alive 上限 800，若在下面的 map 里逐 key 做 find() 就是 64 万次字符串拼接，
+    // 足以单独吃满一个 Worker 的 CPU 预算；Map 查表把它压成 O(n)。
+    const liveByKey = new Map<string, (typeof alive)[number]>(alive.map((n) => [`${n.h}:${n.p}`, n]));
     const colo = S.colo || "??";
     const rows = keys.map((key) => {
       const [h, p] = splitRelay(key, 443);
       const seedCc = seeds.get(key) || "";
-      const live = alive.find((n) => `${n.h}:${n.p}` === key);
+      const live = liveByKey.get(key);
       const q = QUALITY.getFor(h, p, now);
       const cov = COVERAGE.rows.get(key);
       return {
