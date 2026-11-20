@@ -1,0 +1,31 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>地区出口 · {{idShort}}</title>
+<style>
+body{font:14px/1.6 -apple-system,system-ui,sans-serif;margin:20px;max-width:1000px;color:#222}
+h2{font-size:17px;margin:18px 0 8px}
+table{border-collapse:collapse;width:100%;margin-bottom:10px}
+td,th{border:1px solid #ddd;padding:5px 8px;text-align:left;vertical-align:top}
+th{background:#f6f6f6}
+.u{font-family:ui-monospace,monospace;font-size:12px;word-break:break-all}
+.mu{color:#888}
+.b{display:inline-block;padding:0 6px;border-radius:8px;font-size:12px;white-space:nowrap}
+.b.g{background:#e6f7ea;color:#176b2e}.b.n{background:#eef0f2;color:#555}
+.b.r{background:#fdeaea;color:#a11}.b.u{background:#f6f6f6;color:#888}
+.cb{font-size:14px;font-weight:600}
+.bar{background:#fafafa}
+input[type=text]{padding:3px 6px}
+button{padding:4px 12px;cursor:pointer}
+.tip{color:#666;font-size:12.5px;margin:4px 0 12px}
+.lnk a{color:#2f7ad6;text-decoration:none;margin-right:12px}
+</style>
+<h2>地区出口选择 · {{idShort}}</h2>
+<div class="tip">{{coverageText}} · <a href="{{jsonLink}}">JSON 数据</a> · <a href="{{backLink}}">返回面板</a></div>
+<form method="post" action="{{postAction}}">
+  <div style="margin-bottom:10px">
+    目标站（填了才显示到该站的延迟） <input type="text" name="targetHost" size="24" placeholder="example.com" value="{{siteValue}}">
+    每区节点数 <input type="text" name="topN" size="2" value="{{topNValue}}">
+    <button type="submit">保存选择</button>
+  </div>
+  <div class="tip">勾选的地区才会出现在订阅里；不勾任何地区 = 自动挑选全部。节点质量/类型仅供挑选参考，实际挑选仍按订阅策略。</div>
+  {{groupsHtml}}
+</form>

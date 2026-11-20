@@ -12689,7 +12689,7 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   W.CONN_OBS.note("??", "1.1.1.1:443", "example.com", 200, 42, W.IpFamily.IPv4, Date.now());
 
   ok("[372] regions 端点已导出", typeof W.regions === "function" && typeof W.RegionsView === "function");
-  const ctx372 = { url: new URL("https://edge.example.com/regions?site=example.com"), env: {}, id: "u372" };
+  const ctx372 = { url: new URL("https://edge.example.com/regions?format=json&site=example.com"), env: {}, id: "u372" };
   const resp372 = await W.regions(ctx372);
   eq("[372] 返回 200", resp372.status, 200);
   const body372 = await resp372.json();
@@ -12777,9 +12777,12 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
 {
   const admSrc374 = fs.readFileSync("src/routes/admin.ts", "utf8");
   ok("[374] usersOp 有 config 分支", admSrc374.includes('op === "config"'));
-  ok("[374] config 校验地区白名单", admSrc374.includes('/^[A-Z0-9]{2,8}$/') && admSrc374.includes(".slice(0, 32)"));
-  ok("[374] topN 限 1-8", admSrc374.includes("Math.max(1, Math.min(8, Number(f.get(\"topN\")) || 3))"));
-  ok("[374] env 用户转托管", admSrc374.includes("managed: true") && admSrc374.includes("list.filter((x) => x.id !== target)"));
+  // 校验逻辑已抽到 protocol.ts 的 regionConfigList（admin 与自助面板共用）
+  const helperSrc374 = fs.readFileSync("src/proxy/protocol.ts", "utf8");
+  ok("[374] config 校验地区白名单", helperSrc374.includes('/^[A-Z0-9]{2,8}$/') && helperSrc374.includes(".slice(0, 32)"));
+  ok("[374] topN 限 1-8", helperSrc374.includes("Math.max(1, Math.min(8,"));
+  ok("[374] admin 复用 helper", admSrc374.includes("regionConfigList("));
+  ok("[374] env 用户转托管", helperSrc374.includes("managed: true") && helperSrc374.includes("list.filter((x) => x.id !== id)"));
   const htmlTpl374 = fs.readFileSync("src/views/html/admin.html", "utf8");
   ok("[374] admin 模板有 {{rows}} 占位", htmlTpl374.includes("{{rows}}"));
   // renderAdmin 每行带 config 表单
@@ -12886,6 +12889,100 @@ if (fs.existsSync(midPath)) {
   // 这里只做 best-effort 的性质检查，不把「恰好解出一个」当硬门禁，避免随机红。
   if (templates === 0) console.log("[376] 提示：本次 mid 包未解出 HTML 模板，跳过行为断言（结构断言仍生效）");
 }
+
+// 第 377 组：地区选择自助面板 —— 展示映射 / 分组 / HTML / JSON 兼容 / POST 写回
+{
+  // 结构：新模板存在且是 LF；helper 与 admin/regions 都用它
+  const tpl377 = fs.readFileSync("src/views/html/regions.html", "utf8");
+  ok("[377] regions.html 无 CRLF", !tpl377.includes("\r\n"));
+  ok("[377] 模板有表单与分组占位", tpl377.includes("<form method=\"post\"") && tpl377.includes("{{groupsHtml}}") && tpl377.includes('name="targetHost"') && tpl377.includes('name="topN"'));
+  const proto377 = fs.readFileSync("src/proxy/protocol.ts", "utf8");
+  const admin377 = fs.readFileSync("src/routes/admin.ts", "utf8");
+  const tools377 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  ok("[377] 勾选框在 tools.ts 生成", tools377.includes('name="regions" value="'));
+  ok("[377] 共享 helper 在 protocol.ts", proto377.includes("export function regionConfigList("));
+  ok("[377] admin 复用共享 helper", admin377.includes("regionConfigList(") && admin377.includes("/regions"));
+  ok("[377] regions 默认渲染 HTML + format=json 兼容", tools377.includes('get("format") === "json"') && tools377.includes("renderTemplate(regionsTpl"));
+  ok("[377] POST 走 saveUsers 写回", tools377.includes("await saveUsers(this.c.env, chosen.list)"));
+
+  // 展示映射：带文字徽章，不只靠颜色
+  ok("[377] good 徽章带文字", W.levelBadge("good").includes("良好") && W.levelBadge("good").includes("b g"));
+  ok("[377] risky 徽章带文字", W.levelBadge("risky").includes("风险"));
+  ok("[377] 未知等级回落未探", W.levelBadge("weird").includes("未探"));
+  ok("[377] 类型中文标签+原始值", W.kindLabel(W.IpKind.Residential).includes("住宅") && W.kindLabel(W.IpKind.Residential).includes("residential"));
+  ok("[377] 族标签", W.familyLabel(W.IpFamily.IPv4) === "IPv4" && W.familyLabel(W.IpFamily.IPv6) === "IPv6");
+  const row377 = (over = {}) => ({ key: "1.1.1.1:443", country: "US", family: W.IpFamily.IPv4, alive: true, source: "alive", kind: W.IpKind.Residential, level: "good", proxy: true, vpn: false, probed: true, rtt: null, ...over });
+  ok("[377] 代理标记", W.flagLabel(row377()) === "代理");
+  ok("[377] 无标记显示破折号", W.flagLabel(row377({ proxy: false, vpn: false })) === "—");
+  // 所有标签插值都过 escapeHtml（造一个带尖括号的类型不会注入）
+  ok("[377] 标签转义", !W.kindLabel("<img>").includes("<img>"));
+
+  // 分组：按国家码字典序、未知落到 ??
+  const grouped377 = W.groupRows([row377({ country: "JP" }), row377({ country: "US" }), row377({ country: "" }), row377({ country: "JP", key: "2.2.2.2:443" })]);
+  eq("[377] 分组数", grouped377.length, 3);
+  eq("[377] 组按字典序", grouped377.map((g) => g.country).join(","), "??,JP,US");
+  eq("[377] 组内保留顺序", grouped377.find((g) => g.country === "JP").rows.length, 2);
+
+  // regionConfigList：纯函数写回，不改入参，env 用户转托管，归一化地区/节点数
+  const auth377 = {
+    list: [
+      { id: "env377", pwd: "e", note: "", enabled: true, managed: false },
+      { id: "mgr377", pwd: "m", note: "n", enabled: true, managed: true, regions: ["US"] },
+    ],
+    uuids: new Set(), trojan: new Map(), ok: true,
+  };
+  const chosen377 = W.regionConfigList(auth377, "env377", [" jp ", "DE", "bad!!"], 99, "example.com");
+  eq("[377] 写回成功", chosen377.ok, true);
+  const row377b = chosen377.list.find((x) => x.id === "env377");
+  eq("[377] 地区归一化过滤", (row377b.regions || []).join(","), "JP,DE");
+  eq("[377] topN 夹到 8", row377b.regionTopN, 8);
+  eq("[377] env 用户转托管", row377b.managed, true);
+  eq("[377] 保留原密码", row377b.pwd, "e");
+  eq("[377] 托管用户不丢", chosen377.list.some((x) => x.id === "mgr377"), true);
+  eq("[377] 入参未被改", auth377.list.find((x) => x.id === "env377").managed, false);
+  const missing377 = W.regionConfigList(auth377, "nobody", [], 3, "");
+  eq("[377] 不存在的用户报错", missing377.ok, false);
+  const clear377 = W.regionConfigList(auth377, "mgr377", [], 0, "");
+  eq("[377] 空地区=清除", (clear377.list.find((x) => x.id === "mgr377").regions || []).length, 0);
+  eq("[377] topN 缺省回落 3", clear377.list.find((x) => x.id === "mgr377").regionTopN, 3);
+
+  // HTML 渲染：默认请求得到面板，含徽章与勾选框；带 site 显示延迟列
+  const saveSeed377 = W.S.seed;
+  const saveAlive377 = new Map(W.S.alive);
+  W.S.alive.clear();
+  W.S.seed = { v: 7, byColo: { US: { nodes: [{ k: "9.9.9.9:443", h: "9.9.9.9", p: 443, cc: "US" }] } } };
+  W.QUALITY.note("9.9.9.9", { kind: W.IpKind.Residential, level: W.IpLevel.Good, proxy: false, vpn: false, at: Date.now() });
+  const ctx377 = {
+    url: new URL("https://edge.example.com/regions"),
+    request: { method: "GET" },
+    env: {}, id: "u377", pageKey: "",
+    auth: { list: [{ id: "u377", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
+  };
+  const respHtml377 = await W.regions(ctx377);
+  eq("[377] 默认返回 200", respHtml377.status, 200);
+  const html377 = await respHtml377.text();
+  ok("[377] HTML 含地区勾选框", html377.includes('type="checkbox" name="regions" value="US" checked'));
+  ok("[377] HTML 含质量徽章", html377.includes("良好") && html377.includes("b g"));
+  ok("[377] HTML 含类型标签", html377.includes("住宅"));
+  ok("[377] HTML 含 JSON 链接", html377.includes("/regions?format=json"));
+  ok("[377] 未带 site 不显示延迟列", !html377.includes("到站延迟"));
+  // 带 site 显示延迟列
+  const ctxSite377 = { ...ctx377, url: new URL("https://edge.example.com/regions?site=example.com") };
+  const htmlSite377 = await (await W.regions(ctxSite377)).text();
+  ok("[377] 带 site 显示延迟列", htmlSite377.includes("到站延迟"));
+  // format=json 仍返回旧契约
+  const ctxJson377 = { ...ctx377, url: new URL("https://edge.example.com/regions?format=json") };
+  const json377 = await (await W.regions(ctxJson377)).json();
+  ok("[377] format=json 兼容 nodes/coverage", Array.isArray(json377.nodes) && !!json377.coverage);
+
+  // 清理
+  W.S.alive.clear();
+  for (const [k, v] of saveAlive377) W.S.alive.set(k, v);
+  W.S.seed = saveSeed377;
+}
+
+console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
+process.exit(fail ? 1 : 0);
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

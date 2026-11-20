@@ -1,5 +1,5 @@
 import { RATE_LIMIT, adminAuthed, newNonce, randomPwd, sessionToken, sha256Hex } from "../edge/auth";
-import { loadUsers, saveUsers } from "../proxy/protocol";
+import { loadUsers, saveUsers, regionConfigList } from "../proxy/protocol";
 import { eachLimit } from "../core/util";
 import { cnt } from "../core/counter";
 import { SC } from "../core/const";
@@ -129,27 +129,16 @@ export class AdminView {
       // 此时复制一份成 managed 写进 KV；同名托管行最后由 fromManaged 覆盖 env。
       const src = cur.list.find((x) => x.id === target);
       if (!src) return new Response("用户不存在", { status: 404 });
-      const rawRegions = String(f.get("regions") || "")
-        .split(/[\s,]+/)
-        .map((s) => s.trim().toUpperCase())
-        .filter((s) => /^[A-Z0-9]{2,8}$/.test(s))
-        .slice(0, 32);
-      const topN = Math.max(1, Math.min(8, Number(f.get("topN")) || 3));
-      const targetHost = String(f.get("targetHost") || "").slice(0, 253);
-      const prev = list.find((x) => x.id === target);
-      const row = {
-        id: src.id,
-        pwd: prev ? prev.pwd : src.pwd,
-        note: prev ? prev.note : src.note,
-        enabled: prev ? prev.enabled : src.enabled,
-        managed: true,
-        ts: Date.now(),
-        regions: rawRegions,
-        regionTopN: topN,
-        targetHost,
-      };
-      list = list.filter((x) => x.id !== target);
-      list.push(row);
+      // 归一化/转托管全部交给共享 helper，和 /<uuid>/regions 自助面板同一口径
+      const chosen = regionConfigList(
+        cur,
+        target,
+        String(f.get("regions") || "").split(/[\s,]+/).filter(Boolean),
+        Number(f.get("topN")) || 3,
+        String(f.get("targetHost") || ""),
+      );
+      if (!chosen.ok) return new Response(chosen.err, { status: 404 });
+      list = chosen.list;
     } else if (op === "add") {
       list.push({
         id: crypto.randomUUID(),
@@ -269,6 +258,8 @@ export function renderAdmin(
       const subClash = base + "/cl" + kq;
       const subSb = base + "/sb" + kq;
       const subTy = base + "/ty" + kq;
+      // 地区自助面板：查质量/类型挑地区、勾选后自助写回订阅配置（管理员页保留入口）
+      const regionHref = base + "/regions" + kq;
       return `<tr class="${dis ? "off" : ""}">
         <td class="u">${escapeHtml(u.id)}</td>
         <td class="u">${u.pwd ? escapeHtml(u.pwd) : "<span class='mu'>—</span>"}</td>
@@ -281,6 +272,7 @@ export function renderAdmin(
           <button data-copy="${escapeHtml(subClash)}" title="复制 Clash 订阅">cl</button>
           <button data-copy="${escapeHtml(subSb)}" title="复制 sing-box 订阅">sb</button>
           <button data-copy="${escapeHtml(subTy)}" title="复制明文链接订阅">ty</button>
+          <a href="${escapeHtml(regionHref)}" target="_blank" rel="noreferrer">地区</a>
         </td>
         <td>${ops}${cfgForm}</td>
       </tr>`;

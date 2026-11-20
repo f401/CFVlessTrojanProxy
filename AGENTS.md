@@ -1,4 +1,4 @@
-- 线上 **7.375**（已部署、可跑）｜仓库 **7.376**（以 7.270 为基准自举审查：修 ws2 消息帧 >127 字节二次编码损坏、PEND 单飞吞 force 导致账本滞留；共 215 个缺陷皆已修复）：两者差 1 个版本。
+- 线上 **7.375**（已部署、可跑）｜仓库 **7.377**（地区出口自助面板：按国家分组展示质量/类型/族/标记/到站延迟，用户勾选地区自助写回订阅配置，管理页加入口；共 215 个缺陷皆已修复）：两者差 2 个版本。
 
 # AGENTS.md
 
@@ -126,8 +126,9 @@ Account-level traps (all have happened):
 
 ## 9. Current state
 
-- Repo **7.373**; **live 7.372**. 7.372 (region/quality redesign) was deployed, hit a stable 522, and was recovered by deleting/recreating the script with `migrations`. 7.373 fixes a panel display bug: `obf/pre.js` base64-encoded string literals by their *source* text, so esbuild's `\n` escapes became literal `\n` in the obfuscated bundle and the whole panel collapsed to one line. Now `unescapeLiteral()` restores escapes before encoding, and `*.html` is pinned to LF via `.gitattributes`. Deploy 7.373 to fix the live panel.
-- Architecture phase is closed: 115 source files, 103 exported classes, 47 module-level `new` expressions (of which 29 are actual state/view/encoder singletons; the rest are typed constants such as encoders and deny sets). `docs/ARCHITECTURE.md` lists every class and who owns it; `docs/命名约定.md` holds the naming rules and the singleton admission test.
+- Repo **7.377**; **live 7.375** (both runnable; 7.376/7.377 are repo-only per the "few deploys" rule). Baseline is **7.270** — an audit against it found and fixed three byte/semantic regressions: 7.375 WS `earlyData` and 7.376 ws2 message frames both used `TextEncoder` on an `atob()` Latin-1 string (double-encoding every byte >127, corrupting VLESS UUIDs); 7.376 also fixed `PendingLedger.flush` single-flight swallowing a forced flush. 7.377 adds the self-service region panel at `/<uuid>/regions`.
+- The panel groups nodes by country and shows quality badge / IP kind / family / proxy-VPN flags / optional per-site RTT (`?site=`). `?format=json` keeps the old JSON contract. POST writes the user's own `regions` / `regionTopN` / `targetHost` through the shared `regionConfigList()` helper in `src/proxy/protocol.ts` (also used by admin `op=config`); GET is read-only over in-memory tables. Template lives in `src/views/html/regions.html` (esbuild text loader).
+- Architecture phase is closed: 115 source files, 109 exported classes, 29 module-level singleton instances. `docs/ARCHITECTURE.md` lists every class and who owns it; `docs/命名约定.md` holds the naming rules and the singleton admission test.
 - Deliberately not done: merging the six fact tables (`VT`/`PS`/`EG`/`DNS`/`DEAD`/`BLK`) behind one root object. They appear ~540 times in `tests/` and `tools/`; the only gain is one less global. Rationale is recorded in `docs/命名约定.md`.
 - Open boundaries that only real traffic can answer: long-term benefit of relaying, subrequest / `connect()` exhaustion under load, and the paired `facts=eg` vs `none` gain (+6 ± 10.4 — not significant).
 - Historical audit ledger (defects 1–215 with root causes) lives in `docs/v8实现清单.md` (table H6), not here.

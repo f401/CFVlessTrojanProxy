@@ -27,7 +27,7 @@ export { aesKey, b64d, b64e, seal, unseal } from "./store/crypto";
 export { factsOut, freshTop } from "./store/factout";
 export { MeterState } from "./store/meter-state";
 export { MeterEndpoints } from "./store/meter";
-export { FirstFrame, parseVLESS, parseTrojan, loadUsers, saveUsers, normAtyp, readAddr, UserIndex, UserCache, USERS } from "./proxy/protocol";
+export { FirstFrame, parseVLESS, parseTrojan, loadUsers, saveUsers, regionConfigList, normAtyp, readAddr, UserIndex, UserCache, USERS } from "./proxy/protocol";
 export { DOH_ENDPOINTS, DNS as DNS_CACHE, DnsCache, checkTarget, isPrivateHost, isV4Literal, nat64FromV4 } from "./proxy/dial";
 export { isPxHost, pxHostList } from "./core/hosts";
 export { isCfIp } from "./core/net";
@@ -121,7 +121,7 @@ export { ProxyipView, proxyip } from "./routes/proxyip";
 export { AdminView, admin } from "./routes/admin";
 export { SubscriptionRoutes, subscription } from "./routes/subscription";
 export { debug, DEBUG, DebugActions, DebugMeterProbes, DebugTables, DebugSuite } from "./routes/debug";
-export { regions, RegionsView } from "./routes/tools";
+export { regions, RegionsView, levelBadge, kindLabel, familyLabel, flagLabel, groupRows } from "./routes/tools";
 export {
   DebugBench,
   DebugDiag,

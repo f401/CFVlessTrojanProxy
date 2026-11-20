@@ -283,6 +283,56 @@ export async function saveUsers(env: Env, list: UserRec[]) {
   invalidateUsers();
 }
 
+/**
+ * 功能：把用户在地区面板勾选的配置写回托管用户表 —— admin 的 op=config 与用户自助面板共用。
+ *
+ * 为什么要抽出来：这两处做的是同一件事（校验用户 → 归一化地区/节点数/目标站 →
+ * 复制成托管记录 → 覆盖写回）。以前只有 admin 里一份，自助面板若照抄，两边对
+ * 「env 用户转托管」「字段缺省」「非法地区码」的处理迟早漂移。这里是纯函数：
+ * 只算新的用户列表、不碰 KV，写回由调用方 saveUsers 完成 —— 单测不必桩 KV。
+ * @param cur 当前用户表（loadUsers 的结果）
+ * @param target 要改的用户 id
+ * @param regions 勾选的地区码（原始，函数内归一化）
+ * @param topN 每区节点数（原始，函数内夹到 1–8）
+ * @param targetHost 目标站（原始，函数内截断到 253）
+ * @returns 成功时返回新的托管用户列表；用户不存在时返回错误
+ */
+export function regionConfigList(
+  cur: Auth,
+  target: string,
+  regions: string[],
+  topN: number,
+  targetHost: string,
+): { ok: true; list: UserRec[] } | { ok: false; err: string } {
+  const id = String(target || "").toLowerCase();
+  const src = cur.list.find((x) => x.id === id);
+  if (!src) return { ok: false, err: "用户不存在" };
+  // 地区码：大写 + 字母数字 2–8 位，最多 32 个；空数组=清除选择（saveUsers 会落空字段）
+  const rawRegions = regions
+    .map((x) => String(x).trim().toUpperCase())
+    .filter((x) => /^[A-Z0-9]{2,8}$/.test(x))
+    .slice(0, 32);
+  const count = Math.max(1, Math.min(8, Number(topN) || 3));
+  const host = String(targetHost || "").slice(0, 253);
+  // 只回写托管用户：env 静态用户不该被整份覆盖；本用户是例外（改成托管写回 KV）
+  let list = cur.list.filter((x) => x.managed).map((x) => ({ ...x }));
+  const prev = list.find((x) => x.id === id);
+  const row: UserRec = {
+    id: src.id,
+    pwd: prev ? prev.pwd : src.pwd,
+    note: prev ? prev.note : src.note,
+    enabled: prev ? prev.enabled : src.enabled,
+    managed: true,
+    ts: Date.now(),
+    regions: rawRegions,
+    regionTopN: count,
+    targetHost: host,
+  };
+  list = list.filter((x) => x.id !== id);
+  list.push(row);
+  return { ok: true, list };
+}
+
 /* ==================================================================
  * §4  协议侦测与解析
  * ================================================================== */
