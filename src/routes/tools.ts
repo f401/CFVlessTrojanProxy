@@ -324,14 +324,19 @@ export class RegionsView {
             ? `<td>${r.rtt == null ? "—" : escapeHtml(Math.round(r.rtt) + " ms")}</td><td>${escapeHtml(psLabel(r.psOk))}</td><td>${r.blkPenalty > 1 ? "封锁" : "—"}</td>`
             : "";
           // 重探按钮用 formaction 覆盖外层表单的 action/op，避免嵌套表单（HTML 不允许 form 嵌 form）
-          const recheck = `<td><button type="submit" name="op" value="requality" formaction="${actionHtml}" class="lnkbtn">重探质量</button><input type="hidden" name="key" value="${escapeHtml(r.key)}"></td>`;
+          // 去掉全表共享的隐藏 key 字段：多行的隐藏 input 会被一起提交，f.get("key") 只拿到第一行 =
+          // 永远探错节点。改成按钮自带 data-key，由面板脚本在点击时写入 FormData（见 regions.html）。
+          const recheck = `<td><button type="submit" name="op" value="requality" data-probe="1" data-key="${escapeHtml(r.key)}" formaction="${actionHtml}" class="lnkbtn">重探质量</button></td>`;
           // 对指定节点测用户在「节点连通测试」框里填的网站：按钮 value 带节点 key，网站走表单的 checkSite 字段
-          const nodecheck = `<td><button type="submit" name="op" value="nodecheck:${escapeHtml(r.key)}" formaction="${actionHtml}" class="lnkbtn">测连通</button></td>`;
+          const nodecheck = `<td><button type="submit" name="op" value="nodecheck:${escapeHtml(r.key)}" data-probe="1" formaction="${actionHtml}" class="lnkbtn">测连通</button></td>`;
           // 具体节点勾选：回填已 pin 的行；保存后订阅里单独成组（只进手动组，不改默认选路）
           const pinnedChecked = pinnedSelected.has(r.key) ? " checked" : "";
+          // 出站 IP 单独成列：key 就是 host:port，抽 host 出来高亮，便于一眼确认出口地址
+          const [exitIp] = splitRelay(r.key, 443);
           return `<tr>
             <td><input type="checkbox" name="pinnedNodes" value="${escapeHtml(r.key)}"${pinnedChecked}></td>
             <td class="u">${escapeHtml(r.key)}</td>
+            <td class="ipx">${escapeHtml(exitIp)}</td>
             <td>${levelBadge(r.level)}</td>
             <td>${kindLabel(r.kind)}</td>
             <td>${familyLabel(r.family)}</td>
@@ -344,8 +349,11 @@ export class RegionsView {
         })
         .join("");
       const check = `<input type="checkbox" name="regions" value="${cc}"${checked}>`;
-      parts.push(`<h2 class="cb">${check} ${cc} <span class="mu">${g.rows.length} 个节点</span></h2>
-        <table><tr><th>选</th><th>节点</th><th>质量</th><th>类型</th><th>族</th><th>出口族事实</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th><th>连通测试</th></tr>${body}</table>`);
+      // 已知地区按国家分组后，组头直接标出该国有多少节点探过（已知），还是全未探测
+      const probedN = g.rows.filter((r) => r.probed).length;
+      const groupBadge = probedN ? `<span class="b g">已知 ${probedN}</span>` : `<span class="b u">未探测</span>`;
+      parts.push(`<h2 class="cb cgroup">${check} ${cc} ${groupBadge} <span class="mu">${g.rows.length} 个节点</span></h2>
+        <table><tr><th>选</th><th>节点</th><th>出站 IP</th><th>质量</th><th>类型</th><th>族</th><th>出口族事实</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th><th>连通测试</th></tr>${body}</table>`);
     }
     return parts.join("") || '<div class="mu">本 isolate 还没有探到任何节点（稍后刷新重试）</div>';
   }
@@ -371,6 +379,8 @@ export class RegionsView {
       jsonLink: escapeHtml(action + "?format=json" + (target ? "&site=" + encodeURIComponent(target) : "")),
       backLink: escapeHtml(back),
       postAction: escapeHtml(action),
+      // 给面板脚本 fetch 用：JSON 字符串字面量（含引号），action 由 UUID 构造不含引号，安全
+      postActionJson: JSON.stringify(action),
       siteValue: escapeHtml(target),
       topNValue: escapeHtml(String(me?.regionTopN || 3)),
       groupsHtml: this.groupsHtml(rows, selected, pinnedSelected, !!target, action),

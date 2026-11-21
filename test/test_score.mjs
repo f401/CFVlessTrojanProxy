@@ -13010,7 +13010,7 @@ if (fs.existsSync(midPath)) {
   ok("[378] 两类探测都限流", tools378.includes('QUALITY.recheckReady(ck, 60_000)') && tools378.includes('QUALITY.recheckReady(qk, 60_000)'));
   ok("[378] 冷却表放进状态持有者", regionsSrc378.includes("readonly recheckCool = new Map<string, number>()"));
   // 模板：指定网站探测表单 + 重探按钮的样式类
-  ok("[378] 模板有网站探测表单", regionsTpl378.includes('name="site"') && regionsTpl378.includes('value="probe"'));
+  ok("[378] 模板有网站探测表单", regionsTpl378.includes('id="probeSite"') && regionsTpl378.includes("开始探测"));
   ok("[378] 模板有重探按钮样式", regionsTpl378.includes(".lnkbtn"));
 
   // 展示标签
@@ -13053,7 +13053,7 @@ if (fs.existsSync(midPath)) {
   ok("[378] HTML 有出口族事实列", html378.includes("出口族事实"));
   ok("[378] HTML 有成功率列", html378.includes("成功率") && html378.includes("100%"));
   ok("[378] HTML 有重探按钮", html378.includes('value="requality"') && html378.includes("重探质量"));
-  ok("[378] HTML 有网站探测表单", html378.includes('value="probe"') && html378.includes("开始探测"));
+  ok("[378] HTML 有网站探测表单", html378.includes('id="probeSite"') && html378.includes("开始探测"));
   ok("[378] formaction 无模板占位", !html378.includes("{{postAction}}"));
   W.EG.clear && W.EG.clear();
   W.S.alive.clear();
@@ -13529,7 +13529,7 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
   ok(`[${G}] 钉单节点跑 tfb`, tools390.includes("runTfb({ env: this.c.env }, site, 1, key)"));
   ok(`[${G}] 60s 冷却.nc`, tools390.includes('"nc:" + key'));
   ok(`[${G}] 分支用纯函数结论`, tools390.includes("nodeCheckConclusion(status, bytes)"));
-  ok(`[${G}] 模板有 checkSite 输入框`, tpl390.includes('name="checkSite"'));
+  ok(`[${G}] 模板有 checkSite 输入框`, tpl390.includes('id="checkSite"'));
   ok(`[${G}] 表格有测连通按钮`, tools390.includes('value="nodecheck:'));
   ok(`[${G}] 表格有连通测试列`, tools390.includes("<th>连通测试</th>"));
   ok(`[${G}] post 分派 nodecheck`, tools390.includes('opRaw.startsWith("nodecheck:")'));
@@ -13555,11 +13555,52 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
   };
   const html390 = await (await W.regions(ctx390)).text();
   ok(`[${G}] HTML 有测连通按钮`, html390.includes('value="nodecheck:198.51.100.9:443"'));
-  ok(`[${G}] HTML 有 checkSite 框`, html390.includes('name="checkSite"'));
+  ok(`[${G}] HTML 有 checkSite 框`, html390.includes('id="checkSite"'));
   ok(`[${G}] HTML 有连通测试列`, html390.includes("<th>连通测试</th>"));
   W.S.alive.clear();
   for (const [k, v] of saveAlive390) W.S.alive.set(k, v);
   W.S.seed = saveSeed390;
+}
+
+// ---- 第 391 组：地区面板 UI 优化（出站 IP 列 / 国家已知徽章 / 探测不跳转 + 探对节点） ----
+{
+  const tpl391 = fs.readFileSync("src/views/html/regions.html", "utf8");
+  const tools391 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  // 结构锁
+  ok("[391] 出站 IP 列源码", tools391.includes("出站 IP") && tools391.includes("ipx"));
+  ok("[391] 出站 IP 抽自 key", tools391.includes("splitRelay(r.key, 443)"));
+  ok("[391] 国家已知徽章", tools391.includes("已知 ${probedN}") && tools391.includes("未探测"));
+  ok("[391] 重探按钮带 data-key", tools391.includes("data-key="));
+  ok("[391] 探测按钮带 data-probe", tools391.includes('data-probe="1"'));
+  ok("[391] 去掉共享隐藏 key", !tools391.includes('name="key"'));
+  ok("[391] postActionJson 提供", tools391.includes("postActionJson: JSON.stringify(action)"));
+  // 模板：JS 拦截不跳转 + 结果内联 + 重探用 data-key
+  ok("[391] JS fetch 拦截", tpl391.includes("fetch(") && tpl391.includes("preventDefault"));
+  ok("[391] 结果内联容器", tpl391.includes('id="result"'));
+  ok("[391] JS 重探用 data-key", tpl391.includes("dataset.key"));
+  ok("[391] postActionJson 占位", tpl391.includes("{{postActionJson}}"));
+  ok("[391] 新 UI 样式类", tpl391.includes(".ipx") && tpl391.includes(".cgroup"));
+  // 渲染：带 seed 节点，检查出站 IP / 组徽章 / data-key / 无跳转残留
+  const saveSeed391 = W.S.seed;
+  const saveAlive391 = new Map(W.S.alive);
+  W.S.alive.clear();
+  W.S.seed = { v: 7, byColo: { US: { nodes: [{ k: "198.51.100.9:443", h: "198.51.100.9", p: 443, cc: "US" }] } } };
+  const ctx391 = {
+    url: new URL("https://edge.example.com/regions"),
+    request: { method: "GET" },
+    env: {}, id: "u391", pageKey: "",
+    auth: { list: [{ id: "u391", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
+  };
+  const html391 = await (await W.regions(ctx391)).text();
+  ok("[391] HTML 有出站 IP 列", html391.includes("<th>出站 IP</th>") && html391.includes("ipx"));
+  ok("[391] HTML 出站 IP 值", html391.includes("198.51.100.9"));
+  ok("[391] HTML 重探 data-key", html391.includes('data-key="198.51.100.9:443"'));
+  ok("[391] HTML 探测 data-probe", html391.includes('data-probe="1"'));
+  ok("[391] HTML 国家组徽章", html391.includes("已知 ") || html391.includes("未探测"));
+  ok("[391] HTML 无占位符残留", !html391.includes("{{postActionJson}}") && !html391.includes("{{groupsHtml}}"));
+  W.S.alive.clear();
+  for (const [k, v] of saveAlive391) W.S.alive.set(k, v);
+  W.S.seed = saveSeed391;
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

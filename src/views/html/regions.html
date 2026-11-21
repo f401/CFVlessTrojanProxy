@@ -1,43 +1,101 @@
 <!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>地区出口 · {{idShort}}</title>
 <style>
-body{font:14px/1.6 -apple-system,system-ui,sans-serif;margin:20px;max-width:1000px;color:#222}
-h2{font-size:17px;margin:18px 0 8px}
-table{border-collapse:collapse;width:100%;margin-bottom:10px}
-td,th{border:1px solid #ddd;padding:5px 8px;text-align:left;vertical-align:top}
-th{background:#f6f6f6}
-.u{font-family:ui-monospace,monospace;font-size:12px;word-break:break-all}
-.mu{color:#888}
-.b{display:inline-block;padding:0 6px;border-radius:8px;font-size:12px;white-space:nowrap}
-.b.g{background:#e6f7ea;color:#176b2e}.b.n{background:#eef0f2;color:#555}
-.b.r{background:#fdeaea;color:#a11}.b.u{background:#f6f6f6;color:#888}
-.cb{font-size:14px;font-weight:600}
-.bar{background:#fafafa}
-input[type=text]{padding:3px 6px}
-button{padding:4px 12px;cursor:pointer}
-.tip{color:#666;font-size:12.5px;margin:4px 0 12px}
-.lnk a{color:#2f7ad6;text-decoration:none;margin-right:12px}
-.lnkbtn{background:none;border:none;color:#2f7ad6;padding:0;text-decoration:underline;font-size:12px}
+:root{--bd:#e3e7ec;--mut:#78808a;--pri:#2f6fd0;--ok:#1a7f37;--bad:#b42318}
+*{box-sizing:border-box}
+body{font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;color:#1f2329;background:#f5f7fa}
+.wrap{max-width:1180px;margin:0 auto;padding:20px}
+header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+header h1{font-size:20px;margin:0}
+.mu{color:var(--mut);font-size:12.5px}
+a{color:var(--pri);text-decoration:none}
+a:hover{text-decoration:underline}
+.card{background:#fff;border:1px solid var(--bd);border-radius:10px;padding:14px 16px;margin:12px 0;box-shadow:0 1px 2px rgba(16,24,40,.03)}
+.bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.bar label{font-weight:600}
+input[type=text]{padding:5px 8px;border:1px solid var(--bd);border-radius:6px;font:inherit}
+button{padding:5px 14px;border:1px solid var(--pri);background:var(--pri);color:#fff;border-radius:6px;cursor:pointer;font:inherit}
+button:hover{filter:brightness(.95)}
+.lnkbtn{background:none;border:none;color:var(--pri);padding:0;text-decoration:underline;font-size:12.5px}
+.cgroup{font-size:15px;margin:16px 0 6px;display:flex;align-items:center;gap:8px}
+.cgroup input[type=checkbox]{width:16px;height:16px}
+table{border-collapse:collapse;width:100%;font-size:12.5px;background:#fff}
+td,th{border:1px solid var(--bd);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
+.u{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;word-break:break-all}
+.ipx{font-family:ui-monospace,monospace;font-weight:600;color:#0b4fa8;white-space:nowrap}
+.b{display:inline-block;padding:1px 7px;border-radius:9px;font-size:11.5px;white-space:nowrap}
+.b.g{background:#e7f6ec;color:var(--ok)}.b.n{background:#eef0f2;color:#555}
+.b.r{background:#fdeceb;color:var(--bad)}.b.u{background:#f2f4f7;color:var(--mut)}
+.tip{color:#5b6472;font-size:12.5px;margin:6px 0}
+.result{white-space:pre-wrap;background:#f0f6ff;border:1px solid #cfe0ff;border-radius:6px;padding:8px 10px;margin-top:8px;font-size:12.5px;display:none}
+.result.show{display:block}
 </style>
-<h2>地区出口选择 · {{idShort}}</h2>
-<div class="tip">{{coverageText}} · <a href="{{jsonLink}}">JSON 数据</a> · <a href="{{backLink}}">返回面板</a></div>
-<form method="post" action="{{postAction}}" style="margin-bottom:12px">
-  <div class="bar" style="padding:8px">
-    指定网站探测（写入到站延迟） <input type="text" name="site" size="24" placeholder="example.com" value="{{siteValue}}">
-    <button type="submit" name="op" value="probe">开始探测</button>
-    <span class="mu">每个站点 1 分钟最多探一次</span>
+<div class="wrap">
+<header><h1>地区出口选择 · {{idShort}}</h1>
+  <span class="mu">{{coverageText}}</span>
+  <a href="{{jsonLink}}">JSON 数据</a><a href="{{backLink}}">返回面板</a>
+</header>
+
+<div class="card">
+  <div class="bar">
+    <label for="probeSite">指定网站探测</label>
+    <input type="text" id="probeSite" size="26" placeholder="example.com" value="{{siteValue}}">
+    <button data-act="site-probe">开始探测</button>
+    <span class="mu">写入到站延迟 · 每个站点 1 分钟最多一次</span>
   </div>
-</form>
-<form method="post" action="{{postAction}}">
-  <div style="margin-bottom:10px">
-    节点连通测试（填网站后点表格里某行的「测连通」）<input type="text" name="checkSite" size="24" placeholder="x.com" value="{{siteValue}}">
-    <span class="mu">测该节点能否打开此站、是否被 ban，每个节点+站点 1 分钟最多测一次</span>
+  <div class="bar" style="margin-top:10px">
+    <label for="checkSite">节点连通测试</label>
+    <input type="text" id="checkSite" size="26" placeholder="x.com" value="{{siteValue}}">
+    <span class="mu">填网站后点表格「测连通」· 每节点+站点 1 分钟最多一次</span>
   </div>
-  <div style="margin-bottom:10px">
-    目标站（填了才显示到该站的延迟） <input type="text" name="targetHost" size="24" placeholder="example.com" value="{{siteValue}}">
-    每区节点数 <input type="text" name="topN" size="2" value="{{topNValue}}">
+  <div class="result" id="result"></div>
+</div>
+
+<form method="post" action="{{postAction}}" id="saveForm">
+  <div class="card bar">
+    <label for="targetHost">目标站（填了才显示到该站延迟）</label>
+    <input type="text" id="targetHost" name="targetHost" size="24" placeholder="example.com" value="{{siteValue}}">
+    <label for="topN">每区节点数</label>
+    <input type="text" id="topN" name="topN" size="2" value="{{topNValue}}">
     <button type="submit">保存选择</button>
+    <span class="tip">勾选的地区/节点才会进订阅；不勾地区 = 自动挑全部。探测类按钮结果在上方内联显示，不离开本页。</span>
   </div>
-  <div class="tip">勾选的地区才会出现在订阅里；不勾任何地区 = 自动挑选全部。节点质量/类型仅供挑选参考，实际挑选仍按订阅策略。</div>
   {{groupsHtml}}
 </form>
+</div>
+<script>
+(function(){
+  var result=document.getElementById('result');
+  function show(t){result.textContent=t;result.classList.add('show');}
+  function probe(action,extra){
+    var fd=new FormData();
+    fd.set('op',action);
+    if(extra)for(var k in extra)fd.set(k,extra[k]);
+    show('探测中…');
+    fetch({{postActionJson}},{method:'POST',body:fd}).then(function(r){return r.text();}).then(function(t){show(t);})
+      .catch(function(e){show('请求失败：'+e);});
+  }
+  document.addEventListener('click',function(ev){
+    var b=ev.target.closest('button');if(!b)return;
+    if(b.dataset.act==='site-probe'){
+      ev.preventDefault();
+      var site=document.getElementById('probeSite').value.trim();
+      if(!site){show('请先填写要探测的网站');return;}
+      probe('probe',{site:site});return;
+    }
+    if(b.dataset.probe==='1'){
+      ev.preventDefault();
+      var op=b.getAttribute('value')||'';
+      if(op.indexOf('nodecheck:')===0){
+        var site=document.getElementById('checkSite').value.trim();
+        if(!site){show('请先填写节点连通测试的网站');return;}
+        probe(op,{checkSite:site});
+      }else if(op==='requality'){
+        // 按钮自带 key，避免旧隐藏字段多节点串台探错行
+        probe('requality',{key:b.dataset.key||''});
+      }
+    }
+  });
+})();
+</script>
