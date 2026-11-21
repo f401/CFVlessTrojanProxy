@@ -13517,6 +13517,51 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
   W.S.seed = saveSeed389;
 }
 
+
+// 第 390 组：节点连通测试 —— 对指定节点测用户输入的网站，诊断连通与被 ban
+{
+  const G = 390;
+  const tools390 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  const tpl390 = fs.readFileSync("src/views/html/regions.html", "utf8");
+  // ---- 结构锁 ----
+  ok(`[${G}] 纯函数已导出`, typeof W.nodeCheckConclusion === "function");
+  ok(`[${G}] nodecheck 分支存在`, tools390.includes('op.startsWith("nodecheck:")'));
+  ok(`[${G}] 钉单节点跑 tfb`, tools390.includes("runTfb({ env: this.c.env }, site, 1, key)"));
+  ok(`[${G}] 60s 冷却.nc`, tools390.includes('"nc:" + key'));
+  ok(`[${G}] 分支用纯函数结论`, tools390.includes("nodeCheckConclusion(status, bytes)"));
+  ok(`[${G}] 模板有 checkSite 输入框`, tpl390.includes('name="checkSite"'));
+  ok(`[${G}] 表格有测连通按钮`, tools390.includes('value="nodecheck:'));
+  ok(`[${G}] 表格有连通测试列`, tools390.includes("<th>连通测试</th>"));
+  ok(`[${G}] post 分派 nodecheck`, tools390.includes('opRaw.startsWith("nodecheck:")'));
+  // ---- 纯函数行为（连通 / 被 ban 诊断） ----
+  eq(`[${G}] 200 连通`, W.nodeCheckConclusion(200, 45705), "连通正常");
+  eq(`[${G}] 301 连通`, W.nodeCheckConclusion(301, 100), "连通正常");
+  eq(`[${G}] 小响应 403 判被 ban`, W.nodeCheckConclusion(403, 737), "疑似被 ban（小响应 403，族拒绝）");
+  eq(`[${G}] 2048 边界判被 ban`, W.nodeCheckConclusion(403, 2048), "疑似被 ban（小响应 403，族拒绝）");
+  eq(`[${G}] 整页 403 不判 ban`, W.nodeCheckConclusion(403, 20000), "HTTP 403（可能被拒绝或业务 403）");
+  eq(`[${G}] 404 普通错误`, W.nodeCheckConclusion(404, 500), "HTTP 404（可能被拒绝或业务 403）");
+  eq(`[${G}] 0 字节 403 不算 ban`, W.nodeCheckConclusion(403, 0), "HTTP 403（可能被拒绝或业务 403）");
+  eq(`[${G}] 无应答`, W.nodeCheckConclusion(0, 0), "无应答（连不上或超时）");
+  // ---- 面板渲染：有连通测试列与按钮 ----
+  const saveSeed390 = W.S.seed;
+  const saveAlive390 = new Map(W.S.alive);
+  W.S.alive.clear();
+  W.S.seed = { v: 7, byColo: { US: { nodes: [{ k: "198.51.100.9:443", h: "198.51.100.9", p: 443, cc: "US" }] } } };
+  const ctx390 = {
+    url: new URL("https://edge.example.com/regions"),
+    request: { method: "GET" },
+    env: {}, id: "u390", pageKey: "",
+    auth: { list: [{ id: "u390", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
+  };
+  const html390 = await (await W.regions(ctx390)).text();
+  ok(`[${G}] HTML 有测连通按钮`, html390.includes('value="nodecheck:198.51.100.9:443"'));
+  ok(`[${G}] HTML 有 checkSite 框`, html390.includes('name="checkSite"'));
+  ok(`[${G}] HTML 有连通测试列`, html390.includes("<th>连通测试</th>"));
+  W.S.alive.clear();
+  for (const [k, v] of saveAlive390) W.S.alive.set(k, v);
+  W.S.seed = saveSeed390;
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

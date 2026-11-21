@@ -30,6 +30,10 @@ button{padding:4px 12px;cursor:pointer}
 </form>
 <form method="post" action="{{postAction}}">
   <div style="margin-bottom:10px">
+    节点连通测试（填网站后点表格里某行的「测连通」）<input type="text" name="checkSite" size="24" placeholder="x.com" value="{{siteValue}}">
+    <span class="mu">测该节点能否打开此站、是否被 ban，每个节点+站点 1 分钟最多测一次</span>
+  </div>
+  <div style="margin-bottom:10px">
     目标站（填了才显示到该站的延迟） <input type="text" name="targetHost" size="24" placeholder="example.com" value="{{siteValue}}">
     每区节点数 <input type="text" name="topN" size="2" value="{{topNValue}}">
     <button type="submit">保存选择</button>

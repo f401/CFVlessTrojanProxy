@@ -13,7 +13,7 @@ import { S } from "../core/state";
 import { QUALITY, QUALITY_PROBE, COVERAGE, CONN_OBS } from "../px/regions";
 import { AliveBoard, aliveList, nsOf } from "../px/pool";
 import { html, json } from "../edge/respond";
-import { splitRelay } from "../core/relay-addr";
+import { splitRelay, relayIpOf } from "../core/relay-addr";
 import type { UserCtx } from "../edge/types";
 import { escapeHtml, renderTemplate } from "../views/panel";
 import { regionConfigList, saveUsers } from "../proxy/protocol";
@@ -24,6 +24,22 @@ import { DEAD } from "../route/deadfacts";
 import { BLK } from "../route/blkfacts";
 import { DNS } from "../route/dnsfacts";
 import regionsTpl from "../views/html/regions.html";
+
+/**
+ * 功能：根据单节点探测的状态码与响应字节，得出「连通 / 被 ban」的诊断结论。
+ *
+ * 737B「IPv6」这类族拒绝是「小响应 403」，业务 403 通常是整页 —— body 大小只做诊断标签，
+ * 不写封禁，也不影响选路。纯计算，便于单测各种边界。
+ * @param status HTTP 状态码（0 = 无应答）
+ * @param bytes 响应字节数
+ * @returns 中文结论
+ */
+export function nodeCheckConclusion(status: number, bytes: number): string {
+  if (status >= 200 && status < 400) return "连通正常";
+  if (status === 403 && bytes > 0 && bytes <= 2048) return "疑似被 ban（小响应 403，族拒绝）";
+  if (status >= 400) return "HTTP " + status + "（可能被拒绝或业务 403）";
+  return "无应答（连不上或超时）";
+}
 
 /** 单个节点在浏览器里的展示行 */
 export interface RegionNodeRow {
@@ -309,6 +325,8 @@ export class RegionsView {
             : "";
           // 重探按钮用 formaction 覆盖外层表单的 action/op，避免嵌套表单（HTML 不允许 form 嵌 form）
           const recheck = `<td><button type="submit" name="op" value="requality" formaction="${actionHtml}" class="lnkbtn">重探质量</button><input type="hidden" name="key" value="${escapeHtml(r.key)}"></td>`;
+          // 对指定节点测用户在「节点连通测试」框里填的网站：按钮 value 带节点 key，网站走表单的 checkSite 字段
+          const nodecheck = `<td><button type="submit" name="op" value="nodecheck:${escapeHtml(r.key)}" formaction="${actionHtml}" class="lnkbtn">测连通</button></td>`;
           // 具体节点勾选：回填已 pin 的行；保存后订阅里单独成组（只进手动组，不改默认选路）
           const pinnedChecked = pinnedSelected.has(r.key) ? " checked" : "";
           return `<tr>
@@ -321,13 +339,13 @@ export class RegionsView {
             <td>${r.dead ? "判死" : "—"}</td>
             <td>${withRtt ? escapeHtml(dnsLabel(r.dnsV6)) : "—"}</td>
             <td>${flagLabel(r)}</td>
-            <td class="mu">${escapeHtml(r.source)}${r.probed ? " · 已覆盖" : ""}</td>${rtt}${recheck}
+            <td class="mu">${escapeHtml(r.source)}${r.probed ? " · 已覆盖" : ""}</td>${rtt}${recheck}${nodecheck}
           </tr>`;
         })
         .join("");
       const check = `<input type="checkbox" name="regions" value="${cc}"${checked}>`;
       parts.push(`<h2 class="cb">${check} ${cc} <span class="mu">${g.rows.length} 个节点</span></h2>
-        <table><tr><th>选</th><th>节点</th><th>质量</th><th>类型</th><th>族</th><th>出口族事实</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th></tr>${body}</table>`);
+        <table><tr><th>选</th><th>节点</th><th>质量</th><th>类型</th><th>族</th><th>出口族事实</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th><th>连通测试</th></tr>${body}</table>`);
     }
     return parts.join("") || '<div class="mu">本 isolate 还没有探到任何节点（稍后刷新重试）</div>';
   }
@@ -393,6 +411,28 @@ export class RegionsView {
       const q = await QUALITY_PROBE.qualityOf(key, h, this.c.budget, fam);
       return new Response(`重探 ${key}：${q.level} / ${String(q.kind)} / ${q.proxy ? "代理 " : ""}${q.vpn ? "VPN" : ""}`);
     }
+    // 对指定节点测用户输入的网站：钉一条中继跑 runTfb，看连通与是否被 ban。
+    // 只做诊断展示，不额外写封禁（runTfb 内部仍按「两批共识 + 有 2xx」的硬规则写判定表）。
+    if (op.startsWith("nodecheck:")) {
+      const key = op.slice("nodecheck:".length).trim().slice(0, 256);
+      const site = String(f.get("checkSite") || "").trim().slice(0, 256);
+      if (!key || !site) return new Response("缺少节点或网站", { status: 400 });
+      const ck = "nc:" + key + ":" + site;
+      if (!QUALITY.recheckReady(ck, 60_000)) return new Response("该节点对该站 1 分钟内已测过，请稍候再试");
+      QUALITY.recheckMark(ck);
+      const resp = await runTfb({ env: this.c.env }, site, 1, key);
+      const out = (await resp.json().catch(() => ({}))) as {
+        verdict?: string;
+        rows?: Array<{ relay: string; ok: boolean; status?: number; bytes?: number; ms?: number }>;
+      };
+      const ip = relayIpOf(key);
+      const row = (out.rows || []).find((r) => relayIpOf(String(r.relay)) === ip);
+      const status = row?.status || 0;
+      const bytes = row?.bytes || 0;
+      // 737B「IPv6」这类族拒绝是小响应 403；业务 403 通常是整页，靠 body 大小只做诊断标签
+      const conclusion = nodeCheckConclusion(status, bytes);
+      return new Response("节点 " + key + " → " + site + "\n结论：" + conclusion + "\n状态码：" + (status || "无") + " 字节：" + (bytes || "无") + " 耗时：" + (row?.ms ?? "无") + "ms\n判定：" + (out.verdict || "?"));
+    }
     return new Response("未知操作", { status: 400 });
   }
 
@@ -403,7 +443,8 @@ export class RegionsView {
   private async post(): Promise<Response> {
     const f = await this.c.request.formData();
     // 探测类 POST 不改用户配置，也不依赖用户表可读性；单独分派
-    if (String(f.get("op") || "") === "probe" || String(f.get("op") || "") === "requality") return this.probe(f);
+    const opRaw = String(f.get("op") || "");
+    if (opRaw === "probe" || opRaw === "requality" || opRaw.startsWith("nodecheck:")) return this.probe(f);
     const cur = this.c.auth;
     if (cur.ok === false) return new Response("用户表暂时读不到（KV 故障），请稍后重试", { status: 503 });
     const regions = f.getAll("regions").map(String);
