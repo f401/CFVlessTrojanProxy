@@ -13206,6 +13206,43 @@ if (fs.existsSync(midPath)) {
   eq("[383] ps 行类型只在单一真源出现", allStore383.reduce((n, s) => n + (s.match(shape383) || []).length, 0), 1);
 }
 
+
+  // 384. 单例准入门禁（7.384）：命名约定.md 的清单与实际导出实例一一对应。
+  {
+    const G = 384;
+    const gate = "tools/check-singletons.mjs";
+    const docPath = "docs/命名约定.md";
+    const gateSrc = fs.readFileSync(gate, "utf8");
+    const doc = fs.readFileSync(docPath, "utf8");
+    ok(`[${G}] 门禁文件存在`, fs.existsSync(gate));
+    ok(`[${G}] 文档有清单起止标记`, doc.includes("<!-- singleton-list:start -->") && doc.includes("<!-- singleton-list:end -->"));
+    ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
+    ok(`[${G}] 门禁接进 preflight`, fs.readFileSync("tools/preflight.mjs", "utf8").includes("tools/check-singletons.mjs"));
+    ok(`[${G}] 门禁支持 SINGLETON_DOC 覆盖`, gateSrc.includes("SINGLETON_DOC"));
+    // 行为：干净文档退出 0。
+    let clean384 = 0;
+    try { execFileSync("node", [gate], { encoding: "utf8" }); } catch (e) { clean384 = 1; }
+    eq(`[${G}] 干净清单通过门禁`, clean384, 0);
+    // 删掉一个登记名字（VT）⇒ 门禁必须红且点名。
+    const a384 = doc.indexOf("<!-- singleton-list:start -->");
+    const b384 = doc.indexOf("<!-- singleton-list:end -->");
+    const missing384 = doc.slice(0, a384) + doc.slice(a384, b384).replace("`VT`", "`ZZ_UNUSED`") + doc.slice(b384);
+    const tmp384 = ".tmp-sim/singletons384.md";
+    fs.mkdirSync(".tmp-sim", { recursive: true });
+    fs.writeFileSync(tmp384, missing384);
+    let bad384 = 0, badOut384 = "";
+    try {
+      execFileSync("node", [gate], { encoding: "utf8", env: { ...process.env, SINGLETON_DOC: tmp384 } });
+    } catch (e) {
+      bad384 = 1;
+      badOut384 = String(e.stdout || "") + String(e.stderr || "");
+    }
+    eq(`[${G}] 清单漏登记就红`, bad384, 1);
+    ok(`[${G}] 报错点名漂移名字`, badOut384.includes("ZZ_UNUSED") && badOut384.includes("VT"), badOut384.slice(0, 160));
+    if (fs.existsSync(tmp384)) fs.unlinkSync(tmp384);
+    ok(`[${G}] 临时文档已清理`, !fs.existsSync(tmp384));
+  }
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
