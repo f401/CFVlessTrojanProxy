@@ -175,7 +175,8 @@ export { BLK, BLK_BATCH, BLK_DELTA_MAX, BLK_GAP, BLK_MIN, BLK_PEN, BlkFacts } fr
 export { FACT_TTL, PAGE_ABS, mergeAt, mergeBlk } from "./core/facts";
 export { MeterAdd } from "./store/meteradd";
 export { FactMerger } from "./store/factmerge";
-export type { FactTables } from "./store/factmerge";
+export type { FactTables } from "./store/metershard";
+export type { FactMergeTarget } from "./store/factmerge";
 export { BLK_TTL, BIG_PEER, BIG_WIN, DEAD_TTL, TINY_ABS, WRITE_GAP, commitFact, factKey, isTiny } from "./route/commitfact";
 export { ShadowTable, SHADOW_TABLE, FACT, FactShadow, shadowCtx, shadowObs } from "./route/factshadow";
 /** 四类事实的门面（OOP 收口后唯一的上行/合并入口） */

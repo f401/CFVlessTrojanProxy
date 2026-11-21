@@ -1,4 +1,4 @@
-import type { MeterStore } from "./metershard";
+import type { FactTables, MeterStore } from "./metershard";
 
 /**
  * `/add` 失败时回滚用的一份账本快照。
@@ -29,7 +29,7 @@ export interface LedgerSnapshot {
  * （v7.274 的 `restore()` 就是为了断开「改名」与「老数据兼容」的绑定才出现的）。
  * 现在映射只写在这一处：字段名是内存口径，`MeterStore` 的键是落盘口径。
  */
-export class MeterState {
+export class MeterState implements FactTables {
   /** 用量累计（`/get` 的响应体就是它） */
   usage: UsageMeter;
   /** 全局日计数（连接/走节点/断流…，按 UTC 日期一行） */
@@ -40,24 +40,26 @@ export class MeterState {
   errors: ErrItem[];
   /** 连接记录环形：最近 60 条，离线标定用 */
   connRing: ClRec[];
-  /**
-   * 判定表的强证据：`站点|通道` → `{ s: 状态, t: 到期时间 }`。
-   * 老数据里是裸数字（只有到期时间，状态默认 2）—— v7.164 前 DO 只存到期时间，
-   * 于是 `state=3`（dead，硬排除）读回来会变成 2（blocked，软降权），硬排除在跨 isolate 后消失。
+  /*
+   * 七张事实表的行形状单一真源在 metershard.ts 的 FactTables（line protocol）。
+   * 这里 implements 它：任何一处的行类型漂移都会在编译期暴露，而不是四处各改一半。
+   * 语义备忘：vt 老行是裸数字（状态默认 2，v7.164 起存 {s,t} 才保住 dead 的硬排除）；
+   * hl.t 缺省表示 7.160 之前的老行；eg/ps/blk/dns 只折价，永不剔候选。
    */
-  vt: Record<string, number | { s: number; t: number }>;
-  /** 中继存活度：ip → { o: ok, b: bad, d: dead, t: 最后观测时间 }（`t` 缺省表示 7.160 之前写入的老行） */
-  hl: Record<string, { o: number; b: number; d: number; t?: number }>;
-  /** 出口族事实：ip → { f: 4|6, at }。v8 §3 的 eg：只用于选路代价偏置，永不剔除候选 */
-  eg: Record<string, { f: number; at: number }>;
-  /** 「站点 × 中继」成功率事实：`站点|中继IP` → { q 0..255, n 样本数, at }。只折价，永不剔候选 */
-  ps: Record<string, { q: number; n: number; at: number; top?: number }>;
-  /** 中继「连不上」事实：IP → { n 连续失败次数, at }。判死才会影响选路，仅由连接层触发 */
-  dead: Record<string, { n: number; at: number }>;
-  /** 单 IP 封锁事实：`host|relay` → { n 批数, at }。只影响代价（×6），从不剔候选 */
-  blk2: Record<string, { n: number; at: number }>;
-  /** DNS 事实：站点 → { v: 1 有 AAAA / 0 确证没有, at }。24 小时寿命，只用于代价乘数 */
-  dns: Record<string, { v: number; at: number }>;
+  /** 判定表：`站点|通道` → 到期时间或 `{ s: 状态, t: 到期 }` */
+  vt: FactTables["vt"];
+  /** 中继存活度：ip → 计数 + 最后观测时间 */
+  hl: FactTables["hl"];
+  /** 出口族事实：ip → { f: 4|6, at } */
+  eg: FactTables["eg"];
+  /** 「站点 × 中继」成功率事实 */
+  ps: FactTables["ps"];
+  /** 中继「连不上」事实 */
+  dead: FactTables["dead"];
+  /** 单 IP 封锁事实 */
+  blk2: FactTables["blk2"];
+  /** DNS 事实 */
+  dns: FactTables["dns"];
   /** 事实表代号：`a` 里记的号与分片里的号不同就说明分片是上一轮的残留（v7.219） */
   fs: number;
   /** 读不出来的 `a` 原文（换过 kek 或值被写坏）：第一次落盘前先备份到 `a_bak` */
@@ -99,13 +101,13 @@ export class MeterState {
     // 七张事实表：线格式在 `MeterBody` 里声明成「行数组」，而 DO 里存的是「键 → 证据」的映射
     // （DO 侧就是权威形状，跨 isolate 的出站切片在 factout 里做）。这里的 `as unknown as` 是
     // 「同一个值、两种口径」的显式说明；读端（`verdict.ts`/`factsOut`）本来就兼容老行格式。
-    if (body.vt && typeof body.vt === "object") this.vt = body.vt as unknown as Record<string, number | { s: number; t: number }>;
-    if (body.hl && typeof body.hl === "object") this.hl = body.hl as unknown as Record<string, { o: number; b: number; d: number; t?: number }>;
-    if (body.eg && typeof body.eg === "object") this.eg = body.eg as unknown as Record<string, { f: number; at: number }>;
-    if (body.ps && typeof body.ps === "object") this.ps = body.ps as unknown as Record<string, { q: number; n: number; at: number; top?: number }>;
-    if (body.dead && typeof body.dead === "object") this.dead = body.dead as unknown as Record<string, { n: number; at: number }>;
-    if (body.blk2 && typeof body.blk2 === "object") this.blk2 = body.blk2 as unknown as Record<string, { n: number; at: number }>;
-    if (body.dns && typeof body.dns === "object") this.dns = body.dns as unknown as Record<string, { v: number; at: number }>;
+    if (body.vt && typeof body.vt === "object") this.vt = body.vt as unknown as FactTables["vt"];
+    if (body.hl && typeof body.hl === "object") this.hl = body.hl as unknown as FactTables["hl"];
+    if (body.eg && typeof body.eg === "object") this.eg = body.eg as unknown as FactTables["eg"];
+    if (body.ps && typeof body.ps === "object") this.ps = body.ps as unknown as FactTables["ps"];
+    if (body.dead && typeof body.dead === "object") this.dead = body.dead as unknown as FactTables["dead"];
+    if (body.blk2 && typeof body.blk2 === "object") this.blk2 = body.blk2 as unknown as FactTables["blk2"];
+    if (body.dns && typeof body.dns === "object") this.dns = body.dns as unknown as FactTables["dns"];
     // 代号决定「要不要读分片」：0 表示事实就在这个值里，磁盘上的分片必是上一轮的残留
     this.fs = Number((body as unknown as { fs?: number }).fs) || 0;
   }

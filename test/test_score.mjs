@@ -13183,8 +13183,28 @@ if (fs.existsSync(midPath)) {
   ok("[382] seed.ts 无 mojibake", !seedSrc.includes("鎶婃湰鍦") && seedSrc.includes("把本地统计合并进"));
 }
 
-console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
-process.exit(fail ? 1 : 0);
+// 7.383：架构第三批——七张事实表行形状抽单一真源 FactTables（metershard.ts）。
+{
+  const shardSrc = fs.readFileSync("src/store/metershard.ts", "utf8");
+  const outSrc = fs.readFileSync("src/store/factout.ts", "utf8");
+  const addSrc = fs.readFileSync("src/store/meteradd.ts", "utf8");
+  const stateSrc = fs.readFileSync("src/store/meter-state.ts", "utf8");
+  // 结构：单一 interface + 三处复用 + MeterStore 用 Partial。
+  eq("[383] FactTables 只有一处定义", (shardSrc.match(/export interface FactTables\b/g) || []).length, 1);
+  // 从 export interface FactTables 到下一个顶层 } 之间才是七个字段（行内有内联 {} 不能简单 split）。
+  const ftBody383 = shardSrc.slice(shardSrc.indexOf("export interface FactTables"), shardSrc.indexOf("export interface MeterStore"));
+  const fields383 = ["vt", "hl", "eg", "ps", "dead", "blk2", "dns"];
+  ok("[383] FactTables 含七张表", fields383.every((f) => new RegExp("\\b" + f + ":").test(ftBody383)));
+  ok("[383] MeterStore 复用 Partial<FactTables>", shardSrc.includes("interface MeterStore extends Partial<FactTables>"));
+  ok("[383] FactOutSrc 取型自 FactTables", outSrc.includes("type FactOutSrc = FactTables") && !outSrc.includes("interface FactOutSrc"));
+  ok("[383] AddTarget 继承 FactTables", addSrc.includes("interface AddTarget extends FactTables"));
+  ok("[383] MeterState 实现 FactTables", stateSrc.includes("class MeterState implements FactTables"));
+  // 四处 + factmerge 都不再各自抄 ps 的行类型：只有单一真源有一份。
+  const mergeSrc383 = fs.readFileSync("src/store/factmerge.ts", "utf8");
+  const shape383 = /Record<string, \{ q: number; n: number; at: number; top\?: number \}>/g;
+  const allStore383 = [shardSrc, outSrc, addSrc, stateSrc, mergeSrc383];
+  eq("[383] ps 行类型只在单一真源出现", allStore383.reduce((n, s) => n + (s.match(shape383) || []).length, 0), 1);
+}
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

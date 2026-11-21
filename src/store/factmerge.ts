@@ -6,20 +6,13 @@
 // 历史上这里是一个 60 行的函数，加第五种事实（dns）时就撞上了 `meter.ts` 的 560 行上限。
 
 import { FACT_TTL, mergeAt, mergeBlk } from "../core/facts";
+import type { FactTables as AllFactTables } from "./metershard";
 
-/** Meter 的五类事实表（就地修改）。 */
-export interface FactTables {
-  /** 出口族：ip → { f: 4|6, at } */
-  eg: Record<string, { f: number; at: number }>;
-  /** 站点×中继成功率：`host|ip` → { q 0..255, n 样本数, at } */
-  ps: Record<string, { q: number; n: number; at: number; top?: number }>;
-  /** 连不上：ip → { n 连续失败, at } */
-  dead: Record<string, { n: number; at: number }>;
-  /** 单 IP 封锁：`host|ip` → { n 批数, at } */
-  blk2: Record<string, { n: number; at: number }>;
-  /** 站点 DNS：host → { v 1 有 AAAA / 0 确证没有, at } */
-  dns: Record<string, { v: number; at: number }>;
-}
+/**
+ * 合并不涉及的五类事实表（就地修改）：从七张表的单一真源里取子集。
+ * 行类型不在这里重复声明 —— 一处改别处没跟的漂移由 tsc 兜底。
+ */
+export type FactMergeTarget = Pick<AllFactTables, "eg" | "ps" | "dead" | "blk2" | "dns">;
 
 /** 上行/下行车身里与事实有关的字段（其余字段由 meter 自己处理）。 */
 interface FactDeltaIn {
@@ -43,7 +36,7 @@ export class FactMerger {
    * @param d 远端车身
    * @returns {void}
    */
-  merge(t: FactTables, d: FactDeltaIn): void {
+  merge(t: FactMergeTarget, d: FactDeltaIn): void {
     this.egRows(t, d.eg);
     this.dnsRows(t, d.dns);
     this.psRows(t, d.ps);
@@ -57,7 +50,7 @@ export class FactMerger {
    * @param raw 远端行（形状 `{ i, f, at }`）
    * @returns {void}
    */
-  private egRows(t: FactTables, raw: unknown): void {
+  private egRows(t: FactMergeTarget, raw: unknown): void {
     if (!Array.isArray(raw) || !raw.length) return;
     for (const r of raw as Array<{ i?: unknown; f?: unknown; at?: unknown }>) {
       // 地址、族号、时间三件事任一不成立就整条跳过：坏行会让 `famOf` 返回未知族
@@ -82,7 +75,7 @@ export class FactMerger {
    * @param raw 远端行（形状 `{ k, v, at }`）
    * @returns {void}
    */
-  private dnsRows(t: FactTables, raw: unknown): void {
+  private dnsRows(t: FactMergeTarget, raw: unknown): void {
     if (!Array.isArray(raw) || !raw.length) return;
     mergeAt(t.dns, raw, 512, FACT_TTL.dns, (r) => {
       const x = r as { v?: unknown; at?: unknown };
@@ -100,7 +93,7 @@ export class FactMerger {
    * @param raw 远端行（形状 `{ k, q, n, at, top? }`）
    * @returns {void}
    */
-  private psRows(t: FactTables, raw: unknown): void {
+  private psRows(t: FactMergeTarget, raw: unknown): void {
     if (!Array.isArray(raw) || !raw.length) return;
     for (const r of raw as Array<{ k?: unknown; q?: unknown; n?: unknown; at?: unknown; top?: unknown }>) {
       // 键必须带 `|`：少了它就不是「站点×中继」，而是把两条维度混成一个字符串
@@ -133,7 +126,7 @@ export class FactMerger {
    * @param raw 远端行
    * @returns {void}
    */
-  private deadRows(t: FactTables, raw: unknown): void {
+  private deadRows(t: FactMergeTarget, raw: unknown): void {
     if (!Array.isArray(raw) || !raw.length) return;
     mergeAt(t.dead, raw, 256, FACT_TTL.dead, (r) => {
       const x = r as { n?: unknown; at?: unknown };
@@ -148,7 +141,7 @@ export class FactMerger {
    * @param raw 远端行
    * @returns {void}
    */
-  private blkRows(t: FactTables, raw: unknown): void {
+  private blkRows(t: FactMergeTarget, raw: unknown): void {
     if (!Array.isArray(raw) || !raw.length) return;
     mergeBlk(t.blk2, raw, 1024, FACT_TTL.blk);
   }

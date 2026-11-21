@@ -7,24 +7,10 @@
 // 永远在最后（v7.177 的 pend 饥饿、v7.181 的 hl 淘汰留最旧、v7.187 的出口切片都是这个形状）。
 
 import { St } from "../core/enums";
+import type { FactTables } from "./metershard";
 
-/** DO 里七张事实表的最小形状（只声明这里读到的东西） */
-interface FactOutSrc {
-  /** 判定表：`站点|通道` → 到期时间，或 `{ 状态, 到期时间 }`（老行是裸数字） */
-  vt: Record<string, number | { s: number; t: number }>;
-  /** 中继存活度：ip → 计数与最后观测时间 */
-  hl: Record<string, { o: number; b: number; d: number; t?: number }>;
-  /** 出口族：ip → { 族, 时间 } */
-  eg: Record<string, { f: number; at: number }>;
-  /** 站点×中继成功率：`站点|ip` → { 均值, 样本数, 时间, 历史最好 } */
-  ps: Record<string, { q: number; n: number; at: number; top?: number }>;
-  /** 连不上：ip → { 连续失败次数, 时间 } */
-  dead: Record<string, { n: number; at: number }>;
-  /** 单 IP 封锁：`站点|ip` → { 批数, 时间 } */
-  blk2: Record<string, { n: number; at: number }>;
-  /** 站点 DNS：站点 → { 有/无 AAAA, 时间 } */
-  dns: Record<string, { v: number; at: number }>;
-}
+/** DO 里七张事实表的形状（单一真源在 metershard.ts，线协议行类型只声明一处） */
+type FactOutSrc = FactTables;
 
 /** 判定行的线格式（状态 2 = blocked、3 = dead） */
 interface VtOutRow {

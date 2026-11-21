@@ -17,8 +17,33 @@ export const VALUE_MAX = 120000;
  */
 export const SHARD_KEYS = ["f1", "f2", "f3"] as const;
 
+/**
+ * 七张跨 isolate 事实表的行形状（单一真源）。
+ *
+ * 为什么抽出来：这张形状原先在 `factout.ts` / `meteradd.ts` / `meter-state.ts` / 这里
+ * 各抄一遍。行类型是线协议的一部分（`s/t`、`f/at`、`q/n/top` 一个都不能改），
+ * 一处改了别处没跟，tsc 不会报 —— 它们在结构上是各自独立的 interface。
+ * 现在由这里统一声明，另外三处 `extends` / `implements` / 索引取型，改一次全仓跟着变。
+ */
+export interface FactTables {
+  /** 判定表：`站点|通道` → 到期时间（裸数字）或 `{ s: 状态, t: 到期 }` */
+  vt: Record<string, number | { s: number; t: number }>;
+  /** 中继存活度：ip → 好/坏/死计数 + 最后观测时间 */
+  hl: Record<string, { o: number; b: number; d: number; t?: number }>;
+  /** 出口族：ip → `{ f: 4|6, at }` */
+  eg: Record<string, { f: number; at: number }>;
+  /** 站点×中继成功率：`站点|ip` → `{ q, n, at, top? }` */
+  ps: Record<string, { q: number; n: number; at: number; top?: number }>;
+  /** 连不上：ip → `{ n, at }` */
+  dead: Record<string, { n: number; at: number }>;
+  /** 单 IP 封锁：`站点|ip` → `{ n, at }` */
+  blk2: Record<string, { n: number; at: number }>;
+  /** 站点 DNS：站点 → `{ v, at }` */
+  dns: Record<string, { v: number; at: number }>;
+}
+
 /** 从 storage 解出来的账本形状（老布局把全部字段塞在 `a` 里，新布局按体积拆片） */
-export interface MeterStore {
+export interface MeterStore extends Partial<FactTables> {
   /** 事实表代号：分片与 `a` 必须同号才认（见 saveState() 的注释） */
   fs?: number;
   c?: UsageMeter;
@@ -26,13 +51,6 @@ export interface MeterStore {
   s?: Record<string, NodeSnap>;
   e?: ErrItem[];
   cl?: ClRec[];
-  vt?: Record<string, number | { s: number; t: number }>;
-  hl?: Record<string, { o: number; b: number; d: number; t?: number }>;
-  eg?: Record<string, { f: number; at: number }>;
-  ps?: Record<string, { q: number; n: number; at: number; top?: number }>;
-  dead?: Record<string, { n: number; at: number }>;
-  blk2?: Record<string, { n: number; at: number }>;
-  dns?: Record<string, { v: number; at: number }>;
 }
 
 /**

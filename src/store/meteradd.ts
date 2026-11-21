@@ -13,21 +13,15 @@
  */
 import { St } from "../core/enums";
 import { FactMerger } from "./factmerge";
+import type { FactTables } from "./metershard";
 
-/** 合并目标：`Meter` 公开的账本字段（结构化即可，不要求是 `Meter` 实例） */
-export interface AddTarget {
+/** 合并目标：`Meter` 公开的账本字段 + 七张事实表（行形状单一真源在 metershard.ts） */
+export interface AddTarget extends FactTables {
   usage: UsageMeter;
   dayCounter: CounterDoc;
   nodeSnapshots: Record<string, NodeSnap>;
   errors: ErrItem[];
   connRing: ClRec[];
-  vt: Record<string, number | { s: number; t: number }>;
-  hl: Record<string, { o: number; b: number; d: number; t?: number }>;
-  eg: Record<string, { f: number; at: number }>;
-  ps: Record<string, { q: number; n: number; at: number; top?: number }>;
-  dead: Record<string, { n: number; at: number }>;
-  blk2: Record<string, { n: number; at: number }>;
-  dns: Record<string, { v: number; at: number }>;
 }
 
 /**
