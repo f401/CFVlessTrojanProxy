@@ -1,5 +1,5 @@
 import type { Socket } from "cloudflare:sockets";
-import { WS_OPEN, closeQuietly, errMsg, safeSend, toU8 } from "../core/util";
+import { FIRST_BYTE_MS, WS_OPEN, closeQuietly, errMsg, safeSend, toU8 } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
 import { nsDecay, NodeStatsTable } from "../nodes/score";
 import { cnt } from "../core/counter";
@@ -17,7 +17,36 @@ export function pipeBack(
   ws: WebSocketLike,
   st: Connection,
   onClose?: (gotData: boolean) => void | Promise<void>,
+  firstByteMs: number = FIRST_BYTE_MS,
 ): void {
+  // 首字节看门狗：黑洞出口会「连上但一个下游字节都不给」，pipeTo 的流一直挂着，
+  // close/error 永不触发 ⇒ 补救链（换中继/直连兜底）不启动，客户端干等到 30s 定时器。
+  // 10s 无下行就主动关 socket，让 close/catch 走 onClose(false) 启动补救。
+  // firstByteMs 可注入，测试用极短值模拟；正常连接收到首字节或流结束立即撤销。
+  let wd: ReturnType<typeof setTimeout> | null = null;
+  let wdFired = false; // 本 hop 局部变量：递归重试挂新 socket 时会开新的 pipeBack 闭包，互不干扰
+  const clearWd = (): void => {
+    if (wd !== null) {
+      clearTimeout(wd);
+      wd = null;
+    }
+  };
+  const armWd = (): void => {
+    // 不看 notified：换路后 notified 仍是上一跳设的 true，但新 hop 仍需要看门狗。
+    // 流一旦结束 close() 会 clearWd，所以正常收尾不会与看门狗竞态。
+    if (!onClose || st.down > 0 || wdFired) return;
+    const elapsed = st.tAttach ? Date.now() - st.tAttach : 0;
+    wd = setTimeout(() => {
+      wd = null;
+      if (st.down > 0 || wdFired) return;
+      wdFired = true;
+      cnt("fbwd");
+      // 关 socket 让 pipeTo 立即 settle：close()/catch() 会带着 down===0 走到 onClose(false)
+      closeQuietly(sock);
+    }, Math.max(0, firstByteMs - elapsed));
+  };
+  armWd();
+
   sock.readable
     .pipeTo(
       new WritableStream({
@@ -25,6 +54,7 @@ export function pipeBack(
           const u8 = toU8(chunk);
           // 热路径：加字节 → 比阈值 → 发送。其余全在 tick 里（每 512 KB）
           st.down += u8.length;
+          if (st.down > 0) clearWd(); // 首字节到了：链路不是黑洞，撤销看门狗
           if (!st.ttfb && st.tAttach) st.ttfb = Date.now() - st.tAttach;
           if (st.down >= st.mark) {
             if (!(await st.tick(ws))) return;
@@ -44,6 +74,7 @@ export function pipeBack(
           }
         },
         close() {
+          clearWd(); // 流已结束：看门狗不再需要
           if (onClose && !st.notified) {
             // 只通知一次：pipe 的 error 路径也会走到同一个 onClose（见下面的 catch）
             st.notified = true;
@@ -112,7 +143,10 @@ export function pipeBack(
           }
         }
       }
-      if (!clientGone) {
+      // 看门狗触发的黑洞：onClose(false) 已启动补救链，它会递归接新 socket 并复用同一个
+      // clientSocket；此时若关掉客户端 WS，换到的新链路就无处回传，补救全白做。
+      // 非看门狗场景保持原行为（真正的 pipe error 才关客户端）。
+      if (!clientGone && !wdFired) {
         try {
           ws.close(1011, "pipe error");
         } catch (e) {}

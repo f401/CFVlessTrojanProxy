@@ -287,6 +287,17 @@ export const UP_STALL_MS = 30000;
 export const FIRST_UP_MS = 8000;
 
 /**
+ * 首字节看门狗：从 `tAttach`（上游 socket 接上）到收到第一个下行字节的上限，单位毫秒。
+ *
+ * 为什么需要它：`pipeTo` 只有在流 close/error 时才回调 onClose，而「上游连上却一个字节
+ * 都不转发」的黑洞出口会让流一直挂着 —— 补救链（换中继 / 直连兜底）永远不启动，
+ * 客户端只能干等到自己的 30 秒定时器，表现为「TLS 握手阶段无任何下行字节」的长超时。
+ * 实测 x.com 的失败几乎全是这一种。10 秒比客户端的 30 秒短得多，给补救链留足换路时间。
+ * 收到任意字节或流一旦结束就撤销，正常连接完全不受影响。
+ */
+export const FIRST_BYTE_MS = 10000;
+
+/**
  * 可选的请求超时信号：运行时没有 AbortSignal.timeout 时返回 undefined（不影响请求）。
  * 只用于 cron / 诊断这类「慢一点没关系、但不能无限挂」的外层 fetch。
  */
@@ -405,7 +416,7 @@ export function errMsg(e: unknown, max = 200): string {
 // 1) 对外导出面不变（六十多个调用点零改动，「行为不变」由测试证明）；
 // 2) `VERSION` 仍然只有这一处真源（`doc-audit` 与发版脚本都读它）。
 
-export const VERSION = "7.384";
+export const VERSION = "7.385";
 
 // `sha224` 单独一行：它 `import { toU8 } from "./bytes"`，若挂在 `bytes.ts` 的再导出里
 // 就会形成 `bytes → sha224 → bytes` 的真循环（`tools/check-arch.js` 会报文件级循环）。

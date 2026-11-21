@@ -438,7 +438,7 @@ export class PickPath {
   readonly paths = new PathPrefs();
   /**
    * 功能：选一个节点（站点画像 → 冷启动影子 → 单层抽样 → 粘滞兜底），委托给 `SitePick`。
-   * 保留这个门面是因为 `src/px/selector.ts` 与单测都从 `PICK.pick(...)` 进来。
+   * 唯一实例由 `Selector`（`SEL.picker`）持有；这里只定义行为，不再导出模块级单例。
    * @param {object} env Worker 环境
    * @param {'lat'|'tput'} mode 选路模式
    * @param {object|null} st 连接状态（会写 st.node / st.hostTrial）
@@ -554,6 +554,4 @@ export class PickPath {
   }
 }
 
-/** 进程内唯一实例 */
-export const PICK = new PickPath();
 

@@ -66,6 +66,7 @@ export class Counter {
     "ustall",
     "cut",
     "ccut",
+    "fbwd",
     "dead",
     "noPayload",
     "noAuth",

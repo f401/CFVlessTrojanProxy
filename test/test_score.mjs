@@ -8313,11 +8313,11 @@ ok("/crypto 逐项给出耗时", typeof cryptoBody273.digest === "number" && cry
   const rotSrc = fs.readFileSync("src/px/rotation.ts", "utf8");
   const failSrc = fs.readFileSync("src/px/failbook.ts", "utf8");
   // 结构：三个类各自带单例，门面只剩委托
-  ok("pickpath 有 PickPath 与 PICK", pickSrc.includes("export class PickPath {") && pickSrc.includes("export const PICK = new PickPath();"), "");
+ok("pickpath 只定义 PickPath 行为，不再导出模块级实例", pickSrc.includes("export class PickPath {") && !pickSrc.includes("export const PICK ="), "");
   ok("rotation 有 Rotation 与 ROTATION", rotSrc.includes("export class Rotation {") && !rotSrc.includes("export const ROTATION ="), "");
   // 7.347：模块级 `FAILS` 收进 `Selector` 门面 —— 类还在、单例没了、门面自己持有
   ok("failbook 有 FailBook 而模块级 FAILS 已消失", failSrc.includes("export class FailBook {") && !failSrc.includes("export const FAILS = new FailBook();") && facadeSrc.includes("private readonly fails = new FailBook(this.rotation);"), "");
-  eq("门面里 PICK 的委托有 3 处", facadeSrc.split("return PICK.").length - 1, 3);
+eq("门面里 picker 的委托有 3 处", facadeSrc.split("return this.picker.").length - 1, 3);
   eq("门面里 Rotation 的委托有 3 处", facadeSrc.split("return this.rotation.").length - 1, 3);
   eq("门面里失败记账的委托有 4 处", facadeSrc.split("return this.fails.").length - 1, 4);
   // 门面不得再留算法：这些调用各自只在唯一一个执行器里出现
@@ -8892,7 +8892,7 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
 
   // 一个文件里要有四个单元：形状 + 三个类 + 一个就绪函数 + 三个单例
   ok("一个文件里四个单元齐备", pickSrc.includes("export interface PickState") && pickSrc.includes("export class PickPath") && pickSrc.includes("export class SitePick") && pickSrc.includes("export class PathPrefs") && pickSrc.includes("export async function ensureReady("));
-  ok("只剩一个门面实例，组件由它持有", pickSrc.includes("export const PICK = new PickPath();") && !pickSrc.includes("export const SITE") && !pickSrc.includes("export const PATHS") && pickSrc.includes("readonly site = new SitePick();") && pickSrc.includes("readonly paths = new PathPrefs();"));
+ok("pickpath 不再导出模块级实例，组件由 PickPath 持有", !pickSrc.includes("export const PICK") && !pickSrc.includes("export const SITE") && !pickSrc.includes("export const PATHS") && pickSrc.includes("readonly site = new SitePick();") && pickSrc.includes("readonly paths = new PathPrefs();"));
   ok("文件头写清为什么合在一起", pickSrc.includes("四段无独立生命周期"));
 
   // 编排仍然只做编排：抽样与画像调用只在画像那一段里
@@ -8908,9 +8908,9 @@ console.log("\n[296] 挑路的四件事在同一个文件里，四个类各自�
   ok("偏好段不自己抽样", !pickSrc.slice(pickSrc.indexOf("export class PathPrefs")).includes("ThompsonPicker"));
 
   // 行为面：三个单例都在，且「没有站点上下文时不否决任何通道」
-  ok("门面持有两个组件，模块级不再有 SITE / PATHS", W.PICK instanceof W.PickPath && W.PICK.site instanceof W.SitePick && W.PICK.paths instanceof W.PathPrefs && W.SITE === undefined && W.PATHS === undefined);
-  ok("空站点时一律不否决", W.PICK.paths.vetoed("", "203.0.113.9:443") === false);
-  ok("空站点时通道判据也放行", W.PICK.paths.chanOpen("", "203.0.113.9:443") === true);
+ok("门面持有三个组件，模块级不再有 SITE / PATHS / PICK", W.SEL.picker instanceof W.PickPath && W.SEL.picker.site instanceof W.SitePick && W.SEL.picker.paths instanceof W.PathPrefs && W.SITE === undefined && W.PATHS === undefined && W.PICK === undefined);
+ok("空站点时一律不否决", W.SEL.picker.paths.vetoed("", "203.0.113.9:443") === false);
+ok("空站点时通道判据也放行", W.SEL.picker.paths.chanOpen("", "203.0.113.9:443") === true);
 }
 
 // [301] 薄包装与「只为测试存在的入口」已经收掉：调用点直接调单例
@@ -11579,20 +11579,21 @@ eq("第338组·常量表没被压缩污染", W.SHA_H224[0], 0xc1059ed8);
 // ---- 第 345 组：pick 家族的三个模块级单例收成一个（门面自己持有 site / paths） ----
 {
   const pickSrc345 = fs.readFileSync("src/px/pickpath.ts", "utf8");
+  const facade345 = fs.readFileSync("src/px/selector.ts", "utf8");
 
-  // 结构：模块级只剩 PICK 一个实例，两个组件是它的 readonly 字段
+// 结构：模块级实例全收进 Selector（SEL.picker），两个组件是 PickPath 的 readonly 字段
   ok("[345] 模块级不再导出 SITE / PATHS", !pickSrc345.includes("export const SITE") && !pickSrc345.includes("export const PATHS"));
-  ok("[345] 门面仍然导出唯一实例", pickSrc345.includes("export const PICK = new PickPath();"));
+ok("[345] pickpath 不再导出模块级实例（收进 Selector）", !pickSrc345.includes("export const PICK = new PickPath();") && facade345.includes("private readonly picker = new PickPath();"));
   ok("[345] 两个组件是 readonly 字段", pickSrc345.includes("readonly site = new SitePick();") && pickSrc345.includes("readonly paths = new PathPrefs();"));
   ok("[345] 全文各只 new 一次", pickSrc345.split("new SitePick(").length - 1 === 1 && pickSrc345.split("new PathPrefs(").length - 1 === 1);
   ok("[345] 类体里的调用改走字段", !pickSrc345.includes("return SITE.") && !pickSrc345.includes("PATHS.byPrefer") && !pickSrc345.includes("PATHS.rescan") && !pickSrc345.includes("PATHS.byChan") && !pickSrc345.includes("PATHS.chanOpen") && !pickSrc345.includes("PATHS.nonCfFirst"));
   ok("[345] 委托仍然只有一行", /pick\([^)]*\)[^{]*\{[^}]*return this\.site\.pick\(/.test(pickSrc345));
 
   // 行为：组件挂得住、判据不变
-  ok("[345] site 是 SitePick 实例", W.PICK.site instanceof W.SitePick);
-  ok("[345] paths 是 PathPrefs 实例", W.PICK.paths instanceof W.PathPrefs);
-  ok("[345] 空站点不否决", W.PICK.paths.vetoed("", "203.0.113.9:443") === false);
-  ok("[345] 空站点通道放行", W.PICK.paths.chanOpen("", "203.0.113.9:443") === true);
+ok("[345] site 是 SitePick 实例", W.SEL.picker.site instanceof W.SitePick);
+ok("[345] paths 是 PathPrefs 实例", W.SEL.picker.paths instanceof W.PathPrefs);
+ok("[345] 空站点不否决", W.SEL.picker.paths.vetoed("", "203.0.113.9:443") === false);
+ok("[345] 空站点通道放行", W.SEL.picker.paths.chanOpen("", "203.0.113.9:443") === true);
 }
   // ═══ 第 346 组：地区挑选器由会话自己持有（7.346）═══
   {
@@ -13216,7 +13217,7 @@ if (fs.existsSync(midPath)) {
     const doc = fs.readFileSync(docPath, "utf8");
     ok(`[${G}] 门禁文件存在`, fs.existsSync(gate));
     ok(`[${G}] 文档有清单起止标记`, doc.includes("<!-- singleton-list:start -->") && doc.includes("<!-- singleton-list:end -->"));
-    ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
+ok(`[${G}] 文档声明 46 个`, doc.includes("46 处声明"));
     ok(`[${G}] 门禁接进 preflight`, fs.readFileSync("tools/preflight.mjs", "utf8").includes("tools/check-singletons.mjs"));
     ok(`[${G}] 门禁支持 SINGLETON_DOC 覆盖`, gateSrc.includes("SINGLETON_DOC"));
     // 行为：干净文档退出 0。
@@ -13242,6 +13243,86 @@ if (fs.existsSync(midPath)) {
     if (fs.existsSync(tmp384)) fs.unlinkSync(tmp384);
     ok(`[${G}] 临时文档已清理`, !fs.existsSync(tmp384));
   }
+
+// ── 386. 首字节看门狗：黑洞出口无下行主动关 socket 启动补救链 ─────────────
+{
+  const G = 386;
+  const srcTun386 = fs.readFileSync("src/proxy/tunnel.ts", "utf8");
+  const srcUtil386 = fs.readFileSync("src/core/util.ts", "utf8");
+  const srcCnt386 = fs.readFileSync("src/core/counter.ts", "utf8");
+
+  // ── 结构锁 ──
+  ok(`[${G}] 常量 FIRST_BYTE_MS 存在`, W.FIRST_BYTE_MS === 10000, String(W.FIRST_BYTE_MS));
+  ok(`[${G}] 常量有看门狗说明`, srcUtil386.includes("首字节看门狗"));
+  ok(`[${G}] cntKeys 登记 fbwd`, srcCnt386.includes('"fbwd"'));
+  ok(`[${G}] pipeBack 有 firstByteMs 参数`, srcTun386.includes("firstByteMs: number = FIRST_BYTE_MS"));
+  ok(`[${G}] 看门狗定时器 arm/clear`, srcTun386.includes("const armWd") && srcTun386.includes("const clearWd"));
+  ok(`[${G}] 收到字节撤销看门狗`, srcTun386.includes("if (st.down > 0) clearWd()"));
+  ok(`[${G}] 看门狗触发记 fbwd`, srcTun386.includes('cnt("fbwd")'));
+  ok(`[${G}] 看门狗触发关 socket`, srcTun386.includes("closeQuietly(sock)"));
+  ok(`[${G}] 看门狗触发不关客户端 WS`, srcTun386.includes("if (!clientGone && !wdFired)"));
+  ok(`[${G}] close 分支清看门狗`, srcTun386.includes("clearWd(); // 流已结束"));
+
+  // ── 行为桩：socket 的 close() 让 readable 报错，模拟黑洞被主动掐断 ──
+  const mkSock386 = (ref) => {
+    let ctrl = null;
+    const sock = {
+      readable: new ReadableStream({
+        start(c) { ctrl = c; if (ref) ref.ctrl = c; },
+      }),
+      closed: Promise.resolve(),
+      writable: { getWriter: () => ({ write: async () => {}, releaseLock() {} }) },
+    };
+    sock.close = () => { try { ctrl.error(new Error("watchdog")); } catch (e) {} };
+    return sock;
+  };
+  const ws386 = () => ({ readyState: 1, bufferedAmount: 0, send() {}, codes: [], close(code) { this.codes.push(code); } });
+  const st386 = () => {
+    const st = new W.Connection({}, "u386", "", "tput");
+    st.node = "198.51.100.99:443";
+    st.host = "x.com";
+    st.mark = 1e9;
+    st.tAttach = Date.now();
+    st.down = 0;
+    return st;
+  };
+
+  // ① 黑洞：注入 30ms 看门狗，无下行 → 主动关 socket → onClose(false)，且客户端没被关
+  {
+    const st = st386(), ws = ws386(), sock = mkSock386(null), calls = [];
+    const fbwd0 = W.cntView().fbwd || 0;
+    W.pipeBack(sock, ws, st, (got) => calls.push(got), 30);
+    await new Promise((r) => setTimeout(r, 160));
+    eq(`[${G}] 黑洞触发一次 onClose(false)`, calls.length, 1);
+    eq(`[${G}] onClose 收到 gotData=false`, calls[0], false);
+    eq(`[${G}] 黑洞记 fbwd`, (W.cntView().fbwd || 0) - fbwd0, 1);
+    eq(`[${G}] 看门狗不关客户端 WS`, ws.codes.length, 0);
+  }
+
+  // ② 收到首字节：看门狗撤销，流正常结束 onClose(true)，不记 fbwd
+  {
+    const ref = {}, st = st386(), ws = ws386(), sock = mkSock386(ref), calls = [];
+    const fbwd0 = W.cntView().fbwd || 0;
+    W.pipeBack(sock, ws, st, (got) => calls.push(got), 60);
+    await new Promise((r) => setTimeout(r, 10));
+    ref.ctrl.enqueue(new Uint8Array([0x48, 0x54]));
+    await new Promise((r) => setTimeout(r, 20));
+    ref.ctrl.close();
+    await new Promise((r) => setTimeout(r, 60));
+    eq(`[${G}] 有首字节不记 fbwd`, (W.cntView().fbwd || 0) - fbwd0, 0);
+    ok(`[${G}] 有首字节 onClose 收到 true`, calls.length >= 1 && calls[0] === true);
+  }
+
+  // ③ 没有 onClose（纯转发）：看门狗不应触发，fbwd 不增
+  {
+    const st = st386(), ws = ws386(), sock = mkSock386(null);
+    const fbwd0 = W.cntView().fbwd || 0;
+    W.pipeBack(sock, ws, st, undefined, 30);
+    await new Promise((r) => setTimeout(r, 100));
+    eq(`[${G}] 无 onClose 不记 fbwd`, (W.cntView().fbwd || 0) - fbwd0, 0);
+  }
+}
+
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

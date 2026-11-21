@@ -57,7 +57,7 @@ export { SC } from "./core/const";
 export { SEL, Selector } from "./px/selector";
 export { FailBook } from "./px/failbook";
 export { Rotation, dwellOf } from "./px/selector";
-export { PoolReadyClock,  PICK, PickPath } from "./px/pickpath";
+export { PoolReadyClock, PickPath } from "./px/pickpath";
 export { ThompsonPicker } from "./px/ts";
 export { SitePick, PathPrefs } from "./px/pickpath";
 export { SeedStore, SEED_STORE } from "./px/seed";
@@ -202,4 +202,4 @@ export { ProxySession, handleUpgrade } from "./proxy/session";
 
 
 
-export { CONNECT_MS, FIRST_UP_MS, UP_STALL_MS } from "./core/util";
+export { CONNECT_MS, FIRST_BYTE_MS, FIRST_UP_MS, UP_STALL_MS } from "./core/util";

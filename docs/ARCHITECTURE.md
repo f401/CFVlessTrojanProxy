@@ -233,10 +233,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `Selector`（`SEL`） | `src/px/selector.ts` | 门面：十个方法各一行委托给三个执行器，本身不再有算法；失败记账器与换节点器都由它自己持有（7.347 起不再有模块级 `FAILS`，7.356 起不再有模块级 `ROTATION`，同一个 `rotation` 实例也交给记账器） |
 | `PoolReadyClock`（`READY`） | `src/px/pickpath.ts` | 候选池就绪时钟（`S.dnsCache` 那批一起下放）：`lastAttemptAt` 从 `S` 迁入，实例单例，冷启动 60 秒节流；`ensureReady` 经它读写 |
 | `WarmPacer`（`WARM`） | `src/px/warm.ts` | 存活表起搏时钟（`S.aliveAt` 迁入）：5 分钟节流，实例单例 |
-| `PickPath`（`PICK`） | `src/px/pickpath.ts` | 编排：地区硬要求（`?rg=`）与 `current` 的偏好顺序；同文件里还有下面两个类，7.345 起它们由门面自己持有（`PICK.site` / `PICK.paths`），模块级不再有 `SITE` / `PATHS` 两个单例 —— 画像与偏好都只在编排的调用栈里存活，拆成三个文件会让「这次为什么换了节点」分散在三处 import |
-| `SitePick`（`PICK.site`） | `src/px/pickpath.ts` | 站点画像这一层：`pick` 只做编排，五段各一方法 —— `syncCursor`（游标自愈）、`byProfile`（≥3 条样本、首选不超过 2 小时才覆盖全局）、`byShadow`（冷启动影子）、`bySample`（单层抽样 + 负载溢出）、`leastBad`（全池被罚时的兜底） |
+| `PickPath`（`SEL.picker`） | `src/px/pickpath.ts` | 编排：地区硬要求（`?rg=`）与 `current` 的偏好顺序；同文件里还有下面两个类，7.345 起它们由门面自己持有（`SEL.picker.site` / `SEL.picker.paths`），模块级不再有 `SITE` / `PATHS` 两个单例 —— 画像与偏好都只在编排的调用栈里存活，拆成三个文件会让「这次为什么换了节点」分散在三处 import |
+| `SitePick`（`SEL.picker.site`） | `src/px/pickpath.ts` | 站点画像这一层：`pick` 只做编排，五段各一方法 —— `syncCursor`（游标自愈）、`byProfile`（≥3 条样本、首选不超过 2 小时才覆盖全局）、`byShadow`（冷启动影子）、`bySample`（单层抽样 + 负载溢出）、`leastBad`（全池被罚时的兜底） |
 | `ThompsonPicker` | `src/px/ts.ts` | 单层 Thompson 抽样：构造时一次算清「池子大小 → 抽样宽度 → 乐观面 β → 目标流量 → 探活剪枝线 → 池内最快带宽」，`arms()` 逐候选算 σ 与乐观代价，`pickOf()` 按 `TS_BAND` 剪枝后取代价最小；样本不足的臂豁免剪枝（否则「没测过 → 先验慢 → 被剪掉 → 永远没测过」锁死） |
-| `PathPrefs`（`PICK.paths`） | `src/px/pickpath.ts` | 偏好过滤：判定层否决、入口族偏好（非 CF 出口优先，1.5x+50ms 带内）、站点通道偏好、拨号重试的「排除已试过」重扫；只读不写（7.345 起不再是模块级单例，由 `PICK` 持有；`PREFS` 那个名字仍归入口偏好） |
+| `PathPrefs`（`SEL.picker.paths`） | `src/px/pickpath.ts` | 偏好过滤：判定层否决、入口族偏好（非 CF 出口优先，1.5x+50ms 带内）、站点通道偏好、拨号重试的「排除已试过」重扫；只读不写（7.345 起不再是模块级单例，由 `SEL.picker` 持有；`PREFS` 那个名字仍归入口偏好） |
 | `Rotation`（`SEL.rotation`） | `src/px/rotation.ts` | 什么时候换：最短驻留时间（`dwellOf`）、切走判据、扫描后的观察窗与定时复查；无字段（状态在 `S.curs`/`S.lastSwitch`），7.356 起由 `Selector` 持有并注入给 `FailBook`，模块级 `ROTATION` 已撤 |
 | `FailBook`（`SEL.fails`） | `src/px/failbook.ts` | 失败怎么记：节点级失败推进快速失败窗口并重算分数，站点级失败只进站点画像；要切走时调构造注入的 `rotation.maybeSwitch`（7.356 起换节点器由门面持有并传进来，不再引模块级单例） |
 | `IpQualityTable`（`QUALITY`） | `src/px/regions.ts` | 节点 IP 质量表（住宅/移动/商企/机房 + good/normal/risky + proxy/vpn 位），按节点键缓存 3 天、单源失败冷却 5 分钟；质量结论是客观属性，由 `SeedStore.packName` 搭 seed 便车跨 isolate 传播，`get`/`note`/`snapshot` 供选路与面板读取 |

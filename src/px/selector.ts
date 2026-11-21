@@ -2,12 +2,11 @@
 // 实现分成三块 —— 挑谁（./pickpath 的 `PickPath`）、什么时候换（./rotation 的 `Rotation`）、
 // 失败怎么记（./failbook 的 `FailBook`）；这个文件只做委托与再导出，不再有算法。
 
-import { PICK } from "./pickpath";
+import { PickPath } from "./pickpath";
 import { Rotation } from "./rotation";
 import { FailBook } from "./failbook";
 import type { PickState } from "./pickpath";
 
-export { PICK } from "./pickpath";
 export { Rotation, dwellOf } from "./rotation";
 export { FailBook } from "./failbook";
 export type { PickState } from "./pickpath";
@@ -28,10 +27,16 @@ export class Selector {
    * 7.347 前它是模块级 `FAILS`，读门面时看不出谁在用它、用了几次。
    */
   private readonly fails = new FailBook(this.rotation);
+  /**
+   * 挑节点的执行器（7.385 起由门面自己持有）：画像、冷启动影子、抽样、粘滞兜底都在它里面。
+   * 7.384 前它是模块级 `PICK`，selector.ts 还多一条 `export { PICK }` 死导出；
+   * 现在门面是生产唯一入口，挑谁这件事就挂在 `SEL.picker` 上。
+   */
+  private readonly picker = new PickPath();
   /** 按国家挑一个节点（地区硬要求：调用方不得回落到直连/全球） */
   async region(env: Env, cc: string | null, mode: Mode = "tput", avoid = "") {
     // 实现见 PickPath.region：这个类只做委托。
-    return PICK.region(env, cc, mode, avoid);
+    return this.picker.region(env, cc, mode, avoid);
   }
 
   /**
@@ -42,7 +47,7 @@ export class Selector {
    */
   pick(env: Env, mode: Mode, st: PickState | null) {
     // 实现见 PickPath.pick：这个类只做委托。
-    return PICK.pick(env, mode, st);
+    return this.picker.pick(env, mode, st);
   }
 
   /** 重新评估是否该换节点（cron 与失败路径共用） */
@@ -103,7 +108,7 @@ export class Selector {
     exclude: Set<string> | null = null,
   ) {
     // 实现见 PickPath.current：这个类只做委托。
-    return PICK.current(env, mode, st, host, cfOnly, exclude);
+    return this.picker.current(env, mode, st, host, cfOnly, exclude);
   }
 
   /** cron 扫描收尾：重算两个模式的游标，再做定时轮换 */
