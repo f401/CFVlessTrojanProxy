@@ -3539,7 +3539,7 @@ ok(`[${g}] 设计阶段的临时名只在「更正」那句里出现`, !v8.inclu
   const dialSrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
   const vtSrc = fs.readFileSync("src/route/verdictsync.ts", "utf8");
   const jdSrc = fs.readFileSync("src/route/judge.ts", "utf8");
-  ok("dialer 裁剪 cfHost", dialSrc.includes("dropExpired(S.cfHost)") && dialSrc.includes("trimAged(S.cfHost)"));
+  ok("dialer 裁剪 cfHost", dialSrc.includes("dropExpired(this.cfHost)") && dialSrc.includes("trimAged(this.cfHost)"));
   ok("verdictsync 裁剪 vtSent", vtSrc.includes("dropExpired(VT_SYNC.sent)") && vtSrc.includes("trimAged(VT_SYNC.sent)"));
   ok("judge 裁剪 bigByHost", jdSrc.includes("trimAged(this.bigByHost)"));
   ok("verdictsync 不再自己抄 TTL", !vtSrc.includes("v.at + 1800000"));
@@ -6939,7 +6939,7 @@ const wsOf245 = (state = 1) => ({ readyState: state, bufferedAmount: 0, send() {
 
 // ═══ 第 247 组：跳过 CF 边缘候选不等于试过一次（D201）═══
 const H247 = "cfhost247.test";
-W.S.cfHost.set(H247, Date.now() + 1800000);
+W.DIALER.cfHost.set(H247, Date.now() + 1800000);
 W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, at: Date.now(), fail: 0, ok: 3, ms: 200 });
 {
   // 选择器只给一条 CF 边缘：中转到 CF 托管目标等于从同一边缘再撞一次，必须跳过
@@ -13155,6 +13155,32 @@ if (fs.existsSync(midPath)) {
   eq("[380] 保留调用方额外字段", m380["a:443"].extra, "keep");
   eq("[380] 新节点插入", m380["b:443"].bps, 20);
   ok("[380] 空快照行被跳过", !("c:443" in m380));
+}
+
+// 7.382：架构第二批——cfHost 缓存收进 Dialer 实例 + seed.ts 文档乱码修复。
+{
+  const dialSrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
+  const stateSrc = fs.readFileSync("src/core/state.ts", "utf8");
+  const seedSrc = fs.readFileSync("src/px/seed.ts", "utf8");
+  const ownerSrc = fs.readFileSync("tools/check-state-owner.mjs", "utf8");
+  // 结构：cfHost 从 S 迁进 Dialer，门禁登记防回潮。
+  ok("[382] Dialer 自持 cfHost 缓存", dialSrc.includes("readonly cfHost = new Map<string, number>()"));
+  const dialCode382 = dialSrc.split(/\r?\n/).filter((l) => !l.trim().startsWith("*") && !l.trim().startsWith("//")).join("\n");
+  ok("[382] classify 读写实例缓存而非 S",
+    dialCode382.includes("this.cfHost.get(host)") && dialCode382.includes("this.cfHost.set(host")
+      && !dialCode382.includes("S.cfHost"));
+  ok("[382] 裁剪用实例缓存", dialSrc.includes("dropExpired(this.cfHost)") && dialSrc.includes("trimAged(this.cfHost)"));
+  ok("[382] S 里已无 cfHost 字段", !/^\s*cfHost\s*:/m.test(stateSrc));
+  ok("[382] 状态归属门禁登记 cfHost", ownerSrc.includes('["cfHost"'));
+  // 行为：缓存确实挂在 DIALER 实例上，且与 S 解耦。
+  ok("[382] DIALER 暴露 cfHost 实例", W.DIALER && W.DIALER.cfHost instanceof Map);
+  const key382 = "cfhost382.test";
+  W.DIALER.cfHost.set(key382, Date.now() + 60000);
+  ok("[382] 缓存命中可读写", (W.DIALER.cfHost.get(key382) || 0) > Date.now());
+  ok("[382] S 上不再有 cfHost 表", W.S.cfHost === undefined);
+  W.DIALER.cfHost.delete(key382);
+  // seed.ts 文档 mojibake 已修复（历史 PowerShell 写坏 UTF-8）。
+  ok("[382] seed.ts 无 mojibake", !seedSrc.includes("鎶婃湰鍦") && seedSrc.includes("把本地统计合并进"));
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

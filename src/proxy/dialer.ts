@@ -67,6 +67,14 @@ interface RelayCand {
  */
 export class Dialer {
   /**
+   * CF 托管目标缓存（host → 过期时间）。7.382 前放在全局 `S.cfHost`，但全仓只有本类
+   * 读写它——放在 S 里所有权不清，且让本类成了「无字段的假单例」。收进实例后：
+   * ① 边界随实例（DIALER 是进程内唯一实例，语义不变）；② `check-state-owner` 棘轮
+   * 会拦住回潮。键是客户端站点名，故按 `HOST_MEM_MAX` 裁剪，不跨 isolate 共享。
+   */
+  readonly cfHost = new Map<string, number>();
+
+  /**
    * 打开到目标的出站连接；失败抛错（由调用方决定是否回落到中继/断开）。
    * 返回值非空即成功，`conn.node/via/pxTries` 已在内部写好。
    * @param o 目标、模式与调试开关（`?px=` / `?rx=`）
@@ -97,7 +105,7 @@ export class Dialer {
     // 顺序：中继优先（直连多半撞自家边缘），退 IPv4 拨号，再退普通直连
     const learned = (S.needPx.get(host) || 0) > Date.now();
     const onList = isPxHost(env, host);
-    let cfHost = (S.cfHost.get(host) || 0) > Date.now();
+    let cfHost = (this.cfHost.get(host) || 0) > Date.now();
     if (!learned && !onList && !cfHost && env.proxyip === "auto") {
       // DoH 抖动会偶发失败，而这是判定层的关键输入：给两次机会（不做负缓存）。
       for (let k = 0; k < 2 && !cfHost; k++) {
@@ -108,11 +116,11 @@ export class Dialer {
         }
       }
       if (cfHost) {
-        S.cfHost.set(host, Date.now() + 1800000);
+        this.cfHost.set(host, Date.now() + 1800000);
         // 键是客户端请求里的站点名：先过期清理，再按「最早过期」压回上限
-        if (S.cfHost.size > SC.HOST_MEM_MAX) {
-          dropExpired(S.cfHost);
-          trimAged(S.cfHost);
+        if (this.cfHost.size > SC.HOST_MEM_MAX) {
+          dropExpired(this.cfHost);
+          trimAged(this.cfHost);
         }
       }
     }

@@ -50,6 +50,8 @@ const MIGRATED = new Map([
   ["reProbeN", "RetestQueue（src/px/scan.ts）"],
   ["usersCache", "UserCache（src/proxy/protocol.ts）"],
   ["usersSig", "UserCache（src/proxy/protocol.ts）"],
+  // 7.382 状态归属：cfHost 缓存全仓只有 Dialer 读写，从 S 收进 Dialer 实例
+  ["cfHost", "Dialer（src/proxy/dialer.ts）"],
 ]);
 
 const stateSrc = fs.readFileSync("src/core/state.ts", "utf8");

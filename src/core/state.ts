@@ -95,8 +95,6 @@ export class AppState {
   errs: ErrItem[] = [];
   cagg: Map<string, { n: number; ok: number; dn: number; v: number[] }> = new Map(); // 连接观测按节点聚合
 
-  /** 命中过 Cloudflare 托管的目标（host → 过期时间），省掉重复解析 */
-  cfHost: Map<string, number> = new Map();
   /** CF HTTP 判定缓存：跨模块共享，仍由 S 持有 */
   cfHttp: Map<string, { code: number; colo: string; t: number }> = new Map();
 

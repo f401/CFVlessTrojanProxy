@@ -130,7 +130,7 @@ export class SeedStore {
   }
 
   /**
-   * 鎶婃湰鍦扮粺璁″悎骞惰繘「本机房」的桶并落盘。只写自己的桶，不碰别的机房。
+   * 把本地统计合并进「本机房」的桶并落盘。只写自己的桶，不碰别的机房。
    * @param {object} env Worker 环境
    * @returns {Promise<{ok:boolean,err?:string}>} 结果
    */

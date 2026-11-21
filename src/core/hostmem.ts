@@ -3,7 +3,7 @@ import { SC } from "./const";
 /**
  * 功能：把「值是最早使用时间」的按站点表压回上限，防止客户端可控的站点名把内存撑大。
  *
- * 为什么需要：`S.bigByHost`、`S.bigChan`、`S.cfHost`、`S.vtSent` 的键都是客户端
+ * 为什么需要：`JUDGE.memory.bigByHost/bigChan`、`DIALER.cfHost`、`VT_SYNC.sent` 的键都是客户端
  * 请求里的目标站点名（`CONNECT`/ClientHello 带过来的），不是有限集合。一个长期
  * 存活的 isolate 见够几万个不同站点就会一直涨，而且没有任何一条读路径会因此报错，
  * 只有内存水位慢慢上去。`Policy.pin/seq` 在 7.140 已经这样处理过，这里把同一套
