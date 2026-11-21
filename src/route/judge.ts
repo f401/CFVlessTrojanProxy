@@ -11,14 +11,13 @@ import { TrafficEvt } from "../core/hook";
 import { Chan, DIRECT, chanKey } from "./channel";
 import { VT } from "./verdict";
 import { recordBlock, recordPass, recordTraffic } from "./observe";
-import { cfHttpCode } from "../proxy/cfverdict";
 import { cnt } from "../core/counter";
 import { HEALTH } from "./relay-health";
 import { FACT } from "./factshadow";
 import type { FactOut } from "./commitfact";
 import { PS } from "./psfacts";
 import { DNS } from "./dnsfacts";
-import { egDerive } from "./egfacts";
+import { egDerive, EG, FAM } from "./egfacts";
 import { BLK } from "./blkfacts";
 import { relayIpOf } from "../core/relay-addr";
 
@@ -183,6 +182,10 @@ export class Judge {
     if (e.via === "node" && e.node && e.host) {
       const pip = relayIpOf(e.node);
       if (pip) {
+        // famfacts：站点×出口族的实测成功率（本 isolate 软定价，取代 CF v6 一刀切）。
+        // 只记确定族；ok 以「拿到整页」为准（小页/业务 403 不算成功）。
+        const pipFam = EG.famOf(pip, ty);
+        if (pipFam === 4 || pipFam === 6) FAM.note(e.host, pipFam, e.down >= BIG, ty);
         // 只有「拿到完整响应」才记成功率；tiny 的负样本由 blk 的批次投票负责（§5.1 D14）
         if (out.write && out.write.kind === "ps" && out.write.j.ok) PS.note(e.host, pip, true, ty);
         // B 级负样本：`tiny` + 同窗口有 ≥20KB 对照，但批次还不够三批（A 级），此时不写 `blk`，
@@ -254,12 +257,11 @@ export class Judge {
       this.markBlocked(e, chan, ck, now);
       return;
     }
-    // 「站点本身能出内容」的旁证（有其一即可 1 次请求判定）：
-    // ① 本出口 fetch 根路径 200 —— 站点活着，而这条通道只回了小响应；
-    // ② 同站点**另一条**通道 6 小时内出过整页 —— 差分成因明确。
-    const httpOk = cfHttpCode(e.host) === 200;
+    // 「这条通道被拒」的唯一旁证：同站点**另一条**通道 6 小时内出过整页（差分成因明确）。
+    // 本出口 fetch 的 200 只说明 CF 自己出得去，不能当旁证——实测同一时刻 fetch 200 → 隧道 403；
+    // 小响应（tiny 量级）只是诊断标签，业务 403 与 v6 拒绝页在此不可区分，绝不能据此判死。
     const bigDiff = this.memory.bigDiff(e.host, ck, now);
-    const known = httpOk || bigDiff;
+    const known = bigDiff;
     // 短负面记忆：只要「站点确实能出整页」的旁证成立，就把这条通道对该站点软降权 10 分钟。
     // 它是选路层的排序依据，不是封锁结论 —— 突发负载下一条连接就会换别的通道。
     if (known && e.via === "node") {

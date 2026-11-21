@@ -163,7 +163,7 @@ export { TFB, TfbBook } from "./route/tfbbook";
 export { RELPERF, REL_SAMPLE_TTL, RelPerfTable, relCostFor, relCostOf, relNote } from "./route/relperf";
 export { Mode, St, IpKind, IpLevel, IpFamily } from "./core/enums";
 export { BoundedMap, TimedMarks } from "./core/table";
-export { EG, EG_BIG, EG_TINY, EG_TTL, EgFacts, egCounts, egDerive } from "./route/egfacts";
+export { EG, EG_BIG, EG_TINY, EG_TTL, EgFacts, egCounts, egDerive, FamFacts, FAM } from "./route/egfacts";
 export { CAP, CAP_MAX, CAP_TTL, CapFacts } from "./route/capfacts";
 export { ALIVE_TARGET } from "./core/const";
 export { FACT_ALL, factList, factOn, factParse } from "./route/factflags";

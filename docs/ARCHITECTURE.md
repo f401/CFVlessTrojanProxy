@@ -272,7 +272,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | 预算分配（自由函数 `planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核）：判定额度这一项在 7.149 随 `round.ts` 一起删掉，现在只有 `adm` 与 `cap` |
 | `FactMerger` | `src/store/factmerge.ts` | 把 DO 车身里的五类事实并进本地表：每张表一个私有方法（族号、历史最好、判死行、`|` 键、容量淘汰各不相同），`merge()` 只负责分派 |
 | `FactsStore` | `src/route/factsstore.ts` | 事实表同步，纯静态方法：冷启动合并 → 上行增量 → ack/nack 三段生命周期；内部逐类点名五张表（7.360 起无模块级 `FACTS` 实例） |
-| `EgFacts`（`EG`） | `src/route/egfacts.ts` | 出口族事实（中继 IP → v4/v6）与 ×40 的族偏置，含 pending/ack |
+| `EgFacts`（`EG`） | `src/route/egfacts.ts` | 出口族事实（中继 IP → v4/v6）与族偏置，含 pending/ack；`biasFor()` 按站点×族实测放松偏置 |
+| `FamFacts`（`FAM`） | `src/route/egfacts.ts` | 本 isolate 的站点×出口族实测成功率（内存派生表，不进线协议、不跨 isolate），供 `biasFor()` 定价取代 CF v6 一刀切 ×40 |
 | `DnsFacts`（`DNS`） | `src/route/dnsfacts.ts` | 「纯 v4 站点」确证（24 小时）与 v6 出口折价 |
 | PsFacts（PS） | src/route/psfacts.ts | 站点 × 中继「能不能过」成功率表（45 分钟半衰期）：形状、先验与表本体同在此文件，待上报队列与有界化继承自 FactTable |
 | `BlkFacts`（`BLK`） | `src/route/blkfacts.ts` | 单 IP 封锁事实（键为站点 + 出口 IP、三批确认、只乘 6 倍代价、站点级自愈）；表本体 / 待上报队列 / 有界化继承自 `FactTable` |

@@ -1,7 +1,5 @@
 import { X_EDGE_IPS, edgeCount, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, REGION_SUB, trojanPasswordOf, renderLinks, renderSingbox } from "./sub-common";
 import { probeUrlOf } from "../core/util";
-import { S } from "../core/state";
-import { splitRelay } from "../core/relay-addr";
 
 // ---- 并入自 src\views\subview.ts ----
 /** 订阅输出格式：Clash/Mihomo YAML、sing-box JSON、纯链接列表 */
@@ -73,11 +71,11 @@ export function renderClash(
   // 入口 IP 只用内置种子：入口质量（用户 → 边缘）只能由客户端实测，服务端测不了
   // （Worker 打自家域名必 522 自环），所以这里不再读什么"实测排名"。
   const noEdge = Boolean(manual) || url.searchParams.get("e") === "0";
-  // 中继块可以单独关掉（?r=0）：它的成员数是 8 个入口 × 协议数 × 模式数，
-  // 客户端列表里最占地方的一块；关掉之后模式组只剩入口/节点/域名三层。
+  // 通道实测组可以单独关掉（?r=0，历史参数名）；中继块已删除，这个开关现在只影响 G_TU。
+  // 关掉之后模式组只剩入口/节点/域名三层，重复请求数也最少。
   const noRelay = url.searchParams.get("r") === "0";
   // 通道实测：客户端对该 URL 逐条中继做 url-test（expected-status 200），把「哪条中继真能打通」
-  // 变成端到端实测，而不是服务端靠流量推断（免费计划跑不动 TLS 客户端）。
+  // 变成端到端实测，而不是服务端靠流量推断（Worker 请求路径跑不动 userland TLS）。
   const tuRaw = url.searchParams.get("tu") || "";
   const tuUrl = /^https:\/\/[^\s"]+$/.test(tuRaw) ? tuRaw : "";
   const edgeIps: string[] = noEdge ? [] : X_EDGE_IPS.slice(0, edgeCount(url));
@@ -162,44 +160,6 @@ export function renderClash(
     }
   }
 
-  // 中继优选条目：节点名带具体中继 IP，但路径不再钉 rx=<ip>。
-  // 原因（2026-11-21 实测）：逐条钉住的 rx 中继里 8 条有 6 条是 v6 出口或黑洞，
-  // 而 url-test 用 gstatic（非 CF 站点）探测时 v6 也能拿 204 → 全显示绿色，
-  // 一旦打 CF 托管的 x.com 就撞 737B IPv6 拒绝页。去掉 rx 与 px 后交给服务端 policy
-  // 动态选路（已验证默认 8/8），坏出口被 EG 事实与判定表自动避开。
-  const relayNames: string[] = [];
-  const relayIps: string[] = [];
-  // 中继块只由 ?r=0 控制。之前写的是 `!noEdge && !noRelay`，于是 `?e=0`（只想减少入口条目，
-  // 那是最占地方的一块）会连带把中继条目一起删掉 —— 而下面 `srv` 里的 `: host` 回退正是为
-  // 「没有入口 IP 可用」这一种情况写的，条件一收紧它就永远执行不到（写着的兜底从没生效）。
-  if (!noRelay) {
-    // 用本 isolate 已判活的中继（S.alive 里是 ip:port），不走 KV —— 订阅渲染是同步的
-    // 先用**事实层已知的 v4 出口**（跨 isolate 共享过，钉住它们实测 9/9 能过），
-    // 再用本 isolate 已判活的中继补齐 —— 只发 S.alive 会在冷 isolate 里发出空组。
-    for (const ip of S.eg4Top) {
-      if (relayIps.length >= 8) break;
-      if (!relayIps.includes(ip)) relayIps.push(ip);
-    }
-    for (const k of S.alive.keys()) {
-      const [ip] = splitRelay(k, 443);
-      if (/^[0-9.]{7,15}$/.test(ip) && !relayIps.includes(ip)) relayIps.push(ip);
-      if (relayIps.length >= 8) break;
-    }
-    for (const mode of ["tput", "lat"]) {
-      const suffix = mode === "lat" ? "L" : "T";
-      for (const proto of protos) {
-        if (proto === "trojan" && !pass) continue;
-        for (const ip of relayIps) {
-          const name = `r-${ip}-${proto === "trojan" ? "TJ" : "VL"}${suffix}`;
-          const srv = edgeIps.length ? String(edgeIps[relayNames.length % edgeIps.length]) : host;
-          emit(name, proto, srv, 443, `/?ed=2560&ip=relay&mode=${mode}`, true, "");
-          relayNames.push(name);
-          all.push(name);
-        }
-      }
-    }
-  }
-
   // 域名入口（备用）：能解析到 AAAA 的网络上会走 IPv6，目标侧就是 403；
   // 只在用户手动切换时使用，默认组一律走上面的 IPv4 字面量条目。
   const domNames: string[] = [];
@@ -232,9 +192,9 @@ export function renderClash(
   //   ② 成员数就是真实请求数：客户端每隔 interval 秒对目标站发「成员数」条 HTTPS。
   //      上限取 10 —— v8 §7 的结论是「10 成员 + 连测 2 次 = 97.4%」，再往上只是拿
   //      目标站的限流换一点点精度。
-  //   ③ 冷 isolate 里可能一条存活中继都没有，这时退化成前 10 个条目 —— 至少还能回答
-  //      「哪条入口能过这个站」；?r=0 明确要求关中继块，就不退化了。
-  const tuMembers = relayNames.length ? pick(relayNames, 10) : noRelay ? [] : pick(all, 10);
+  //   ③ 中继组删除后成员退化成前 10 个入口/节点条目 —— 至少还能回答
+  //      「哪条入口能过这个站」；?r=0 明确要求关通道实测，就不生成了。
+  const tuMembers = noRelay ? [] : pick(all, 10);
 
   const G_EDGE = "\ud83c\udf10 \u5165\u53e3\u4f18\u9009";
   const groups = [];
@@ -248,17 +208,6 @@ export function renderClash(
     groups.push(`    lazy: false`);
     groups.push(q(edgeNames));
   }
-  const G_RELAY = "\ud83d\udd01 \u4e2d\u7ee7\u4f18\u9009";
-  if (relayNames.length) {
-    groups.push(`  - name: "${G_RELAY}"`);
-    groups.push(`    type: url-test`);
-    groups.push(`    url: https://${host}/health`);
-    groups.push(`    expected-status: 200`);
-    groups.push(`    interval: 300`);
-    groups.push(`    tolerance: 50`);
-    groups.push(`    lazy: false`);
-    groups.push(q(relayNames));
-  }
   const G_DOM = "📛 域名入口";
   const G_TU = "📡 通道实测";
   if (domNames.length) {
@@ -267,7 +216,7 @@ export function renderClash(
     groups.push(q(domNames));
   }
   // 模式组的成员顺序就是客户端的选择顺序：① 先信「端到端实测能过这个站点」的通道（只有 ?tu= 才有）；
-  // ② 再入口优选；③ 再中继优选；④ 然后是具体节点；⑤ 最后拿域名入口兜底 —— 8 个钉住的 v4 边缘
+  // ② 再入口优选；③ 然后是具体节点；④ 最后拿域名入口兜底 —— 8 个钉住的 v4 边缘
   // 全不通时，用户至少还能走域名。url-test 只在这些成员之间测速，顺序本身表达的是可信度。
   groups.push(`  - name: "${G_TPUT}"`);
   groups.push(`    type: url-test`);
@@ -282,7 +231,6 @@ export function renderClash(
     q([
       ...(tuUrl && tuMembers.length ? [G_TU] : []),
       ...(edgeNames.length ? [G_EDGE] : []),
-      ...(relayNames.length ? [G_RELAY] : []),
       ...pick(byMode.tput, 5),
       ...(domNames.length ? [G_DOM] : []),
     ]),
@@ -299,7 +247,6 @@ export function renderClash(
     q([
       ...(tuUrl && tuMembers.length ? [G_TU] : []),
       ...(edgeNames.length ? [G_EDGE] : []),
-      ...(relayNames.length ? [G_RELAY] : []),
       ...pick(byMode.lat, 5),
       ...(domNames.length ? [G_DOM] : []),
     ]),
@@ -328,7 +275,7 @@ export function renderClash(
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
   groups.push(
-    `    proxies: ["${G_TPUT}", "${G_LAT}"${domNames.length ? `, "${G_DOM}"` : ""}${edgeNames.length ? `, "${G_EDGE}"` : ""}${relayNames.length ? `, "${G_RELAY}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && tuMembers.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
+    `    proxies: ["${G_TPUT}", "${G_LAT}"${domNames.length ? `, "${G_DOM}"` : ""}${edgeNames.length ? `, "${G_EDGE}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && tuMembers.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
   );
 
   return [

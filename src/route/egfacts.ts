@@ -13,6 +13,7 @@
 // 修两遍（7.143、7.177）。现在子类只回答「行长什么样」和「三个刻度是多少」。
 import { cnt } from "../core/counter";
 import { FACT_TTL, PAGE_ABS } from "../core/facts";
+import { BoundedMap } from "../core/table";
 import { FactTable } from "./fact-table";
 
 /** 一条出口族事实的线格式：`i` 中继 IP，`f` 族（4 或 6），`at` 观测时间 */
@@ -148,6 +149,28 @@ export class EgFacts extends FactTable<EgEntry, EgRow> {
   }
 
   /**
+   * 功能：按「站点×出口族」实测成功率给代价乘数（famfacts），取代 CF 目标 v6 的一刀切 ×40。
+   * 为什么：v6 出口对部分 CF 站点必拒（737B），但对另一些能出整页；一刀切会把后者也永远压掉。
+   * 只用本 isolate 的真实连接样本；样本不足 2 条回退旧分层偏置，冷启动行为完全不变。
+   * 纪律：只乘代价、永不剔除候选（v8 §15 I1）；只会放松 v6 罚，不会给 v4 加新罚。
+   * @param host 目标站点
+   * @param ip 中继 IP
+   * @param cf 目标是否 CF 托管
+   * @param now 当前时间
+   * @returns 代价乘数
+   */
+  biasFor(host: string, ip: string, cf = false, now = Date.now()): number {
+    const base = this.bias(ip, cf, now);
+    if (!cf || !host) return base;
+    const fam = this.famOf(ip, now);
+    if (fam !== 4 && fam !== 6) return base; // 未知族保持探索偏置（×2），避免冷启动死锁
+    const s = FAM.rate(host, fam, now);
+    if (s.n < 2) return base; // 样本不足：回退旧口径，冷启动不回归
+    // 实测成功率 r → 乘数 1+39*(1-r)：r=1→1（旧 v4）、r=0→40（旧 v6），中间线性放松
+    return Math.max(1, Math.min(base, 1 + 39 * (1 - s.r)));
+  }
+
+  /**
    * 功能：列出已知 v4 出口，最近的在前。
    * 用途：冷 isolate 里 `S.alive` 还是空的时候，用它兜底挑一条「已验证能把页面送回来」的中继，
    * 而不是退回直连（CF→CF 直连几乎必被自家边缘拒）。
@@ -175,6 +198,79 @@ export class EgFacts extends FactTable<EgEntry, EgRow> {
 
 /** 进程内唯一的出口族事实表（每个 isolate 一份，读到的远端事实会在冷启动时灌进来） */
 export const EG = new EgFacts();
+
+/** 站点×出口族的一条实测样本：成功数 / 总数 / 最后观测时刻 */
+interface FamRow {
+  ok: number;
+  n: number;
+  at: number;
+}
+
+/**
+ * 功能：站点×出口族的实测成功率（本 isolate 内存派生表，不进线协议）。
+ * 为什么不扩线协议：七表→八表会牵动 vtShape/golden/DO/FactTables，blast 大；这张表是从真实连接
+ * 派生的软定价依据，和 `eg`（中继→族、可跨 isolate 共享的客观事实）不是一类东西。
+ * 有界化继承 BoundedMap：先 set 后 prune（7.227 教训），TTL 与 eg 同源。
+ */
+export class FamFacts {
+  private readonly rows = new BoundedMap<string, FamRow>({
+    max: 512,
+    ttlMs: FACT_TTL.eg,
+    timeOf: (row) => row.at,
+  });
+
+  /**
+   * 功能：记一条「该站点从该族出口的结果」。
+   * @param host 目标站点
+   * @param fam 出口族（4 或 6，其它值忽略）
+   * @param ok 是否拿到整页（小页/业务 403 不算成功）
+   * @param now 当前时间
+   * @returns 无
+   */
+  note(host: string, fam: number, ok: boolean, now = Date.now()): void {
+    if (!host || (fam !== 4 && fam !== 6)) return;
+    const key = host + "|" + fam;
+    const row = this.rows.get(key) || { ok: 0, n: 0, at: now };
+    row.n += 1;
+    if (ok) row.ok += 1;
+    row.at = now;
+    this.rows.set(key, row);
+    if (this.rows.size > this.rows.capacity()) this.rows.prune(now, false);
+  }
+
+  /**
+   * 功能：读该站点该族的实测成功率与样本数。
+   * @param host 目标站点
+   * @param fam 出口族
+   * @param now 当前时间
+   * @returns 成功率 r 与样本数 n；无样本或过期时 n=0
+   */
+  rate(host: string, fam: number, now = Date.now()): { r: number; n: number } {
+    if (!host || (fam !== 4 && fam !== 6)) return { r: 0, n: 0 };
+    const row = this.rows.get(host + "|" + fam);
+    if (!row || now - row.at > FACT_TTL.eg) return { r: 0, n: 0 };
+    return { r: row.n > 0 ? row.ok / row.n : 0, n: row.n };
+  }
+
+  /**
+   * 功能：当前样本对数（调试与测试隔离用）。
+   * @returns 表内行数
+   */
+  size(): number {
+    return this.rows.size;
+  }
+
+  /**
+   * 功能：清空全部样本（测试隔离用）。
+   * @returns 无
+   */
+  clear(): void {
+    this.rows.clear();
+  }
+}
+
+/** 进程内唯一的站点×出口族实测表（每个 isolate 一份，不跨 isolate 共享统计） */
+export const FAM = new FamFacts();
 
 /** 「整页」门槛：CF 托管站点对 v6 出口一律回 737B 左右的小页，能出 20KB 说明这条通道确实走了 v4 */
 export const EG_BIG = PAGE_ABS.big;

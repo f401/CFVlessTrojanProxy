@@ -148,8 +148,8 @@ export class GatewayFetchTransport implements ProbeTransport {
  * 功能：明文 HTTP/80 探测 —— `connect` 到 `<relay|host>:80`，写一条 GET，只读状态行。
  *
  * 为什么它是第三种传输而不是一个独立函数：它和另外两种回答的是同一个问题（「这条腿能不能
- * 拿到响应」），区别只在代价与能看到的证据 —— 免费计划跑不动 TLS 客户端（DO 会 CPU 超限），
- * 但 CF 边缘在 :80 同样按 Host 路由，封锁/放行会体现为不同的状态码，于是这是**最便宜的
+ * 拿到响应」），区别只在代价与能看到的证据 —— 另两种要完整 TLS 握手（tunnelfetch，只能在 DO 里跑）
+ * 或只能直连（gateway），而 CF 边缘在 :80 同样按 Host 路由，封锁/放行会体现为不同的状态码，于是这是**最便宜的
  * 真实 HTTP 证据**。7.361 之前它叫 `probeHttp80`，住在 `src/core/http80.ts` 里，与传输层
  * 各写一套「可选 relay、必带超时、close 要吞异常」的壳；合进来之后这些共同约定只有一份。
  */

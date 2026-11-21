@@ -32,7 +32,7 @@ function pick(on: ReadonlySet<string>, name: string, v: number): number {
  */
 export function factMul(on: ReadonlySet<string>, host: string, ip: string, mode: string, cf = false): number {
   let m = 1;
-  m *= pick(on, "eg", EG.bias(ip, cf));
+  m *= pick(on, "eg", EG.biasFor(host, ip, cf));
   m *= pick(on, "dns", DNS.penOf(host, EG.famOf(ip)));
   m *= pick(on, "ps", PS.factor(host, ip));
   m *= pick(on, "cap", CAP.factor(ip, mode));

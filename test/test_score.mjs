@@ -1798,7 +1798,7 @@ W.VT.clear();
   eq("?e=0 时不发实测组", y0.includes("url: https://probe.example.org/"), false);
 }
 
-// 第 38b 组：中继优选条目（把「经某条中继」做成客户端可实测的节点）
+// 第 38b 组：中继组已删除（r- 节点的 IP 是假标签，交服务端 policy 动态选路）
 {
   const envR = { uuid: "u", nodes: "", proxyip: "auto" };
   const keep = S.alive;
@@ -1807,21 +1807,21 @@ W.VT.clear();
     ["198.51.100.9:443", { h: "198.51.100.9", p: 443, cc: "", ms: 180, src: "pool" }],
   ]);
   const yr = W.renderClash(envR, new URL("https://example.com/x"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
-  eq("中继条目：每条中继 × 协议 × 模式（成对出现）", (yr.match(/name: "r-/g) || []).length % 2 === 0 && (yr.match(/name: "r-/g) || []).length >= 4, true);
-  eq("中继条目含首条与次条", yr.includes("r-203.0.113.7-") && yr.includes("r-198.51.100.9-"), true);
-  eq("中继条目不钉 rx，走服务端动态选路", yr.includes("rx=203.0.113.7") === false && yr.includes("px=1") === false && yr.includes("ip=relay"), true);
-  eq("中继优选组按 /health 实测", yr.includes('name: "\ud83d\udd01 \u4e2d\u7ee7\u4f18\u9009"'), true);
+    eq("不再发 r- 中继条目", (yr.match(/name: "r-/g) || []).length, 0);
+    eq("S.alive 里的中继不再泄漏进订阅", yr.includes("203.0.113.7") === false && yr.includes("198.51.100.9") === false, true);
+    eq("订阅里没有 rx 硬钉", /rx=203\.0\.113\.7|px=1|ip=relay/.test(yr), false);
+    eq("不再有中继优选组", yr.includes("\u4e2d\u7ee7\u4f18\u9009"), false);
   const y0r = W.renderClash(envR, new URL("https://example.com/x?e=0"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
-  // 冷 isolate 里 S.alive 是空的，但事实层（跨 isolate 共享）知道哪些中继是 v4 出口 —— 必须先发它们
+    // 冷 isolate：S.alive/eg4Top 都不应再泄漏成订阅节点
   const keepTop = S.eg4Top;
   S.alive = new Map();
   S.eg4Top = ["192.0.2.44"];
   const yt = W.renderClash(envR, new URL("https://example.com/x"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
-  eq("冷 isolate：中继条目来自事实层的 v4 出口（不钉 rx）", yt.includes("r-192.0.2.44-") && yt.includes("rx=192.0.2.44") === false, true);
+    eq("冷 isolate 不因 eg4Top 发中继条目", yt.includes("192.0.2.44"), false);
   S.eg4Top = keepTop;
-  // ?e=0 只是「不发入口 IP 条目」（那是列表里最占地方的一块），中继条目仍要发：
-  // 它们承载 ?tu= 通道实测，一并删掉等于把「客户端自己挑中继」这条路关死。
-  eq("?e=0 只关入口条目、中继条目仍在", y0r.includes('name: "r-203.0.113.7-'), true);
+    // ?e=0 只关入口条目；中继组已删，两者互不影响：
+    // 通道实测组成员退化为入口/节点，仍可用。
+    eq("?e=0 时也没有 r- 条目", (y0r.match(/name: "r-/g) || []).length, 0);
   eq("?e=0 时入口条目消失", (y0r.match(/name: "e-/g) || []).length, 0);
   S.alive = keep;
 }
@@ -1858,7 +1858,7 @@ W.VT.clear();
   eq("probe 确认过能通的通道不被小响应当掉", W.Prefs.chan("9.9.9.8", "x.com"), 0);
   W.VT.clear();
 }
-// 第 41 组：差分复核链路已删除（免费计划单次 userland TLS 握手就超 CPU 预算，实测 1102）
+// 第 41 组：差分复核链路已删除（Worker 请求路径跑不动 userland TLS，实测 1102；DO 里单发 tunnelfetch 可以）
 // 它在 7.69 删掉 subtls 时就只剩空壳：两个探测开关（PROBE_REQ / PROBE_RND）恒为 0 ⇒ 入队闸门恒假、
 // 预算里 vt 份额恒为 0、runRound 立即返回 ⇒ 队列只进不出，?vtq=1 永远显示一份没人处理的积压。
 ok("两个探测开关已随复核链路一起删除（7.153：零读取点的假旋钮）", W.SC.PROBE_REQ === undefined && W.SC.PROBE_RND === undefined);
@@ -1915,10 +1915,10 @@ for (let i = 0; i < 3; i++) W.HOOK.traffic({ host: "z.com", via: "node", node: "
 eq("假 200 攒 3 次判该中继不可用", W.VT.bad("z.com", "r:6.6.6.6"), true);
 // 第 44 组：1 次请求感知 + 站点自愈（判定只改路由，永不断路）
 W.VT.clear(); W.S.needPx.clear(); W.JUDGE.memory.smCnt.clear(); W.JUDGE.memory.bigByHost.clear(); W.JUDGE.memory.bigChan.clear(); W.S.cfHttp.clear();
-// 1) 本出口 fetch 根路径 200（站点活着）+ 小响应 → 一次即判该通道被封
+// 1) 本出口 fetch 200 不再是判死旁证：没有另一通道整页差分，业务 403/小响应绝不判死
 W.S.cfHttp.set("x.com", { code: 200, colo: "VIE", t: Date.now() });
 W.HOOK.traffic({ host: "x.com", via: "node", node: "5.5.5.5:443", down: 4200, ok: false, life: 900, up: 300 });
-eq("1 次请求即可判定 IP 级封锁", W.VT.bad("x.com", "r:5.5.5.5"), true);
+eq("无整页差分时即使本出口 fetch 200 也不判死（业务 403 不误伤）", W.VT.bad("x.com", "r:5.5.5.5"), false);
 // 2) 站点自愈：所有中继都被判死时，决策仍给出中继，且该站点的结论被清空
 W.VT.clear();
 W.S.cfHttp.clear();
@@ -4526,7 +4526,7 @@ console.log("\n176) 预算账本与续回边界");
     ["198.51.100.9:443", { h: "198.51.100.9", p: 443, cc: "", ms: 180, src: "pool" }],
   ]);
   const yR = W.renderClash(envA, U(""), idA, "example.com");
-  ok("默认发中继条目", (yR.match(/name: "r-/g) || []).length > 0, "r- 条目数 " + (yR.match(/name: "r-/g) || []).length);
+    eq("默认不发中继条目", (yR.match(/name: "r-/g) || []).length, 0);
   const yNoR = W.renderClash(envA, U("?r=0"), idA, "example.com");
   eq("?r=0 时不发中继条目", (yNoR.match(/name: "r-/g) || []).length, 0);
   eq("?r=0 时也不发中继优选组", yNoR.includes("\u{1F501} \u4e2d\u7ee7\u4f18\u9009"), false);
@@ -4543,7 +4543,7 @@ console.log("\n176) 预算账本与续回边界");
       ? JSON.parse("[" + gLines[pi].slice(gLines[pi].indexOf("[") + 1, gLines[pi].lastIndexOf("]")) + "]")
       : [];
   eq("?tu= 有实测组", gi >= 0 && pi > gi, true);
-  ok("成员全部是按中继走的条目", members.length > 0 && members.every((x) => x.startsWith("r-")), "成员 " + members.join("/"));
+    ok("实测组成员是入口/节点条目（中继组已删）", members.length > 0 && members.every((x) => !x.startsWith("r-")), "成员 " + members.join("/"));
   ok("成员上限 10（每条都是一次对目标站的真实请求）", members.length > 0 && members.length <= 10, "成员数 " + members.length);
   const yTuNoR = W.renderClash(envA, U(tuQ + "&r=0"), idA, "example.com");
   eq("?r=0 时实测组不退化到入口条目", yTuNoR.includes("\u{1F4E1} \u901a\u9053\u5b9e\u6d4b"), false);
@@ -4802,22 +4802,22 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
     return s ? s.trim().slice(7).trim() : null;
   };
 
-  // ① ?e=0 只去掉入口 IP 条目：中继条目与它的 url-test 组都还在，server 回落到域名
+    // ① ?e=0 只去掉入口 IP 条目：中继组已删，不受影响
   const noEdgeTxt = render("?e=0");
-  ok("?e=0 时中继条目仍在", noEdgeTxt.includes("- name: \"r-45.136.117.194-VLT\""), "中继条目被 ?e=0 一起删掉了");
-  ok("?e=0 时中继优选组仍在", noEdgeTxt.includes("\"🔁 中继优选\""), "中继优选组被 ?e=0 一起删掉了");
+    eq("?e=0 时无 r- 条目", noEdgeTxt.includes("- name: \"r-"), false);
+    eq("中继优选组已删除", noEdgeTxt.includes("🔁 中继优选"), false);
   ok("?e=0 时入口条目确实没了", noEdgeTxt.includes("- name: \"e-") === false, "入口条目没被去掉");
-  eq("?e=0 时中继条目用域名入口", serverOf(noEdgeTxt, "r-45.136.117.194-VLT"), subHost);
+    eq("中继条目删除后 serverOf 返回 null", serverOf(noEdgeTxt, "r-45.136.117.194-VLT"), null);
 
-  // ② ?r=0 才是中继开关：中继条目与组都没了，入口条目照旧
+    // ② ?r=0 是遗留开关：中继组已删，入口条目照旧
   const noRelayTxt = render("?r=0");
   ok("?r=0 时中继条目消失", noRelayTxt.includes("- name: \"r-45.136.117.194-VLT\"") === false, "中继条目还在");
   ok("?r=0 时中继优选组消失", noRelayTxt.includes("\"🔁 中继优选\"") === false, "中继优选组还在");
   ok("?r=0 时入口条目仍在", noRelayTxt.includes("- name: \"e-"), "入口条目被连带删掉了");
 
-  // ③ 默认（两个开关都不给）：入口 IP 还在时，中继条目必须钉在入口 IP 上，不能退化成域名
+    // ③ 默认（两个开关都不给）：入口 IP 条目照旧
   const defTxt = render("");
-  ok("默认时中继条目钉入口 IP", /^\d+\.\d+\.\d+\.\d+$/.test(String(serverOf(defTxt, "r-45.136.117.194-VLT"))), "中继条目的 server 不是 IP 字面量");
+    ok("默认仍发入口 IP 条目", defTxt.includes("- name: \"e-"), "入口条目没发出");
 
   // ④ RegionEntry 的端口兜底：url 省略时不能是 undefined（`NaN || undefined` 还是 undefined）
   const regs = W.regionEntries(["HK"], subHost, "", ["vless"], undefined);
@@ -4830,9 +4830,9 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   W.S.alive = aliveBefore;
   W.S.eg4Top = egBefore;
 
-  // ⑤ 源码锁：两个开关必须是两个独立条件；兜底写法必须在位
+    // ⑤ 源码锁：中继组已删、入口兜底仍在
   const srcSub = fs.readFileSync("src/views/sub.ts", "utf8");
-  ok("中继块只判 noRelay", srcSub.includes("if (!noRelay) {"), "条件里还带着 noEdge");
+    ok("中继块已删除", !srcSub.includes("if (!noRelay) {") && !srcSub.includes("const G_RELAY"), "中继块还在");
   eq("中继块不再要求入口 IP 存在", srcSub.includes("if (!noEdge && !noRelay) {"), false);
   const srcCommon = fs.readFileSync("src/views/sub-common.ts", "utf8");
   ok("地区条目端口有显式兜底", srcCommon.includes(': 443;'), "端口兜底不见了");
@@ -7689,7 +7689,7 @@ eq("拆地址：方括号无端口", W.splitRelay("[2a06:98c0::103]", 443).join(
 ok("调试探针不再内联拆地址", !netsAll().includes('lastIndexOf(":")') && netsAll().includes("const [ph, pp] = splitRelay(pr, 443);"));
 ok("池子探活不再内联拆地址", !scanAll().includes('lastIndexOf(":")') && scanAll().includes("splitRelay(key, 443)"));
 ok("名单打包不再内联拆地址", !code265("src/px/seed.ts").includes("k.slice(0, i)") && code265("src/px/seed.ts").includes("splitRelay(k, 443)"));
-ok("订阅渲染不再内联拆地址", !code265("src/views/sub.ts").includes('lastIndexOf(":")') && code265("src/views/sub.ts").includes("const [ip] = splitRelay(k, 443);"));
+ok("订阅渲染不再内联拆地址", !code265("src/views/sub.ts").includes('lastIndexOf(":")'));
 
 eq("配代理 IP：裸 v6 不当作「主机:端口」", px265("2a06:98c0::103").host + "|" + px265("2a06:98c0::103").port, "2a06:98c0::103|443");
 eq("配代理 IP：方括号 v6 + 端口", px265("[2a06:98c0::103]:8443").host + "|" + px265("[2a06:98c0::103]:8443").port, "2a06:98c0::103|8443");
@@ -13217,7 +13217,7 @@ if (fs.existsSync(midPath)) {
     const doc = fs.readFileSync(docPath, "utf8");
     ok(`[${G}] 门禁文件存在`, fs.existsSync(gate));
     ok(`[${G}] 文档有清单起止标记`, doc.includes("<!-- singleton-list:start -->") && doc.includes("<!-- singleton-list:end -->"));
-ok(`[${G}] 文档声明 46 个`, doc.includes("46 处声明"));
+ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
     ok(`[${G}] 门禁接进 preflight`, fs.readFileSync("tools/preflight.mjs", "utf8").includes("tools/check-singletons.mjs"));
     ok(`[${G}] 门禁支持 SINGLETON_DOC 覆盖`, gateSrc.includes("SINGLETON_DOC"));
     // 行为：干净文档退出 0。
@@ -13376,8 +13376,65 @@ ok(`[${G}] 文档声明 46 个`, doc.includes("46 处声明"));
   eq(`[${G}] probeUrlOf 缺省`, W.probeUrlOf(new URL("https://h/u")), "https://x.com/");
   // 中继条目不再钉 rx（结构锁：源码里 r- 条目的 emit 路径无 rx=）
   const subSrc = fs.readFileSync("src/views/sub.ts", "utf8");
-  ok(`[${G}] 中继条目不钉 rx`, subSrc.includes("ip=relay&mode=${mode}`") && !subSrc.includes("ip=relay&mode=${mode}&px=1"));
+    ok(`[${G}] 中继组已删除（无 r- 条目/无 ip=relay）`, !subSrc.includes("ip=relay") && !subSrc.includes("const G_RELAY"));
 }
+
+
+  // 388. famfacts：站点×出口族实测定价（取代 CF 目标 v6 一刀切 ×40）
+  {
+    const G = 388;
+    const egSrc = fs.readFileSync("src/route/egfacts.ts", "utf8");
+    const fmSrc = fs.readFileSync("src/route/factmul.ts", "utf8");
+    const jdSrc = fs.readFileSync("src/route/judge.ts", "utf8");
+    ok([`[${G}] egfacts 有 biasFor`], egSrc.includes("biasFor(host: string"));
+    ok([`[${G}] egfacts 有 FamFacts 类`], egSrc.includes("export class FamFacts"));
+    ok([`[${G}] egfacts 有 FAM 单例`], egSrc.includes("export const FAM = new FamFacts()"));
+    ok([`[${G}] factmul 走 biasFor`], fmSrc.includes("EG.biasFor(host, ip, cf)"));
+    ok([`[${G}] judge 写 famfacts`], jdSrc.includes("FAM.note(e.host, pipFam"));
+    // 行为：用独立 T 实例 + 全局 FAM（biasFor 内部读全局）
+    const T = new W.EgFacts();
+    const t0 = 1750000000000;
+    const v6 = "2001:db8::88";
+    T.note(v6, 6, t0);
+    W.FAM.clear();
+    // 样本不足 2 条 → 回退旧的 ×40
+    W.FAM.note("fam.test", 6, true, t0);
+    eq([`[${G}] 样本<2 回退旧口径`], T.biasFor("fam.test", v6, true, t0 + 10), 40);
+    // 3 条 v6 全成功 → 放松到 1
+    W.FAM.note("fam.test", 6, true, t0 + 11);
+    W.FAM.note("fam.test", 6, true, t0 + 12);
+    eq([`[${G}] v6 全成功放松到 1`], T.biasFor("fam.test", v6, true, t0 + 13), 1);
+    eq([`[${G}] 成功率读对`], W.FAM.rate("fam.test", 6, t0 + 13).r, 1);
+    // 3 条 v6 全失败 → 40（和旧口径一致）
+    W.FAM.clear();
+    W.FAM.note("fam.test", 6, false, t0);
+    W.FAM.note("fam.test", 6, false, t0 + 1);
+    W.FAM.note("fam.test", 6, false, t0 + 2);
+    eq([`[${G}] v6 全失败保持 40`], T.biasFor("fam.test", v6, true, t0 + 3), 40);
+    // 1 成功 1 失败 → r=0.5 → 20.5，介于 1 和 40
+    W.FAM.clear();
+    W.FAM.note("fam.test", 6, true, t0);
+    W.FAM.note("fam.test", 6, false, t0 + 1);
+    const mid = T.biasFor("fam.test", v6, true, t0 + 2);
+    ok([`[${G}] 半成功介于 1 与 40`], mid > 1 && mid < 40);
+    eq([`[${G}] 半成功乘数 20.5`], mid, 20.5);
+    // 未知族不受 FAM 影响（保持探索偏置 ×2）
+    eq([`[${G}] 未知族仍 ×2`], T.biasFor("fam.test", "198.51.100.99", true, t0 + 2), 2);
+    // 非 CF 站点 FAM 不介入
+    eq([`[${G}] 非 CF 站点不受 FAM 影响`], T.biasFor("fam.test", v6, false, t0 + 2), 1.05);
+    // 过期样本回退
+    W.FAM.clear();
+    W.FAM.note("fam.test", 6, true, t0);
+    W.FAM.note("fam.test", 6, true, t0 + 1);
+    // EG 行保持在观测时刻新鲜，只让 FAM 样本过期（两者 TTL 同源，错开写入时间才能分开验）
+    const late = t0 + W.EG_TTL + 10;
+    T.note(v6, 6, late);
+    eq([`[${G}] 过期样本回退`], T.biasFor("fam.test", v6, true, late), 40);
+    // note 的 ok 参数只认整页语义由调用方保证，这里验 ev-note 的计数与 clear
+    eq([`[${G}] 站点×族分开记`], (W.FAM.note("fam.test", 4, true, t0), W.FAM.size()), 2);
+    W.FAM.clear();
+    eq([`[${G}] clear 后为空`], W.FAM.size(), 0);
+  }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
