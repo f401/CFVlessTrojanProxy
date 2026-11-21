@@ -13321,6 +13321,27 @@ ok(`[${G}] 文档声明 46 个`, doc.includes("46 处声明"));
     await new Promise((r) => setTimeout(r, 100));
     eq(`[${G}] 无 onClose 不记 fbwd`, (W.cntView().fbwd || 0) - fbwd0, 0);
   }
+
+  // ④ 多跳补救链：run() 挂新跳前必须重置 notified，否则第二跳黑洞的看门狗触发后
+  //    close/catch 的 !notified 守卫挡住 onClose，换路断链、客户端干等到 30s。
+  ok(`[${G}] run 每跳重置 notified`, fs.readFileSync("src/proxy/attacher.ts", "utf8").includes("conn.notified = false;"));
+  {
+    const conn = new W.Connection({}, "u386b", "", "tput");
+    conn.notified = true; // 模拟第一跳已收尾
+    let ctrl = null;
+    const sock = {
+      readable: new ReadableStream({ start(c) { ctrl = c; } }),
+      closed: Promise.resolve(),
+      writable: { getWriter: () => ({ write: async () => {}, releaseLock() {} }) },
+      close() { try { ctrl.error(new Error("done")); } catch (e) {} },
+    };
+    const ws = ws386();
+    // 空 payload 跳过 upWrite，run 直接挂 pipeBack；此时 notified 应已重置
+    await new W.Attacher().run({ conn, clientSocket: ws, payload: new Uint8Array(0), env: {}, host: "x.com", port: 443, mode: "tput" }, sock);
+    eq(`[${G}] 新跳 notified 归零`, conn.notified, false);
+    sock.close();
+    await new Promise((r) => setTimeout(r, 30));
+  }
 }
 
 

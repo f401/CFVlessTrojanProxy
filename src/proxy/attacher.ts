@@ -70,6 +70,11 @@ export class Attacher {
     conn.headerSent = false;
     conn.tAttach = Date.now(); // 首字节耗时从这里起算
     conn.ttfb = 0;
+    // notified 是「本跳已收尾、防 close/catch 双调」的单跳标志，多跳补救链复用同一个
+    // conn：不重置的话第一跳置 true 后，第二跳黑洞即使看门狗触发也被 !notified 挡住，
+    // onClose 不再调 → 换中继断链，客户端干等到 30s 定时器（实测 10759ms ws error）。
+    // 重置只影响这一跳的 pipeBack，仍在同一跳内防双调，不改 7.270 的补救顺序。
+    conn.notified = false;
     // 首包写也要有上限：黑洞中继接了连接却不读，write 永不返回，而客户端已经等在首字节上
     if (payload.length) await conn.upWrite(payload, FIRST_UP_MS);
 
