@@ -1809,7 +1809,7 @@ W.VT.clear();
   const yr = W.renderClash(envR, new URL("https://example.com/x"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
   eq("中继条目：每条中继 × 协议 × 模式（成对出现）", (yr.match(/name: "r-/g) || []).length % 2 === 0 && (yr.match(/name: "r-/g) || []).length >= 4, true);
   eq("中继条目含首条与次条", yr.includes("r-203.0.113.7-") && yr.includes("r-198.51.100.9-"), true);
-  eq("中继条目钉住具体中继", yr.includes("rx=203.0.113.7") && yr.includes("px=1"), true);
+  eq("中继条目不钉 rx，走服务端动态选路", yr.includes("rx=203.0.113.7") === false && yr.includes("px=1") === false && yr.includes("ip=relay"), true);
   eq("中继优选组按 /health 实测", yr.includes('name: "\ud83d\udd01 \u4e2d\u7ee7\u4f18\u9009"'), true);
   const y0r = W.renderClash(envR, new URL("https://example.com/x?e=0"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
   // 冷 isolate 里 S.alive 是空的，但事实层（跨 isolate 共享）知道哪些中继是 v4 出口 —— 必须先发它们
@@ -1817,7 +1817,7 @@ W.VT.clear();
   S.alive = new Map();
   S.eg4Top = ["192.0.2.44"];
   const yt = W.renderClash(envR, new URL("https://example.com/x"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "example.com");
-  eq("冷 isolate：中继条目来自事实层的 v4 出口", yt.includes("r-192.0.2.44-") && yt.includes("rx=192.0.2.44"), true);
+  eq("冷 isolate：中继条目来自事实层的 v4 出口（不钉 rx）", yt.includes("r-192.0.2.44-") && yt.includes("rx=192.0.2.44") === false, true);
   S.eg4Top = keepTop;
   // ?e=0 只是「不发入口 IP 条目」（那是列表里最占地方的一块），中继条目仍要发：
   // 它们承载 ?tu= 通道实测，一并删掉等于把「客户端自己挑中继」这条路关死。
@@ -13344,6 +13344,28 @@ ok(`[${G}] 文档声明 46 个`, doc.includes("46 处声明"));
   }
 }
 
+
+// 第 387 组：默认 url-test 探测目标改 CF 站点（?pu= 可覆盖），v6 出口通道在测速阶段即被淘汰
+{
+  const G = "387";
+  const envP = { uuid: "u", proxyip: "auto", defaultMode: "tput" };
+  const urlP = new URL("https://edge.example.com/u");
+  const rClash = W.renderClash(envP, urlP, "4241b903-8d39-4a17-8f4c-bb33b1630c33", "edge.example.com");
+  const rSb = W.renderSingbox(envP, urlP, "4241b903-8d39-4a17-8f4c-bb33b1630c33", "edge.example.com");
+  // 默认目标：两种格式都不再用 gstatic，改指 CF 站点
+  ok(`[${G}] clash 默认探测目标不是 gstatic`, !rClash.includes("gstatic.com") && rClash.includes("url: https://x.com/"));
+  ok(`[${G}] singbox 默认探测目标不是 gstatic`, !rSb.includes("gstatic.com") && /"url":\s*"https:\/\/x\.com\/"/.test(rSb));
+  // ?pu= 可覆盖（合法 https）
+  const rPu = W.renderClash(envP, new URL("https://edge.example.com/u?pu=https://cloudflare.com/"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "edge.example.com");
+  ok(`[${G}] ?pu= 覆盖探测目标`, rPu.includes("url: https://cloudflare.com/") && !rPu.includes("url: https://x.com/"));
+  // 非法 ?pu= 回落默认
+  eq(`[${G}] probeUrlOf 合法覆盖`, W.probeUrlOf(new URL("https://h/u?pu=https://ok.example/a")), "https://ok.example/a");
+  eq(`[${G}] probeUrlOf 非法回落`, W.probeUrlOf(new URL("https://h/u?pu=http://bad")), "https://x.com/");
+  eq(`[${G}] probeUrlOf 缺省`, W.probeUrlOf(new URL("https://h/u")), "https://x.com/");
+  // 中继条目不再钉 rx（结构锁：源码里 r- 条目的 emit 路径无 rx=）
+  const subSrc = fs.readFileSync("src/views/sub.ts", "utf8");
+  ok(`[${G}] 中继条目不钉 rx`, subSrc.includes("ip=relay&mode=${mode}`") && !subSrc.includes("ip=relay&mode=${mode}&px=1"));
+}
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

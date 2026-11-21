@@ -1,4 +1,4 @@
-import { secretPwd } from "../core/util";
+import { secretPwd, probeUrlOf } from "../core/util";
 import { S } from "../core/state";
 import { IpFamily, IpLevel } from "../core/enums";
 import { AliveBoard } from "../px/alive";
@@ -149,7 +149,7 @@ export function renderSingbox(
       type: "urltest",
       tag: G_TPUT,
       outbounds: pick(byMode.tput, 5),
-      url: "http://www.gstatic.com/generate_204",
+      url: probeUrlOf(url),
       interval: "5m",
       tolerance: 30,
     },
@@ -166,7 +166,7 @@ export function renderSingbox(
       type: "urltest",
       tag: G_LAT,
       outbounds: pick(byMode.lat, 5),
-      url: "http://www.gstatic.com/generate_204",
+      url: probeUrlOf(url),
       interval: "5m",
       tolerance: 30,
     },

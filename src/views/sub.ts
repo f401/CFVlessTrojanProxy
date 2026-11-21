@@ -1,4 +1,5 @@
 import { X_EDGE_IPS, edgeCount, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, REGION_SUB, trojanPasswordOf, renderLinks, renderSingbox } from "./sub-common";
+import { probeUrlOf } from "../core/util";
 import { S } from "../core/state";
 import { splitRelay } from "../core/relay-addr";
 
@@ -83,6 +84,9 @@ export function renderClash(
   const nodes = orderNodes(loadNodes(env, host), learned);
   const pass = trojanPasswordOf(env, id, auth);
   const protos = pickProtos(env, url, Boolean(pass));
+  // 默认 url-test 探测目标：gstatic 对 v6 出口也回 204 会误判，改用会拒 v6 的 CF 站点。
+  // ?pu=<https-url> 可覆盖，不把单一站点写死。
+  const probeUrl = probeUrlOf(url);
   const out: string[] = [];
   const byMode: Record<string, string[]> = { lat: [], tput: [] };
   const all = [];
@@ -158,10 +162,11 @@ export function renderClash(
     }
   }
 
-  // 中继优选条目：把「经这条中继」做成可被客户端实测的节点。
-  // 中继那一跳的容量差异可达 3–6 倍（本地实测 275 KB/s vs 1642 KB/s），
-  // 而服务端每条连接可能落在新 isolate 上、拿不到别的 isolate 的样本（不跨 isolate 共享），
-  // 只有客户端自己逐条试才稳；路径里的 px=1&rx=<ip> 由服务端钉住该中继。
+  // 中继优选条目：节点名带具体中继 IP，但路径不再钉 rx=<ip>。
+  // 原因（2026-11-21 实测）：逐条钉住的 rx 中继里 8 条有 6 条是 v6 出口或黑洞，
+  // 而 url-test 用 gstatic（非 CF 站点）探测时 v6 也能拿 204 → 全显示绿色，
+  // 一旦打 CF 托管的 x.com 就撞 737B IPv6 拒绝页。去掉 rx 与 px 后交给服务端 policy
+  // 动态选路（已验证默认 8/8），坏出口被 EG 事实与判定表自动避开。
   const relayNames: string[] = [];
   const relayIps: string[] = [];
   // 中继块只由 ?r=0 控制。之前写的是 `!noEdge && !noRelay`，于是 `?e=0`（只想减少入口条目，
@@ -187,7 +192,7 @@ export function renderClash(
         for (const ip of relayIps) {
           const name = `r-${ip}-${proto === "trojan" ? "TJ" : "VL"}${suffix}`;
           const srv = edgeIps.length ? String(edgeIps[relayNames.length % edgeIps.length]) : host;
-          emit(name, proto, srv, 443, `/?ed=2560&ip=relay&mode=${mode}&px=1&rx=${ip}`, true, "");
+          emit(name, proto, srv, 443, `/?ed=2560&ip=relay&mode=${mode}`, true, "");
           relayNames.push(name);
           all.push(name);
         }
@@ -266,7 +271,7 @@ export function renderClash(
   // 全不通时，用户至少还能走域名。url-test 只在这些成员之间测速，顺序本身表达的是可信度。
   groups.push(`  - name: "${G_TPUT}"`);
   groups.push(`    type: url-test`);
-  groups.push(`    url: http://www.gstatic.com/generate_204`);
+  groups.push(`    url: ${probeUrl}`);
   groups.push(`    interval: 300`);
   groups.push(`    tolerance: 30`);
   groups.push(`    lazy: false`);
@@ -282,7 +287,7 @@ export function renderClash(
 
   groups.push(`  - name: "${G_LAT}"`);
   groups.push(`    type: url-test`);
-  groups.push(`    url: http://www.gstatic.com/generate_204`);
+  groups.push(`    url: ${probeUrl}`);
   groups.push(`    interval: 300`);
   groups.push(`    tolerance: 30`);
   groups.push(`    lazy: false`);

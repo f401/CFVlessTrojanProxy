@@ -407,6 +407,19 @@ export function errMsg(e: unknown, max = 200): string {
   return out.slice(0, max);
 }
 
+/**
+ * 订阅默认 url-test 探测目标：gstatic（非 CF 托管）对 IPv6 出口也回 204，
+ * 于是 v6 黑洞/被拒通道在测速里显示绿色、被默认组选中，打 CF 站就撞 737B 拒绝页。
+ * 改用一个「对 v6 出口返回非 200」的 CF 托管站点做探测，v6 通道在测速阶段即被淘汰。
+ * ?pu=<https-url> 可覆盖，避免把单一站点写死进逻辑。放在 core：clash 与 sing-box 两个渲染器共用。
+ * @param url 订阅请求 URL（读 ?pu=）
+ * @returns 探测 URL（非法/缺省回落到默认 CF 站点）
+ */
+export function probeUrlOf(url: URL): string {
+  const raw = url.searchParams.get("pu") || "";
+  return /^https:\/\/[^\s"]+$/.test(raw) ? raw : "https://x.com/";
+}
+
 // ---- 门面（对外导出面保持不变） ----
 // 通用工具门面：`VERSION` 与「历史 import 路径」的再导出。
 //
@@ -416,7 +429,7 @@ export function errMsg(e: unknown, max = 200): string {
 // 1) 对外导出面不变（六十多个调用点零改动，「行为不变」由测试证明）；
 // 2) `VERSION` 仍然只有这一处真源（`doc-audit` 与发版脚本都读它）。
 
-export const VERSION = "7.386";
+export const VERSION = "7.387";
 
 // `sha224` 单独一行：它 `import { toU8 } from "./bytes"`，若挂在 `bytes.ts` 的再导出里
 // 就会形成 `bytes → sha224 → bytes` 的真循环（`tools/check-arch.js` 会报文件级循环）。

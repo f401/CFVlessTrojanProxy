@@ -45,6 +45,7 @@ export {
   edgeCount,
 } from "./views/sub";
 export { regionEntries, REGION_SUB, RegionSubscription } from "./views/sub-common";
+export { probeUrlOf } from "./core/util";
 export { SubscriptionView } from "./views/sub";
 export { RouteTable } from "./routes/table";
 export { PageView } from "./views/panel";
