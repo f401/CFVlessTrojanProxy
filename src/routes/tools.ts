@@ -310,7 +310,8 @@ export class RegionsView {
    */
   private groupsHtml(rows: RegionNodeRow[], selected: Set<string>, pinnedSelected: Set<string>, withRtt: boolean, postAction: string): string {
     const parts: string[] = [];
-    const actionHtml = escapeHtml(postAction);
+    // 探测按钮是 type="button" + 面板脚本 fetch，不再需要 formaction；postAction 由 htmlView 走 postActionJson 传给脚本
+    void postAction;
     // 一个国家一个勾选框 + 一张表：勾选状态回填，避免用户保存时丢掉已选地区
     for (const g of groupRows(rows)) {
       // 每个国家（含全未探的国家）都给勾选框：冷 isolate 里也必须能选地区
@@ -323,12 +324,13 @@ export class RegionsView {
           const rtt = withRtt
             ? `<td>${r.rtt == null ? "—" : escapeHtml(Math.round(r.rtt) + " ms")}</td><td>${escapeHtml(psLabel(r.psOk))}</td><td>${r.blkPenalty > 1 ? "封锁" : "—"}</td>`
             : "";
-          // 重探按钮用 formaction 覆盖外层表单的 action/op，避免嵌套表单（HTML 不允许 form 嵌 form）
+          // 探测按钮必须是 type="button"：这些按钮在保存表单内部，若用 submit 即使 JS preventDefault
+          // 一旦竞态失败，表单导航会 abort 掉正在进行的 fetch → 浏览器报 NetworkError。button 类型永不提交表单。
           // 去掉全表共享的隐藏 key 字段：多行的隐藏 input 会被一起提交，f.get("key") 只拿到第一行 =
           // 永远探错节点。改成按钮自带 data-key，由面板脚本在点击时写入 FormData（见 regions.html）。
-          const recheck = `<td><button type="submit" name="op" value="requality" data-probe="1" data-key="${escapeHtml(r.key)}" formaction="${actionHtml}" class="lnkbtn">重探质量</button></td>`;
+          const recheck = `<td><button type="button" name="op" value="requality" data-probe="1" data-key="${escapeHtml(r.key)}" class="lnkbtn">重探质量</button></td>`;
           // 对指定节点测用户在「节点连通测试」框里填的网站：按钮 value 带节点 key，网站走表单的 checkSite 字段
-          const nodecheck = `<td><button type="submit" name="op" value="nodecheck:${escapeHtml(r.key)}" data-probe="1" formaction="${actionHtml}" class="lnkbtn">测连通</button></td>`;
+          const nodecheck = `<td><button type="button" name="op" value="nodecheck:${escapeHtml(r.key)}" data-probe="1" class="lnkbtn">测连通</button></td>`;
           // 具体节点勾选：回填已 pin 的行；保存后订阅里单独成组（只进手动组，不改默认选路）
           const pinnedChecked = pinnedSelected.has(r.key) ? " checked" : "";
           // 出站 IP 单独成列：key 就是 host:port，抽 host 出来高亮，便于一眼确认出口地址
@@ -406,7 +408,8 @@ export class RegionsView {
       QUALITY.recheckMark(ck);
       const resp = await runTfb({ env: this.c.env }, site, 2);
       const out = (await resp.json().catch(() => ({}))) as { verdict?: string; probed?: number; okN?: number; rows?: Array<{ relay: string; status?: number; ms?: number }> };
-      const rows = (out.rows || []).slice(0, 8).map((r) => `${String(r.relay).replace(/[:[\]]/g, "")}:${r.status ?? "?"}/${r.ms ?? "?"}ms`);
+      // 只去 IPv6 的方括号，不能把 host:port 的冒号也删掉（否则出现 45.136.117.194443 这种粘连）
+      const rows = (out.rows || []).slice(0, 8).map((r) => `${String(r.relay).replace(/[[\]]/g, "")}:${r.status ?? "?"}/${r.ms ?? "?"}ms`);
       return new Response(`探测 ${site}：${out.verdict || "?"} ${out.okN ?? 0}/${out.probed ?? 0} 成功\n` + rows.join("\n"));
     }
     // 逐节点质量重探：复用 QualityProbe.qualityOf（6 源合并），缓存 3 天，手动可强制刷新
@@ -419,7 +422,9 @@ export class RegionsView {
       const [h] = splitRelay(key, 443);
       const fam = h.includes(":") ? IpFamily.IPv6 : IpFamily.IPv4;
       const q = await QUALITY_PROBE.qualityOf(key, h, this.c.budget, fam);
-      return new Response(`重探 ${key}：${q.level} / ${String(q.kind)} / ${q.proxy ? "代理 " : ""}${q.vpn ? "VPN" : ""}`);
+      // 标签拼成数组再过滤空值：proxy/vpn 都否定时不能留下悬空的「 / 」（用户看到的"奇怪东西"）
+      const tags = [String(q.level), String(q.kind), q.proxy ? "代理" : "", q.vpn ? "VPN" : ""].filter(Boolean);
+      return new Response(`重探 ${key}：${tags.join(" / ")}`);
     }
     // 对指定节点测用户输入的网站：钉一条中继跑 runTfb，看连通与是否被 ban。
     // 只做诊断展示，不额外写封禁（runTfb 内部仍按「两批共识 + 有 2xx」的硬规则写判定表）。

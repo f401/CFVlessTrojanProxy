@@ -13603,6 +13603,27 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
   W.S.seed = saveSeed391;
 }
 
+// 第 392 组：修探测按钮 NetworkError + 探测结果文本格式（冒号粘连/悬空分隔符）
+{
+  const tools392 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  const tpl392 = fs.readFileSync("src/views/html/regions.html", "utf8");
+  // 根因1：探测按钮从 submit 改 button，避免表单导航 abort fetch → NetworkError
+  ok("[392] 重探按钮 type=button", tools392.includes('type="button" name="op" value="requality"'));
+  ok("[392] 测连通按钮 type=button", tools392.includes('type="button" name="op" value="nodecheck:'));
+  ok("[392] 按钮不再用 formaction", !tools392.includes("formaction="));
+  ok("[392] 开始探测按钮 type=button", tpl392.includes('type="button" data-act="site-probe"'));
+  // 根因2：relay 只去方括号、保留 host:port 冒号（原 replace 把冒号删了 → 45.136.117.194443）
+  ok("[392] relay 只去方括号", tools392.includes('replace(/[[\\]]/g, "")'));
+  ok("[392] 冒号粘连注释在", tools392.includes("45.136.117.194443"));
+  // 根因3：requality 标签拼数组过滤空值，去掉悬空 " / "
+  ok("[392] 标签数组过滤空值", tools392.includes('.filter(Boolean)') && tools392.includes("tags.join"));
+  // hint 文案与 catch 人话化
+  ok("[392] 探测 hint 无奇怪文案", tpl392.includes("各出口能否打开"));
+  ok("[392] 测连通 hint 说明用途", tpl392.includes("识别是否被 ban"));
+  ok("[392] catch 人话提示", tpl392.includes("请检查网络后重试") && tpl392.includes("e.message"));
+  ok("[392] catch 无裸 e 拼接", !tpl392.includes("show('请求失败：'+e)"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
