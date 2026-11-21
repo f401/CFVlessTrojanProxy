@@ -13354,6 +13354,18 @@ ok(`[${G}] 文档声明 46 个`, doc.includes("46 处声明"));
   const rSb = W.renderSingbox(envP, urlP, "4241b903-8d39-4a17-8f4c-bb33b1630c33", "edge.example.com");
   // 默认目标：两种格式都不再用 gstatic，改指 CF 站点
   ok(`[${G}] clash 默认探测目标不是 gstatic`, !rClash.includes("gstatic.com") && rClash.includes("url: https://x.com/"));
+  // 吞吐/速率组必须带 expected-status: 200 —— 否则 url-test 把 v6 出口的 737B 403 也当「通」，
+  // 测速快就选中，用户仍看到 IPv6 拒绝页。按组名定位块，确认每组都有这条。
+  {
+    const hasExpected = (name) => {
+      const i = rClash.indexOf(`- name: "${name}"`);
+      if (i < 0) return false;
+      const blk = rClash.slice(i, rClash.indexOf("- name:", i + 10) < 0 ? rClash.length : rClash.indexOf("- name:", i + 10));
+      return blk.includes("expected-status: 200");
+    };
+    ok(`[${G}] 吞吐组拒绝非200`, hasExpected("🚀 吞吐优先"));
+    ok(`[${G}] 速率组拒绝非200`, hasExpected("⚡ 速率优先"));
+  }
   ok(`[${G}] singbox 默认探测目标不是 gstatic`, !rSb.includes("gstatic.com") && /"url":\s*"https:\/\/x\.com\/"/.test(rSb));
   // ?pu= 可覆盖（合法 https）
   const rPu = W.renderClash(envP, new URL("https://edge.example.com/u?pu=https://cloudflare.com/"), "4241b903-8d39-4a17-8f4c-bb33b1630c33", "edge.example.com");

@@ -1,10 +1,10 @@
 {
-  "version": "7.386",
+  "version": "7.388",
   "items": [
     {
       "name": "clash",
-      "bytes": 9849,
-      "sha": "89cca560ee651c18f666bb94d6780305"
+      "bytes": 9899,
+      "sha": "609a63b767e176bf434a578d94801f32"
     },
     {
       "name": "singbox",

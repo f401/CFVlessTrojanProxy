@@ -272,6 +272,9 @@ export function renderClash(
   groups.push(`  - name: "${G_TPUT}"`);
   groups.push(`    type: url-test`);
   groups.push(`    url: ${probeUrl}`);
+  // expected-status 必须写：url-test 默认「拿到任意 HTTP 响应就算通」，
+  // v6 出口打 CF 站拿到的是 737B 403，不写这条会被当可用、测速快就选中 → 用户仍看到 IPv6 拒绝页。
+  groups.push(`    expected-status: 200`);
   groups.push(`    interval: 300`);
   groups.push(`    tolerance: 30`);
   groups.push(`    lazy: false`);
@@ -288,6 +291,7 @@ export function renderClash(
   groups.push(`  - name: "${G_LAT}"`);
   groups.push(`    type: url-test`);
   groups.push(`    url: ${probeUrl}`);
+  groups.push(`    expected-status: 200`);
   groups.push(`    interval: 300`);
   groups.push(`    tolerance: 30`);
   groups.push(`    lazy: false`);
