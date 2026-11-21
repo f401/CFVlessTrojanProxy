@@ -13436,6 +13436,87 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
     eq([`[${G}] clear 后为空`], W.FAM.size(), 0);
   }
 
+
+// 第 389 组：面板勾选具体节点（pinnedNodes）—— 数据层归一化 + 面板勾选框 + 订阅独立分组
+{
+  const G = 389;
+  const proto389 = fs.readFileSync("src/proxy/protocol.ts", "utf8");
+  const tools389 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  const sub389 = fs.readFileSync("src/views/sub.ts", "utf8");
+  const app389 = fs.readFileSync("types/app.d.ts", "utf8");
+  // ---- 结构锁 ----
+  ok(`[${G}] UserRec 有 pinnedNodes 字段`, app389.includes("pinnedNodes?: string[];"));
+  ok(`[${G}] protocol 读入 pinnedNodes`, proto389.includes("Array.isArray(cfg.pinnedNodes)"));
+  ok(`[${G}] protocol 落盘 pinnedNodes`, proto389.includes("{ pinnedNodes: x.pinnedNodes }"));
+  ok(`[${G}] regionConfigList 有 pinnedNodes 形参`, proto389.includes("pinnedNodes?: string[],"));
+  ok(`[${G}] 面板有节点勾选框`, tools389.includes('name="pinnedNodes"'));
+  ok(`[${G}] 面板 post 读 pinnedNodes`, tools389.includes('f.getAll("pinnedNodes")'));
+  ok(`[${G}] 订阅有自选组常量`, sub389.includes("G_PIN"));
+  ok(`[${G}] 订阅从 auth 读 pinnedNodes`, sub389.includes("me?.pinnedNodes"));
+  ok(`[${G}] 自选组已定义且被手动组引用（G_PIN 出现≥2次）`, (sub389.match(/G_PIN/g) || []).length >= 2);
+  // ---- 数据层行为：归一化 + 不传保留原值 ----
+  const auth389 = {
+    list: [
+      { id: "pinm", pwd: "m", note: "", enabled: true, managed: true, regions: ["US"], pinnedNodes: ["1.2.3.4:443"] },
+      { id: "pine", pwd: "e", note: "", enabled: true, managed: false },
+    ],
+    uuids: new Set(), trojan: new Map(), ok: true,
+  };
+  // 传了：归一化（过滤非法、去重无关但截断、host:port 正则）
+  const set389 = W.regionConfigList(auth389, "pinm", ["US"], 3, "", [" bad!! ", "5.6.7.8:8443", "noport", "9.9.9.9:443"]);
+  eq(`[${G}] 写回成功`, set389.ok, true);
+  const rowSet389 = set389.list.find((x) => x.id === "pinm");
+  eq(`[${G}] pinnedNodes 归一化`, (rowSet389.pinnedNodes || []).join(","), "5.6.7.8:8443,9.9.9.9:443");
+  // 不传：保留原值（admin 旧表单不清空）
+  const keep389 = W.regionConfigList(auth389, "pinm", ["US"], 3, "");
+  eq(`[${G}] 不传保留原 pinnedNodes`, (keep389.list.find((x) => x.id === "pinm").pinnedNodes || []).join(","), "1.2.3.4:443");
+  // 空数组=清空
+  const clear389 = W.regionConfigList(auth389, "pinm", ["US"], 3, "", []);
+  eq(`[${G}] 空数组清空`, (clear389.list.find((x) => x.id === "pinm").pinnedNodes || []).length, 0);
+  // 入参未被改
+  eq(`[${G}] 入参未被改`, auth389.list.find((x) => x.id === "pinm").pinnedNodes.length, 1);
+  // ---- 订阅层行为：自选节点独立分组，只进手动组 ----
+  const subAuth389 = {
+    list: [{ id: "u389", pwd: "p", note: "", enabled: true, managed: true, pinnedNodes: ["203.0.113.60:8443"] }],
+    uuids: new Set(), trojan: new Map(), ok: true,
+  };
+  const env389 = { uuid: "u389", nodes: "", proxyip: "auto" };
+  const y389 = W.renderClash(env389, new URL("https://edge.example.com/x"), "u389", "edge.example.com", {}, [], subAuth389);
+  ok(`[${G}] 自选节点条目存在`, y389.includes('📌203.0.113.60-VL'));
+  ok(`[${G}] 自选节点硬钉 node=`, y389.includes('node=203.0.113.60%3A8443') || y389.includes('node=203.0.113.60:8443'));
+  ok(`[${G}] 自选组定义存在`, y389.includes('name: "📌 自选节点"'));
+  // 默认组（吞吐/速率）不引用自选组：定位 G_TPUT/G_LAT 块
+  const blockOf = (name) => {
+    const i = y389.indexOf(`- name: "${name}"`);
+    if (i < 0) return "";
+    const j = y389.indexOf("- name:", i + 10);
+    return y389.slice(i, j < 0 ? y389.length : j);
+  };
+  ok(`[${G}] 吞吐组不含自选组`, !blockOf("🚀 吞吐优先").includes("📌 自选节点"));
+  ok(`[${G}] 速率组不含自选组`, !blockOf("⚡ 速率优先").includes("📌 自选节点"));
+  ok(`[${G}] 手动组含自选组`, blockOf("🎯 手动").includes("📌 自选节点"));
+  // 无 pinnedNodes 时不生成自选组
+  const yNoPin389 = W.renderClash(env389, new URL("https://edge.example.com/x"), "u389", "edge.example.com", {}, [], undefined);
+  ok(`[${G}] 无勾选不生成自选组`, !yNoPin389.includes('name: "📌 自选节点"'));
+  // ---- 面板渲染：勾选框回填 ----
+  const saveSeed389 = W.S.seed;
+  const saveAlive389 = new Map(W.S.alive);
+  W.S.alive.clear();
+  W.S.seed = { v: 7, byColo: { US: { nodes: [{ k: "203.0.113.60:8443", h: "203.0.113.60", p: 8443, cc: "US" }] } } };
+  const ctx389 = {
+    url: new URL("https://edge.example.com/regions"),
+    request: { method: "GET" },
+    env: {}, id: "u389", pageKey: "",
+    auth: { list: [{ id: "u389", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"], pinnedNodes: ["203.0.113.60:8443"] }], uuids: new Set(), trojan: new Map(), ok: true },
+  };
+  const html389 = await (await W.regions(ctx389)).text();
+  ok(`[${G}] 面板节点勾选框回填`, html389.includes('type="checkbox" name="pinnedNodes" value="203.0.113.60:8443" checked'));
+  ok(`[${G}] 面板表头有选列`, html389.includes("<th>选</th>"));
+  W.S.alive.clear();
+  for (const [k, v] of saveAlive389) W.S.alive.set(k, v);
+  W.S.seed = saveSeed389;
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

@@ -1,5 +1,6 @@
 import { X_EDGE_IPS, edgeCount, loadNodes, nodeLabel, nodePath, orderNodes, pickProtos, REGION_SUB, trojanPasswordOf, renderLinks, renderSingbox } from "./sub-common";
 import { probeUrlOf } from "../core/util";
+import { splitRelay } from "../core/relay-addr";
 
 // ---- 并入自 src\views\subview.ts ----
 /** 订阅输出格式：Clash/Mihomo YAML、sing-box JSON、纯链接列表 */
@@ -91,6 +92,7 @@ export function renderClash(
   const G_LAT = "\u26a1 \u901f\u7387\u4f18\u5148";
   const G_TPUT = "\ud83d\ude80 \u541e\u5410\u4f18\u5148";
   const G_REG = "\ud83c\udf0d \u5730\u533a";
+  const G_PIN = "\ud83d\udccc \u81ea\u9009\u8282\u70b9";
   const G_MAN = "\ud83c\udfaf \u624b\u52a8";
 
   const emit = (
@@ -184,6 +186,21 @@ export function renderClash(
     all.push(e.name);
   }
 
+  // 面板勾选的具体节点：单独成组（只进手动组，不进默认选路），节点名带 📌 便于区分
+  const pinNames: string[] = [];
+  const me = auth && auth.list ? auth.list.find((u) => u.id === id) : undefined;
+  for (const raw of me?.pinnedNodes || []) {
+    const [ph, pp] = splitRelay(String(raw), 443);
+    if (!ph || pp <= 0) continue;
+    for (const proto of protos) {
+      if (proto === "trojan" && !pass) continue;
+      const name = `📌${ph}-${proto === "trojan" ? "TJ" : "VL"}`;
+      emit(name, proto, ph, pp, `/?ed=2560&node=${encodeURIComponent(`${ph}:${pp}`)}`, true, "面板自选");
+      pinNames.push(name);
+      all.push(name);
+    }
+  }
+
   const q = (arr: string[]) => `    proxies: [${arr.map((x) => `"${x}"`).join(", ")}]`;
   const pick = (arr: string[], n: number) => arr.slice(0, Math.max(1, Math.min(n, arr.length)));
   // 目标实测组（?tu=）的成员只能是「按中继走」的条目，两个理由：
@@ -257,6 +274,11 @@ export function renderClash(
     groups.push(`    type: select`);
     groups.push(q(regNames));
   }
+  if (pinNames.length) {
+    groups.push(`  - name: "${G_PIN}"`);
+    groups.push(`    type: select`);
+    groups.push(q(pinNames));
+  }
 
 
   // 通道实测组：成员是「按中继走」的节点条目，客户端对 tu 指定的 URL 逐条实测，
@@ -275,7 +297,7 @@ export function renderClash(
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
   groups.push(
-    `    proxies: ["${G_TPUT}", "${G_LAT}"${domNames.length ? `, "${G_DOM}"` : ""}${edgeNames.length ? `, "${G_EDGE}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && tuMembers.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
+    `    proxies: ["${G_TPUT}", "${G_LAT}"${domNames.length ? `, "${G_DOM}"` : ""}${edgeNames.length ? `, "${G_EDGE}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${pinNames.length ? `, "${G_PIN}"` : ""}${tuUrl && tuMembers.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
   );
 
   return [

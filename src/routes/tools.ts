@@ -288,10 +288,11 @@ export class RegionsView {
    * 功能：把分组后的节点渲染成 HTML 表格（每组一个勾选框 + 明细表）。
    * @param rows 展示行
    * @param selected 已勾选的地区集合
+   * @param pinnedSelected 已勾选的具体节点（host:port 键，回填用）
    * @param withRtt 是否显示目标站延迟列
    * @returns 已转义的 HTML 片段
    */
-  private groupsHtml(rows: RegionNodeRow[], selected: Set<string>, withRtt: boolean, postAction: string): string {
+  private groupsHtml(rows: RegionNodeRow[], selected: Set<string>, pinnedSelected: Set<string>, withRtt: boolean, postAction: string): string {
     const parts: string[] = [];
     const actionHtml = escapeHtml(postAction);
     // 一个国家一个勾选框 + 一张表：勾选状态回填，避免用户保存时丢掉已选地区
@@ -308,7 +309,10 @@ export class RegionsView {
             : "";
           // 重探按钮用 formaction 覆盖外层表单的 action/op，避免嵌套表单（HTML 不允许 form 嵌 form）
           const recheck = `<td><button type="submit" name="op" value="requality" formaction="${actionHtml}" class="lnkbtn">重探质量</button><input type="hidden" name="key" value="${escapeHtml(r.key)}"></td>`;
+          // 具体节点勾选：回填已 pin 的行；保存后订阅里单独成组（只进手动组，不改默认选路）
+          const pinnedChecked = pinnedSelected.has(r.key) ? " checked" : "";
           return `<tr>
+            <td><input type="checkbox" name="pinnedNodes" value="${escapeHtml(r.key)}"${pinnedChecked}></td>
             <td class="u">${escapeHtml(r.key)}</td>
             <td>${levelBadge(r.level)}</td>
             <td>${kindLabel(r.kind)}</td>
@@ -323,7 +327,7 @@ export class RegionsView {
         .join("");
       const check = `<input type="checkbox" name="regions" value="${cc}"${checked}>`;
       parts.push(`<h2 class="cb">${check} ${cc} <span class="mu">${g.rows.length} 个节点</span></h2>
-        <table><tr><th>节点</th><th>质量</th><th>类型</th><th>族</th><th>出口族事实</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th></tr>${body}</table>`);
+        <table><tr><th>选</th><th>节点</th><th>质量</th><th>类型</th><th>族</th><th>出口族事实</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th></tr>${body}</table>`);
     }
     return parts.join("") || '<div class="mu">本 isolate 还没有探到任何节点（稍后刷新重试）</div>';
   }
@@ -338,6 +342,7 @@ export class RegionsView {
     // 只回填当前用户自己的地区/节点数；其他用户配置和表单 action 一律不含
     const me = this.c.auth.list.find((x) => x.id === this.c.id);
     const selected = new Set((me?.regions || []).map((x) => String(x).toUpperCase()));
+    const pinnedSelected = new Set((me?.pinnedNodes || []).map((x) => String(x)));
     const back = "/" + encodeURIComponent(this.c.id) + (this.c.pageKey ? "?k=" + encodeURIComponent(this.c.pageKey) : "");
     const cov = COVERAGE.stats(rows.map((r) => r.key));
     // 模板占位符全部 escapeHtml；groupsHtml 由分组函数自己保证转义
@@ -350,7 +355,7 @@ export class RegionsView {
       postAction: escapeHtml(action),
       siteValue: escapeHtml(target),
       topNValue: escapeHtml(String(me?.regionTopN || 3)),
-      groupsHtml: this.groupsHtml(rows, selected, !!target, action),
+      groupsHtml: this.groupsHtml(rows, selected, pinnedSelected, !!target, action),
     });
     return html(body);
   }
@@ -404,7 +409,8 @@ export class RegionsView {
     const regions = f.getAll("regions").map(String);
     const topN = Number(f.get("topN")) || 3;
     const targetHost = String(f.get("targetHost") || "");
-    const chosen = regionConfigList(cur, this.c.id, regions, topN, targetHost);
+    const pinnedNodes = f.getAll("pinnedNodes").map(String);
+    const chosen = regionConfigList(cur, this.c.id, regions, topN, targetHost, pinnedNodes);
     if (!chosen.ok) return new Response(chosen.err, { status: 404 });
     await saveUsers(this.c.env, chosen.list);
     return new Response(null, { status: 303, headers: { location: "/" + encodeURIComponent(this.c.id) + "/regions" } });

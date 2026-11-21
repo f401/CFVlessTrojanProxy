@@ -91,6 +91,7 @@ export class UserIndex {
       if (Array.isArray(cfg.regions)) rec.regions = cfg.regions.slice(0, 32);
       if (cfg.regionTopN) rec.regionTopN = cfg.regionTopN;
       if (cfg.targetHost) rec.targetHost = cfg.targetHost;
+      if (Array.isArray(cfg.pinnedNodes)) rec.pinnedNodes = cfg.pinnedNodes.slice(0, 24).map((x) => String(x).slice(0, 128));
     }
     if (note && !rec.note) rec.note = note;
     if (managed) rec.managed = true;
@@ -278,6 +279,7 @@ export async function saveUsers(env: Env, list: UserRec[]) {
       ...(x.regions && x.regions.length ? { regions: x.regions } : {}),
       ...(x.regionTopN ? { regionTopN: x.regionTopN } : {}),
       ...(x.targetHost ? { targetHost: x.targetHost } : {}),
+      ...(x.pinnedNodes && x.pinnedNodes.length ? { pinnedNodes: x.pinnedNodes } : {}),
     }));
   await kvSet(env, "users", clean);
   invalidateUsers();
@@ -294,7 +296,8 @@ export async function saveUsers(env: Env, list: UserRec[]) {
  * @param target 要改的用户 id
  * @param regions 勾选的地区码（原始，函数内归一化）
  * @param topN 每区节点数（原始，函数内夹到 1–8）
- * @param targetHost 目标站（原始，函数内截断到 253）
+  * @param targetHost 目标站（原始，函数内截断到 253）
+  * @param pinnedNodes 面板勾选的具体节点（可选，不传保留原值；host:port 格式）
  * @returns 成功时返回新的托管用户列表；用户不存在时返回错误
  */
 export function regionConfigList(
@@ -303,6 +306,7 @@ export function regionConfigList(
   regions: string[],
   topN: number,
   targetHost: string,
+  pinnedNodes?: string[],
 ): { ok: true; list: UserRec[] } | { ok: false; err: string } {
   const id = String(target || "").toLowerCase();
   const src = cur.list.find((x) => x.id === id);
@@ -327,6 +331,10 @@ export function regionConfigList(
     regions: rawRegions,
     regionTopN: count,
     targetHost: host,
+    // 面板勾选的具体节点：传了就归一化写回（空=清空），没传（admin 旧表单）则保留原值
+    pinnedNodes: pinnedNodes === undefined
+      ? (prev?.pinnedNodes || [])
+      : pinnedNodes.map((x) => String(x).trim().slice(0, 128)).filter((x) => /^[^\s]+:\d+$/.test(x)).slice(0, 24),
   };
   list = list.filter((x) => x.id !== id);
   list.push(row);

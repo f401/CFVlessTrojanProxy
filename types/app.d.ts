@@ -312,6 +312,8 @@ interface UserRec {
   regionTopN?: number;
   /** 连通性测试/订阅节点名里显示延迟的目标站点（用户自定义，不假设 generate204） */
   targetHost?: string;
+  /** 面板勾选的具体节点（host:port 键），订阅里单独成组；空=不生成该组 */
+  pinnedNodes?: string[];
 }
 
 /** loadUsers 的返回：鉴权用的索引 + 面板展示用的列表 */
