@@ -13733,6 +13733,28 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
     const capRun = W.runTfb && typeof W.runTfb === "function";
     ok("[396] runTfb 可从窗口导出", capRun);
   }
+  // ---- 第 397 组：探测结果显示节点国家码（POST 路径惰性载入 alive/seed） ----
+  {
+    const tl397 = fs.readFileSync("src/routes/tools.ts", "utf8");
+    // 结构：probe() 开头和 GET run() 一样有 aliveList 惰性载入，否则 POST 落到冷 isolate 时 countryOf 查不到
+    ok("[397] probe 路径惰性载入国家码表",
+      tl397.includes("探测结果要给每个节点标国家码") &&
+      tl397.includes("await aliveList(this.c.env)"));
+    // 惰性载入出现两处（GET run + POST probe）
+    eq("[397] aliveList 惰性载入两处", (tl397.split("await aliveList(this.c.env)").length - 1), 2);
+    // 行为：countryOf 从 seed byColo 查到国家码（探测结果每行靠它标 [CC]）
+    const seedBackup397 = W.S.seed && W.S.seed.byColo ? W.S.seed.byColo : null;
+    try {
+      W.S.alive.clear();
+      if (W.S.seed) W.S.seed.byColo = { TST: { nodes: [{ k: "198.51.100.9:443", h: "198.51.100.9", p: 443, cc: "TST" }] } };
+      eq("[397] countryOf 从 seed 查到国家码", W.countryOf("198.51.100.9:443"), "TST");
+      eq("[397] ccTag 渲染国家码", W.ccTag("TST"), "[TST] ");
+      eq("[397] 未知节点无国家码", W.countryOf("192.0.2.99:443"), "");
+    } finally {
+      W.S.alive.clear();
+      if (W.S.seed) W.S.seed.byColo = seedBackup397;
+    }
+  }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

@@ -435,6 +435,12 @@ export class RegionsView {
    */
   private async probe(f: FormData): Promise<Response> {
     const op = String(f.get("op") || "");
+    // 探测结果要给每个节点标国家码，而国家码只在本机 alive/seed 内存里。
+    // POST 可能落到没 GET 过的 isolate（那里 S.alive/S.seed 是空的），先惰性载入，
+    // 和 GET 路径一致；aliveList 带 30 分钟缓存，暖 isolate 几乎零成本。
+    if (this.c.env && !S.alive.size && !(S.seed.byColo && Object.keys(S.seed.byColo).length)) {
+      await aliveList(this.c.env);
+    }
     // 指定网站探测：复用 /debug?tfb 的同一实现，结果行会写进 CONN_OBS 供面板显示延迟
     if (op === "probe") {
       const site = String(f.get("site") || "").trim().slice(0, 256);
