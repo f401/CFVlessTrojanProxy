@@ -13792,6 +13792,42 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   }
 }
 
+
+// ---- 第 399 组：真实 ISO 国家码（展示层，与选路用的 CF 机场码分开） ----
+{
+  const tl399 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  const rg399 = fs.readFileSync("src/px/regions.ts", "utf8");
+  // 结构：QUALITY 有独立 isoCc 表 + noteIso/getIso；展示层优先 ISO；文档 IP 跳过
+  ok("[399] isoCc 表存在", rg399.includes("readonly isoCc = new Map<"));
+  ok("[399] noteIso/getIso 方法", rg399.includes("noteIso(host: string") && rg399.includes("getIso(host: string"));
+  ok("[399] countryOf 优先 ISO", tl399.indexOf("QUALITY.getIso(host)") < tl399.indexOf("const exact = S.alive.get(relay)"));
+  ok("[399] rows 用 ISO 码", tl399.includes("isoCc || live?.cc || seedCc"));
+  ok("[399] 排除文档 IP 查询", tl399.includes("function isDocIp") && tl399.includes("!isDocIp(h)"));
+  ok("[399] 惰性补码只在缺失时查", tl399.includes("!QUALITY.getIso(h)"));
+  // 行为：noteIso/getIso 隔离缓存，优先于机场码
+  const savedAlive399 = new Map(W.S.alive);
+  const savedSeed399 = W.S.seed && W.S.seed.byColo;
+  W.QUALITY.isoCc.clear();
+  try {
+    W.S.alive.clear();
+    W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, cc: "AMS", ms: 5 });
+    eq("[399] 无 ISO 时回落机场码", W.countryOf("198.51.100.9:443"), "AMS");
+    W.QUALITY.noteIso("198.51.100.9", "nl");
+    eq("[399] ISO 大写存储", W.QUALITY.getIso("198.51.100.9"), "NL");
+    eq("[399] ISO 覆盖机场码展示", W.countryOf("198.51.100.9:443"), "NL");
+    eq("[399] 缺省端口也用 ISO", W.countryOf("198.51.100.9"), "NL");
+    // 过期回退机场码
+    W.QUALITY.isoCc.set("198.51.100.9", { cc: "NL", at: Date.now() - 4 * 86400_000 });
+    eq("[399] 过期 ISO 回退机场码", W.countryOf("198.51.100.9:443"), "AMS");
+    eq("[399] 过期 ISO 清除", W.QUALITY.getIso("198.51.100.9"), "");
+  } finally {
+    W.S.alive.clear();
+    for (const [k, v] of savedAlive399) W.S.alive.set(k, v);
+    if (W.S.seed) W.S.seed.byColo = savedSeed399;
+    W.QUALITY.isoCc.clear();
+  }
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

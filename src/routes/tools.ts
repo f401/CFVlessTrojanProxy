@@ -1,9 +1,5 @@
 /**
  * 诊断/浏览类只读路由：proxyip（池子报表）、debug（内部探针）、regions（地区节点浏览器）。
- *
- * 为什么 regions 放在这里而不是新文件：源码文件数卡在 115 的门禁上限，新建文件会立刻变红；
- * 而 regions 与这两个邻居一样是「只读、不花 DO/KV 额度」的诊断端点，放一起语义一致。
- * 例外：用户自助改地区配置时会走一次 KV 写回（saveUsers），那是一轮唯一一次写。
  */
 export { proxyip } from "./proxyip";
 export { debug } from "./debug";
@@ -12,6 +8,7 @@ import { IpFamily, IpKind } from "../core/enums";
 import { S } from "../core/state";
 import { QUALITY, QUALITY_PROBE, COVERAGE, CONN_OBS } from "../px/regions";
 import { AliveBoard, aliveList, nsOf } from "../px/pool";
+import { geoLabel } from "../px/probe";
 import { html, json } from "../edge/respond";
 import { splitRelay, relayIpOf } from "../core/relay-addr";
 import type { UserCtx } from "../edge/types";
@@ -25,14 +22,35 @@ import { BLK } from "../route/blkfacts";
 import { DNS } from "../route/dnsfacts";
 import regionsTpl from "../views/html/regions.html";
 
+/** RFC 5737 文档地址段：不浪费子请求查、也避免测试假 IP 污染展示缓存 */
+function isDocIp(h: string): boolean {
+  return /^(192\.0\.2|198\.51\.100|203\.0\.113)\./.test(h);
+}
+
+/** 给展示层补真实 ISO 国家码：alive.cc/seed 存的是 CF 机场码，按出口 IP 批量查真实码回填 */
+async function ensureIsoCountries(): Promise<number> {
+  // 只查 IPv4 出口（v6 字面量含冒号，第三方源对它的字段不稳定），alive ∪ seed 去重
+  const hosts = new Set<string>();
+  for (const n of S.alive.values()) if (n.h && !n.h.includes(":")) hosts.add(n.h);
+  const byColo = (S.seed && S.seed.byColo) || {};
+  for (const bucket of Object.values(byColo)) {
+    for (const n of bucket?.nodes || []) if (n.h && !n.h.includes(":")) hosts.add(n.h);
+  }
+  // 已缓存的不重复查；geoLabel 单次最多 100 IP（第三方批量上限），超出的下轮再补
+  const need = [...hosts].filter((h) => !QUALITY.getIso(h) && !isDocIp(h)).slice(0, 100);
+  if (!need.length) return 0;
+  const iso = await geoLabel(need);
+  let n = 0;
+  // 结果写进展示专用表，绝不碰选路用的 alive.cc（那边存的是 CF 机场码）
+  for (const [h, cc] of Object.entries(iso)) { QUALITY.noteIso(h, cc); n++; }
+  return n;
+}
+
 /**
  * 功能：根据单节点探测的状态码与响应字节，得出「连通 / 被 ban」的诊断结论。
- *
- * 737B「IPv6」这类族拒绝是「小响应 403」，业务 403 通常是整页 —— body 大小只做诊断标签，
- * 不写封禁，也不影响选路。纯计算，便于单测各种边界。
- * @param status HTTP 状态码（0 = 无应答）
- * @param bytes 响应字节数
- * @returns 中文结论
+* @param status HTTP 状态码（0 = 无应答）
+* @param bytes 响应字节数
+* @returns 中文结论
  */
 export function nodeCheckConclusion(status: number, bytes: number): string {
   if (status >= 200 && status < 400) return "连通正常";
@@ -43,37 +61,22 @@ export function nodeCheckConclusion(status: number, bytes: number): string {
 
 /** 单个节点在浏览器里的展示行 */
 export interface RegionNodeRow {
-  /** host:port 键（订阅 `?node=` 用的就是这个值） */
-  key: string;
-  /** 国家码（可能为空 = 未知地区） */
-  country: string;
-  /** 地址族 v4 / v6 */
-  family: IpFamily;
-  /** 是否在本 isolate 存活表里 */
-  alive: boolean;
-  /** 来源（存活表 / seed 跨 isolate 名单 / 两者） */
-  source: string;
-  /** 质量种类枚举（unknown 表示还没探过） */
-  kind: IpKind;
-  /** 质量等级 good / normal / risky */
-  level: string;
-  /** 是否代理 / VPN */
-  proxy: boolean;
-  vpn: boolean;
-  /** 是否在覆盖账本里记过探测 */
-  probed: boolean;
-  /** 目标站点延迟（毫秒，null = 没测过） */
-  rtt: number | null;
-  /** 出口族事实：4 / 6 / 0（0 = 未知或未记过） */
-  egFamily: number;
-  /** 站点成功率事实：0..1，-1 表示无样本 */
-  psOk: number;
-  /** 该中继是否被判死（连接层连不上） */
-  dead: boolean;
-  /** 站点封锁代价倍数：1 = 无封锁，>1 表示被判封锁 */
-  blkPenalty: number;
-  /** DNS 事实：1 有 AAAA / 0 确证无 AAAA / -1 不知道 */
-  dnsV6: number;
+  key: string;        // host:port 键（订阅 `?node=` 用这个值）
+  country: string;    // 国家码，空 = 未知地区
+  family: IpFamily;   // v4 / v6
+  alive: boolean;     // 是否在本 isolate 存活表
+  source: string;     // 来源：alive / seed / 两者
+  kind: IpKind;       // 质量种类，unknown = 未探过
+  level: string;      // good / normal / risky
+  proxy: boolean;     // 是否代理
+  vpn: boolean;       // 是否 VPN
+  probed: boolean;    // 覆盖账本里记过探测
+  rtt: number | null; // 目标站点延迟（毫秒，null = 没测）
+  egFamily: number;   // 出口族事实 4/6/0（0=未知）
+  psOk: number;       // 站点成功率 0..1，-1=无样本
+  dead: boolean;      // 是否被判死（连接层连不上）
+  blkPenalty: number; // 封锁代价倍数，1=无封锁
+  dnsV6: number;      // DNS 事实 1=有 AAAA/0=无/-1=不知道
 }
 
 /**
@@ -120,16 +123,15 @@ export function familyLabel(f: IpFamily): string {
 
 /**
  * 功能：从存活表/seed 名单里查一个通道（IP / host:port / direct）的国家码，给探测结果标注出口国家。
- *
- * 为什么单独做：探测结果里的 relay 是「节点地址」而不是面板行，拿不到现成的 country 字段；
- * 国家码只存在存活表（alive.cc）与 seed 名单（byColo 桶）里，都是本 isolate 内存，查表零子请求。
- * 直连通道没有出口节点，用本机房码（S.colo）标注；查不到就留空，结果文本不强塞「未知」。
- * @param relay 通道名："direct" / 纯 IP / host:port
- * @returns 两位大写国家码；查不到返回空串
+* @param relay 通道名："direct" / 纯 IP / host:port
+* @returns 两位大写国家码；查不到返回空串
  */
 export function countryOf(relay: string): string {
   if (relay === "direct") return String(S.colo || "").toUpperCase();
   const [host] = splitRelay(relay, 443);
+  // 展示优先真实 ISO 码：alive.cc / seed 桶键是机场码，不能当出口国家
+  const iso = QUALITY.getIso(host);
+  if (iso) return iso;
   // 先按完整 key 命中，再按 host 扫存活表（探测结果可能只带 IP 不带端口）
   const exact = S.alive.get(relay) || S.alive.get(host + ":443");
   if (exact?.cc) return String(exact.cc).toUpperCase();
@@ -221,13 +223,6 @@ export function groupRows(rows: RegionNodeRow[]): { country: string; rows: Regio
 
 /**
  * 功能：地区节点浏览器 —— 列出 alive ∪ seed 的全部已知节点及其质量/族/覆盖/目标延迟。
- *
- * 为什么是一个类：这个端点要把四张来源不同的表（存活表、seed 名单、质量表、覆盖表）
- * 按同一个 key 拼成一行，还要处理「同一节点在两张表里都有」「补全 cc/family」的合并规则；
- * 把这些规则放在对象里，路由入口只剩一行 `new RegionsView(c).run()`。
- *
- * 额度纪律：GET 全程只读内存表，不发子请求、不碰 DO/KV（净增 0）；
- * POST 写回走一次 saveUsers（复用 loadUsers 已读到的 c.auth，不重复读 KV）。
  */
 export class RegionsView {
   /** 用户上下文（url 取 site 参数、auth 取当前用户配置） */
@@ -286,9 +281,10 @@ export class RegionsView {
       const cov = COVERAGE.rows.get(key);
       // 事实列全部是纯内存 O(1) 查表，零子请求；按站点维度的三张表只在带了 ?site= 时才有意义
       const ip = h;
+      const isoCc = QUALITY.getIso(h);
       return {
         key,
-        country: String((live?.cc || seedCc) || "").toUpperCase(),
+        country: String(isoCc || live?.cc || seedCc || "").toUpperCase(),
         family: this.familyOf(h),
         alive: !!live,
         source: live && seedCc ? "alive+seed" : live ? "alive" : "seed",
@@ -321,9 +317,9 @@ export class RegionsView {
 
   /**
    * 功能：JSON 输出（保留旧契约，?format=json 显式请求）。
-   * @param rows 展示行
-   * @param target 目标站点
-   * @returns JSON 响应
+  * @param rows 展示行
+  * @param target 目标站点
+  * @returns JSON 响应
    */
   private jsonView(rows: RegionNodeRow[], target: string): Response {
     const keys = rows.map((r) => r.key);
@@ -338,11 +334,11 @@ export class RegionsView {
 
   /**
    * 功能：把分组后的节点渲染成 HTML 表格（每组一个勾选框 + 明细表）。
-   * @param rows 展示行
-   * @param selected 已勾选的地区集合
-   * @param pinnedSelected 已勾选的具体节点（host:port 键，回填用）
-   * @param withRtt 是否显示目标站延迟列
-   * @returns 已转义的 HTML 片段
+  * @param rows 展示行
+  * @param selected 已勾选的地区集合
+  * @param pinnedSelected 已勾选的具体节点（host:port 键，回填用）
+  * @param withRtt 是否显示目标站延迟列
+  * @returns 已转义的 HTML 片段
    */
   private groupsHtml(rows: RegionNodeRow[], selected: Set<string>, pinnedSelected: Set<string>, withRtt: boolean, postAction: string): string {
     const parts: string[] = [];
@@ -399,9 +395,9 @@ export class RegionsView {
 
   /**
    * 功能：渲染自助面板 HTML。
-   * @param rows 展示行
-   * @param target 目标站点
-   * @returns HTML 响应
+  * @param rows 展示行
+  * @param target 目标站点
+  * @returns HTML 响应
    */
   private htmlView(rows: RegionNodeRow[], target: string): Response {
     // 只回填当前用户自己的地区/节点数；其他用户配置和表单 action 一律不含
@@ -429,10 +425,7 @@ export class RegionsView {
 
   /**
    * 功能：POST 手动探测 —— 指定网站探测（复用 runTfb，写 CONN_OBS/判定表）与逐节点质量重探。
-   *
-   * 两类按钮都客户端可控，必须限流：tfb 一次是 2 个 DO 往返，质量一次是 6 个子请求；
-   * 冷却表放在 QUALITY 这个状态持有者里（不往 AppState 加字段），每个站点/节点各自计时。
-   * @returns 探测结果文本（浏览器上方显示），冷却中给出等待提示
+  * @returns 探测结果文本（浏览器上方显示），冷却中给出等待提示
    */
   private async probe(f: FormData): Promise<Response> {
     const op = String(f.get("op") || "");
@@ -442,6 +435,7 @@ export class RegionsView {
     if (this.c.env && !S.alive.size && !(S.seed.byColo && Object.keys(S.seed.byColo).length)) {
       await aliveList(this.c.env);
     }
+    await ensureIsoCountries();
     // 指定网站探测：复用 /debug?tfb 的同一实现，结果行会写进 CONN_OBS 供面板显示延迟
     if (op === "probe") {
       const site = String(f.get("site") || "").trim().slice(0, 256);
@@ -543,6 +537,7 @@ export class RegionsView {
     if (this.c.env && !S.alive.size && !(S.seed.byColo && Object.keys(S.seed.byColo).length)) {
       await aliveList(this.c.env);
     }
+    await ensureIsoCountries();
     const target = (this.c.url.searchParams.get("site") || "").slice(0, 256);
     const rows = this.rows(target);
     if (this.c.url.searchParams.get("format") === "json") return this.jsonView(rows, target);

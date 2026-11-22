@@ -44,13 +44,6 @@ interface ConnObsRow {
 
 /**
  * 功能：把六个第三方源各自不同的返回格式，归一化成同一个 QualitySignal。
- *
- * 为什么每个源单独一个解析器：实测（2026-11-19）六个源的字段完全不同，而且
- * ident.me 只返回调用方自己的出口、根本不支持查指定 IP。把它们放进一张
- * 「源名 → 解析器」注册表，新增/停用某个源不用改合并逻辑。
- *
- * 判定口径与 FlClash 一致：hosting→Normal，residential/mobile/business→Good，
- * isTor/isAbuser→Risky；isProxy/isVpn 只标记、不降级。
  */
 export const QUALITY_SOURCES: ReadonlyArray<{
   name: string;
@@ -161,9 +154,9 @@ export const QUALITY_SOURCES: ReadonlyArray<{
 
 /**
  * 功能：把多个源的归一化信号合并成一条最终的 IpQuality。
- * @param signals 本轮成功解析的信号（可为空）
- * @param at 合并时刻（毫秒）
- * @returns 质量结论；无信号时 kind=Unknown / level=Normal，不臆测
+* @param signals 本轮成功解析的信号（可为空）
+* @param at 合并时刻（毫秒）
+* @returns 质量结论；无信号时 kind=Unknown / level=Normal，不臆测
  */
 export function mergeQuality(signals: QualitySignal[], at: number): IpQuality {
   // 风险位只要有一个源报了就认：宁可错杀也不把 abuser/tor 出口标成 Good
@@ -183,12 +176,9 @@ export function mergeQuality(signals: QualitySignal[], at: number): IpQuality {
 
 /**
  * 功能：从 ip-api 批量查询的一行里直接产出质量结论（搭现有 geoLabel 便车，零新增请求）。
- *
- * 为什么复用 QUALITY_SOURCES[0] 的解析器而不是重写：单源与批量必须用同一套判定口径，
- * 否则「批量补国家码时顺手标的质量」与「6 源主动探测的质量」会对同一台机器给出不同结论。
- * @param row ip-api 批量返回的一行
- * @param at 观测时刻（毫秒）
- * @returns 质量结论；解析失败返回 null
+* @param row ip-api 批量返回的一行
+* @param at 观测时刻（毫秒）
+* @returns 质量结论；解析失败返回 null
  */
 export function qualityFromIpApi(row: Record<string, unknown>, at: number): IpQuality | null {
   const signal = QUALITY_SOURCES[0].parse(row);
@@ -197,9 +187,6 @@ export function qualityFromIpApi(row: Record<string, unknown>, at: number): IpQu
 
 /**
  * 功能：按节点 key 保存质量结论的内存表，负责 3 天缓存与「是否该重探」。
- *
- * 为什么单独成类：质量结论的生命周期与节点统计不同——它跨 isolate 传播（搭 seed），
- * 3 天有效，且按源失败要冷却 5 分钟。把这些规则散在 probe/seed 里会各写一遍。
  */
 export class IpQualityTable {
   /** 节点 key → 质量结论 */
@@ -208,12 +195,43 @@ export class IpQualityTable {
   readonly sourceCool = new Map<string, number>();
   /** 手动重探/站点探测的节流：前缀 key → 上次触发时刻（面板按钮不能无限点） */
   readonly recheckCool = new Map<string, number>();
+  /** 出口 IP → ISO 国家码（展示层用；alive.cc / seed 桶键是 CF 接入机场码，不能当国家）。本 isolate 内存，随质量表 3 天失效 */
+  readonly isoCc = new Map<string, { cc: string; at: number }>();
+
+  /**
+   * 功能：记一条出口 IP 的 ISO 国家码（仅展示，不参与选路/打分）。
+  * @param host 出口 IP
+  * @param cc ISO 国家码
+  * @param now 当前时刻
+  * @returns 无
+   */
+  noteIso(host: string, cc: string, now: number = Date.now()): void {
+    if (!host || !cc) return;
+    this.isoCc.set(host, { cc: String(cc).toUpperCase(), at: now });
+    if (this.isoCc.size > COVERAGE_CAP) {
+      const old = [...this.isoCc.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, this.isoCc.size - COVERAGE_CAP);
+      for (const [k] of old) this.isoCc.delete(k);
+    }
+  }
+
+  /**
+   * 功能：读出口 IP 的 ISO 国家码，过期即删。
+  * @param host 出口 IP
+  * @param now 当前时刻
+  * @returns ISO 国家码；没有或过期返回空串
+   */
+  getIso(host: string, now: number = Date.now()): string {
+    const row = this.isoCc.get(host);
+    if (!row) return "";
+    if (now - row.at > QUALITY_TTL) { this.isoCc.delete(host); return ""; }
+    return row.cc;
+  }
 
   /**
    * 功能：读一条仍然有效的质量结论，过期即删并返回 null。
-   * @param key 节点 key（host:port）
-   * @param now 当前时刻
-   * @returns 有效结论或 null
+  * @param key 节点 key（host:port）
+  * @param now 当前时刻
+  * @returns 有效结论或 null
    */
   get(key: string, now = Date.now()): IpQuality | null {
     const q = this.rows.get(key);
@@ -242,13 +260,10 @@ export class IpQualityTable {
 
   /**
    * 功能：按「主机 + 端口」读质量，端口维度缺失时回落到纯主机（批量补码搭车时用主机做键）。
-   *
-   * 为什么要回落：geoLabel 批量查询只拿到 IP、没有端口，写进本表时用的是纯 IP 作键；
-   * 而选路/订阅拿到的是 `host:port`。两级查找让「顺手标的质量」与「主动探测的质量」都能命中。
-   * @param host 主机（IP 或域名）
-   * @param port 端口
-   * @param now 当前时刻
-   * @returns 有效结论或 null
+  * @param host 主机（IP 或域名）
+  * @param port 端口
+  * @param now 当前时刻
+  * @returns 有效结论或 null
    */
   getFor(host: string, port: number | undefined, now = Date.now()): IpQuality | null {
     return this.get(`${host}:${port}`, now) || this.get(host, now);
@@ -256,9 +271,9 @@ export class IpQualityTable {
 
   /**
    * 功能：某源是否还在失败冷却中。
-   * @param name 源名
-   * @param now 当前时刻
-   * @returns 冷却中为 true
+  * @param name 源名
+  * @param now 当前时刻
+  * @returns 冷却中为 true
    */
   sourceCooling(name: string, now = Date.now()): boolean {
     const at = this.sourceCool.get(name);
@@ -279,14 +294,10 @@ export class IpQualityTable {
 
   /**
    * 功能：判断一次手动探测（质量重探 / 指定网站探测）是否过了冷却期。
-   *
-   * 为什么放这里：面板按钮是客户端可控的，不设限流就能被连点刷爆免费计划的
-   * 子请求（6 源质量）与 DO 往返（tfb 探测）；把冷却表放在质量表这个状态持有者里，
-   * 避免再往 AppState 塞新字段。调用方用不同前缀区分两类探测。
-   * @param key 带前缀的操作键（如 `q:host:port` / `s:site`）
-   * @param cooldownMs 冷却时长
-   * @param now 当前时刻
-   * @returns 可以探测返回 true
+  * @param key 带前缀的操作键（如 `q:host:port` / `s:site`）
+  * @param cooldownMs 冷却时长
+  * @param now 当前时刻
+  * @returns 可以探测返回 true
    */
   recheckReady(key: string, cooldownMs: number, now = Date.now()): boolean {
     const at = this.recheckCool.get(key);
@@ -324,20 +335,16 @@ export const QUALITY = new IpQualityTable();
 
 /**
  * 功能：按注册表依次查 6 个质量源，把结果合并成一条 IpQuality。
- *
- * 为什么用类而不是一堆自由函数：探测要持「本轮用哪个 I/O 出口」「一次最多发几个源」，
- * 且失败源要写进 QUALITY 的冷却表。把这两件有状态的事放在一个对象里，调用方只需
- * `await PROBE.qualityOf(ip, io)`，不必记「先查缓存、再逐源、再合并、再登记失败」的步骤。
  */
 export class QualityProbe {
   /**
    * 功能：探测一个 IP 的质量。
-   * @param key 节点 key（含端口，用于缓存与覆盖记账）
-   * @param ip 要查的 IP（v4 字面量；v6 需先经支持 v6 的源）
-   * @param io 子请求出口（走它才扣 sub 额度，测试可注入桩）
-   * @param family 地址族
-   * @param now 当前时刻
-   * @returns 质量结论（先查缓存，命中则零请求）
+  * @param key 节点 key（含端口，用于缓存与覆盖记账）
+  * @param ip 要查的 IP（v4 字面量；v6 需先经支持 v6 的源）
+  * @param io 子请求出口（走它才扣 sub 额度，测试可注入桩）
+  * @param family 地址族
+  * @param now 当前时刻
+  * @returns 质量结论（先查缓存，命中则零请求）
    */
   async qualityOf(key: string, ip: string, io: import("../core/budgeted-io").BudgetedIO, family: IpFamily, now = Date.now()): Promise<IpQuality> {
     // 先查缓存：3 天内不重复请求（用户明确的额度纪律）
@@ -375,9 +382,6 @@ export const QUALITY_PROBE = new QualityProbe();
 
 /**
  * 功能：全池 IP 探测覆盖账本，按「最久没探」优先轮转，确保每个节点迟早被探到。
- *
- * 为什么纯内存不持久化：用户要求 KV/DO 额度净增 0；覆盖进度重启后从头轮转虽会重置，
- * 但用户主动开面板时能立刻看到当前进度，代价可接受。
  */
 export class ProbeCoverage {
   /** 节点 key → 最近探测时刻与地址族 */
@@ -385,9 +389,9 @@ export class ProbeCoverage {
 
   /**
    * 功能：记录一次探测。
-   * @param key 节点 key
-   * @param family 地址族
-   * @param now 当前时刻
+  * @param key 节点 key
+  * @param family 地址族
+  * @param now 当前时刻
    */
   note(key: string, family: IpFamily, now = Date.now()): void {
     this.rows.set(key, { lastProbeAt: now, family });
@@ -395,9 +399,9 @@ export class ProbeCoverage {
 
   /**
    * 功能：取本轮该探的节点（从未探过 / 最久没探优先），不花任何 KV/DO 额度。
-   * @param keys 候选池里的全部节点 key
-   * @param max 本轮上限（受 SCAN_MAX/SCAN_SUB 约束，由调用方夹取）
-   * @returns 按最旧优先排序的 key 列表
+  * @param keys 候选池里的全部节点 key
+  * @param max 本轮上限（受 SCAN_MAX/SCAN_SUB 约束，由调用方夹取）
+  * @returns 按最旧优先排序的 key 列表
    */
   pick(keys: string[], max: number): string[] {
     return [...keys]
@@ -438,9 +442,6 @@ export const COVERAGE = new ProbeCoverage();
 
 /**
  * 功能：按机房分桶的连通性观测表（用户指定的「colo 那个表」）。
- *
- * 每条记录对应「某机房的某节点访问某站点」的一次 HTTP 判定，键形如 `colo|node|site`。
- * 默认只本 isolate 可见；若要跨 isolate，由 usageSnapWrite 搭快照便车，不新增 KV 写。
  */
 export class ConnObservation {
   /** colo|node|site → 观测行 */
@@ -448,14 +449,14 @@ export class ConnObservation {
 
   /**
    * 功能：记一次连通性结果，并按上限 + TTL 淘汰。
-   * @param colo 机房标签
-   * @param node 节点 key
-   * @param site 目标站点
-   * @param code HTTP 状态码（0=连接失败）
-   * @param rtt 首字节耗时
-   * @param family 地址族
-   * @param now 当前时刻
-   * @returns 无
+  * @param colo 机房标签
+  * @param node 节点 key
+  * @param site 目标站点
+  * @param code HTTP 状态码（0=连接失败）
+  * @param rtt 首字节耗时
+  * @param family 地址族
+  * @param now 当前时刻
+  * @returns 无
    */
   note(colo: string, node: string, site: string, code: number, rtt: number, family: IpFamily, now = Date.now()): void {
     const key = `${colo}|${node}|${site}`;
@@ -474,11 +475,11 @@ export class ConnObservation {
 
   /**
    * 功能：读一条连通性结果（过期即删）。
-   * @param colo 机房标签
-   * @param node 节点 key
-   * @param site 目标站点
-   * @param now 当前时刻
-   * @returns 观测行或 null
+  * @param colo 机房标签
+  * @param node 节点 key
+  * @param site 目标站点
+  * @param now 当前时刻
+  * @returns 观测行或 null
    */
   get(colo: string, node: string, site: string, now = Date.now()): ConnObsRow | null {
     const key = `${colo}|${node}|${site}`;
@@ -493,11 +494,11 @@ export class ConnObservation {
 
   /**
    * 功能：按节点取目标站点的延迟，给订阅节点名显示（用户要求「生成 ip 显示目标站点延迟」）。
-   * @param colo 机房标签
-   * @param node 节点 key
-   * @param site 目标站点
-   * @param now 当前时刻
-   * @returns 毫秒数或 null（没测过/已过期）
+  * @param colo 机房标签
+  * @param node 节点 key
+  * @param site 目标站点
+  * @param now 当前时刻
+  * @returns 毫秒数或 null（没测过/已过期）
    */
   rttOf(colo: string, node: string, site: string, now = Date.now()): number | null {
     return this.get(colo, node, site, now)?.rtt ?? null;
