@@ -374,6 +374,7 @@ export class RegionsView {
           return `<tr data-node="${escapeHtml(r.key)}">
             <td><input type="checkbox" name="pinnedNodes" value="${escapeHtml(r.key)}"${pinnedChecked}></td>
             <td class="u">${escapeHtml(r.key)}</td>
+            <td>${escapeHtml(r.country || "—")}</td>
             <td class="ipx">${escapeHtml(exitIp)}</td>
             <td data-cell="level">${levelBadge(r.level)}</td>
             <td data-cell="kind">${kindLabel(r.kind)}</td>
@@ -391,7 +392,7 @@ export class RegionsView {
       const probedN = g.rows.filter((r) => r.probed).length;
       const groupBadge = probedN ? `<span class="b g">已知 ${probedN}</span>` : `<span class="b u">未探测</span>`;
       parts.push(`<h2 class="cb cgroup">${check} ${cc} ${groupBadge} <span class="mu">${g.rows.length} 个节点</span></h2>
-        <table><tr><th>选</th><th>节点</th><th>出站 IP</th><th>质量</th><th>类型</th><th>族</th><th>出口族事实</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th><th>连通测试</th></tr>${body}</table>`);
+        <table><tr><th>选</th><th>节点</th><th>国家</th><th>出站 IP</th><th>质量</th><th>类型</th><th>族</th><th>出口族事实</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th><th>连通测试</th></tr>${body}</table>`);
     }
     return parts.join("") || '<div class="mu">本 isolate 还没有探到任何节点（稍后刷新重试）</div>';
   }

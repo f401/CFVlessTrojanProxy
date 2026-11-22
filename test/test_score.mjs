@@ -13755,6 +13755,43 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
       if (W.S.seed) W.S.seed.byColo = seedBackup397;
     }
   }
+
+// ---- 第 398 组：地区面板表格加国家列 + 连通测试框 placeholder 不再触发混淆 ----
+{
+  const tools398 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  const tpl398 = fs.readFileSync("src/views/html/regions.html", "utf8");
+  // 结构：表头有国家列、紧跟节点列；行里渲染 r.country（缺失显示 —）
+  ok("[398] 表头有国家列", tools398.includes("<th>国家</th>"));
+  ok("[398] 国家列在节点列后", tools398.indexOf("<th>节点</th>") < tools398.indexOf("<th>国家</th>") && tools398.indexOf("<th>国家</th>") < tools398.indexOf("<th>出站 IP</th>"));
+  ok("[398] 行渲染国家码", tools398.includes('escapeHtml(r.country || "—")'));
+  // 根因修复：checkSite placeholder 从 x.com（会被 obf/pre.js 的 SENS 编码成 __K 破坏 HTML 属性引号）改成不敏感的示例域名
+  const checkInput398 = tpl398.split("\n").find((l) => l.includes('id="checkSite"'));
+  ok("[398] checkSite placeholder 不触发混淆", !!checkInput398 && checkInput398.includes("example.com") && !checkInput398.includes("x.com"));
+  // 其他两个输入框仍正常
+  ok("[398] probeSite/targetHost 用示例域名", tpl398.includes('id="probeSite"') && tpl398.includes('id="targetHost"'));
+  // 渲染：seed 节点带 cc=US，表格里出现国家码单元格
+  const saveSeed398 = W.S.seed;
+  const saveAlive398 = new Map(W.S.alive);
+  W.S.alive.clear();
+  W.S.seed = { v: 7, byColo: { US: { nodes: [{ k: "198.51.100.9:443", h: "198.51.100.9", p: 443, cc: "US" }] } } };
+  const ctx398 = {
+    url: new URL("https://edge.example.com/regions"),
+    request: { method: "GET" },
+    env: {}, id: "u398", pageKey: "",
+    auth: { list: [{ id: "u398", pwd: "p", note: "", enabled: true, managed: true, regions: [] }], uuids: new Set(), trojan: new Map(), ok: true },
+  };
+  try {
+    const html398 = await (await W.regions(ctx398)).text();
+    ok("[398] HTML 表头有国家列", html398.includes("<th>国家</th>"));
+    ok("[398] HTML 行有国家码", html398.includes(">US</td>"));
+    ok("[398] HTML 连通框 placeholder 正常", html398.includes('id="checkSite"') && !html398.includes("__K("));
+  } finally {
+    W.S.alive.clear();
+    for (const [k, v] of saveAlive398) W.S.alive.set(k, v);
+    W.S.seed = saveSeed398;
+  }
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
