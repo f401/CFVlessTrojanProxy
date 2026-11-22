@@ -371,18 +371,18 @@ export class RegionsView {
           const pinnedChecked = pinnedSelected.has(r.key) ? " checked" : "";
           // 出站 IP 单独成列：key 就是 host:port，抽 host 出来高亮，便于一眼确认出口地址
           const [exitIp] = splitRelay(r.key, 443);
-          return `<tr>
+          return `<tr data-node="${escapeHtml(r.key)}">
             <td><input type="checkbox" name="pinnedNodes" value="${escapeHtml(r.key)}"${pinnedChecked}></td>
             <td class="u">${escapeHtml(r.key)}</td>
             <td class="ipx">${escapeHtml(exitIp)}</td>
-            <td>${levelBadge(r.level)}</td>
-            <td>${kindLabel(r.kind)}</td>
+            <td data-cell="level">${levelBadge(r.level)}</td>
+            <td data-cell="kind">${kindLabel(r.kind)}</td>
             <td>${familyLabel(r.family)}</td>
             <td>${egLabel(r.egFamily)}</td>
             <td>${r.dead ? "判死" : "—"}</td>
             <td>${withRtt ? escapeHtml(dnsLabel(r.dnsV6)) : "—"}</td>
             <td>${flagLabel(r)}</td>
-            <td class="mu">${escapeHtml(r.source)}${r.probed ? " · 已覆盖" : ""}</td>${rtt}${recheck}${nodecheck}
+            <td class="mu" data-cell="source">${escapeHtml(r.source)}${r.probed ? " · 已覆盖" : ""}</td>${rtt}${recheck}${nodecheck}
           </tr>`;
         })
         .join("");
@@ -439,10 +439,14 @@ export class RegionsView {
     if (op === "probe") {
       const site = String(f.get("site") || "").trim().slice(0, 256);
       if (!site) return new Response("请先填写要探测的网站", { status: 400 });
-      const ck = "s:" + site;
+      // 勾选节点批量探测：nodes 是逗号分隔的 host:port；没勾就回退全池自动挑（原行为）。最多 12 条守 DO 预算
+      const picked = f.getAll("nodes").map(String).flatMap((x) => x.split(",")).map((x) => x.trim()).filter(Boolean).slice(0, 12);
+      const list = picked.join(",");
+      const n = picked.length || 2;
+      const ck = "s:" + site + (list ? "|" + list : "");
       if (!QUALITY.recheckReady(ck, 60_000)) return new Response("该站点 1 分钟内已探测过，请稍候再试");
       QUALITY.recheckMark(ck);
-      const resp = await runTfb({ env: this.c.env }, site, 2);
+      const resp = await runTfb({ env: this.c.env }, site, n, list, Math.min(12, Math.max(3, n)));
       const out = (await resp.json().catch(() => ({}))) as { verdict?: string; probed?: number; okN?: number; rows?: Array<{ relay: string; status?: number; ms?: number }> };
       // 只去 IPv6 的方括号，不能把 host:port 的冒号也删掉（否则出现 45.136.117.194443 这种粘连）；
       // 每行前置出口国家码（从存活表/seed 查，零子请求），让「探测完显示国家」在结果里可见
@@ -466,6 +470,10 @@ export class RegionsView {
       // 标签拼成数组再过滤空值：proxy/vpn 都否定时不能留下悬空的「 / 」（用户看到的"奇怪东西"）
       const tags = [String(q.level), String(q.kind), q.proxy ? "代理" : "", q.vpn ? "VPN" : ""].filter(Boolean);
       const cc = ccTag(countryOf(key));
+      // 面板按钮带 json=1：返回结构化结果供前端回填表格对应行，不跳转；文本路径保持不变（兼容旧测试/脚本）
+      if (String(f.get("json") || "") === "1") {
+        return Response.json({ ok: true, key, cc, level: String(q.level), kind: String(q.kind), proxy: !!q.proxy, vpn: !!q.vpn, label: tags.join(" / "), badge: levelBadge(String(q.level)), kindHtml: kindLabel(q.kind as IpKind) });
+      }
       return new Response(`重探 ${cc}${key}：${tags.join(" / ")}`);
     }
     // 对指定节点测用户输入的网站：钉一条中继跑 runTfb，看连通与是否被 ban。

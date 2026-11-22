@@ -120,14 +120,15 @@ export function pickFresh(host: string, ips: string[], n: number): string[] {
  * @param host 目标主机
  * @param n 中继条数（1~3）
  * @param list 指定中继列表（逗号分隔），空串表示自动挑
+* @param cap 单次最多探测的中继数（面板勾选批量探测可放大，默认 3 守 cron 预算）
  * @returns JSON 响应：verdict / escalate / rows
  */
-export async function runTfb(c: RouteCtx, host: string, n: number, list = ""): Promise<Response> {
+export async function runTfb(c: RouteCtx, host: string, n: number, list = "", cap = 3): Promise<Response> {
   const own = [...S.alive.values()].map((x) => x.h);
   const pool = (list ? list.split(",") : own.length ? own : SEED)
 .map((x) => splitRelay(x.trim(), 443)[0])
     .filter((h, i, arr) => h && arr.indexOf(h) === i);
-  const ips = pickFresh(host, pool, Math.max(1, Math.min(3, n)));
+  const ips = pickFresh(host, pool, Math.max(1, Math.min(cap, n)));
   // 直连也算一条通道：DO 的出口族与中继不同，常常正好一个 403 一个 200（真混采样）
   const dq = "https://meter/tf?h=" + encodeURIComponent(host) + "&r=";
   const dres = (await withTimeout(stub0(c).fetch(dq), 8000)) as Response | undefined;

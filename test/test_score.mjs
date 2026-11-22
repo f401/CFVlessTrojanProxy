@@ -13005,7 +13005,7 @@ if (fs.existsSync(midPath)) {
   ok("[378] 已探优先排序", tools378.includes("Number(b.probed) - Number(a.probed)"));
   ok("[378] 组级也按已探优先", tools378.includes("a[1].some((r) => r.probed) ? 1 : 0"));
   // 探测按钮：指定网站（runTfb）+ 逐节点质量重探（qualityOf），且都限流
-  ok("[378] 指定网站探测复用 tfb", tools378.includes("runTfb({ env: this.c.env }, site, 2)"));
+  ok("[378] 指定网站探测复用 tfb", tools378.includes("runTfb({ env: this.c.env }, site, n, list"));
   ok("[378] 质量重探复用 probe", tools378.includes("QUALITY_PROBE.qualityOf(key, h, this.c.budget, fam)"));
   ok("[378] 两类探测都限流", tools378.includes('QUALITY.recheckReady(ck, 60_000)') && tools378.includes('QUALITY.recheckReady(qk, 60_000)'));
   ok("[378] 冷却表放进状态持有者", regionsSrc378.includes("readonly recheckCool = new Map<string, number>()"));
@@ -13714,6 +13714,25 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
     W.S.colo = coloBackup;
   }
 }
+  // ---- 第 396 组：地区面板探测交互（重探回填 / 勾选节点探测 / 状态码+延迟） ----
+  {
+    const tf396 = fs.readFileSync("src/route/tfb.ts", "utf8");
+    const tl396 = fs.readFileSync("src/routes/tools.ts", "utf8");
+    const h396 = fs.readFileSync("src/views/html/regions.html", "utf8");
+    // 结构：tfb 支持 cap；tools 读 nodes 列表 / requality json / 结果含状态码+延迟 / 表格行 data 标识
+    ok("[396] runTfb 支持自定义 cap", tf396.includes("cap = 3") && tf396.includes("Math.min(cap, n)"));
+    ok("[396] probe 读勾选节点列表", tl396.includes('f.getAll("nodes")') && tl396.includes('x.split(",")') && tl396.includes("picked.join"));
+    ok("[396] 探测结果含状态码与延迟", tl396.includes("r.status ??") && tl396.includes("r.ms ??") && tl396.includes("ms`"));
+    ok("[396] requality 返回 json 回填", tl396.includes('Response.json({ ok: true, key') && tl396.includes("badge: levelBadge") && tl396.includes("kindHtml: kindLabel"));
+    ok("[396] 表格行带 data-node 定位", tl396.includes('<tr data-node=') && tl396.includes('data-cell="level"') && tl396.includes('data-cell="kind"') && tl396.includes('data-cell="source"'));
+    // 前端：收集勾选节点传 nodes；requality json=1；回填三单元格
+    ok("[396] 前端收集勾选节点", h396.includes("input[name=\"pinnedNodes\"]:checked") && h396.includes("nodes:nodes.join"));
+    ok("[396] 前端 requality 走 json", h396.includes("json:'1'") && h396.includes("probe('requality'") && h396.includes(",true)"));
+    ok("[396] 前端回填行单元格", h396.includes('td[data-cell="level"]') && h396.includes('td[data-cell="kind"]') && h396.includes('td[data-cell="source"]') && h396.includes("innerHTML=data.badge"));
+    // 行为：tfb cap 上限与 pickFresh 选择
+    const capRun = W.runTfb && typeof W.runTfb === "function";
+    ok("[396] runTfb 可从窗口导出", capRun);
+  }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

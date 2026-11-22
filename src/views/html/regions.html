@@ -68,12 +68,29 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
 (function(){
   var result=document.getElementById('result');
   function show(t){result.textContent=t;result.classList.add('show');}
-  function probe(action,extra){
+  function checkedNodes(){
+    var out=[];
+    document.querySelectorAll('input[name="pinnedNodes"]:checked').forEach(function(c){out.push(c.value);});
+    return out;
+  }
+  function probe(action,extra,json){
     var fd=new FormData();
     fd.set('op',action);
     if(extra)for(var k in extra)fd.set(k,extra[k]);
     show('探测中…');
-    fetch({{postActionJson}},{method:'POST',body:fd}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.text();}).then(function(t){show(t);})
+    fetch({{postActionJson}},{method:'POST',body:fd}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return json?r.json():r.text();})
+      .then(function(data){
+        if(json&&data&&data.ok&&data.key){
+          // 重探结果回填对应表格行：质量徽章 / 类型 / 来源
+          var row=document.querySelector('tr[data-node="'+data.key.replace(/"/g,'')+'"]');
+          if(row){
+            var lv=row.querySelector('td[data-cell="level"]');if(lv)lv.innerHTML=data.badge||'';
+            var kd=row.querySelector('td[data-cell="kind"]');if(kd)kd.innerHTML=data.kindHtml||'';
+            var sc=row.querySelector('td[data-cell="source"]');if(sc)sc.textContent='重探 '+(data.cc||'')+(data.label||'');
+          }
+          show('重探 '+(data.cc||'')+data.key+'：'+(data.label||''));
+        }else show(typeof data==='string'?data:JSON.stringify(data));
+      })
       .catch(function(e){show('请求失败（'+e.message+'），请检查网络后重试');});
   }
   document.addEventListener('click',function(ev){
@@ -82,7 +99,9 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
       ev.preventDefault();
       var site=document.getElementById('probeSite').value.trim();
       if(!site){show('请先填写要探测的网站');return;}
-      probe('probe',{site:site});return;
+      // 只对勾选的节点探测；没勾则服务端回退全池自动挑
+      var nodes=checkedNodes();
+      probe('probe',{site:site,nodes:nodes.join(',')});return;
     }
     if(b.dataset.probe==='1'){
       ev.preventDefault();
@@ -92,8 +111,8 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
         if(!site){show('请先填写节点连通测试的网站');return;}
         probe(op,{checkSite:site});
       }else if(op==='requality'){
-        // 按钮自带 key，避免旧隐藏字段多节点串台探错行
-        probe('requality',{key:b.dataset.key||''});
+        // 按钮自带 key + json=1，结果回填对应行，不跳转
+        probe('requality',{key:b.dataset.key||'',json:'1'},true);
       }
     }
   });
