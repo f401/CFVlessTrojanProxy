@@ -119,6 +119,42 @@ export function familyLabel(f: IpFamily): string {
 }
 
 /**
+ * 功能：从存活表/seed 名单里查一个通道（IP / host:port / direct）的国家码，给探测结果标注出口国家。
+ *
+ * 为什么单独做：探测结果里的 relay 是「节点地址」而不是面板行，拿不到现成的 country 字段；
+ * 国家码只存在存活表（alive.cc）与 seed 名单（byColo 桶）里，都是本 isolate 内存，查表零子请求。
+ * 直连通道没有出口节点，用本机房码（S.colo）标注；查不到就留空，结果文本不强塞「未知」。
+ * @param relay 通道名："direct" / 纯 IP / host:port
+ * @returns 两位大写国家码；查不到返回空串
+ */
+export function countryOf(relay: string): string {
+  if (relay === "direct") return String(S.colo || "").toUpperCase();
+  const [host] = splitRelay(relay, 443);
+  // 先按完整 key 命中，再按 host 扫存活表（探测结果可能只带 IP 不带端口）
+  const exact = S.alive.get(relay) || S.alive.get(host + ":443");
+  if (exact?.cc) return String(exact.cc).toUpperCase();
+  for (const node of S.alive.values()) {
+    if (node.h === host && node.cc) return String(node.cc).toUpperCase();
+  }
+  const byColo = (S.seed && S.seed.byColo) || {};
+  for (const [cc, bucket] of Object.entries(byColo)) {
+    for (const n of bucket?.nodes || []) {
+      if ((n.h === host || n.k === relay) && (n.cc || cc)) return String(n.cc || cc).toUpperCase();
+    }
+  }
+  return "";
+}
+
+/**
+ * 功能：把国家码渲染成探测结果里的方括号前缀（查不到就不显示，避免每行都挂「??」）。
+ * @param cc 两位国家码或空串
+ * @returns "[US] " 或空串
+ */
+export function ccTag(cc: string): string {
+  return cc ? "[" + cc + "] " : "";
+}
+
+/**
  * 功能：代理/VPN 标记（只标记、不降级 —— 与 IpLevel 的判定口径一致）。
  * @param r 节点展示行
  * @returns "代理 VPN" / "—"
@@ -408,8 +444,13 @@ export class RegionsView {
       QUALITY.recheckMark(ck);
       const resp = await runTfb({ env: this.c.env }, site, 2);
       const out = (await resp.json().catch(() => ({}))) as { verdict?: string; probed?: number; okN?: number; rows?: Array<{ relay: string; status?: number; ms?: number }> };
-      // 只去 IPv6 的方括号，不能把 host:port 的冒号也删掉（否则出现 45.136.117.194443 这种粘连）
-      const rows = (out.rows || []).slice(0, 8).map((r) => `${String(r.relay).replace(/[[\]]/g, "")}:${r.status ?? "?"}/${r.ms ?? "?"}ms`);
+      // 只去 IPv6 的方括号，不能把 host:port 的冒号也删掉（否则出现 45.136.117.194443 这种粘连）；
+      // 每行前置出口国家码（从存活表/seed 查，零子请求），让「探测完显示国家」在结果里可见
+      const rows = (out.rows || []).slice(0, 8).map((r) => {
+        const relay = String(r.relay);
+        const cc = ccTag(countryOf(relay));
+        return `${cc}${relay.replace(/[[\]]/g, "")}:${r.status ?? "?"}/${r.ms ?? "?"}ms`;
+      });
       return new Response(`探测 ${site}：${out.verdict || "?"} ${out.okN ?? 0}/${out.probed ?? 0} 成功\n` + rows.join("\n"));
     }
     // 逐节点质量重探：复用 QualityProbe.qualityOf（6 源合并），缓存 3 天，手动可强制刷新
@@ -424,7 +465,8 @@ export class RegionsView {
       const q = await QUALITY_PROBE.qualityOf(key, h, this.c.budget, fam);
       // 标签拼成数组再过滤空值：proxy/vpn 都否定时不能留下悬空的「 / 」（用户看到的"奇怪东西"）
       const tags = [String(q.level), String(q.kind), q.proxy ? "代理" : "", q.vpn ? "VPN" : ""].filter(Boolean);
-      return new Response(`重探 ${key}：${tags.join(" / ")}`);
+      const cc = ccTag(countryOf(key));
+      return new Response(`重探 ${cc}${key}：${tags.join(" / ")}`);
     }
     // 对指定节点测用户输入的网站：钉一条中继跑 runTfb，看连通与是否被 ban。
     // 只做诊断展示，不额外写封禁（runTfb 内部仍按「两批共识 + 有 2xx」的硬规则写判定表）。
@@ -446,7 +488,8 @@ export class RegionsView {
       const bytes = row?.bytes || 0;
       // 737B「IPv6」这类族拒绝是小响应 403；业务 403 通常是整页，靠 body 大小只做诊断标签
       const conclusion = nodeCheckConclusion(status, bytes);
-      return new Response("节点 " + key + " → " + site + "\n结论：" + conclusion + "\n状态码：" + (status || "无") + " 字节：" + (bytes || "无") + " 耗时：" + (row?.ms ?? "无") + "ms\n判定：" + (out.verdict || "?"));
+      const cc = ccTag(countryOf(key));
+      return new Response("节点 " + cc + key + " → " + site + "\n结论：" + conclusion + "\n状态码：" + (status || "无") + " 字节：" + (bytes || "无") + " 耗时：" + (row?.ms ?? "无") + "ms\n判定：" + (out.verdict || "?"));
     }
     return new Response("未知操作", { status: 400 });
   }

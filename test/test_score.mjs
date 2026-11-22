@@ -13678,6 +13678,42 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   const respSrc = fs.readFileSync("src/edge/respond.ts", "utf8");
   ok("[394] 不出现 connect-src *", !/connect-src\s+\*/.test(respSrc));
 }
+// ── 第 395 组：地区面板探测结果显示国家 + 已知节点按国家分组 ──
+{
+  const tools395 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  // 结构锁：三类探测结果都要带国家码
+  ok("[395] 有 countryOf 查询函数", typeof W.countryOf === "function");
+  ok("[395] 有 ccTag 渲染函数", typeof W.ccTag === "function");
+  ok("[395] 指定网站探测带国家", tools395.includes("ccTag(countryOf(relay))"));
+  ok("[395] 质量重探带国家", tools395.includes("ccTag(countryOf(key))"));
+  ok("[395] 连通测试带国家", tools395.includes('"节点 " + cc + key'));
+  ok("[395] 已知节点按国家分组", tools395.includes("groupRows(rows)"));
+  ok("[395] 已知组在前", tools395.includes("pb - pa || a[0].localeCompare(b[0])"));
+  // 行为：ccTag 空串不显示、有码显示方括号
+  eq("[395] ccTag 空串", W.ccTag(""), "");
+  eq("[395] ccTag 有码", W.ccTag("US"), "[US] ");
+  // 行为：countryOf 从存活表查国家码（保存/恢复现场，避免污染其它组）
+  const aliveBackup = new Map(W.S.alive);
+  const coloBackup = W.S.colo;
+  try {
+    W.S.alive.set("198.51.100.9:443", { h: "198.51.100.9", p: 443, cc: "JP", ms: 5 });
+    W.S.alive.set("198.51.100.10:8443", { h: "198.51.100.10", p: 8443, cc: "DE", ms: 6 });
+    eq("[395] countryOf 精确匹配 key", W.countryOf("198.51.100.9:443"), "JP");
+    eq("[395] countryOf 缺省端口", W.countryOf("198.51.100.9"), "JP");
+    eq("[395] countryOf 按 host 扫", W.countryOf("198.51.100.10:9999"), "DE");
+    eq("[395] countryOf direct 用本机房", W.countryOf("direct"), String(coloBackup || "").toUpperCase());
+    eq("[395] countryOf 查不到返回空", W.countryOf("203.0.113.99"), "");
+    // 分组：已知节点（probed=true）的国家排在未知国家前，组内保留顺序
+    const mk = (key, country, probed) => ({ key, country, probed, alive: true, level: "normal", family: 1, source: "alive", kind: "unknown", proxy: false, vpn: false, rtt: null, egFamily: 0, psOk: -1, dead: false, blkPenalty: 1, dnsV6: -1 });
+    const groups = W.groupRows([mk("a:1", "ZZ", false), mk("b:2", "AA", true), mk("c:3", "MM", false)]);
+    eq("[395] 分组已知国家在前", groups[0].country, "AA");
+    eq("[395] 分组数正确", groups.length, 3);
+  } finally {
+    W.S.alive.clear();
+    for (const [k, v] of aliveBackup) W.S.alive.set(k, v);
+    W.S.colo = coloBackup;
+  }
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

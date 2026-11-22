@@ -122,7 +122,7 @@ export { ProxyipView, proxyip } from "./routes/proxyip";
 export { AdminView, admin } from "./routes/admin";
 export { SubscriptionRoutes, subscription } from "./routes/subscription";
 export { debug, DEBUG, DebugActions, DebugMeterProbes, DebugTables, DebugSuite } from "./routes/debug";
-export { regions, RegionsView, levelBadge, kindLabel, familyLabel, flagLabel, egLabel, psLabel, dnsLabel, groupRows, nodeCheckConclusion } from "./routes/tools";
+export { regions, RegionsView, levelBadge, kindLabel, familyLabel, flagLabel, egLabel, psLabel, dnsLabel, groupRows, nodeCheckConclusion, countryOf, ccTag } from "./routes/tools";
 export {
   DebugBench,
   DebugDiag,
