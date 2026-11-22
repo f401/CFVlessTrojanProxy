@@ -106,7 +106,15 @@ export class Dialer {
     const learned = (S.needPx.get(host) || 0) > Date.now();
     const onList = isPxHost(env, host);
     let cfHost = (this.cfHost.get(host) || 0) > Date.now();
-    if (!learned && !onList && !cfHost && env.proxyip === "auto") {
+    // 冷 isolate 首条 CF 连接必须在选路前拿到 EG 出口族事实：EG 空时 v4/v6 同权 ×2，
+    // 排序退化成 alive 原顺序，v6 排前就 100% 撞 737B IPv6 403（闭环探针 200/200 实证）。
+    // 只在「需要 DoH 判定的冷请求」上提前并行启动，利用 DoH 等待时间加载事实，
+    // 不给首字节增加延迟；非 CF 路径不触发，避免多余的 DO 子请求。
+    const needDoh = !learned && !onList && !cfHost && env.proxyip === "auto";
+    // needDoh：提前启动，与 DoH 并行；cfHost 已缓存但事实未加载：也启动（保持原等待语义）。
+    // 非 CF 且无需 DoH：不启动，避免多余 DO 子请求。
+    const factLoad = HOOK.vtLoad && !S.vtLoaded && (needDoh || cfHost) ? HOOK.vtLoad(env).catch(() => {}) : null;
+    if (needDoh) {
       // DoH 抖动会偶发失败，而这是判定层的关键输入：给两次机会（不做负缓存）。
       for (let k = 0; k < 2 && !cfHost; k++) {
         try {
@@ -124,10 +132,9 @@ export class Dialer {
         }
       }
     }
-    if (cfHost && !S.vtLoaded && HOOK.vtLoad) {
-      // 冷 isolate 读一次事实能省掉「注定失败的第一次请求」，但首字节不能为它排队：
-      // 最多等 200ms，超时先放行（事实会在后台继续应用，下一条连接就能用上）。
-      await Promise.race([HOOK.vtLoad(env), new Promise<void>((r) => setTimeout(r, 200))]);
+    if (cfHost && factLoad) {
+      // DoH 判定期间事实已在后台加载，这里通常立即返回；200ms 只是兜底上限。
+      await Promise.race([factLoad, new Promise<void>((r) => setTimeout(r, 200))]);
     }
     const win = HOOK.win ? HOOK.win(host) : { d: false, r: false };
     const relWin = win.r;

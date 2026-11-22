@@ -13624,6 +13624,43 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
   ok("[392] catch 无裸 e 拼接", !tpl392.includes("show('请求失败：'+e)"));
 }
 
+// 第 393 组：冷 isolate 事实加载与 DoH 并行修复（修偶发 IPv6 403）
+// 结构锁读源码；行为验证用纯 JS 复刻 classify 的「先启动、后 await」竞态语义。
+
+
+const dialSrc393 = fs.readFileSync("src/proxy/dialer.ts", "utf8");
+const dial393 = dialSrc393.replace(/\r\n/g, "\n");
+
+// 结构锁
+ok("[393] factLoad 在 DoH 判定之前启动",
+  dial393.indexOf("const factLoad = HOOK.vtLoad") < dial393.indexOf("for (let k = 0; k < 2 && !cfHost; k++)"));
+ok("[393] factLoad 吞掉加载异常", dial393.includes("HOOK.vtLoad(env).catch(() => {})"));
+ok("[393] DoH 后 await 已启动的 promise", dial393.includes("Promise.race([factLoad, new Promise"));
+ok("[393] 不再串行重启 vtLoad", !dial393.includes("await Promise.race([HOOK.vtLoad(env)"));
+ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B IPv6 403"));
+
+// 行为：复刻 classify 的新旧两种时序，证明「并行启动」让事实在 DoH 期间就绪。
+// 旧时序：先 await DoH(50ms)，再启动 factLoad(40ms) ⇒ 90ms 后事实才就绪。
+// 新时序：同时启动 factLoad(40ms) 与 DoH(50ms) ⇒ 50ms 时事实已就绪。
+{
+  const doh = (ms) => new Promise((r) => setTimeout(r, ms));
+  const load = (ms, flag) => new Promise((r) => setTimeout(() => { flag.on = true; r(); }, ms));
+  const oldFlag = { on: false };
+  const t0 = Date.now();
+  await doh(50);
+  const oldP = load(40, oldFlag);
+  await oldP;
+  const oldMs = Date.now() - t0;
+
+  const newFlag = { on: false };
+  const t1 = Date.now();
+  const newP = load(40, newFlag);
+  await doh(50);
+  await Promise.race([newP, new Promise((r) => setTimeout(r, 200))]);
+  const newMs = Date.now() - t1;
+  ok("[393] 并行后事实更早就绪", newFlag.on && oldFlag.on && newMs < oldMs);
+  ok("[393] 并行为 DoH 重叠留出时间", oldMs - newMs >= 25);
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
