@@ -137,7 +137,7 @@ export { randomPwd } from "./edge/auth";
 
 export { renderAdmin, renderAdminHint, renderLogin } from "./routes/admin";
 export { RATE_LIMIT, RateLimiter, adminAuthed, sha256Hex, sessionToken } from "./edge/auth";
-export { html, CSP_STATIC } from "./edge/respond";
+export { html, CSP_STATIC, SEC_HEADERS } from "./edge/respond";
 export { UploadStream, WS_UP_QUEUE_MAX, wsToStream } from "./proxy/ws-in";
 export { pipeBack } from "./proxy/tunnel";
 export { VT_TTL_MS } from "./route/verdict";

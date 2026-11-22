@@ -13661,6 +13661,23 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   ok("[393] 并行后事实更早就绪", newFlag.on && oldFlag.on && newMs < oldMs);
   ok("[393] 并行为 DoH 重叠留出时间", oldMs - newMs >= 25);
 }
+// ── 第 394 组：管理面板 CSP 允许同源 fetch（Firefox NetworkError 根因）──
+{
+  const csp = String(W.SEC_HEADERS["content-security-policy"] || "");
+  ok("[394] CSP 含 connect-src 'self'", csp.includes("connect-src 'self'"));
+  ok("[394] CSP 仍禁 default-src", csp.includes("default-src 'none'"));
+  ok("[394] CSP 保留 form-action self", csp.includes("form-action 'self'"));
+  ok("[394] CSP 保留 script-src unsafe-inline", csp.includes("script-src 'unsafe-inline'"));
+  ok("[394] CSP 保留 frame-ancestors none", csp.includes("frame-ancestors 'none'"));
+  // 行为：html() 响应必须真的带上这条 CSP
+  const resp = W.html('<button>probe</button>');
+  const h = resp.headers.get("content-security-policy") || "";
+  ok("[394] html 响应带 connect-src", h.includes("connect-src 'self'"), h);
+  ok("[394] html 响应 content-type 正确", (resp.headers.get("content-type") || "").includes("text/html"));
+  // 源码锁：respond.ts 的 connect-src 只能是 self，不能放宽到 *
+  const respSrc = fs.readFileSync("src/edge/respond.ts", "utf8");
+  ok("[394] 不出现 connect-src *", !/connect-src\s+\*/.test(respSrc));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

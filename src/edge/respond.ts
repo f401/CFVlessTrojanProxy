@@ -11,8 +11,10 @@ const SAFE_HEADERS: Record<string, string> = {
 export const CSP_STATIC = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'";
 
 export const SEC_HEADERS: Record<string, string> = {
+  // 管理面板的探测按钮走同源 fetch；CSP 缺 connect-src 会回落到 default-src 'none'，
+  // Firefox 直接把 fetch 掐成 TypeError: NetworkError（服务端其实收到 200）。
   "content-security-policy":
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   "x-frame-options": "DENY",
   ...SAFE_HEADERS,
 };
