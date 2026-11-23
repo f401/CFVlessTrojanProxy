@@ -12698,6 +12698,7 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
 
   ok("[372] regions 端点已导出", typeof W.regions === "function" && typeof W.RegionsView === "function");
   const ctx372 = { url: new URL("https://edge.example.com/regions?format=json&site=example.com"), env: {}, id: "u372" };
+  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
   const resp372 = await W.regions(ctx372);
   eq("[372] 返回 200", resp372.status, 200);
   const body372 = await resp372.json();
@@ -12976,6 +12977,7 @@ if (fs.existsSync(midPath)) {
     env: {}, id: "u377", pageKey: "",
     auth: { list: [{ id: "u377", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
   };
+  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
   const respHtml377 = await W.regions(ctx377);
   eq("[377] 默认返回 200", respHtml377.status, 200);
   const html377 = await respHtml377.text();
@@ -13058,6 +13060,7 @@ if (fs.existsSync(midPath)) {
     env: {}, id: "u378", pageKey: "",
     auth: { list: [{ id: "u378", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
   };
+  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
   const html378 = await (await W.regions(ctx378)).text();
   ok("[378] HTML 有出口族事实列", html378.includes("出口族事实"));
   ok("[378] HTML 有成功率列", html378.includes("成功率") && html378.includes("100%"));
@@ -13105,6 +13108,7 @@ if (fs.existsSync(midPath)) {
     request: { method: "GET" },
     env: env379, id: "u379",
   };
+  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
   const resp379 = await W.regions(ctx379);
   eq("[379] 冷 isolate 请求成功", resp379.status, 200);
   const body379 = await resp379.json();
@@ -13518,6 +13522,7 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
     env: {}, id: "u389", pageKey: "",
     auth: { list: [{ id: "u389", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"], pinnedNodes: ["203.0.113.60:8443"] }], uuids: new Set(), trojan: new Map(), ok: true },
   };
+  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
   const html389 = await (await W.regions(ctx389)).text();
   ok(`[${G}] 面板节点勾选框回填`, html389.includes('type="checkbox" name="pinnedNodes" value="203.0.113.60:8443" checked'));
   ok(`[${G}] 面板表头有选列`, html389.includes("<th>选</th>"));
@@ -13562,6 +13567,7 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
     env: {}, id: "u390", pageKey: "",
     auth: { list: [{ id: "u390", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
   };
+  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
   const html390 = await (await W.regions(ctx390)).text();
   ok(`[${G}] HTML 有测连通按钮`, html390.includes('value="nodecheck:198.51.100.9:443"'));
   ok(`[${G}] HTML 有 checkSite 框`, html390.includes('id="checkSite"'));
@@ -13600,6 +13606,7 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
     env: {}, id: "u391", pageKey: "",
     auth: { list: [{ id: "u391", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
   };
+  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
   const html391 = await (await W.regions(ctx391)).text();
   ok("[391] HTML 有出站 IP 列", html391.includes("<th>出站 IP</th>") && html391.includes("ipx"));
   ok("[391] HTML 出站 IP 值", html391.includes("198.51.100.9"));
@@ -13790,6 +13797,7 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
     auth: { list: [{ id: "u398", pwd: "p", note: "", enabled: true, managed: true, regions: [] }], uuids: new Set(), trojan: new Map(), ok: true },
   };
   try {
+    W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
     const html398 = await (await W.regions(ctx398)).text();
     ok("[398] HTML 表头有国家列", html398.includes("<th>国家</th>"));
     ok("[398] HTML 行有国家码", html398.includes(">US</td>"));
@@ -13865,6 +13873,7 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   W.S.pool.length = 0;
   for (let i = 0; i < 45; i++) W.S.pool.push({ h: "203.0.113." + (i + 1), p: 443 });
   const ctx400 = { url: new URL("https://edge.example.com/regions"), env: {}, id: "u400", auth: { uuids: new Set(), list: [] } };
+  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
   const r1 = await W.regions({ ...ctx400, url: new URL("https://edge.example.com/regions?format=json") });
   const j1 = await r1.json();
   eq("[400] JSON 全量 45 节点", j1.nodes.length, 45);
@@ -13960,14 +13969,14 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
 }
 
 
-// 406) 问题②：rows() 结果 5 秒缓存——每 GET 重建 1600 行 + 排序会吃满免费版 10ms CPU（连续几次即 1102）
+// 406) 问题②：rows() 结果缓存——重建 1600 行在 CF 上超 10ms CPU 即 1102；TTL 30 秒且命中只看寿命，后台 churn 不触发重建
 {
   ok("[406] 状态表有 regionRowsCache 字段", Object.prototype.hasOwnProperty.call(W.S, "regionRowsCache"), "缺字段");
   const tools406 = fs.readFileSync("src/routes/tools.ts", "utf8");
-  ok("[406] 缓存键含数据指纹", tools406.includes("cache.key === key") && tools406.includes("aliveSig") && tools406.includes("poolSig"), "未带指纹");
+  ok("[406] 命中只看寿命不看 key", tools406.includes("cache && now - cache.t < 30000") && !tools406.includes("cache.key === key"), "churn 会触发重建");
   ok("[406] 缓存键不含 target", tools406.includes("const key = `${aliveSig}|${poolSig}|${seedSig}`;"), "换 site 会重建整表");
   ok("[406] target 四列补算", tools406.includes("CONN_OBS.rttOf(coloNow") && tools406.includes("PS.okOf(target") && tools406.includes("BLK.penOf(target") && tools406.includes("DNS.v6Of(target"), "四列未渲染时补算"),
-  ok("[406] 缓存 5 秒过期", tools406.includes("now - cache.t < 5000"), "TTL 不是 5 秒");
+  ok("[406] 缓存 30 秒过期", tools406.includes("now - cache.t < 30000"), "TTL 不是 30 秒");
   ok("[406] 写回缓存", tools406.includes("S.regionRowsCache = { t: now, key, rows }"), "未写回");
   ok("[406] POST 失效缓存", tools406.includes("S.regionRowsCache = null; // 探测/写配置"), "POST 未失效");
   // 行为：用 ctx 走真实 routes() 两次；第一次填充缓存、第二次同 URL 命中（不重建），换 site 重建
@@ -13982,6 +13991,11 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   const ctx406b = { url: new URL("https://edge.example.com/regions?format=json&site=other.test"), env: {}, id: "u406" };
   await W.regions(ctx406b);
   ok("[406] 不同 target 命中缓存", W.S.regionRowsCache === c1, "换 site 重建了整表");
+  // 后台 probe 改 alive（churn）不应触发重建——旧代码用完整指纹做 key，每次都重建 → CF 上 1102
+  W.S.alive.set("99.0.0.77:443", { h: "99.0.0.77", p: 443, cc: "US", at: Date.now() });
+  await W.regions(ctx406);
+  ok("[406] alive churn 不触发重建", W.S.regionRowsCache === c1, "后台探活改 alive 导致重建");
+  W.S.alive.delete("99.0.0.77:443");
   W.S.regionRowsCache = savedCache406;
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

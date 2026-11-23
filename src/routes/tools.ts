@@ -252,14 +252,14 @@ export class RegionsView {
    * @returns 展示行数组
    */
   private rows(target: string): RegionNodeRow[] {
-    // 每 GET 重建 1600 行 + 排序吃满 10ms CPU 即 1102；缓存 5 秒、键不含 target（换 site 只补四列），节点 key 指纹保证 IP 替换即失效。
+    // 重建 1600 行 + ICU 排序在 CF 上逼近 10ms CPU（TTL 到期即 1102）；缓存 30 秒且命中只看寿命，后台 probe 改 alive 也不触发重建（面板允许短暂陈旧，POST 探测会主动失效）。
     const now = Date.now();
     const aliveSig = [...S.alive.keys()].join(",");
     const poolSig = S.pool.map((x) => `${x.h}:${x.p}`).join(",");
     const seedSig = Object.values(S.seed?.byColo || {}).map((c) => (c.nodes || []).map((n) => n.k).join(",")).join("|");
-    const key = `${aliveSig}|${poolSig}|${seedSig}`;
+    const key = `${aliveSig}|${poolSig}|${seedSig}`; void key; // 指纹仅作写回标记，不参与命中：后台 probe 改 alive 让 key 每次变 → 每次重建 → 1102
     const cache = S.regionRowsCache;
-    let rows = cache && cache.key === key && now - cache.t < 5000 ? (cache.rows as RegionNodeRow[]) : null;
+    let rows = cache && now - cache.t < 30000 ? (cache.rows as RegionNodeRow[]) : null;
     if (!rows) {
       const alive = new AliveBoard().list();
       const seeds = this.seedNodes();
@@ -295,8 +295,8 @@ export class RegionsView {
           Number(b.probed) - Number(a.probed) ||
           Number(b.alive) - Number(a.alive) ||
           (rank[a.level] ?? 3) - (rank[b.level] ?? 3) ||
-          a.country.localeCompare(b.country) ||
-          a.key.localeCompare(b.key),
+          (a.country < b.country ? -1 : a.country > b.country ? 1 : 0) ||
+          (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
       );
       S.regionRowsCache = { t: now, key, rows };
     }
