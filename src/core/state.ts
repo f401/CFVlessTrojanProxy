@@ -98,6 +98,13 @@ export class AppState {
   /** CF HTTP 判定缓存：跨模块共享，仍由 S 持有 */
   cfHttp: Map<string, { code: number; colo: string; t: number }> = new Map();
 
+  /**
+   * 地区面板的已排序节点行缓存（短 TTL）。GET 每次重建 1600 行 + 排序会吃满免费版 10ms
+   * CPU 预算，连续几次就触发 1102；面板是只读展示，允许几秒陈旧。rows 用 unknown[] 存，
+   * 避免 core 依赖 routes 的类型。
+   */
+  regionRowsCache: { t: number; key: string; rows: unknown[] } | null = null;
+
 }
 
 export const S = new AppState();

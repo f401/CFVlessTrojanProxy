@@ -80,11 +80,7 @@ export interface RegionNodeRow {
   dnsV6: number;      // DNS 事实 1=有 AAAA/0=无/-1=不知道
 }
 
-/**
- * 功能：把质量等级渲染成带文字的徽章（不只靠颜色，色弱/黑白屏也能读）。
- * @param level 质量等级字符串
- * @returns 已转义的 HTML 片段
- */
+/** 功能：把质量等级渲染成带文字徽章（不只靠颜色）；@param level 质量等级；@returns 已转义 HTML */
 export function levelBadge(level: string): string {
   const map: Record<string, [string, string]> = {
     good: ["g", "良好"],
@@ -96,11 +92,7 @@ export function levelBadge(level: string): string {
   return `<span class="b ${cls}">${text}</span>`;
 }
 
-/**
- * 功能：把线路类型枚举翻译成中文标签，并附上原始值（便于对照探测源数据）。
- * @param kind 线路类型枚举
- * @returns 已转义的 HTML 片段
- */
+/** 功能：线路类型枚举翻译成中文标签并附原始值；@param kind 线路类型；@returns 已转义 HTML */
 export function kindLabel(kind: IpKind): string {
   const map: Record<string, string> = {
     residential: "住宅",
@@ -113,11 +105,7 @@ export function kindLabel(kind: IpKind): string {
   return `${escapeHtml(map[raw] || "未知")} <span class="mu">${escapeHtml(raw)}</span>`;
 }
 
-/**
- * 功能：地址族的可读标签。
- * @param f 地址族枚举
- * @returns "IPv4" 或 "IPv6"
- */
+/** 功能：地址族可读标签；@param f 地址族枚举；@returns "IPv4" 或 "IPv6" */
 export function familyLabel(f: IpFamily): string {
   return f === IpFamily.IPv6 ? "IPv6" : "IPv4";
 }
@@ -264,8 +252,16 @@ export class RegionsView {
    * @returns 展示行数组
    */
   private rows(target: string): RegionNodeRow[] {
-    // 目标站延迟是可选的：没带 ?site= 时一条 RTT 都不算，省掉观测表遍历
+    // 每 GET 重建 1600 行 + 排序吃满免费版 10ms CPU 即 1102；面板只读允许 5 秒陈旧。
+    // 缓存键用节点 key 本身做指纹（非规模）：IP 被替换也要失效。
     const now = Date.now();
+    const aliveSig = [...S.alive.keys()].join(",");
+    const poolSig = S.pool.map((x) => `${x.h}:${x.p}`).join(",");
+    const seedSig = Object.values(S.seed?.byColo || {}).map((c) => (c.nodes || []).map((n) => n.k).join(",")).join("|");
+    const key = `${target}|${aliveSig}|${poolSig}|${seedSig}`;
+    const cache = S.regionRowsCache;
+    if (cache && cache.key === key && now - cache.t < 5000) return cache.rows as RegionNodeRow[];
+    // 目标站延迟是可选的：没带 ?site= 时一条 RTT 都不算，省掉观测表遍历
     const alive = new AliveBoard().list();
     const seeds = this.seedNodes();
     // alive 与 seed 可能重复，按 key 去重后逐个补画像/覆盖/延迟
@@ -313,6 +309,7 @@ export class RegionsView {
         a.country.localeCompare(b.country) ||
         a.key.localeCompare(b.key),
     );
+    S.regionRowsCache = { t: now, key, rows };
     return rows;
   }
 
@@ -534,7 +531,10 @@ export class RegionsView {
    */
   async run(): Promise<Response> {
     // 有些只读探针只给 url/id、不带 request；缺 request 一律按 GET 处理
-    if (this.c.request && this.c.request.method === "POST") return this.post();
+    if (this.c.request && this.c.request.method === "POST") {
+      S.regionRowsCache = null; // 探测/写配置改了事实，下一次 GET 必须重建行，不能被 5 秒缓存挡住
+      return this.post();
+    }
     // 冷 isolate 的 alive/seed 都还在内存里没载入：先看一眼名单与游标再渲染，
     // 否则本机房刚起来时面板恒空（KV 里其实有节点）。aliveList 内部走 30 分钟缓存，
     // 暖 isolate 上这一次几乎零成本，和 /proxyip、订阅的载入路径一致。
