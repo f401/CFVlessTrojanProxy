@@ -13978,7 +13978,7 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   ok("[406] target 四列补算", tools406.includes("CONN_OBS.rttOf(coloNow") && tools406.includes("PS.okOf(target") && tools406.includes("BLK.penOf(target") && tools406.includes("DNS.v6Of(target"), "四列未渲染时补算"),
   ok("[406] 缓存 30 秒过期", tools406.includes("now - cache.t < 30000"), "TTL 不是 30 秒");
   ok("[406] 写回缓存", tools406.includes("S.regionRowsCache = { t: now, key, rows }"), "未写回");
-  ok("[406] POST 失效缓存", tools406.includes("S.regionRowsCache = null; // 探测/写配置"), "POST 未失效");
+  ok("[406] POST 不清整表缓存", tools406.includes("不在 POST 入口清整表缓存") && !tools406.includes("S.regionRowsCache = null; // 探测/写配置"), "POST 清缓存会累积触发 1102");
   // 行为：用 ctx 走真实 routes() 两次；第一次填充缓存、第二次同 URL 命中（不重建），换 site 重建
   const savedCache406 = W.S.regionRowsCache;
   W.S.regionRowsCache = null;

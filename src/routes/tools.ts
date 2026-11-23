@@ -532,7 +532,7 @@ export class RegionsView {
   async run(): Promise<Response> {
     // 有些只读探针只给 url/id、不带 request；缺 request 一律按 GET 处理
     if (this.c.request && this.c.request.method === "POST") {
-      S.regionRowsCache = null; // 探测/写配置改了事实，下一次 GET 必须重建行，不能被 5 秒缓存挡住
+      // 不在 POST 入口清整表缓存：重建 1600 行会累积触发 1102；四个站点相关列本就渲染时补算，节点列表/静态列靠 30 秒 TTL 自然过期。
       return this.post();
     }
     // 冷 isolate 的 alive/seed 都还在内存里没载入：先看一眼名单与游标再渲染，
