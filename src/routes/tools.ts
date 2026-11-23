@@ -7,7 +7,7 @@ export { debug } from "./debug";
 import { IpFamily, IpKind } from "../core/enums";
 import { S } from "../core/state";
 import { QUALITY, QUALITY_PROBE, COVERAGE, CONN_OBS } from "../px/regions";
-import { AliveBoard, aliveList, nsOf } from "../px/pool";
+import { AliveBoard, aliveList, ensurePool, nsOf } from "../px/pool";
 import { geoLabel } from "../px/probe";
 import { html, json } from "../edge/respond";
 import { splitRelay, relayIpOf } from "../core/relay-addr";
@@ -437,6 +437,7 @@ export class RegionsView {
     if (this.c.env && !S.alive.size && !(S.seed.byColo && Object.keys(S.seed.byColo).length)) {
       await aliveList(this.c.env);
     }
+    if (this.c.env && !S.pool.length) await ensurePool(this.c.env); // 冷 isolate 池空则载入，否则「列全池」只剩 alive
     await ensureIsoCountries();
     // 指定网站探测：复用 /debug?tfb 的同一实现，结果行会写进 CONN_OBS 供面板显示延迟
     if (op === "probe") {
@@ -539,6 +540,7 @@ export class RegionsView {
     if (this.c.env && !S.alive.size && !(S.seed.byColo && Object.keys(S.seed.byColo).length)) {
       await aliveList(this.c.env);
     }
+    if (this.c.env && !S.pool.length) await ensurePool(this.c.env); // 冷 isolate 池空则载入，否则「列全池」只剩 alive
     await ensureIsoCountries();
     const target = (this.c.url.searchParams.get("site") || "").slice(0, 256);
     const rows = this.rows(target);
