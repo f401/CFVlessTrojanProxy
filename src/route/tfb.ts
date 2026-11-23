@@ -8,11 +8,19 @@ import { VT } from "./verdict";
 import { splitRelay } from "../core/relay-addr";
 import { logErr } from "../nodes/metrics";
 /**
- * 功能：把主机拼成 `host:port`（IPv6 要加方括号，否则下游拆分会把它当裸地址）。
- * @param h 主机（IPv4 或 IPv6 字面量）
- * @returns 带端口的地址串
+ * 功能：把中继地址规范成 `host:port`，保留显式端口、缺省时才补 443。
+ *
+ * 设计原因：面板勾选的节点可能是 `ip:非443端口`。旧实现先 splitRelay 丢端口、再统一
+ * 补 :443，探测的是错误端口；而 probeTf → splitRelay(relay,443) 本来就认显式端口，
+ * 这里只要不丢即可。IPv6 字面量自带冒号，必须走 splitRelay 而不是 lastIndexOf。
+ *
+ * @param h 中继地址（裸 IP 或带端口的 `host:port`）
+ * @returns 规范后的 `host:port`
  */
-const relayAddr = (h: string): string => (h.includes(":") ? "[" + h + "]:443" : h + ":443");
+const relayAddr = (h: string): string => {
+  const [host, port] = splitRelay(h.trim(), 443);
+  return host.includes(":") ? "[" + host + "]:" + port : host + ":" + port;
+};
 
 /** 站点 → 上一批判定标签的容量上限：站点名来自客户端 ClientHello，不是有限集合。 */
 const TFB_MEM_MAX = 256;
@@ -105,7 +113,9 @@ export function tfClass(rows: Array<{ ok: boolean; status?: number; bytes?: numb
  * 这是 rotate 的真正消费者 —— 全 4xx 时不写封禁，而是扩大采样面。
  */
 export function pickFresh(host: string, ips: string[], n: number): string[] {
-  const seen = (ip: string) => VT.at(host, "r:" + ip);
+  // 判定表按裸 IP 存（`r:<ip>`，见 runTfb 的写入），这里也按裸 IP 查；
+  // 入参 ip 可能是 `host:端口`，直接拼会把端口带进键、永远查不到旧证据。
+  const seen = (ip: string) => VT.at(host, "r:" + splitRelay(ip, 443)[0]);
   const fresh = ips.filter((ip) => !seen(ip));
   const rest = ips.filter((ip) => seen(ip)).sort((a, b) => seen(a) - seen(b));
   // 全部没探过时，按 10 分钟一档轮转起点：否则小池子永远取数组前 n 条，"换出口"名存实亡
@@ -124,9 +134,11 @@ export function pickFresh(host: string, ips: string[], n: number): string[] {
  * @returns JSON 响应：verdict / escalate / rows
  */
 export async function runTfb(c: RouteCtx, host: string, n: number, list = "", cap = 3): Promise<Response> {
-  const own = [...S.alive.values()].map((x) => x.h);
+  const own = [...S.alive.values()].map((x) => `${x.h}:${x.p}`);
+  // 保留面板勾选里的显式端口：旧写法 splitRelay(...)[0] 丢端口、relayAddr 又补 :443，
+  // 探测端口与真实拨号端口不一致（pp≠443 时探测假 200/超时）。
   const pool = (list ? list.split(",") : own.length ? own : SEED)
-.map((x) => splitRelay(x.trim(), 443)[0])
+    .map((x) => relayAddr(x))
     .filter((h, i, arr) => h && arr.indexOf(h) === i);
   const ips = pickFresh(host, pool, Math.max(1, Math.min(cap, n)));
   // 直连也算一条通道：DO 的出口族与中继不同，常常正好一个 403 一个 200（真混采样）

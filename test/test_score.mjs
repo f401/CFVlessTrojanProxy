@@ -3033,12 +3033,17 @@ console.log("\n94) 五类事实门面：一次取齐增量，ack 后清空");
   eq("737B 小页 + 同窗口整页对照 判 v6", W.egDerive(B, 737, { peerBig: true, cf: true }), 6);
   eq("没有整页对照的小页不写", W.egDerive("203.0.113.23", 737, { cf: true }), 0);
   eq("零字节不写", W.egDerive("203.0.113.24", 0, { peerBig: true, cf: true }), 0);
-  eq("5KB 既不整页也不 tiny，不写", W.egDerive("203.0.113.25", 5000, { peerBig: true, cf: true }), 0);
+  eq("5KB 真实内容（>EG_TINY）判 v4", W.egDerive("203.0.113.25", 5000, { peerBig: true, cf: true }), 4);
   eq("空 IP 不写", W.egDerive("", 45000, { cf: true }), 0);
   eq("整页证据会把 v6 改回 v4", W.egDerive(B, 40000, { peerBig: true, cf: true }), 4);
   eq("改回后查得到 4", W.EG.famOf(B), 4);
   eq("known 旁证下的小页判 v6", W.egDerive("203.0.113.26", 737, { known: true, cf: true }), 6);
   eq("纯 v4 站点送到 900B 页面判 v4", W.egDerive("203.0.113.27", 900, { siteV4: true, cf: true }), 4);
+  // 4107B 是 x.com 隧道首页实测大小，旧 EG_BIG=20KB 门槛下学到东西 → 全分组 v6 偶发 403
+  eq("4107B CF 站点内容判 v4", W.egDerive("203.0.113.30", 4107, { cf: true }), 4);
+  eq("刚过 EG_TINY 的 2049B 也判 v4", W.egDerive("203.0.113.31", 2049, { cf: true }), 4);
+  eq("2048B 边界不判 v4", W.egDerive("203.0.113.32", 2048, { cf: true }), 0);
+  eq("非 CF 站点 5KB 不判 v4", W.egDerive("203.0.113.33", 5000, { cf: false }), 0);
   eq("既有 known 又有 siteV4 时按族级拒绝优先", W.egDerive("203.0.113.28", 737, { known: true, siteV4: true, cf: true }), 6);
   eq("整页优先于 siteV4", W.egDerive("203.0.113.29", 45000, { siteV4: true, cf: true }), 4);
   W.EG.clear();
@@ -12760,7 +12765,8 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   const picked373 = W.REGION_SUB.entries(["JP"], "edge.example.com", "pw", ["vless", "trojan"], url373, auth373, uid373);
   // JP 两个节点：1.1.1.1(Good 保留) / 2.2.2.2(Risky 排除) → 每节点×2协议 = 2 条
   eq("[373] Risky 被排除，只剩 Good 的两条协议", picked373.length, 2);
-  ok("[373] 都是 1.1.1.1 的硬钉条目", picked373.every((e) => e.server === "1.1.1.1" && e.path.includes("node=1.1.1.1")));
+  // server 必须是 CF 边缘入口（钉 v4），不再是中继 IP 1.1.1.1（中继上无 Worker WS/TLS 监听，客户端必超时）
+  ok("[373] server 走 CF 边缘且 node= 硬钉中继", picked373.every((e) => e.server !== "1.1.1.1" && e.port === 443 && e.path.includes("node=1.1.1.1")));
   eq("[373] vless 条目质量名", picked373[0].name, "📍JP-good-v4-1.1.1.1-vless");
   eq("[373] trojan 条目质量名", picked373[1].name, "📍JP-good-v4-1.1.1.1-trojan");
   ok("[373] path 用 encodeURIComponent 编码冒号", picked373[0].path.includes("1.1.1.1%3A443"));
@@ -13011,7 +13017,7 @@ if (fs.existsSync(midPath)) {
   ok("[378] 指定网站探测复用 tfb", tools378.includes("runTfb({ env: this.c.env }, site, n, list"));
   ok("[378] 质量重探复用 probe", tools378.includes("QUALITY_PROBE.qualityOf(key, h, this.c.budget, fam)"));
   ok("[378] 两类探测都限流", tools378.includes('QUALITY.recheckReady(ck, 60_000)') && tools378.includes('QUALITY.recheckReady(qk, 60_000)'));
-  ok("[378] 冷却表放进状态持有者", regionsSrc378.includes("readonly recheckCool = new Map<string, number>()"));
+  ok("[378] 冷却表放进状态持有者且有界", regionsSrc378.includes("readonly recheckCool = new BoundedMap<string, number>"));
   // 模板：指定网站探测表单 + 重探按钮的样式类
   ok("[378] 模板有网站探测表单", regionsTpl378.includes('id="probeSite"') && regionsTpl378.includes("开始探测"));
   ok("[378] 模板有重探按钮样式", regionsTpl378.includes(".lnkbtn"));
@@ -13801,7 +13807,7 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   const tl399 = fs.readFileSync("src/routes/tools.ts", "utf8");
   const rg399 = fs.readFileSync("src/px/regions.ts", "utf8");
   // 结构：QUALITY 有独立 isoCc 表 + noteIso/getIso；展示层优先 ISO；文档 IP 跳过
-  ok("[399] isoCc 表存在", rg399.includes("readonly isoCc = new Map<"));
+  ok("[399] isoCc 表存在且有界", rg399.includes("readonly isoCc = new BoundedMap<"));
   ok("[399] noteIso/getIso 方法", rg399.includes("noteIso(host: string") && rg399.includes("getIso(host: string"));
   ok("[399] countryOf 优先 ISO", tl399.indexOf("QUALITY.getIso(host)") < tl399.indexOf("const exact = S.alive.get(relay)"));
   ok("[399] rows 用 ISO 码", tl399.includes("isoCc || live?.cc || seedCc"));
@@ -13875,6 +13881,62 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   W.S.pool.push(...savePool400);
   W.S.seed = saveSeed400;
   W.S.alive = saveAlive400;
+}
+
+
+// 402) 质量探测顺带回填国家码 + EG 门槛从 20KB 降到 EG_TINY（问题①③）
+{
+  // ① egDerive 使用 EG_TINY 而不是 EG_BIG：源码证据 + 行为已在第 95 组验证
+  const egSrc = W.egDerive.toString();
+  ok("[402] egDerive 用 EG_TINY 门槛", egSrc.includes("down > EG_TINY"), "门槛不是 EG_TINY");
+  ok("[402] egDerive 不再用 EG_BIG 判 v4", !/down >= EG_BIG/.test(egSrc), "仍用 EG_BIG");
+  // ③ 国家码搭车：ip-api 源请求 fields 带 countryCode，QoS 成功行回填 isoCc（零新增子请求）
+  const ipapi = W.QUALITY_SOURCES.find((x) => x.name === "ipapi-com");
+  ok("[402] ipapi fields 含 countryCode", ipapi.url("1.2.3.4").includes("countryCode"), "fields 缺 countryCode");
+  W.QUALITY.isoCc.clear();
+  W.QUALITY.noteIso("1.2.3.4", "DE", Date.now());
+  eq("[402] noteIso 可回读", W.QUALITY.getIso("1.2.3.4", Date.now()), "DE");
+  W.QUALITY.isoCc.clear();
+}
+
+// 403) 四问题批量修复：有界表不会随操作次数无界增长 + 自选/地区节点 server 走 CF 边缘（问题②④）
+{
+  const t0 = 1_700_000_000_000;
+  // ② ConnObservation：灌 6000 行（> CONN_CAP=2000），表必须收敛到上限附近，不能无界涨
+  const co = new W.ConnObservation();
+  for (let i = 0; i < 6000; i++) co.note("HKG", `n${i}:443`, "x.com", 200, 100, W.IpFamily.IPv4, t0 + i);
+  ok("[403] ConnObservation 有界（不超 CAP）", co.rows.size <= 2000 && co.rows.size > 0, `size=${co.rows.size}`);
+  // ProbeCoverage：只 set 无 cap 是 1102 根因，灌 6000 行后必须收敛
+  const cv = new W.ProbeCoverage();
+  for (let i = 0; i < 6000; i++) cv.note(`n${i}:443`, W.IpFamily.IPv4, t0 + i);
+  ok("[403] ProbeCoverage 有界", cv.rows.size <= 4000 && cv.rows.size > 0, `size=${cv.rows.size}`);
+  // recheckCool：60s key 旧代码 TTL=3d 清不掉会一直涨，新代码靠容量上限收口
+  const qt = new W.IpQualityTable();
+  for (let i = 0; i < 6000; i++) qt.recheckMark(`s:site${i}`, t0 + i);
+  ok("[403] recheckCool 有界", qt.recheckCool.size <= 4000 && qt.recheckCool.size > 0, `size=${qt.recheckCool.size}`);
+  // 源码锁：三处手写全表 sort 已删除（1102 的 O(N log N) 来源）
+  const rg403 = fs.readFileSync("src/px/regions.ts", "utf8");
+  ok("[403] 写路径不再全表排序裁剪", !rg403.includes("].sort((a, b) => a[1].at"), "仍有手写全表 sort");
+  // ④ 面板自选 server 走 CF 边缘，不是中继 IP
+  const sub403 = fs.readFileSync("src/views/sub.ts", "utf8");
+  ok("[403] 自选 emit server 用 vip 不用 ph", /emit\(name, proto, vip, 443,/.test(sub403), "server 不是 vip:443");
+}
+
+// 404) 问题④：探测端口与真实拨号端口一致（relayAddr 保留显式端口，pickFresh 按裸 IP 查判定表）
+{
+  const tfbSrc = fs.readFileSync("src/route/tfb.ts", "utf8");
+  // relayAddr 必须用 splitRelay 解析端口，而不是裸拼 :443（pp≠443 时探测错端口）
+  ok("[404] relayAddr 用 splitRelay 保留端口", /splitRelay\(h\.trim\(\), 443\)/.test(tfbSrc), "relayAddr 未解析端口");
+  ok("[404] pool 不再丢端口", !tfbSrc.includes("splitRelay(x.trim(), 443)[0]"), "pool 仍 splitRelay()[0] 丢端口");
+  ok("[404] own 列表带端口", tfbSrc.includes("${x.h}:${x.p}"), "own 未拼端口");
+  // pickFresh 按裸 IP 查判定表（键是 r:<ip>），入参带端口时不能把端口带进键
+  ok("[404] pickFresh 按裸 IP 查 VT", tfbSrc.includes('"r:" + splitRelay(ip, 443)[0]'), "pickFresh 未按裸 IP 查");
+  // 行为：同一裸 IP 的不同端口在判定表眼里是同一通道（旧证据能命中）
+  W.VT.clear();
+  W.VT.set("porttest.example", "r:10.0.0.7", 200, 100, 1);
+  const picked = W.pickFresh("porttest.example", ["10.0.0.7:8443", "10.0.0.8:443"], 2);
+  ok("[404] pickFresh 接受带端口地址", picked.length === 2, `picked=${picked.length}`);
+  W.VT.clear();
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);

@@ -7,6 +7,7 @@ import { SEL } from "../px/selector";
 import { checkTarget } from "./dial";
 import { aliveList } from "../px/pool";
 import { keyOf } from "../px/const";
+import { splitRelay } from "../core/relay-addr";
 import { isBlack, isFrozen } from "../nodes/score";
 
 interface RegionOpts {
@@ -88,18 +89,21 @@ export class RegionPicker {
   async openPinned(env: Env, node: string, conn: Connection, budget: BudgetedIO, onFail: (msg: string) => void): Promise<Socket | null> {
     const list = await aliveList(env);
     const hit = list.find((x) => keyOf(x) === node);
-    if (!hit) {
-      onFail(`节点 ${node} 不在存活表`);
+    // ?node=host:port 本身就是完整的拨号目标；面板勾选来自 alive∪seed∪pool，后两者
+    // 可能不在本 isolate 的存活表里，直接按 key 解析出来拨，不再误报「不在存活表」。
+    const [host, port] = hit ? [hit.h, hit.p] : splitRelay(node, 443);
+    if (!host || port <= 0) {
+      onFail(`节点 ${node} 地址无效`);
       return null;
     }
-    const k = keyOf(hit);
-    if (isBlack(k) || isFrozen(k) || checkTarget(hit.h, hit.p)) {
+    const k = hit ? keyOf(hit) : node;
+    if (isBlack(k) || isFrozen(k) || checkTarget(host, port)) {
       onFail(`节点 ${node} 被封禁或地址不允许`);
       return null;
     }
     conn.node = k;
     try {
-      const sock = await SOCKET_DIALER.open(hit.h, hit.p, budget);
+      const sock = await SOCKET_DIALER.open(host, port, budget);
       conn.via = "node";
       conn.retried = true;
       return sock;

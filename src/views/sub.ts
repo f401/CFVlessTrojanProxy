@@ -195,7 +195,11 @@ export function renderClash(
     for (const proto of protos) {
       if (proto === "trojan" && !pass) continue;
       const name = `📌${ph}-${proto === "trojan" ? "TJ" : "VL"}`;
-      emit(name, proto, ph, pp, `/?ed=2560&node=${encodeURIComponent(`${ph}:${pp}`)}`, true, "面板自选");
+      // server 必须是 CF 边缘入口，不能是中继 IP：中继上面没有 Worker 的 WS/TLS 监听，
+      // 客户端 wss 到它必超时（面板探测走 DO→中继，跟客户端入口无关，所以探测 200 也证明不了这条能连）。
+      // node= 只作为服务端选路参数硬钉这条中继；入口沿用钉 v4 的边缘 IP，避免双栈回落 v6。
+      const vip = edgeIps.length ? String(edgeIps[pinNames.length % edgeIps.length]) : host;
+      emit(name, proto, vip, 443, `/?ed=2560&node=${encodeURIComponent(`${ph}:${pp}`)}`, true, "面板自选");
       pinNames.push(name);
       all.push(name);
     }

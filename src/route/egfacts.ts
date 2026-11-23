@@ -303,10 +303,13 @@ interface EgEv {
  */
 export function egDerive(ip: string, down: number, ev: EgEv = {}, now = Date.now()): number {
   if (!ip) return 0;
-  // 整页是硬证据：v6 出口在 737B 的小页上就停住了，拿不到 20KB 以上
-  // 「整页 ⇒ v4」只在 CF 托管站点上成立：别的站点 v6 出口也能出整页，拿它判族会把 v6 中继标成 v4，
+  // 「送到了真实内容 ⇒ v4」只在 CF 托管站点上成立：别的站点 v6 出口也能出整页，拿它判族会把 v6 中继标成 v4，
   // 之后打 CF 站点时按 ×1 优先选它（本地闭环证明里正是这种反向标注最伤）。
-  if (down >= EG_BIG && ev.cf) {
+  // 门槛用 EG_TINY 而不是 EG_BIG：v6 出口在 x.com 这类 CF 站点固定回 737B 的族拒绝页，
+  // 真实业务页哪怕只有 4KB（x.com 隧道首页实测 4107B）也明显更大。旧口径要 ≥EG_BIG 才算 v4，
+  // 结果 x.com 的 4107B 落在 EG_TINY~EG_BIG 的灰色地带两条规则都不满足 → EG 表恒空（线上 egSent=0/egDO=0），
+  // 冷 isolate 无法区分 v4/v6 中继只能随机选，8 条里 4 条是 v6 出口 → 全分组偶发 737B IPv6 403。
+  if (down > EG_TINY && ev.cf) {
     EG.note(ip, 4, now);
     return 4;
   }

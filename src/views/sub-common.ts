@@ -219,7 +219,6 @@ export const X_EDGE_IPS = [
   "104.20.1.1",
 ];
 
-
 /**
  * 功能：订阅里发几个入口 IP（?ei=）。
  * 上限就是这个种子表的长度：再要更多也只能重复同样的地址，没有意义。
@@ -511,15 +510,16 @@ export class RegionSubscription {
     const now = Date.now();
     const live = new AliveBoard().list();
     const out: RegionEntry[] = [];
-    // 一次算好每个节点的 rank：原写法在 filter 与 sort comparator 里反复调 rank()（内部走 QUALITY.getFor），
-    // 32 地区 × 800 节点 × 排序比较会放大成几十万次画像查询；缓存后降为 O(alive) 次。
+    // server 走 CF 边缘（中继无 WS/TLS 监听，写中继 IP 必超时）；缓存 rank 避免重复查画像。
+    const edgeIps = url ? X_EDGE_IPS.slice(0, edgeCount(url)) : X_EDGE_IPS.slice();
     const ranked = live.map((n) => ({ n, r: this.rank(n, now) }));
     for (const cc of cfg.regions) {
       const ccUpper = cc.toUpperCase();
-      // Risky 直接排除，Unknown 按 Normal；再按质量与 key 稳定排序（用缓存的 rank）
+      // Risky 排除、Unknown 按 Normal，再按质量与 key 稳定排序
       const picked = ranked
         .filter((x) => String(x.n.cc || "").toUpperCase() === ccUpper && x.r < 3)
         .sort((a, b) => a.r - b.r || a.n.h.localeCompare(b.n.h));
+      let edgeIdx = 0;
       for (const { n } of picked.slice(0, topN)) {
         const q = QUALITY.getFor(n.h, n.p, now);
         const level = q ? q.level : IpLevel.Normal;
@@ -527,13 +527,13 @@ export class RegionSubscription {
         const rtt = cfg.targetHost ? CONN_OBS.rttOf(S.colo || "", `${n.h}:${n.p}`, cfg.targetHost, now) : null;
         const labelParts = [`${ccUpper}-${level}`, fam, n.h];
         if (rtt != null) labelParts.push(`${rtt}ms`);
+        const entry = edgeIps.length ? String(edgeIps[edgeIdx++ % edgeIps.length]) : host;
         for (const proto of protos) {
           if (proto === "trojan" && !pass) continue;
           out.push({
             proto,
             name: `📍${labelParts.join("-")}-${proto}`,
-            server: n.h, port: n.p,
-            // node= 是硬钉住：用户点名即只走这条，失败不回落
+            server: entry, port: 443,
             path: `/?ed=2560&node=${encodeURIComponent(`${n.h}:${n.p}`)}`,
           });
         }

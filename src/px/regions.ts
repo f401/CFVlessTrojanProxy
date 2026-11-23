@@ -1,4 +1,5 @@
 import { IpFamily, IpKind, IpLevel } from "../core/enums";
+import { BoundedMap } from "../core/table";
 
 /*
  * 地区节点质量层：把「6 源 IP 质量探测」「全池覆盖账本」「按机房分桶的连通性观测」
@@ -53,7 +54,8 @@ export const QUALITY_SOURCES: ReadonlyArray<{
   {
     // ip-api.com 免费版只支持 http；字段 via ?fields= 指定
     name: "ipapi-com",
-    url: (ip) => `http://ip-api.com/json/${ip}?fields=status,isp,org,as,mobile,proxy,hosting`,
+    // countryCode 已在同一次请求的 fields 里：重探质量时顺手回填 IsoCc，零新增子请求
+    url: (ip) => `http://ip-api.com/json/${ip}?fields=status,countryCode,isp,org,as,mobile,proxy,hosting`,
     parse: (row) => {
       if (row.status !== "success") return null;
       const hosting = row.hosting === true;
@@ -189,14 +191,14 @@ export function qualityFromIpApi(row: Record<string, unknown>, at: number): IpQu
  * 功能：按节点 key 保存质量结论的内存表，负责 3 天缓存与「是否该重探」。
  */
 export class IpQualityTable {
-  /** 节点 key → 质量结论 */
-  readonly rows = new Map<string, IpQuality>();
-  /** 源名 → 上次失败的时刻（冷却用） */
+  /** 节点 key → 质量结论（写入路径按容量+3d寿命裁剪，不再全表排序） */
+  readonly rows = new BoundedMap<string, IpQuality>({ max: COVERAGE_CAP, ttlMs: QUALITY_TTL, timeOf: (q) => q.at });
+  /** 源名 → 上次失败的时刻（冷却用；源名只有 6 个，固定小表） */
   readonly sourceCool = new Map<string, number>();
-  /** 手动重探/站点探测的节流：前缀 key → 上次触发时刻（面板按钮不能无限点） */
-  readonly recheckCool = new Map<string, number>();
+  /** 手动重探/站点探测的节流：前缀 key → 上次触发时刻。key 由客户端拼，必须按寿命+容量有界（1102 根因之一） */
+  readonly recheckCool = new BoundedMap<string, number>({ max: COVERAGE_CAP, ttlMs: QUALITY_TTL, timeOf: (at) => at });
   /** 出口 IP → ISO 国家码（展示层用；alive.cc / seed 桶键是 CF 接入机场码，不能当国家）。本 isolate 内存，随质量表 3 天失效 */
-  readonly isoCc = new Map<string, { cc: string; at: number }>();
+  readonly isoCc = new BoundedMap<string, { cc: string; at: number }>({ max: COVERAGE_CAP, ttlMs: QUALITY_TTL, timeOf: (r) => r.at });
 
   /**
    * 功能：记一条出口 IP 的 ISO 国家码（仅展示，不参与选路/打分）。
@@ -207,11 +209,9 @@ export class IpQualityTable {
    */
   noteIso(host: string, cc: string, now: number = Date.now()): void {
     if (!host || !cc) return;
+    // 裁剪必须在 set 之后，且用低水位把 O(n log n) 排序摊薄（1102：写路径全表排序是 CPU 主因）
     this.isoCc.set(host, { cc: String(cc).toUpperCase(), at: now });
-    if (this.isoCc.size > COVERAGE_CAP) {
-      const old = [...this.isoCc.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, this.isoCc.size - COVERAGE_CAP);
-      for (const [k] of old) this.isoCc.delete(k);
-    }
+    this.isoCc.prune(now);
   }
 
   /**
@@ -251,11 +251,8 @@ export class IpQualityTable {
    */
   note(key: string, q: IpQuality): void {
     this.rows.set(key, q);
-    if (this.rows.size > COVERAGE_CAP) {
-      // 按 at 升序删最旧：保留刚探过的节点
-      const old = [...this.rows.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, this.rows.size - COVERAGE_CAP);
-      for (const [k] of old) this.rows.delete(k);
-    }
+    // BoundedMap 统一做「先删 3d 过期、再按 at 低水位收到 COVERAGE_CAP」，替代手写全表排序
+    this.rows.prune(q.at);
   }
 
   /**
@@ -311,11 +308,10 @@ export class IpQualityTable {
    * @param now 当前时刻
    */
   recheckMark(key: string, now = Date.now()): void {
+    // 裁剪必须在 set 之后：旧写法只在超 COVERAGE_CAP 时按 QUALITY_TTL(3d) 清，
+    // 而 recheck key 的寿命只有 60s ⇒ 过期项 3 天内清不掉，表无限涨（1102 根因）
     this.recheckCool.set(key, now);
-    // 顺手清理过期项，避免客户端构造海量不同 key 让表无限涨
-    if (this.recheckCool.size > COVERAGE_CAP) {
-      for (const [k, at] of this.recheckCool) if (now - at > QUALITY_TTL) this.recheckCool.delete(k);
-    }
+    this.recheckCool.prune(now);
   }
 
   /**
@@ -365,6 +361,11 @@ export class QualityProbe {
         const row = (await resp.json()) as Record<string, unknown>;
         const signal = source.parse(row);
         if (signal) signals.push(signal);
+        // 探测质量时顺手记下该 IP 的 ISO 国家码：ip-api 的 countryCode 已在这次响应里，
+        // 零新增子请求；回填到展示用的 isoCc 表，让面板/探测结果能显示真实国家
+        if (source.name === "ipapi-com" && row.countryCode && ip && !ip.includes(":")) {
+          QUALITY.noteIso(ip, String(row.countryCode), now);
+        }
       } catch {
         // 某个源超时/不可达只记冷却，绝不拖垮整轮——这正是用户说的「部分网站不返回数据」
         QUALITY.failSource(source.name, now);
@@ -384,8 +385,10 @@ export const QUALITY_PROBE = new QualityProbe();
  * 功能：全池 IP 探测覆盖账本，按「最久没探」优先轮转，确保每个节点迟早被探到。
  */
 export class ProbeCoverage {
-  /** 节点 key → 最近探测时刻与地址族 */
-  readonly rows = new Map<string, { lastProbeAt: number; family: IpFamily }>();
+  /** 节点 key → 最近探测时刻与地址族（有界：key 由客户端/池子来，不能无限涨） */
+  readonly rows = new BoundedMap<string, { lastProbeAt: number; family: IpFamily }>({
+    max: COVERAGE_CAP, ttlMs: QUALITY_TTL, timeOf: (r) => r.lastProbeAt,
+  });
 
   /**
    * 功能：记录一次探测。
@@ -395,6 +398,7 @@ export class ProbeCoverage {
    */
   note(key: string, family: IpFamily, now = Date.now()): void {
     this.rows.set(key, { lastProbeAt: now, family });
+    this.rows.prune(now);
   }
 
   /**
@@ -444,8 +448,8 @@ export const COVERAGE = new ProbeCoverage();
  * 功能：按机房分桶的连通性观测表（用户指定的「colo 那个表」）。
  */
 export class ConnObservation {
-  /** colo|node|site → 观测行 */
-  readonly rows = new Map<string, ConnObsRow>();
+  /** colo|node|site → 观测行（有界 + 6h 寿命，裁剪走 BoundedMap 的低水位摊薄） */
+  readonly rows = new BoundedMap<string, ConnObsRow>({ max: CONN_CAP, ttlMs: CONN_TTL, timeOf: (r) => r.at });
 
   /**
    * 功能：记一次连通性结果，并按上限 + TTL 淘汰。
@@ -463,14 +467,8 @@ export class ConnObservation {
     // 2xx 可用；401/403/429/451 视为「可达但受限」；其它非 0 是「可达」；0 是不可达
     const ok = (code >= 200 && code < 300) || (code > 0 && code < 600);
     this.rows.set(key, { code, rtt, family, ok, at: now });
-    // 先清过期，再按上限裁（只在写入路径做一次，读路径不扫描）
-    if (this.rows.size > CONN_CAP) {
-      for (const [k, v] of this.rows) if (now - v.at > CONN_TTL) this.rows.delete(k);
-      if (this.rows.size > CONN_CAP) {
-        const old = [...this.rows.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, this.rows.size - CONN_CAP);
-        for (const [k] of old) this.rows.delete(k);
-      }
-    }
+    // 写在 set 之后：BoundedMap 先删 6h 过期、再按 at 低水位收到 CONN_CAP（1102 根因：写路径全表排序）
+    this.rows.prune(now);
   }
 
   /**
