@@ -36,9 +36,10 @@ async function ensureIsoCountries(): Promise<number> {
   for (const bucket of Object.values(byColo)) {
     for (const n of bucket?.nodes || []) if (n.h && !n.h.includes(":")) hosts.add(n.h);
   }
-  // 已缓存的不重复查；geoLabel 单次最多 100 IP（第三方批量上限），超出的下轮再补
-  const need = [...hosts].filter((h) => !QUALITY.getIso(h) && !isDocIp(h)).slice(0, 100);
+  // 已缓存/负缓存内的都不重查（否则每 GET 重发 ip-api，1102 累积源）；geoLabel 单次≤100 IP，超出下轮补。
+  const need = [...hosts].filter((h) => QUALITY.isoNeeded(h) && !isDocIp(h)).slice(0, 100);
   if (!need.length) return 0;
+  for (const h of need) QUALITY.markIsoTried(h);
   const iso = await geoLabel(need);
   let n = 0;
   // 结果写进展示专用表，绝不碰选路用的 alive.cc（那边存的是 CF 机场码）

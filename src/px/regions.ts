@@ -1,5 +1,5 @@
 import { IpFamily, IpKind, IpLevel } from "../core/enums";
-import { BoundedMap } from "../core/table";
+import { BoundedMap, TimedMarks } from "../core/table";
 
 /*
  * 地区节点质量层：把「6 源 IP 质量探测」「全池覆盖账本」「按机房分桶的连通性观测」
@@ -19,6 +19,7 @@ const SOURCE_COOLDOWN = 5 * 60_000; // 单源失败冷却 5 分钟
 const COVERAGE_CAP = 4000; // 覆盖表最多记多少节点（超过 SCAN_MAX 的一轮量留足）
 const CONN_CAP = 2000; // 连通性观测上限
 const CONN_TTL = 6 * 3600_000; // 连通性观测 6 小时后失效
+const ISO_TRY_TTL = 6 * 3600_000; // ISO 查询的负缓存寿命：查过但没结果的 host 6 小时内不再重查
 
 /**
  * 单个质量源的归一化信号。
@@ -199,6 +200,8 @@ export class IpQualityTable {
   readonly recheckCool = new BoundedMap<string, number>({ max: COVERAGE_CAP, ttlMs: QUALITY_TTL, timeOf: (at) => at });
   /** 出口 IP → ISO 国家码（展示层用；alive.cc / seed 桶键是 CF 接入机场码，不能当国家）。本 isolate 内存，随质量表 3 天失效 */
   readonly isoCc = new BoundedMap<string, { cc: string; at: number }>({ max: COVERAGE_CAP, ttlMs: QUALITY_TTL, timeOf: (r) => r.at });
+  /** ISO 查询负缓存：查过但没结果的 host TTL 内不再重查，否则每 GET 重发 ip-api 子请求（1102 累积源） */
+  readonly isoTried = new TimedMarks({ max: COVERAGE_CAP, ttlMs: ISO_TRY_TTL });
 
   /**
    * 功能：记一条出口 IP 的 ISO 国家码（仅展示，不参与选路/打分）。
@@ -209,9 +212,10 @@ export class IpQualityTable {
    */
   noteIso(host: string, cc: string, now: number = Date.now()): void {
     if (!host || !cc) return;
-    // 裁剪必须在 set 之后，且用低水位把 O(n log n) 排序摊薄（1102：写路径全表排序是 CPU 主因）
+    // 只在超容量时裁剪：prune 全表扫，每行调会放大成 O(N²) 撞 10ms CPU 上限（1102）。
+    // 常态 O(1) set，过期行由 getIso 读时顺手删。
     this.isoCc.set(host, { cc: String(cc).toUpperCase(), at: now });
-    this.isoCc.prune(now);
+    if (this.isoCc.size > this.isoCc.capacity()) this.isoCc.prune(now);
   }
 
   /**
@@ -225,6 +229,16 @@ export class IpQualityTable {
     if (!row) return "";
     if (now - row.at > QUALITY_TTL) { this.isoCc.delete(host); return ""; }
     return row.cc;
+  }
+
+  /** 功能：判断出口 IP 是否还要查 ISO（无缓存且不在负缓存内）；@param host 出口 IP / now 时刻；@returns 需查询为 true */
+  isoNeeded(host: string, now: number = Date.now()): boolean {
+    return !this.getIso(host, now) && !this.isoTried.on(host, now);
+  }
+
+  /** 功能：登记已查过某出口 IP（命中与否都记，TTL 内不重试）；@param host 出口 IP / now 时刻；@returns 无 */
+  markIsoTried(host: string, now: number = Date.now()): void {
+    this.isoTried.mark(host, now);
   }
 
   /**
@@ -251,8 +265,8 @@ export class IpQualityTable {
    */
   note(key: string, q: IpQuality): void {
     this.rows.set(key, q);
-    // BoundedMap 统一做「先删 3d 过期、再按 at 低水位收到 COVERAGE_CAP」，替代手写全表排序
-    this.rows.prune(q.at);
+    // 只在超容量时裁剪：每行 prune 全表扫会放大成 O(N²)（1102）；过期行由 get() 读时删。
+    if (this.rows.size > this.rows.capacity()) this.rows.prune(q.at);
   }
 
   /**
@@ -311,7 +325,8 @@ export class IpQualityTable {
     // 裁剪必须在 set 之后：旧写法只在超 COVERAGE_CAP 时按 QUALITY_TTL(3d) 清，
     // 而 recheck key 的寿命只有 60s ⇒ 过期项 3 天内清不掉，表无限涨（1102 根因）
     this.recheckCool.set(key, now);
-    this.recheckCool.prune(now);
+    // 只在超容量时裁剪，避免每标记一次就全表扫 TTL —— 与 TimedMarks.mark 同口径
+    if (this.recheckCool.size > this.recheckCool.capacity()) this.recheckCool.prune(now);
   }
 
   /**
@@ -398,7 +413,8 @@ export class ProbeCoverage {
    */
   note(key: string, family: IpFamily, now = Date.now()): void {
     this.rows.set(key, { lastProbeAt: now, family });
-    this.rows.prune(now);
+    // 只在超容量时裁剪：每行 prune 全表扫会放大成 O(N²)（1102）
+    if (this.rows.size > this.rows.capacity()) this.rows.prune(now);
   }
 
   /**
@@ -467,8 +483,8 @@ export class ConnObservation {
     // 2xx 可用；401/403/429/451 视为「可达但受限」；其它非 0 是「可达」；0 是不可达
     const ok = (code >= 200 && code < 300) || (code > 0 && code < 600);
     this.rows.set(key, { code, rtt, family, ok, at: now });
-    // 写在 set 之后：BoundedMap 先删 6h 过期、再按 at 低水位收到 CONN_CAP（1102 根因：写路径全表排序）
-    this.rows.prune(now);
+    // 只在超容量时裁剪：每行 prune 全表扫会放大成 O(N²)（1102）；过期行由 get() 读时删。
+    if (this.rows.size > this.rows.capacity()) this.rows.prune(now);
   }
 
   /**

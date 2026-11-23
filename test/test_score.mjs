@@ -13812,7 +13812,7 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   ok("[399] countryOf 优先 ISO", tl399.indexOf("QUALITY.getIso(host)") < tl399.indexOf("const exact = S.alive.get(relay)"));
   ok("[399] rows 用 ISO 码", tl399.includes("isoCc || live?.cc || seedCc"));
   ok("[399] 排除文档 IP 查询", tl399.includes("function isDocIp") && tl399.includes("!isDocIp(h)"));
-  ok("[399] 惰性补码只在缺失时查", tl399.includes("!QUALITY.getIso(h)"));
+  ok("[399] 惰性补码只在缺失时查", tl399.includes("QUALITY.isoNeeded(h)"));
   // 行为：noteIso/getIso 隔离缓存，优先于机场码
   const savedAlive399 = new Map(W.S.alive);
   const savedSeed399 = W.S.seed && W.S.seed.byColo;
@@ -13937,6 +13937,26 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   const picked = W.pickFresh("porttest.example", ["10.0.0.7:8443", "10.0.0.8:443"], 2);
   ok("[404] pickFresh 接受带端口地址", picked.length === 2, `picked=${picked.length}`);
   W.VT.clear();
+}
+
+// 405) 问题②：ISO 查询负缓存 + prune 只在超容量时调用（1102 累积效应根治）
+{
+  const t0 = 1700000000000;
+  const q = new W.IpQualityTable();
+  eq("[405] host 初始需要查 ISO", q.isoNeeded("198.18.0.1", t0), true);
+  q.markIsoTried("198.18.0.1", t0);
+  eq("[405] 查过未命中后 TTL 内不重查", q.isoNeeded("198.18.0.1", t0 + 3600000), false);
+  eq("[405] TTL 过后允许重试", q.isoNeeded("198.18.0.1", t0 + 7 * 3600000), true);
+  q.noteIso("198.18.0.2", "US", t0);
+  eq("[405] 已有国家码的 host 不再查", q.isoNeeded("198.18.0.2", t0), false);
+  // 源码锁：五处 prune 都带「超容量」守卫，常态 O(1) set（O(N²) 是 1102 根因）
+  const rg405 = fs.readFileSync("src/px/regions.ts", "utf8");
+  const guards405 = rg405.split(".capacity()) this.").length - 1;
+  ok("[405] 五处 prune 都有超容量守卫", guards405 >= 5, `guards=${guards405}`);
+  // 负缓存确实接到展示层的查询路径上（ensureIsoCountries 用 isoNeeded + markIsoTried）
+  const tools405 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  ok("[405] ensureIsoCountries 用 isoNeeded 过滤", tools405.includes("QUALITY.isoNeeded(h)"), "未过滤已查 host");
+  ok("[405] 发起查询前登记负缓存", tools405.includes("QUALITY.markIsoTried(h)"), "失败 host 会每 GET 重试");
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
