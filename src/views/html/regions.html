@@ -52,6 +52,13 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
   <div class="result" id="result"></div>
 </div>
 
+<div class="card bar" id="pager">
+  <span class="mu">{{pageInfo}}</span>
+  <a href="{{prevHref}}" data-show="{{hasPrev}}" style="display:none">« 上一页</a>
+  <a href="{{nextHref}}" data-show="{{hasNext}}" style="display:none">下一页 »</a>
+  <button type="button" data-act="toggle-unprobed">显示未探测节点</button>
+  <span class="mu">节点多时自动分页；未探测节点默认折叠</span>
+</div>
 <form method="post" action="{{postAction}}" id="saveForm">
   <div class="card bar">
     <label for="targetHost">目标站（填了才显示到该站延迟）</label>
@@ -68,12 +75,20 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
 (function(){
   var result=document.getElementById('result');
   function show(t){result.textContent=t;result.classList.add('show');}
+  // 未探测节点（data-probed=0）默认折叠，点开关切换
+  var folded=true;
+  function applyFold(){document.querySelectorAll('tr[data-probed="0"]').forEach(function(tr){tr.style.display=folded?'none':'';});}
+  applyFold();
+  // 分页链接按 data-show 显隐
+  document.querySelectorAll('#pager a[data-show]').forEach(function(a){if(a.getAttribute('data-show')==='1')a.style.display='';});
+  // 探测后带 site 重载，从 sessionStorage 恢复结果文本
+  var saved=sessionStorage.getItem('rgProbeResult');if(saved){show(saved);sessionStorage.removeItem('rgProbeResult');}
   function checkedNodes(){
     var out=[];
     document.querySelectorAll('input[name="pinnedNodes"]:checked').forEach(function(c){out.push(c.value);});
     return out;
   }
-  function probe(action,extra,json){
+  function probe(action,extra,json,reloadSite){
     var fd=new FormData();
     fd.set('op',action);
     if(extra)for(var k in extra)fd.set(k,extra[k]);
@@ -90,6 +105,7 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
           }
           show('重探 '+(data.cc||'')+data.key+'：'+(data.label||''));
         }else show(typeof data==='string'?data:JSON.stringify(data));
+        if(reloadSite){sessionStorage.setItem('rgProbeResult',typeof data==='string'?data:JSON.stringify(data));setTimeout(function(){location.href='?site='+encodeURIComponent(reloadSite);},500);}
       })
       .catch(function(e){show('请求失败（'+e.message+'），请检查网络后重试');});
   }
@@ -101,8 +117,9 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
       if(!site){show('请先填写要探测的网站');return;}
       // 只对勾选的节点探测；没勾则服务端回退全池自动挑
       var nodes=checkedNodes();
-      probe('probe',{site:site,nodes:nodes.join(',')});return;
+      probe('probe',{site:site,nodes:nodes.join(',')},false,site);return;
     }
+    if(b.dataset.act==='toggle-unprobed'){ev.preventDefault();folded=!folded;applyFold();b.textContent=folded?'显示未探测节点':'隐藏未探测节点';return;}
     if(b.dataset.probe==='1'){
       ev.preventDefault();
       var op=b.getAttribute('value')||'';

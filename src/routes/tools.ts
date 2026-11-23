@@ -268,7 +268,7 @@ export class RegionsView {
     const alive = new AliveBoard().list();
     const seeds = this.seedNodes();
     // alive 与 seed 可能重复，按 key 去重后逐个补画像/覆盖/延迟
-    const keys = [...new Set([...alive.map((n) => `${n.h}:${n.p}`), ...seeds.keys()])];
+    const keys = [...new Set([...alive.map((n) => `${n.h}:${n.p}`), ...seeds.keys(), ...S.pool.map((x) => `${x.h}:${x.p}`)])];
     // 一次建表：alive 上限 800，若在下面的 map 里逐 key 做 find() 就是 64 万次字符串拼接，
     // 足以单独吃满一个 Worker 的 CPU 预算；Map 查表把它压成 O(n)。
     const liveByKey = new Map<string, (typeof alive)[number]>(alive.map((n) => [`${n.h}:${n.p}`, n]));
@@ -292,7 +292,7 @@ export class RegionsView {
         level: q?.level ?? "normal",
         proxy: q?.proxy ?? false,
         vpn: q?.vpn ?? false,
-        probed: !!cov,
+        probed: !!cov || !!q,
         rtt: target ? CONN_OBS.rttOf(colo, key, target, now) : null,
         egFamily: EG.famOf(ip, now),
         psOk: target ? PS.okOf(target, ip, now) : -1,
@@ -356,10 +356,7 @@ export class RegionsView {
           const rtt = withRtt
             ? `<td>${r.rtt == null ? "—" : escapeHtml(Math.round(r.rtt) + " ms")}</td><td>${escapeHtml(psLabel(r.psOk))}</td><td>${r.blkPenalty > 1 ? "封锁" : "—"}</td>`
             : "";
-          // 探测按钮必须是 type="button"：这些按钮在保存表单内部，若用 submit 即使 JS preventDefault
-          // 一旦竞态失败，表单导航会 abort 掉正在进行的 fetch → 浏览器报 NetworkError。button 类型永不提交表单。
-          // 去掉全表共享的隐藏 key 字段：多行的隐藏 input 会被一起提交，f.get("key") 只拿到第一行 =
-          // 永远探错节点。改成按钮自带 data-key，由面板脚本在点击时写入 FormData（见 regions.html）。
+          // type="button" + 自带 data-key：submit 竞态会 abort fetch（NetworkError），共享隐藏 key 只会拿到第一行
           const recheck = `<td><button type="button" name="op" value="requality" data-probe="1" data-key="${escapeHtml(r.key)}" class="lnkbtn">重探质量</button></td>`;
           // 对指定节点测用户在「节点连通测试」框里填的网站：按钮 value 带节点 key，网站走表单的 checkSite 字段
           const nodecheck = `<td><button type="button" name="op" value="nodecheck:${escapeHtml(r.key)}" data-probe="1" class="lnkbtn">测连通</button></td>`;
@@ -367,7 +364,7 @@ export class RegionsView {
           const pinnedChecked = pinnedSelected.has(r.key) ? " checked" : "";
           // 出站 IP 单独成列：key 就是 host:port，抽 host 出来高亮，便于一眼确认出口地址
           const [exitIp] = splitRelay(r.key, 443);
-          return `<tr data-node="${escapeHtml(r.key)}">
+          return `<tr data-node="${escapeHtml(r.key)}" data-probed="${r.probed ? 1 : 0}">
             <td><input type="checkbox" name="pinnedNodes" value="${escapeHtml(r.key)}"${pinnedChecked}></td>
             <td class="u">${escapeHtml(r.key)}</td>
             <td>${escapeHtml(r.country || "—")}</td>
@@ -399,7 +396,7 @@ export class RegionsView {
   * @param target 目标站点
   * @returns HTML 响应
    */
-  private htmlView(rows: RegionNodeRow[], target: string): Response {
+  private htmlView(rows: RegionNodeRow[], target: string, page: number, pages: number, total: number): Response {
     // 只回填当前用户自己的地区/节点数；其他用户配置和表单 action 一律不含
     const me = this.c.auth.list.find((x) => x.id === this.c.id);
     const selected = new Set((me?.regions || []).map((x) => String(x).toUpperCase()));
@@ -418,6 +415,11 @@ export class RegionsView {
       postActionJson: JSON.stringify(action),
       siteValue: escapeHtml(target),
       topNValue: escapeHtml(String(me?.regionTopN || 3)),
+      pageInfo: `第 ${page}/${pages} 页 · 共 ${total} 节点`,
+      prevHref: escapeHtml(action + "?page=" + (page - 1) + (target ? "&site=" + encodeURIComponent(target) : "")),
+      nextHref: escapeHtml(action + "?page=" + (page + 1) + (target ? "&site=" + encodeURIComponent(target) : "")),
+      hasPrev: page > 1 ? "1" : "",
+      hasNext: page < pages ? "1" : "",
       groupsHtml: this.groupsHtml(rows, selected, pinnedSelected, !!target, action),
     });
     return html(body);
@@ -541,7 +543,10 @@ export class RegionsView {
     const target = (this.c.url.searchParams.get("site") || "").slice(0, 256);
     const rows = this.rows(target);
     if (this.c.url.searchParams.get("format") === "json") return this.jsonView(rows, target);
-    return this.htmlView(rows, target);
+    // 全池可达 1600 条：服务端分页，避免一次性渲染数 MB HTML；JSON 仍返回全量
+    const size = 40, pages = Math.max(1, Math.ceil(rows.length / size));
+    const page = Math.min(pages, Math.max(1, Number(this.c.url.searchParams.get("page")) || 1));
+    return this.htmlView(rows.slice((page - 1) * size, page * size), target, page, pages, rows.length);
   }
 }
 

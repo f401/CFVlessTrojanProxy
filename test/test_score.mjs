@@ -12673,6 +12673,8 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   const saveSeed372 = W.S.seed;
   const saveAlive372 = new Map(W.S.alive);
   const saveColo372 = W.S.colo;
+  const savePool372 = [...W.S.pool];
+  W.S.pool.length = 0;
 
   W.S.alive.clear();
   W.S.colo = "??";
@@ -12727,6 +12729,7 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   W.S.seed = saveSeed372;
   W.S.alive = saveAlive372;
   W.S.colo = saveColo372;
+  W.S.pool.push(...savePool372);
   W.QUALITY.rows.clear();
   W.COVERAGE.clear();
   W.CONN_OBS.rows.clear();
@@ -13826,6 +13829,52 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
     if (W.S.seed) W.S.seed.byColo = savedSeed399;
     W.QUALITY.isoCc.clear();
   }
+}
+
+
+// 第 400 组：地区面板分页 / 折叠 / 全池节点 / 延迟按探测站点
+{
+  const rs = fs.readFileSync("src/routes/tools.ts", "utf8");
+  const rh = fs.readFileSync("src/views/html/regions.html", "utf8");
+  ok("[400] rows 含全池 S.pool", rs.includes("...S.pool.map((x) => `${x.h}:${x.p}`)"));
+  ok("[400] probed 认质量徽章", rs.includes("probed: !!cov || !!q"));
+  ok("[400] 表格行带 data-probed", rs.includes("data-probed=\"${r.probed ? 1 : 0}\""));
+  ok("[400] 服务端分页 size=40", rs.includes("const size = 40"));
+  ok("[400] 分页切片", rs.includes("rows.slice((page - 1) * size"));
+  ok("[400] page 由查询串取", rs.includes('searchParams.get("page")'));
+  ok("[400] htmlView 带分页变量", rs.includes("pageInfo:") && rs.includes("prevHref:") && rs.includes("hasNext:"));
+  ok("[400] 分页条模板", rh.includes('id="pager"') && rh.includes("{{pageInfo}}"));
+  ok("[400] 折叠默认隐藏未探测", rh.includes('tr[data-probed="0"]') && rh.includes("folded=true"));
+  ok("[400] 折叠开关按钮", rh.includes("data-act=\"toggle-unprobed\""));
+  ok("[400] 探测后带 site 重载", rh.includes("reloadSite") && rh.includes("location.href='?site='"));
+  ok("[400] 重载保留结果", rh.includes("rgProbeResult") && rh.includes("sessionStorage"));
+  ok("[400] probe 函数第四参", rh.includes("function probe(action,extra,json,reloadSite)"));
+  ok("[400] JS 无语法断裂", !rh.includes("})\n        if(reloadSite)"));
+  // 行为：全池节点进入 rows 且分页正确
+  const savePool400 = [...W.S.pool];
+  const saveSeed400 = W.S.seed;
+  const saveAlive400 = new Map(W.S.alive);
+  W.S.alive.clear();
+  W.S.seed = { v: 7, ts: Date.now(), poolGen: 1, poolN: 45, builtAt: Date.now(), byColo: {} };
+  W.S.pool.length = 0;
+  for (let i = 0; i < 45; i++) W.S.pool.push({ h: "203.0.113." + (i + 1), p: 443 });
+  const ctx400 = { url: new URL("https://edge.example.com/regions"), env: {}, id: "u400", auth: { uuids: new Set(), list: [] } };
+  const r1 = await W.regions({ ...ctx400, url: new URL("https://edge.example.com/regions?format=json") });
+  const j1 = await r1.json();
+  eq("[400] JSON 全量 45 节点", j1.nodes.length, 45);
+  const r2 = await W.regions({ ...ctx400, url: new URL("https://edge.example.com/regions?page=1") });
+  const h2 = await r2.text();
+  ok("[400] 第一页 40 行", (h2.match(/<tr /g) || []).length === 40);
+  ok("[400] 分页信息 1/2", h2.includes("第 1/2 页"));
+  ok("[400] 下一页链接可见", /data-show="1"[^>]*>下一页/.test(h2));
+  const r3 = await W.regions({ ...ctx400, url: new URL("https://edge.example.com/regions?page=2") });
+  const h3 = await r3.text();
+  ok("[400] 第二页 5 行", (h3.match(/<tr /g) || []).length === 5);
+  ok("[400] 分页信息 2/2", h3.includes("第 2/2 页"));
+  W.S.pool.length = 0;
+  W.S.pool.push(...savePool400);
+  W.S.seed = saveSeed400;
+  W.S.alive = saveAlive400;
 }
 
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
