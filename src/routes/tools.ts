@@ -252,64 +252,64 @@ export class RegionsView {
    * @returns 展示行数组
    */
   private rows(target: string): RegionNodeRow[] {
-    // 每 GET 重建 1600 行 + 排序吃满免费版 10ms CPU 即 1102；面板只读允许 5 秒陈旧。
-    // 缓存键用节点 key 本身做指纹（非规模）：IP 被替换也要失效。
+    // 每 GET 重建 1600 行 + 排序吃满 10ms CPU 即 1102；缓存 5 秒、键不含 target（换 site 只补四列），节点 key 指纹保证 IP 替换即失效。
     const now = Date.now();
     const aliveSig = [...S.alive.keys()].join(",");
     const poolSig = S.pool.map((x) => `${x.h}:${x.p}`).join(",");
     const seedSig = Object.values(S.seed?.byColo || {}).map((c) => (c.nodes || []).map((n) => n.k).join(",")).join("|");
-    const key = `${target}|${aliveSig}|${poolSig}|${seedSig}`;
+    const key = `${aliveSig}|${poolSig}|${seedSig}`;
     const cache = S.regionRowsCache;
-    if (cache && cache.key === key && now - cache.t < 5000) return cache.rows as RegionNodeRow[];
-    // 目标站延迟是可选的：没带 ?site= 时一条 RTT 都不算，省掉观测表遍历
-    const alive = new AliveBoard().list();
-    const seeds = this.seedNodes();
-    // alive 与 seed 可能重复，按 key 去重后逐个补画像/覆盖/延迟
-    const keys = [...new Set([...alive.map((n) => `${n.h}:${n.p}`), ...seeds.keys(), ...S.pool.map((x) => `${x.h}:${x.p}`)])];
-    // 一次建表：alive 上限 800，若在下面的 map 里逐 key 做 find() 就是 64 万次字符串拼接，
-    // 足以单独吃满一个 Worker 的 CPU 预算；Map 查表把它压成 O(n)。
-    const liveByKey = new Map<string, (typeof alive)[number]>(alive.map((n) => [`${n.h}:${n.p}`, n]));
-    const colo = S.colo || "??";
-    const rows = keys.map((key) => {
-      const [h, p] = splitRelay(key, 443);
-      const seedCc = seeds.get(key) || "";
-      const live = liveByKey.get(key);
-      const q = QUALITY.getFor(h, p, now);
-      const cov = COVERAGE.rows.get(key);
-      // 事实列全部是纯内存 O(1) 查表，零子请求；按站点维度的三张表只在带了 ?site= 时才有意义
-      const ip = h;
-      const isoCc = QUALITY.getIso(h);
-      return {
-        key,
-        country: String(isoCc || live?.cc || seedCc || "").toUpperCase(),
-        family: this.familyOf(h),
-        alive: !!live,
-        source: live && seedCc ? "alive+seed" : live ? "alive" : "seed",
-        kind: q?.kind ?? IpKind.Unknown,
-        level: q?.level ?? "normal",
-        proxy: q?.proxy ?? false,
-        vpn: q?.vpn ?? false,
-        probed: !!cov || !!q,
-        rtt: target ? CONN_OBS.rttOf(colo, key, target, now) : null,
-        egFamily: EG.famOf(ip, now),
-        psOk: target ? PS.okOf(target, ip, now) : -1,
-        dead: DEAD.isDead(ip, now),
-        blkPenalty: target ? BLK.penOf(target, ip, now) : 1,
-        dnsV6: target ? DNS.v6Of(target, now) : -1,
-      } as RegionNodeRow;
-    });
-    // 已探测的排前面（用户口径：alive 已探的优先），再按质量等级 → 国家码 → key；
-    // 未探测的一组落在最后，仍按质量/国家/key 稳定排序。
-    const rank: Record<string, number> = { good: 0, normal: 1, risky: 2 };
-    rows.sort(
-      (a, b) =>
-        Number(b.probed) - Number(a.probed) ||
-        Number(b.alive) - Number(a.alive) ||
-        (rank[a.level] ?? 3) - (rank[b.level] ?? 3) ||
-        a.country.localeCompare(b.country) ||
-        a.key.localeCompare(b.key),
-    );
-    S.regionRowsCache = { t: now, key, rows };
+    let rows = cache && cache.key === key && now - cache.t < 5000 ? (cache.rows as RegionNodeRow[]) : null;
+    if (!rows) {
+      const alive = new AliveBoard().list();
+      const seeds = this.seedNodes();
+      const keys = [...new Set([...alive.map((n) => `${n.h}:${n.p}`), ...seeds.keys(), ...S.pool.map((x) => `${x.h}:${x.p}`)])];
+      // alive 上限 800，逐 key find() 是 64 万次拼接；Map 查表把它压成 O(n)。
+      const liveByKey = new Map<string, (typeof alive)[number]>(alive.map((n) => [`${n.h}:${n.p}`, n]));
+      rows = keys.map((key) => {
+        const [h, p] = splitRelay(key, 443), ip = h, seedCc = seeds.get(key) || "", live = liveByKey.get(key);
+        const q = QUALITY.getFor(h, p, now), cov = COVERAGE.rows.get(key), isoCc = QUALITY.getIso(h);
+        return {
+          key,
+          country: String(isoCc || live?.cc || seedCc || "").toUpperCase(),
+          family: this.familyOf(h),
+          alive: !!live,
+          source: live && seedCc ? "alive+seed" : live ? "alive" : "seed",
+          kind: q?.kind ?? IpKind.Unknown,
+          level: q?.level ?? "normal",
+          proxy: q?.proxy ?? false,
+          vpn: q?.vpn ?? false,
+          probed: !!cov || !!q,
+          rtt: null,
+          egFamily: EG.famOf(ip, now),
+          psOk: -1,
+          dead: DEAD.isDead(ip, now),
+          blkPenalty: 1,
+          dnsV6: -1,
+        } as RegionNodeRow;
+      });
+      // 已探测在前，再按质量等级 → 国家 → key 稳定排序。
+      const rank: Record<string, number> = { good: 0, normal: 1, risky: 2 };
+      rows.sort(
+        (a, b) =>
+          Number(b.probed) - Number(a.probed) ||
+          Number(b.alive) - Number(a.alive) ||
+          (rank[a.level] ?? 3) - (rank[b.level] ?? 3) ||
+          a.country.localeCompare(b.country) ||
+          a.key.localeCompare(b.key),
+      );
+      S.regionRowsCache = { t: now, key, rows };
+    }
+    // 四个站点相关列按 target 补算：换 site 只走 4 次 O(1) 查表，不重建 1600 行。
+    const coloNow = S.colo || "??";
+    const v6 = target ? DNS.v6Of(target, now) : -1;
+    for (const r of rows) {
+      const ip = target ? relayIpOf(r.key) : "";
+      r.rtt = target ? CONN_OBS.rttOf(coloNow, r.key, target, now) : null;
+      r.psOk = target ? PS.okOf(target, ip, now) : -1;
+      r.blkPenalty = target ? BLK.penOf(target, ip, now) : 1;
+      r.dnsV6 = v6;
+    }
     return rows;
   }
 

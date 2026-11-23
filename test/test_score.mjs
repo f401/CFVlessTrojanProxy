@@ -13006,10 +13006,10 @@ if (fs.existsSync(midPath)) {
   const regionsSrc378 = fs.readFileSync("src/px/regions.ts", "utf8");
   // 结构：事实列（纯内存查表）已在 rows() 里读取五张表
   ok("[378] rows 读出口族事实", tools378.includes("egFamily: EG.famOf(ip, now)"));
-  ok("[378] rows 读成功率事实", tools378.includes("psOk: target ? PS.okOf(target, ip, now)"));
+  ok("[378] rows 读成功率事实", tools378.includes("r.psOk = target ? PS.okOf(target, ip, now)"));
   ok("[378] rows 读判死事实", tools378.includes("dead: DEAD.isDead(ip, now)"));
-  ok("[378] rows 读封锁事实", tools378.includes("blkPenalty: target ? BLK.penOf(target, ip, now)"));
-  ok("[378] rows 读 DNS 事实", tools378.includes("dnsV6: target ? DNS.v6Of(target, now)"));
+  ok("[378] rows 读封锁事实", tools378.includes("r.blkPenalty = target ? BLK.penOf(target, ip, now)"));
+  ok("[378] rows 读 DNS 事实", tools378.includes("const v6 = target ? DNS.v6Of(target, now)"));
   // 已探优先 + 未探测单独分组（用户口径）
   ok("[378] 已探优先排序", tools378.includes("Number(b.probed) - Number(a.probed)"));
   ok("[378] 组级也按已探优先", tools378.includes("a[1].some((r) => r.probed) ? 1 : 0"));
@@ -13965,6 +13965,8 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   ok("[406] 状态表有 regionRowsCache 字段", Object.prototype.hasOwnProperty.call(W.S, "regionRowsCache"), "缺字段");
   const tools406 = fs.readFileSync("src/routes/tools.ts", "utf8");
   ok("[406] 缓存键含数据指纹", tools406.includes("cache.key === key") && tools406.includes("aliveSig") && tools406.includes("poolSig"), "未带指纹");
+  ok("[406] 缓存键不含 target", tools406.includes("const key = `${aliveSig}|${poolSig}|${seedSig}`;"), "换 site 会重建整表");
+  ok("[406] target 四列补算", tools406.includes("CONN_OBS.rttOf(coloNow") && tools406.includes("PS.okOf(target") && tools406.includes("BLK.penOf(target") && tools406.includes("DNS.v6Of(target"), "四列未渲染时补算"),
   ok("[406] 缓存 5 秒过期", tools406.includes("now - cache.t < 5000"), "TTL 不是 5 秒");
   ok("[406] 写回缓存", tools406.includes("S.regionRowsCache = { t: now, key, rows }"), "未写回");
   ok("[406] POST 失效缓存", tools406.includes("S.regionRowsCache = null; // 探测/写配置"), "POST 未失效");
@@ -13979,7 +13981,7 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   ok("[406] 同 target 命中缓存不重建", W.S.regionRowsCache === c1, "缓存被重建");
   const ctx406b = { url: new URL("https://edge.example.com/regions?format=json&site=other.test"), env: {}, id: "u406" };
   await W.regions(ctx406b);
-  ok("[406] 不同 target 重建缓存", !!W.S.regionRowsCache && W.S.regionRowsCache !== c1 && W.S.regionRowsCache.key !== c1.key, "target 未区分");
+  ok("[406] 不同 target 命中缓存", W.S.regionRowsCache === c1, "换 site 重建了整表");
   W.S.regionRowsCache = savedCache406;
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
