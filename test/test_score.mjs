@@ -13754,7 +13754,7 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
     const tl397 = fs.readFileSync("src/routes/tools.ts", "utf8");
     // 结构：probe() 开头和 GET run() 一样有 aliveList 惰性载入，否则 POST 落到冷 isolate 时 countryOf 查不到
     ok("[397] probe 路径惰性载入国家码表",
-      tl397.includes("探测结果要给每个节点标国家码") &&
+      tl397.includes("POST 可能落到没 GET 过的 isolate") &&
       tl397.includes("await aliveList(this.c.env)"));
     // 惰性载入出现两处（GET run + POST probe）
     eq("[397] aliveList 惰性载入两处", (tl397.split("await aliveList(this.c.env)").length - 1), 2);
@@ -13997,6 +13997,34 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   ok("[406] alive churn 不触发重建", W.S.regionRowsCache === c1, "后台探活改 alive 导致重建");
   W.S.alive.delete("99.0.0.77:443");
   W.S.regionRowsCache = savedCache406;
+}
+// ---- 第 407 组：探测同时判可用性 + IP 组织展示（黑洞根因修复） ----
+{
+  const reg407 = fs.readFileSync("src/px/regions.ts", "utf8");
+  const types407 = fs.readFileSync("types/app.d.ts", "utf8");
+  const tools407 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  const html407 = fs.readFileSync("src/views/html/regions.html", "utf8");
+  // 结构锁：org 是客观属性能进 IpQuality；reach 是实测值只进 CONN_OBS
+  ok("[407] IpQuality 有 org 字段", types407.includes("org?: string"), "org 未进 IpQuality");
+  ok("[407] qualityFromIpApi 带 org", reg407.includes("if (row.org) q.org = String(row.org)"), "批量查询没带出组织");
+  ok("[407] qualityOf 带 org", reg407.includes("if (org) result.org = org"), "手动重探没带出组织");
+  ok("[407] 可达性走 probeSni", tools407.includes('probeSni(rh, rp, "www.cloudflare.com", CONNECT_MS, this.c.budget)'), "没拨节点判可达");
+  ok("[407] 可达写 CONN_OBS", tools407.includes('CONN_OBS.note(S.colo || "??", key, "@reach"'), "可达性没落本 isolate");
+  ok("[407] reach 不进 IpQuality", !reg407.includes("reachable") && !reg407.includes("reach?:"), "实测值跨 isolate 传播了");
+  ok("[407] rows 读 @reach", tools407.includes('CONN_OBS.get(coloNow, r.key, "@reach", now)'), "写了没读=死数据");
+  ok("[407] 表格显示组织列", tools407.includes('data-cell="org"') && html407.includes('data-cell="org"'), "组织未展示");
+  ok("[407] 前端回填组织", html407.includes("data.org||"), "回填没刷新组织");
+  // 行为：qualityFromIpApi 从 ip-api 行里提取 org
+  const q407 = W.qualityFromIpApi({ status: "success", org: "Example Telecom", countryCode: "US", hosting: false, mobile: false, proxy: false }, Date.now());
+  eq("[407] org 提取", q407 && q407.org, "Example Telecom");
+  // 行为：reach 写 CONN_OBS 后按 key 读回（黑洞=code 0 → ok=false）
+  const colo407 = "TST", key407 = "198.51.100.77:443";
+  W.CONN_OBS.note(colo407, key407, "@reach", 0, 1234, W.IpFamily.IPv4, Date.now());
+  const rr407 = W.CONN_OBS.get(colo407, key407, "@reach", Date.now());
+  ok("[407] 黑洞观测可读回", !!rr407 && rr407.ok === false, "CONN_OBS 读不到黑洞结果");
+  W.CONN_OBS.note(colo407, key407, "@reach", 200, 322, W.IpFamily.IPv4, Date.now());
+  const rr407b = W.CONN_OBS.get(colo407, key407, "@reach", Date.now());
+  ok("[407] 可用观测覆盖", !!rr407b && rr407b.ok === true, "可用结果没覆盖黑洞结果");
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

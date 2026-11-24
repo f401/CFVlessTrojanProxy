@@ -8,9 +8,10 @@ import { IpFamily, IpKind } from "../core/enums";
 import { S } from "../core/state";
 import { QUALITY, QUALITY_PROBE, COVERAGE, CONN_OBS } from "../px/regions";
 import { AliveBoard, aliveList, ensurePool, nsOf } from "../px/pool";
-import { geoLabel } from "../px/probe";
+import { geoLabel, probeSni } from "../px/probe";
 import { html, json } from "../edge/respond";
 import { splitRelay, relayIpOf } from "../core/relay-addr";
+import { CONNECT_MS } from "../core/util";
 import type { UserCtx } from "../edge/types";
 import { escapeHtml, renderTemplate } from "../views/panel";
 import { regionConfigList, saveUsers } from "../proxy/protocol";
@@ -71,6 +72,8 @@ export interface RegionNodeRow {
   level: string;      // good / normal / risky
   proxy: boolean;     // 是否代理
   vpn: boolean;       // 是否 VPN
+  org: string;        // IP 所属组织（客观属性，随质量表跨 isolate 传播）
+  reach: number;      // 连通实测：1=可用 / -1=黑洞 / 0=未测（本 isolate CONN_OBS，不跨 isolate）
   probed: boolean;    // 覆盖账本里记过探测
   rtt: number | null; // 目标站点延迟（毫秒，null = 没测）
   egFamily: number;   // 出口族事实 4/6/0（0=未知）
@@ -279,6 +282,8 @@ export class RegionsView {
           level: q?.level ?? "normal",
           proxy: q?.proxy ?? false,
           vpn: q?.vpn ?? false,
+          org: q?.org || "",
+          reach: 0,
           probed: !!cov || !!q,
           rtt: null,
           egFamily: EG.famOf(ip, now),
@@ -300,11 +305,13 @@ export class RegionsView {
       );
       S.regionRowsCache = { t: now, key, rows };
     }
-    // 四个站点相关列按 target 补算：换 site 只走 4 次 O(1) 查表，不重建 1600 行。
+    // 站点相关列与连通实测按 target 补算：换 site 只走 O(1) 查表，不重建 1600 行。
     const coloNow = S.colo || "??";
     const v6 = target ? DNS.v6Of(target, now) : -1;
     for (const r of rows) {
-      const ip = target ? relayIpOf(r.key) : "";
+      const ip = relayIpOf(r.key);
+      const reachRow = CONN_OBS.get(coloNow, r.key, "@reach", now);
+      r.reach = reachRow ? (reachRow.ok ? 1 : -1) : 0;
       r.rtt = target ? CONN_OBS.rttOf(coloNow, r.key, target, now) : null;
       r.psOk = target ? PS.okOf(target, ip, now) : -1;
       r.blkPenalty = target ? BLK.penOf(target, ip, now) : 1;
@@ -332,17 +339,12 @@ export class RegionsView {
 
   /**
    * 功能：把分组后的节点渲染成 HTML 表格（每组一个勾选框 + 明细表）。
-  * @param rows 展示行
-  * @param selected 已勾选的地区集合
-  * @param pinnedSelected 已勾选的具体节点（host:port 键，回填用）
-  * @param withRtt 是否显示目标站延迟列
-  * @returns 已转义的 HTML 片段
+   * @param rows 展示行；@param selected 已勾选地区；@param pinnedSelected 已勾选节点；@param withRtt 显示延迟；@returns HTML
    */
   private groupsHtml(rows: RegionNodeRow[], selected: Set<string>, pinnedSelected: Set<string>, withRtt: boolean, postAction: string): string {
     const parts: string[] = [];
-    // 探测按钮是 type="button" + 面板脚本 fetch，不再需要 formaction；postAction 由 htmlView 走 postActionJson 传给脚本
-    void postAction;
-    // 一个国家一个勾选框 + 一张表：勾选状态回填，避免用户保存时丢掉已选地区
+    void postAction; // 按钮走面板脚本 fetch，不需要 formaction
+    // 每国一个勾选框+表：回填勾选，避免保存时丢掉已选地区
     for (const g of groupRows(rows)) {
       // 每个国家（含全未探的国家）都给勾选框：冷 isolate 里也必须能选地区
       const cc = escapeHtml(g.country);
@@ -354,19 +356,17 @@ export class RegionsView {
           const rtt = withRtt
             ? `<td>${r.rtt == null ? "—" : escapeHtml(Math.round(r.rtt) + " ms")}</td><td>${escapeHtml(psLabel(r.psOk))}</td><td>${r.blkPenalty > 1 ? "封锁" : "—"}</td>`
             : "";
-          // type="button" + 自带 data-key：submit 竞态会 abort fetch（NetworkError），共享隐藏 key 只会拿到第一行
+          // type=button + data-key 避开 submit 竞态；value 带 key，网站走 checkSite 字段
           const recheck = `<td><button type="button" name="op" value="requality" data-probe="1" data-key="${escapeHtml(r.key)}" class="lnkbtn">重探质量</button></td>`;
-          // 对指定节点测用户在「节点连通测试」框里填的网站：按钮 value 带节点 key，网站走表单的 checkSite 字段
           const nodecheck = `<td><button type="button" name="op" value="nodecheck:${escapeHtml(r.key)}" data-probe="1" class="lnkbtn">测连通</button></td>`;
-          // 具体节点勾选：回填已 pin 的行；保存后订阅里单独成组（只进手动组，不改默认选路）
-          const pinnedChecked = pinnedSelected.has(r.key) ? " checked" : "";
-          // 出站 IP 单独成列：key 就是 host:port，抽 host 出来高亮，便于一眼确认出口地址
-          const [exitIp] = splitRelay(r.key, 443);
+          const pinnedChecked = pinnedSelected.has(r.key) ? " checked" : ""; // 回填已 pin；保存后进手动组
+          const [exitIp] = splitRelay(r.key, 443); // 出站 IP 单独成列，便于确认出口地址
           return `<tr data-node="${escapeHtml(r.key)}" data-probed="${r.probed ? 1 : 0}">
             <td><input type="checkbox" name="pinnedNodes" value="${escapeHtml(r.key)}"${pinnedChecked}></td>
             <td class="u">${escapeHtml(r.key)}</td>
             <td>${escapeHtml(r.country || "—")}</td>
             <td class="ipx">${escapeHtml(exitIp)}</td>
+            <td data-cell="org">${escapeHtml(r.org || "—")}</td>
             <td data-cell="level">${levelBadge(r.level)}</td>
             <td data-cell="kind">${kindLabel(r.kind)}</td>
             <td>${familyLabel(r.family)}</td>
@@ -374,16 +374,15 @@ export class RegionsView {
             <td>${r.dead ? "判死" : "—"}</td>
             <td>${withRtt ? escapeHtml(dnsLabel(r.dnsV6)) : "—"}</td>
             <td>${flagLabel(r)}</td>
-            <td class="mu" data-cell="source">${escapeHtml(r.source)}${r.probed ? " · 已覆盖" : ""}</td>${rtt}${recheck}${nodecheck}
+            <td class="mu" data-cell="source">${escapeHtml(r.source)}${r.probed ? " · 已覆盖" : ""}${r.reach > 0 ? " · 可用" : r.reach < 0 ? " · 黑洞" : ""}</td>${rtt}${recheck}${nodecheck}
           </tr>`;
         })
         .join("");
       const check = `<input type="checkbox" name="regions" value="${cc}"${checked}>`;
-      // 已知地区按国家分组后，组头直接标出该国有多少节点探过（已知），还是全未探测
       const probedN = g.rows.filter((r) => r.probed).length;
       const groupBadge = probedN ? `<span class="b g">已知 ${probedN}</span>` : `<span class="b u">未探测</span>`;
       parts.push(`<h2 class="cb cgroup">${check} ${cc} ${groupBadge} <span class="mu">${g.rows.length} 个节点</span></h2>
-        <table><tr><th>选</th><th>节点</th><th>国家</th><th>出站 IP</th><th>质量</th><th>类型</th><th>族</th><th>出口族事实</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th><th>连通测试</th></tr>${body}</table>`);
+        <table><tr><th>选</th><th>节点</th><th>国家</th><th>出站 IP</th><th>组织</th><th>质量</th><th>类型</th><th>族</th><th>出口族事实</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th><th>连通测试</th></tr>${body}</table>`);
     }
     return parts.join("") || '<div class="mu">本 isolate 还没有探到任何节点（稍后刷新重试）</div>';
   }
@@ -423,15 +422,10 @@ export class RegionsView {
     return html(body);
   }
 
-  /**
-   * 功能：POST 手动探测 —— 指定网站探测（复用 runTfb，写 CONN_OBS/判定表）与逐节点质量重探。
-  * @returns 探测结果文本（浏览器上方显示），冷却中给出等待提示
-   */
+  /** 功能：POST 手动探测，指定网站走 runTfb、逐节点走质量重探；@returns 结果文本或等待提示 */
   private async probe(f: FormData): Promise<Response> {
     const op = String(f.get("op") || "");
-    // 探测结果要给每个节点标国家码，而国家码只在本机 alive/seed 内存里。
-    // POST 可能落到没 GET 过的 isolate（那里 S.alive/S.seed 是空的），先惰性载入，
-    // 和 GET 路径一致；aliveList 带 30 分钟缓存，暖 isolate 几乎零成本。
+    // POST 可能落到没 GET 过的 isolate：国家码只在本机内存，先惰性载入 alive/seed（aliveList 带 30 分钟缓存）。
     if (this.c.env && !S.alive.size && !(S.seed.byColo && Object.keys(S.seed.byColo).length)) {
       await aliveList(this.c.env);
     }
@@ -469,12 +463,16 @@ export class RegionsView {
       const [h] = splitRelay(key, 443);
       const fam = h.includes(":") ? IpFamily.IPv6 : IpFamily.IPv4;
       const q = await QUALITY_PROBE.qualityOf(key, h, this.c.budget, fam);
-      // 标签拼成数组再过滤空值：proxy/vpn 都否定时不能留下悬空的「 / 」（用户看到的"奇怪东西"）
+      // 质量只查 IP 情报不拨节点；补一次拨号（扣 connect 不占 sub），黑洞节点当场暴露
+      const [rh, rp] = splitRelay(key, 443);
+      const sn = await probeSni(rh, rp, "www.cloudflare.com", CONNECT_MS, this.c.budget);
+      const reachable = !!sn.hs && !sn.err;
+      CONN_OBS.note(S.colo || "??", key, "@reach", reachable ? 200 : 0, sn.hs || 0, fam, Date.now());
       const tags = [String(q.level), String(q.kind), q.proxy ? "代理" : "", q.vpn ? "VPN" : ""].filter(Boolean);
       const cc = ccTag(countryOf(key));
       // 面板按钮带 json=1：返回结构化结果供前端回填表格对应行，不跳转；文本路径保持不变（兼容旧测试/脚本）
       if (String(f.get("json") || "") === "1") {
-        return Response.json({ ok: true, key, cc, level: String(q.level), kind: String(q.kind), proxy: !!q.proxy, vpn: !!q.vpn, label: tags.join(" / "), badge: levelBadge(String(q.level)), kindHtml: kindLabel(q.kind as IpKind) });
+        return Response.json({ ok: true, key, cc, org: q.org || "", reachable, reachMs: sn.hs || 0, level: String(q.level), kind: String(q.kind), proxy: !!q.proxy, vpn: !!q.vpn, label: tags.join(" / "), badge: levelBadge(String(q.level)), kindHtml: kindLabel(q.kind as IpKind) });
       }
       return new Response(`重探 ${cc}${key}：${tags.join(" / ")}`);
     }

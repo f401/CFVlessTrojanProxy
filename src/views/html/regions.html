@@ -101,7 +101,8 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
           if(row){
             var lv=row.querySelector('td[data-cell="level"]');if(lv)lv.innerHTML=data.badge||'';
             var kd=row.querySelector('td[data-cell="kind"]');if(kd)kd.innerHTML=data.kindHtml||'';
-            var sc=row.querySelector('td[data-cell="source"]');if(sc)sc.textContent='重探 '+(data.cc||'')+(data.label||'');
+            var og=row.querySelector('td[data-cell="org"]');if(og)og.textContent=data.org||'—';
+            var sc=row.querySelector('td[data-cell="source"]');if(sc)sc.textContent='重探 '+(data.cc||'')+(data.label||'')+(data.reachable===true?' · 可用':data.reachable===false?' · 黑洞':'');
           }
           show('重探 '+(data.cc||'')+data.key+'：'+(data.label||''));
         }else show(typeof data==='string'?data:JSON.stringify(data));

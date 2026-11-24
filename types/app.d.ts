@@ -27,6 +27,7 @@ interface IpQuality {
   level: IpLevel;
   proxy: boolean;
   vpn: boolean;
+  org?: string; // IP 所属组织（客观属性，随 seed 跨 isolate 传播；可达性是实测值，绝不写这里）
   at: number;
 }
 

@@ -185,7 +185,10 @@ export function mergeQuality(signals: QualitySignal[], at: number): IpQuality {
  */
 export function qualityFromIpApi(row: Record<string, unknown>, at: number): IpQuality | null {
   const signal = QUALITY_SOURCES[0].parse(row);
-  return signal ? mergeQuality([signal], at) : null;
+  if (!signal) return null;
+  const q = mergeQuality([signal], at);
+  if (row.org) q.org = String(row.org);
+  return q;
 }
 
 /**
@@ -212,8 +215,7 @@ export class IpQualityTable {
    */
   noteIso(host: string, cc: string, now: number = Date.now()): void {
     if (!host || !cc) return;
-    // 只在超容量时裁剪：prune 全表扫，每行调会放大成 O(N²) 撞 10ms CPU 上限（1102）。
-    // 常态 O(1) set，过期行由 getIso 读时顺手删。
+    // 只在超容量时裁剪：每行 prune 全表扫会放大成 O(N²)（1102）；过期行由 getIso 读时删。
     this.isoCc.set(host, { cc: String(cc).toUpperCase(), at: now });
     if (this.isoCc.size > this.isoCc.capacity()) this.isoCc.prune(now);
   }
@@ -322,8 +324,7 @@ export class IpQualityTable {
    * @param now 当前时刻
    */
   recheckMark(key: string, now = Date.now()): void {
-    // 裁剪必须在 set 之后：旧写法只在超 COVERAGE_CAP 时按 QUALITY_TTL(3d) 清，
-    // 而 recheck key 的寿命只有 60s ⇒ 过期项 3 天内清不掉，表无限涨（1102 根因）
+    // 裁剪必须在 set 之后：旧写法按 QUALITY_TTL(3d) 清，而 recheck key 只活 60s ⇒ 表无限涨（1102 根因）
     this.recheckCool.set(key, now);
     // 只在超容量时裁剪，避免每标记一次就全表扫 TTL —— 与 TimedMarks.mark 同口径
     if (this.recheckCool.size > this.recheckCool.capacity()) this.recheckCool.prune(now);
@@ -362,6 +363,7 @@ export class QualityProbe {
     const cached = QUALITY.get(key, now);
     if (cached) return cached;
     const signals: QualitySignal[] = [];
+    let org = "";
     for (const source of QUALITY_SOURCES) {
       // ident.me 只返回调用者自己的出口，不能查指定 IP —— 注册表里保留仅是文档用途
       if (source.name === "ident-me") continue;
@@ -378,8 +380,9 @@ export class QualityProbe {
         if (signal) signals.push(signal);
         // 探测质量时顺手记下该 IP 的 ISO 国家码：ip-api 的 countryCode 已在这次响应里，
         // 零新增子请求；回填到展示用的 isoCc 表，让面板/探测结果能显示真实国家
-        if (source.name === "ipapi-com" && row.countryCode && ip && !ip.includes(":")) {
-          QUALITY.noteIso(ip, String(row.countryCode), now);
+        if (source.name === "ipapi-com") {
+          if (row.org) org = String(row.org);
+          if (row.countryCode && ip && !ip.includes(":")) QUALITY.noteIso(ip, String(row.countryCode), now);
         }
       } catch {
         // 某个源超时/不可达只记冷却，绝不拖垮整轮——这正是用户说的「部分网站不返回数据」
@@ -387,6 +390,7 @@ export class QualityProbe {
       }
     }
     const result = mergeQuality(signals, now);
+    if (org) result.org = org;
     QUALITY.note(key, result);
     COVERAGE.note(key, family, now);
     return result;
