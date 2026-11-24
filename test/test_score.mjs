@@ -8664,7 +8664,7 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   eq("toHex(toU8(\"A\"))", W.toHex(W.toU8("A")), "41");
   eq("sha224Bytes 输出 28 字节", W.sha224Bytes(new Uint8Array(0)).length, 28);
   eq("errMsg 截断", W.errMsg("hello", 2), "he");
-  eq("WS_MAX_BUFFER 搬到 ws.ts 后仍可达", W.WS_MAX_BUFFER, 16 * 1024 * 1024);
+  eq("WS_MAX_BUFFER 放宽到 64MB", W.WS_MAX_BUFFER, 64 * 1024 * 1024);
   eq("协议名仍在 proto-names.ts", [W.P_V.length, W.P_T.length], [5, 6]);
   eq("SHADOW_DEFAULT 仍是 5%", W.SHADOW_DEFAULT, 0.05);
   eq("uuidFromBytes 是 8-4-4-4-12", W.uuidFromBytes(new Uint8Array(16).fill(0xab)).split("-").map((x) => x.length), [8, 4, 4, 4, 12]);
@@ -13464,9 +13464,9 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
   ok(`[${G}] regionConfigList 有 pinnedNodes 形参`, proto389.includes("pinnedNodes?: string[],"));
   ok(`[${G}] 面板有节点勾选框`, tools389.includes('name="pinnedNodes"'));
   ok(`[${G}] 面板 post 读 pinnedNodes`, tools389.includes('f.getAll("pinnedNodes")'));
-  ok(`[${G}] 订阅有自选组常量`, sub389.includes("G_PIN"));
+  ok(`[${G}] 自选节点作为手动组成员生成`, sub389.includes("pinNames.length ? \", \" + pinNames.map"));
   ok(`[${G}] 订阅从 auth 读 pinnedNodes`, sub389.includes("me?.pinnedNodes"));
-  ok(`[${G}] 自选组已定义且被手动组引用（G_PIN 出现≥2次）`, (sub389.match(/G_PIN/g) || []).length >= 2);
+  ok(`[${G}] 手动组有版本号后缀且默认回自动组`, /const G_MAN = .*v2"/.test(sub389) && sub389.includes('default-selected: "${G_TPUT}"'));
   // ---- 数据层行为：归一化 + 不传保留原值 ----
   const auth389 = {
     list: [
@@ -13497,7 +13497,7 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
   const y389 = W.renderClash(env389, new URL("https://edge.example.com/x"), "u389", "edge.example.com", {}, [], subAuth389);
   ok(`[${G}] 自选节点条目存在`, y389.includes('📌203.0.113.60-VL'));
   ok(`[${G}] 自选节点硬钉 node=`, y389.includes('node=203.0.113.60%3A8443') || y389.includes('node=203.0.113.60:8443'));
-  ok(`[${G}] 自选组定义存在`, y389.includes('name: "📌 自选节点"'));
+  ok(`[${G}] 手动组默认选中吞吐优先组`, y389.includes('default-selected: "🚀 吞吐优先"'));
   // 默认组（吞吐/速率）不引用自选组：定位 G_TPUT/G_LAT 块
   const blockOf = (name) => {
     const i = y389.indexOf(`- name: "${name}"`);
@@ -13505,12 +13505,12 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
     const j = y389.indexOf("- name:", i + 10);
     return y389.slice(i, j < 0 ? y389.length : j);
   };
-  ok(`[${G}] 吞吐组不含自选组`, !blockOf("🚀 吞吐优先").includes("📌 自选节点"));
-  ok(`[${G}] 速率组不含自选组`, !blockOf("⚡ 速率优先").includes("📌 自选节点"));
-  ok(`[${G}] 手动组含自选组`, blockOf("🎯 手动").includes("📌 自选节点"));
+  ok(`[${G}] 吞吐组不含硬钉节点`, !blockOf("🚀 吞吐优先").includes("📌203.0.113.60-VL"));
+  ok(`[${G}] 速率组不含硬钉节点`, !blockOf("⚡ 速率优先").includes("📌203.0.113.60-VL"));
+  ok(`[${G}] 手动组含硬钉节点`, blockOf("🎯 手动 v2").includes("📌203.0.113.60-VL"));
   // 无 pinnedNodes 时不生成自选组
   const yNoPin389 = W.renderClash(env389, new URL("https://edge.example.com/x"), "u389", "edge.example.com", {}, [], undefined);
-  ok(`[${G}] 无勾选不生成自选组`, !yNoPin389.includes('name: "📌 自选节点"'));
+  ok(`[${G}] 无勾选不生成硬钉条目`, !yNoPin389.includes("📌203.0.113.60-VL"));
   // ---- 面板渲染：勾选框回填 ----
   const saveSeed389 = W.S.seed;
   const saveAlive389 = new Map(W.S.alive);
@@ -14036,9 +14036,9 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   const clash408 = W.renderClash(
     { uuid: "u408", nodes: "", proxyip: "auto", defaultMode: "tput" },
     new URL("https://example.com/u408"), "u408", "example.com", {}, [], auth408);
-  ok("[408] 规则里 MATCH 到手动组", clash408.includes("- MATCH,🎯 手动"), "实际订阅规则没指向手动组");
-  const man408 = clash408.slice(clash408.indexOf('- name: "🎯 手动"'), clash408.indexOf('- name: "🎯 手动"') + 900);
-  ok("[408] 手动组含自选组", man408.includes("📌 自选节点"), "手动组没纳入自选节点");
+  ok("[408] 规则里 MATCH 到手动组 v2", clash408.includes("- MATCH,🎯 手动 v2"), "实际订阅规则没指向手动组");
+  const man408 = clash408.slice(clash408.indexOf('- name: "🎯 手动 v2"'), clash408.indexOf('- name: "🎯 手动 v2"') + 900);
+  ok("[408] 手动组含硬钉节点且默认回自动组", man408.includes("📌45.151.183.22") && man408.includes('default-selected: "🚀 吞吐优先"'), "手动组没纳入硬钉节点或缺默认回退");
   // 决定性行为：stub fetch 恒 200，若 forceTunnel 生效则必定走 gate.openSocket（此处抛标记错），
   // 结果 ok:false 且 err 含标记；若没生效则被 native fetch 骗成 ok:true —— 这正是黑洞假 200 的成因。
   const realFetch408 = globalThis.fetch;

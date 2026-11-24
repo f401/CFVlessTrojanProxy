@@ -188,9 +188,9 @@ export function sha224Bytes(data: Uint8Array | ArrayBuffer) {
 // 名字说明用途 —— 这些以前都叫 `util`，读代码时看不出它们只服务 WS 出口。
 
 export const WS_OPEN = 1;
-export const WS_BUFFER_LIMIT = 1024 * 1024; // 下行发送缓冲超过 1MB 就开始背压
-export const WS_STALL_MS = 60000; // 客户端一时收不动很常见，给它 60 秒
-export const WS_MAX_BUFFER = 16 * 1024 * 1024; // 硬上限：别因为客户端慢就把下载掐死
+export const WS_BUFFER_LIMIT = 4 * 1024 * 1024; // 下行缓冲 4MB 才背压（原 1MB 对慢客户端过严）
+export const WS_STALL_MS = 180000; // 3 分钟没排空才判停滞（原 60 秒会误杀慢速大文件）
+export const WS_MAX_BUFFER = 64 * 1024 * 1024; // 硬上限放宽到 64MB：宁可多缓冲也别误杀慢下载
 
 /** 单帧上限：CF 对超大 WS 消息会直接断开，safeSend 按这个尺寸切片 */
 export const WS_MSG_MAX = 256 * 1024;
@@ -429,7 +429,7 @@ export function probeUrlOf(url: URL): string {
 // 1) 对外导出面不变（六十多个调用点零改动，「行为不变」由测试证明）；
 // 2) `VERSION` 仍然只有这一处真源（`doc-audit` 与发版脚本都读它）。
 
-export const VERSION = "7.410";
+export const VERSION = "7.411";
 
 // `sha224` 单独一行：它 `import { toU8 } from "./bytes"`，若挂在 `bytes.ts` 的再导出里
 // 就会形成 `bytes → sha224 → bytes` 的真循环（`tools/check-arch.js` 会报文件级循环）。

@@ -1,15 +1,15 @@
 {
-  "version": "7.409",
+  "version": "7.410",
   "items": [
     {
       "name": "clash",
-      "bytes": 9893,
-      "sha": "44e9dd3747225426121313123b20df25"
+      "bytes": 9944,
+      "sha": "850ba6fc02c138f1898ea8367ef4fd05"
     },
     {
       "name": "singbox",
-      "bytes": 14349,
-      "sha": "74d66f751e15f1d7b746fdcc3a5dd6be"
+      "bytes": 14358,
+      "sha": "8a76cd7cee417fef202bab45ab0bb1e4"
     },
     {
       "name": "links",

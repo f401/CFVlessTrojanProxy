@@ -98,7 +98,7 @@ export function renderSingbox(
   const tags = [];
   const G_LAT = "\u26a1 \u901f\u7387\u4f18\u5148";
   const G_TPUT = "\ud83d\ude80 \u541e\u5410\u4f18\u5148";
-  const G_MAN = "\ud83c\udfaf \u624b\u52a8";
+  const G_MAN = "\ud83c\udfaf \u624b\u52a8 v2";
   const G_REG = "\ud83c\udf0d \u5730\u533a";
   const regNames: string[] = [];
 

@@ -92,8 +92,7 @@ export function renderClash(
   const G_LAT = "\u26a1 \u901f\u7387\u4f18\u5148";
   const G_TPUT = "\ud83d\ude80 \u541e\u5410\u4f18\u5148";
   const G_REG = "\ud83c\udf0d \u5730\u533a";
-  const G_PIN = "\ud83d\udccc \u81ea\u9009\u8282\u70b9";
-  const G_MAN = "\ud83c\udfaf \u624b\u52a8";
+  const G_MAN = "\ud83c\udfaf \u624b\u52a8 v2";
 
   const emit = (
     name: string,
@@ -246,7 +245,7 @@ export function renderClash(
   // v6 出口打 CF 站拿到的是 737B 403，不写这条会被当可用、测速快就选中 → 用户仍看到 IPv6 拒绝页。
   groups.push(`    expected-status: 200`);
   groups.push(`    interval: 300`);
-  groups.push(`    tolerance: 30`);
+  groups.push(`    tolerance: 100`);
   groups.push(`    lazy: false`);
   groups.push(
     q([
@@ -262,7 +261,7 @@ export function renderClash(
   groups.push(`    url: ${probeUrl}`);
   groups.push(`    expected-status: 200`);
   groups.push(`    interval: 300`);
-  groups.push(`    tolerance: 30`);
+  groups.push(`    tolerance: 100`);
   groups.push(`    lazy: false`);
   groups.push(
     q([
@@ -277,11 +276,6 @@ export function renderClash(
     groups.push(`  - name: "${G_REG}"`);
     groups.push(`    type: select`);
     groups.push(q(regNames));
-  }
-  if (pinNames.length) {
-    groups.push(`  - name: "${G_PIN}"`);
-    groups.push(`    type: select`);
-    groups.push(q(pinNames));
   }
 
 
@@ -300,8 +294,10 @@ export function renderClash(
 
   groups.push(`  - name: "${G_MAN}"`);
   groups.push(`    type: select`);
+  // 📌 硬钉中继只允许用户在 UI 主动点选；G_TPUT 保持首位 + default-selected 双保险，绝不自动接管
+  groups.push(`    default-selected: "${G_TPUT}"`);
   groups.push(
-    `    proxies: ["${G_TPUT}", "${G_LAT}"${domNames.length ? `, "${G_DOM}"` : ""}${edgeNames.length ? `, "${G_EDGE}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${pinNames.length ? `, "${G_PIN}"` : ""}${tuUrl && tuMembers.length ? `, "${G_TU}"` : ""}, ${all.map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
+    `    proxies: ["${G_TPUT}"${pinNames.length ? ", " + pinNames.map((x) => `"${x}"`).join(", ") : ""}, "${G_LAT}"${domNames.length ? `, "${G_DOM}"` : ""}${edgeNames.length ? `, "${G_EDGE}"` : ""}${regNames.length ? `, "${G_REG}"` : ""}${tuUrl && tuMembers.length ? `, "${G_TU}"` : ""}, ${all.filter((x) => !pinNames.includes(x)).map((x) => `"${x}"`).join(", ")}, "DIRECT"]`,
   );
 
   return [
@@ -310,7 +306,8 @@ export function renderClash(
     "mode: rule",
   "ipv6: false",
     "log-level: info",
-    "unified-delay: true",
+    // 小页测速被 unified-delay 放大成纯延迟比较，关掉减少抖动误切
+    "unified-delay: false",
     "global-client-fingerprint: chrome",
     "dns:",
     "  enable: true",
@@ -327,10 +324,9 @@ export function renderClash(
     "",
     "rules:",
     "  - GEOIP,CN,DIRECT",
-    // MATCH 必须指向手动组，否则 📌 自选节点 / 🎯 手动 这两个 select 组没有任何规则引用，
-    // 用户在 UI 里选了自选节点也不生效（流量仍被 MATCH 送进 url-test 组）。
-    // 手动组第一个成员是吞吐优先组，Clash select 默认选第一个 ⇒ 老用户行为完全不变，
-    // 只是多了一个可切换的入口。
+    // MATCH 指向手动组，用户可在里面主动选 📌 硬钉节点（紧跟默认的吞吐组之后）。
+    // 7.410 教训：select 按组名缓存用户选择，旧缓存的坏节点被 MATCH 自动接管造成全网断。
+    // 现在组名带 v2 让旧缓存失效，default-selected 固定回自动组，只有主动点才走 📌。
     `  - MATCH,${G_MAN}`,
   ].join("\n");
 }
