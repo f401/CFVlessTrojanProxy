@@ -14026,6 +14026,31 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   const rr407b = W.CONN_OBS.get(colo407, key407, "@reach", Date.now());
   ok("[407] 可用观测覆盖", !!rr407b && rr407b.ok === true, "可用结果没覆盖黑洞结果");
 }
+// 第 408 组：探测必须真走中继（forceTunnel）+ Clash MATCH 指向手动组，自选节点才生效
+{
+  const tr408 = fs.readFileSync("src/core/transport.ts", "utf8");
+  const sub408 = fs.readFileSync("src/views/sub.ts", "utf8");
+  ok("[408] 有中继时强制隧道", tr408.includes("forceTunnel: !!relay"), "没传 forceTunnel，native fetch 会忽略 connect 回调");
+  ok("[408] Clash MATCH 指向手动组", sub408.includes("`  - MATCH,${G_MAN}`"), "MATCH 仍锁在 url-test，自选节点不生效");
+  const auth408 = { list: [{ id: "u408", pwd: "p", note: "", enabled: true, managed: true, pinnedNodes: ["45.151.183.22:443"] }], uuids: new Set(), trojan: new Map(), ok: true };
+  const clash408 = W.renderClash(
+    { uuid: "u408", nodes: "", proxyip: "auto", defaultMode: "tput" },
+    new URL("https://example.com/u408"), "u408", "example.com", {}, [], auth408);
+  ok("[408] 规则里 MATCH 到手动组", clash408.includes("- MATCH,🎯 手动"), "实际订阅规则没指向手动组");
+  const man408 = clash408.slice(clash408.indexOf('- name: "🎯 手动"'), clash408.indexOf('- name: "🎯 手动"') + 900);
+  ok("[408] 手动组含自选组", man408.includes("📌 自选节点"), "手动组没纳入自选节点");
+  // 决定性行为：stub fetch 恒 200，若 forceTunnel 生效则必定走 gate.openSocket（此处抛标记错），
+  // 结果 ok:false 且 err 含标记；若没生效则被 native fetch 骗成 ok:true —— 这正是黑洞假 200 的成因。
+  const realFetch408 = globalThis.fetch;
+  let dialed408 = false;
+  const gate408 = { openSocket() { dialed408 = true; throw new Error("TUNNEL_DIALED_408"); }, fetch() { throw new Error("no sub"); }, snapshot() { return {}; } };
+  try {
+    globalThis.fetch = async () => new Response("ok", { status: 200 });
+    const out408 = await W.TRANSPORTS.get("tunnelfetch").probe("www.example.com", "203.0.113.99:443", "/", 1500, gate408);
+    ok("[408] 中继探测没被 native fetch 骗成 200", out408.ok === false, "不存在的中继仍返回 200=没走隧道");
+    ok("[408] 中继探测真的调用了 connect 回调", dialed408 === true, "connect 回调没被调用");
+  } finally { globalThis.fetch = realFetch408; }
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

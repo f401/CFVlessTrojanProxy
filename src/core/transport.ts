@@ -75,7 +75,10 @@ export class TunnelFetchTransport implements ProbeTransport {
     // `2a06:98c0::1:443` 拆成 host=`2a06`、port=`98c0`（7.180 在 http80 修过同一处）
     const [relayHost, relayPort] = relay ? splitRelay(relay, 443) : ["", 443];
     const dial = relay ? () => gate.openSocket(relayHost, relayPort) : undefined;
-    const client = new Client({ connect: dial } as unknown as ConstructorParameters<typeof Client>[0]);
+    // 有中继时必须 forceTunnel：否则 tunnelfetch 的 nativeFetchCanServe 判定平台 fetch 能直连目标，
+    // 就直接用运行时 fetch 发请求、完全忽略 connect 回调 —— 探测拿到的是直连结果（不存在的 IP 也 200），
+    // 中继标签只是事后贴上去的。只有强制隧道才会真把 TCP 落到中继上；无中继的直连对照腿保持原生 fetch。
+    const client = new Client({ connect: dial, forceTunnel: !!relay } as unknown as ConstructorParameters<typeof Client>[0]);
     // 抓「请求 + 读体」这整段：只给 fetch 加超时，读体阶段照样能挂住
     let work: Promise<{ status: number; server: string; body: ArrayBuffer }> | null = null;
     try {

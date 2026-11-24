@@ -327,7 +327,11 @@ export function renderClash(
     "",
     "rules:",
     "  - GEOIP,CN,DIRECT",
-    `  - MATCH,${G_TPUT}`,
+    // MATCH 必须指向手动组，否则 📌 自选节点 / 🎯 手动 这两个 select 组没有任何规则引用，
+    // 用户在 UI 里选了自选节点也不生效（流量仍被 MATCH 送进 url-test 组）。
+    // 手动组第一个成员是吞吐优先组，Clash select 默认选第一个 ⇒ 老用户行为完全不变，
+    // 只是多了一个可切换的入口。
+    `  - MATCH,${G_MAN}`,
   ].join("\n");
 }
 
