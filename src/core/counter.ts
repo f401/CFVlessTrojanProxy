@@ -12,6 +12,7 @@ export class Counter {
     "snapFlushFail",
     "snapUsersFail",
     "seedWriteFail",
+    "accEmit",
   "statsSeedFail",
   "admStatsSkip",
     "snapSkip",

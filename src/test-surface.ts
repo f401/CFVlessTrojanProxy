@@ -65,6 +65,7 @@ export { SeedStore, SEED_STORE } from "./px/seed";
 export { Connection } from "./proxy/connection";
 export { CAGG_MAX, ConnSettle, type SettleView } from "./proxy/conn-settle";
 export { FLOW_TICK_MS, NODE_EMIT_GAP_MS, NODE_WIN_MS, SITE_WIN_MS, SampleWindow, ClientFlow } from "./proxy/connection";
+export { ACC, ACC_MAX, ACC_MIN_BYTES, ACC_TTL_MS, ByteAccumulator, EMIT_BYTES, EMIT_WALL_MS } from "./proxy/conn-settle";
 export { SAMPLE_MIN_BYTES, SAMPLE_STD_BYTES, SITE_MIN_BYTES, TRANSFER_ENOUGH, kbsOf, sampleWeight, stalledWindow } from "./proxy/conn-settle";
 export {
   pFailFast,

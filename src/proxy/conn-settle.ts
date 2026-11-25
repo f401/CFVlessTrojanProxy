@@ -75,6 +75,96 @@ export function sampleWeight(used: number, bytes: number, dt: number, factor = 1
   return Math.min(room, raw * clamped);
 }
 
+/**
+ * 攒样本阈值：跨连接累计到这么多字节才交一条带宽样本（实测选定，见 .tmp-sim/exp-emit-decide）。
+ *
+ * 为什么是 256KB：4KB 小页单独算带宽会被建连耗时主导、噪声极大；攒够 256KB（约 64 页）
+ * 既有足够信号，又能在样本里稀释单页异常。实测 256KB 抗单页暴快/暴慢都 <5%，
+ * 512KB 抗暴快偏差 +74%，1024KB 单页异常能让整条样本偏 +100%/-94%。
+ */
+export const EMIT_BYTES = 256 * 1024;
+/** 攒样本的最短墙钟时间：防止一次极快的突发（同一毫秒内塞够字节）被当成稳定带宽 */
+export const EMIT_WALL_MS = 300;
+/** 单笔最小字节：只挡 4 字节 403 页（不能用 ms 门槛——4KB@4MB/s 只有 1ms） */
+export const ACC_MIN_BYTES = 4096;
+/** 累加表上限与寿命：按节点隔离（键 = node），10 分钟没再攒就丢弃 */
+export const ACC_MAX = 256;
+export const ACC_TTL_MS = 10 * 60_000;
+
+/**
+ * 一条跨连接的字节累加行：同一节点多个短响应攒到一起，够格才发一条带宽样本。
+ */
+interface AccRow {
+  /** 已累计下行字节 */
+  bytes: number;
+  /** 累计净传输毫秒（已扣首字节） */
+  txMs: number;
+  /** 本次累加的墙钟起点（用于 EMIT_WALL_MS，不累加传输时间——否则快节点永远够不到门槛） */
+  firstAt: number;
+  /** 最近一次累计时刻（TTL 用） */
+  at: number;
+}
+
+/**
+ * 功能：节点级跨连接字节累加器 —— 让「每次只下 4KB 的小页浏览」也能攒出带宽样本。
+ *
+ * 为什么成类：它独占一张按节点索引的累加表（Map），这张表必须与请求/连接生命周期无关地
+ * 在 isolate 内存里活着，又绝不能写进 KV/seed（硬约束①：统计不跨 isolate 共享）。
+ * 表的裁剪（上限 + TTL）也集中在这里，避免每个写入点各写一遍。
+ */
+export class ByteAccumulator {
+  private rows = new Map<string, AccRow>();
+
+  /**
+   * 功能：喂一笔短响应；攒够阈值就发一条 nsSpeed 并清空该行。
+   * @param node 节点 key（空则不记）
+   * @param bytes 本笔下行字节
+   * @param txMs 本笔净传输毫秒（已扣首字节）
+   * @param now 当前墙钟毫秒
+   * @param env 环境（传给 nsSpeed）
+   * @returns {void}
+   */
+  add(node: string, bytes: number, txMs: number, now: number, env: Env): void {
+    if (!node || bytes < ACC_MIN_BYTES || txMs <= 0) return;
+    // 上限与 TTL 兜底：先清过期，再在超限时按最近更新时间丢最旧的一行
+    // （不用 keys().next()：Map.set 对已存在的键不移动位置，插入序≠最近使用序）
+    if (this.rows.size >= ACC_MAX) {
+      let oldestKey = "";
+      let oldestAt = Infinity;
+      for (const [k, r] of this.rows) {
+        if (now - r.at > ACC_TTL_MS) this.rows.delete(k);
+        else if (r.at < oldestAt) { oldestAt = r.at; oldestKey = k; }
+      }
+      if (this.rows.size >= ACC_MAX && oldestKey) this.rows.delete(oldestKey);
+    }
+    let r = this.rows.get(node);
+    if (!r || now - r.at > ACC_TTL_MS) {
+      r = { bytes: 0, txMs: 0, firstAt: now, at: now };
+      this.rows.set(node, r);
+    }
+    r.at = now;
+    r.bytes += bytes;
+    r.txMs += txMs;
+    if (r.bytes < EMIT_BYTES || now - r.firstAt < EMIT_WALL_MS) return;
+    // 攒够：一次性交出一条完整虚拟样本，再清空重来。
+    // 权重必须是 1（与选档实测脚本 exp-emit-decide.mjs 完全一致）：256KB 已是标准样本量，
+    // 若套单连接的 sampleWeight 折扣，快节点 w 会被打到 ~0.03，样本等于白出、实测结论失效。
+    // 背压是客户端下行积压、不代表节点慢，不据此给节点带宽降权。
+    NodeStatsTable.nsSpeed(node, (r.bytes * 1000) / r.txMs, r.bytes, env, 1);
+    cnt("tput");
+    cnt("accEmit");
+    this.rows.delete(node);
+  }
+
+  /** 功能：清空累加表（测试隔离 / 代际切换用）。@returns {void} */
+  clear(): void { this.rows.clear(); }
+  /** 功能：当前累加行数（诊断用）。@returns {number} */
+  size(): number { return this.rows.size; }
+}
+
+/** 节点级字节累加器的进程级单例（每个 isolate 一份，统计不跨 isolate）。 */
+export const ACC = new ByteAccumulator();
+
 // ---- 门面（对外导出面保持不变） ----
 /**
  * 结算阶段读到的连接字段（只读视图）。
@@ -187,6 +277,10 @@ export class ConnSettle {
         NodeStatsTable.nsSpeed(v.node, (bytes * 1000) / dt, bytes, v.env, w);
         cnt("tput");
       }
+    } else if (v.node && v.sampleAt && bytes >= ACC_MIN_BYTES && dt > 0) {
+      // 小页浏览：单页字节过不了大样本门槛（4KB<32KB），攒进节点级累加器，
+      // 跨连接累计到 256KB 再交一条带宽样本 —— 否则这些节点永远停在 2MB/s 先验。
+      ACC.add(v.node, bytes, dt, now, v.env);
     }
   }
 

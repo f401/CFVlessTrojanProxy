@@ -5062,7 +5062,7 @@ ok("较旧的观测不覆盖本地结论", Math.abs(f.score("10.4.4.4") - before
   ok("e4retry 已从登记表删除", !/^\s*"e4retry",/m.test(st));
   ok("vtSeen 已从登记表删除", !/^\s*"vtSeen",/m.test(st));
   ok("vtPend 计数键已删除（S.vtPend 是另一张表）", !/^\s*"vtPend",/m.test(st));
-  eq("connection.ts 与 conn-settle.ts 的 tput 都走 cnt()", (cn.match(/cnt\("tput"\)/g) || []).length, 2);
+  ok("connection.ts 与 conn-settle.ts 的 tput 都走 cnt()", (cn.match(/cnt\("tput"\)/g) || []).length >= 2, "tput 计数点不足");
   ok("connection.ts 不再直接改 S.cnt.tput", !cn.includes("S.cnt.tput"));
   ok("check-wire 有动态键白名单", cw.includes("DYN_CNT"));
   ok("check-wire 会对死登记键报红", cw.includes("没有任何 cnt("));
@@ -8527,7 +8527,7 @@ eq("策略是否生效是只读属性", W.POLICY.enabled, W.SC.POLICY > 0);
   ok("连接本体不再自己记 PEND 账", !connSrc286.includes("statBump(") && !connSrc286.includes("scheduleFlush("), "");
   ok("flush 只负责调度结算", connSrc286.includes("this.settle.close(this)") && connSrc286.includes("this.settle.pend(this)"), "");
   ok("通道证据也搬进结算", !connSrc286.includes("HOOK.traffic") && settleSrc286.includes("HOOK.traffic"), "");
-  const sampBlock286 = sampSrc286.slice(sampSrc286.indexOf("export const SAMPLE_STD_BYTES"), sampSrc286.indexOf("export const CAGG_MAX"));
+  const sampBlock286 = sampSrc286.slice(sampSrc286.indexOf("export const SAMPLE_STD_BYTES"), sampSrc286.indexOf("export const EMIT_BYTES"));
   ok("采样换算是纯函数（不读 S、不计数、不 await）", !sampBlock286.includes("S.") && !sampBlock286.includes("cnt(") && !sampBlock286.includes("await ") && sampBlock286.includes("export function sampleWeight") && sampBlock286.includes("export function stalledWindow") && sampBlock286.includes("export function kbsOf"), "采样换算块必须是纯函数");
   eq("权重封顶：额度用完就是 0", W.sampleWeight(W.SC.CONN_W_CAP, 512 * 1024, 1000), 0);
   ok("权重封顶：折扣在封顶之前生效", Math.abs(W.sampleWeight(W.SC.CONN_W_CAP - 0.1, 512 * 1024, 1000, 0.3) - 0.1) < 1e-6, "");
@@ -14050,6 +14050,41 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
     ok("[408] 中继探测没被 native fetch 骗成 200", out408.ok === false, "不存在的中继仍返回 200=没走隧道");
     ok("[408] 中继探测真的调用了 connect 回调", dialed408 === true, "connect 回调没被调用");
   } finally { globalThis.fetch = realFetch408; }
+}
+{
+  const accSrc409 = fs.readFileSync("src/proxy/conn-settle.ts", "utf8");
+  const cntSrc409 = fs.readFileSync("src/core/counter.ts", "utf8");
+  ok("[409] 攒样本阈值256KB", W.EMIT_BYTES === 256 * 1024, "EMIT_BYTES=" + W.EMIT_BYTES);
+  ok("[409] 墙钟门槛300ms", W.EMIT_WALL_MS === 300, "EMIT_WALL_MS=" + W.EMIT_WALL_MS);
+  ok("[409] 单笔最小4096挡4字节", W.ACC_MIN_BYTES === 4096, "ACC_MIN_BYTES=" + W.ACC_MIN_BYTES);
+  ok("[409] ACC单例是ByteAccumulator", W.ACC instanceof W.ByteAccumulator, "ACC类型错");
+  ok("[409] accEmit计数键登记", cntSrc409.includes('"accEmit"'), "accEmit未登记");
+  ok("[409] closeSample接小样本到累加器", accSrc409.includes("ACC.add(v.node"), "closeSample没接累加器");
+  ok("[409] 大样本仍走原路径", accSrc409.includes("bytes >= 32768") && accSrc409.includes("NodeStatsTable.nsSpeed(v.node"), "大样本路径被改");
+  const realNow409 = Date.now;
+  try {
+    let NOW409 = Date.UTC(2026, 0, 1); Date.now = () => NOW409;
+    const ENV409 = { pxDwellMin: 0, pxShadow: 0, pxSchedH: 6 };
+    const bw409 = 4 * 1048576;
+    const k409 = "acc-t409"; W.S.nstat.delete(k409);
+    const acc409 = new W.ByteAccumulator();
+    for (let i = 0; i < 300; i++) { acc409.add(k409, 4096, 4096 / bw409 * 1000, NOW409, ENV409); NOW409 += 600; }
+    const cap409 = W.scoreParts(k409, "tput", NOW409, false, 0).capBps || 0;
+    ok("[409] 300页4KB攒出带宽样本", cap409 > 2 * 1048576, "capBps=" + cap409);
+    const k403 = "acc-t403"; W.S.nstat.delete(k403);
+    const acc403 = new W.ByteAccumulator();
+    for (let i = 0; i < 1000; i++) { acc403.add(k403, 4, 1, NOW409, ENV409); NOW409 += 600; }
+    ok("[409] 4字节页不进累加器", acc403.size() === 0, "size=" + acc403.size());
+    ok("[409] 4字节页无带宽样本", (W.scoreParts(k403, "tput", NOW409, false, 0).capBps || 0) === 0, "有样本");
+    const kWall = "acc-wall"; W.S.nstat.delete(kWall);
+    const accWall = new W.ByteAccumulator();
+    accWall.add(kWall, 300 * 1024, 50, NOW409, ENV409);
+    ok("[409] 瞬时塞够不发样本", (W.scoreParts(kWall, "tput", NOW409, false, 0).capBps || 0) === 0, "瞬时发了");
+    NOW409 += 400;
+    accWall.add(kWall, 4096, 1, NOW409, ENV409);
+    ok("[409] 过墙钟后发样本", (W.scoreParts(kWall, "tput", NOW409, false, 0).capBps || 0) > 0, "没发");
+    W.S.nstat.delete(k409); W.S.nstat.delete(k403); W.S.nstat.delete(kWall);
+  } finally { Date.now = realNow409; }
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

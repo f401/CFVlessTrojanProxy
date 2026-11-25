@@ -290,6 +290,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `FirstObs` | `src/core/obs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
 | `Attacher`（`ProxySession.attacher`） | `src/proxy/attacher.ts` | 上游挂载与补救链：`run()` 只装配，收尾交给 `onClose()`；中转再试一条 / IPv6 兜底 / proxyip 三段各一方法；无字段，7.354 起由 `ProxySession` 自己持有，模块级 `ATTACHER` 已撤 |
 | `ConnSettle`（`Connection.settle`） | `src/proxy/conn-settle.ts` | 一条连接结束时的结算流水线：收尾采样 → pStall 占比 → 节点观测聚合 → 首眼观测（含站点画像与通道证据）→ PEND 记账；只读 `SettleView`，状态仍归 `Connection`；7.348 起由连接自己持有，模块级 `SETTLE` 已撤 |
+| `ByteAccumulator`（`ACC`） | `src/proxy/conn-settle.ts` | 节点级跨连接字节累加器：小页浏览（<32KB）单条不够带宽门槛，攒够 256KB / 300ms 才交一条 `nsSpeed`；独占一张按节点索引的累加表（上限 256、TTL 10min），只在 isolate 内存，绝不进 KV/seed（硬约束①） |
 | `BudgetLedger` | `src/core/budget-ledger.ts` | 一次调用的额度**账本**（connect / 子请求 / DO 三类）：caps、used、refused、`snapshot()`，外加 `isBudgetExhausted()`。只有记账，不 import `cloudflare:sockets`、不碰 `S`；请求与 cron 轮各 `new` 一份随参数下传 |
 | `BudgetedIO` | `src/core/budgeted-io.ts` | 花钱的**出口**：`openSocket()` 与 `fetch()` 全仓唯二，出门先向账本取号 —— 判断依据从「记得写 take」变成「绕不过这两个门」。`BudgetExhausted` 是独立类型，调用方必须认出它并上抛，别当成坏腿（`dialer`/`fallback`/`dial`/`probe` 四处 catch 都有 `isBudgetExhausted()` 判断） |
 | `FirstFrame` | `src/proxy/protocol.ts` | 首帧解析器，**纯函数式**：只回答「这帧要打哪、是不是 UDP」，回 400 / 关连接 / 记账 / 设响应头都由调用方按固定顺序做（省掉 v7.187 那种「顺序错了但单测全绿」的坑） |
