@@ -14256,6 +14256,12 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   // 文档漂移：真实阈值 4MB/180s/64MB
   ok("[414] LIMITS 背压阈值同步", lim414.includes("4 MB") && lim414.includes("180 s") && lim414.includes("64 MB"));
   ok("[414] connection 注释不再写 16MB/60秒", !conn414.includes("缓冲涨到 16MB 上限或等满 60 秒") && conn414.includes("WS_STALL_MS（180s）"));
+  const tun415 = fs.readFileSync("src/proxy/tunnel.ts", "utf8");
+  ok("[415] 异常收尾记录已搬字节与耗时", tun415.includes("dl end ${st ? st.down : 0}B/${endMs}ms"));
+  ok("[415] 异常收尾记录 WS 状态与是否已通知", tun415.includes("rs=${ws ? ws.readyState : -1} n=${st && st.notified ? 1 : 0}"));
+  ok("[415] 异常收尾立刻推 DO", tun415.includes("if (st) kickFlush(st.env, st.id);"));
+  ok("[415] 旧的 pipe 日志已换成带数据的证据行", !tun415.includes('logErr("pipe: " + errMsg(err)'));
+  ok("[415] clientGone 分支仍单独记一条", tun415.includes("client gone ${st.down}B/${goneMs}ms"));
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

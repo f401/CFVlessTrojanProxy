@@ -102,7 +102,15 @@ export function pipeBack(
       }),
     )
     .catch((err) => {
-      logErr("pipe: " + errMsg(err), st && st.node ? st.node : "");
+      // 每条异常收尾都留一条「搬到多少 / 多久 / WS 状态 / 是否已通知」的证据，并立刻推 DO：
+      // 大文件断流到底是边缘或客户端先走（这条能落盘）还是 isolate 被资源限额杀掉
+      // （catch 根本不执行 ⇒ 这条不会出现），只有这两者之差能区分。
+      const endMs = st && st.tAttach ? Date.now() - st.tAttach : 0;
+      logErr(
+        `dl end ${st ? st.down : 0}B/${endMs}ms rs=${ws ? ws.readyState : -1} n=${st && st.notified ? 1 : 0} e=${errMsg(err)}`,
+        st && st.node ? st.node : "",
+      );
+      if (st) kickFlush(st.env, st.id);
       closeQuietly(sock);
       const clientGone = !ws || ws.readyState !== WS_OPEN;
       if (st && !st.notified) {
