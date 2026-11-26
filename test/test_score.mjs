@@ -14154,6 +14154,16 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   ok("[411] noRelayNonCf 已登记", cnt411.includes('"noRelayNonCf"'));
 }
 
+
+// ---- 412) ?rebuild=1 强制重建候选池（7.415）----
+{
+  const px412 = fs.readFileSync("src/routes/proxyip.ts", "utf8");
+  ok("[412] 路由认 ?rebuild=1", px412.includes('searchParams.get("rebuild") === "1"'));
+  ok("[412] 重建前把池子构建时间清零", px412.includes("S.poolBuilt = 0;"));
+  ok("[412] 重建后复用 refresh 的扫描闸门", /rebuildPool\(\)[\s\S]{0,120}return this\.refreshPool\(\)/.test(px412));
+  ok("[412] 池子 TTL 仍是 24 小时", fs.readFileSync("src/px/probe.ts", "utf8").includes("24 * 3600e3"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

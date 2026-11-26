@@ -60,6 +60,12 @@ export class ProxyipView {
     if (this.url.searchParams.get("day") === "1") return this.dayReport();
     if (this.url.searchParams.get("src") === "1") return this.sourceReport();
     if (this.url.searchParams.get("reset") === "1") return this.resetPool();
+    // ?rebuild=1 —— 强制下一轮扫描重建候选池。池子本身有 24 小时 TTL，而国家码是
+    // 重建时从池子源解析出来的；想让新解析器立刻生效（比如刚补上 #CC 采集），只能重建。
+    if (this.url.searchParams.get("rebuild") === "1") {
+      const deny = await this.rebuildPool();
+      if (deny) return deny;
+    }
     if (this.url.searchParams.get("refresh") === "1") {
       const deny = await this.refreshPool();
       if (deny) return deny;
@@ -145,6 +151,16 @@ export class ProxyipView {
     NodeStatsTable.invalidateRank();
     S.candN = 0;
     return json({ ok: true, alive: 0, curs: S.curs });
+  }
+
+  /**
+   * 功能：?rebuild=1 —— 把池子的构建时间清零并立刻跑一轮扫描，让候选池按当前源重建。
+   * @returns {Promise<Response | null>} 与 `?refresh=1` 相同：被 cron 占用时返回拒绝响应，否则 null
+   */
+  private async rebuildPool(): Promise<Response | null> {
+    // poolBuilt 是「上次重建时间」；清零后 scan 里的 TTL 判断必然成立，于是重新抓源
+    S.poolBuilt = 0;
+    return this.refreshPool();
   }
 
   /**
