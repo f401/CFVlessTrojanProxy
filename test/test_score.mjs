@@ -14229,7 +14229,7 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   // 客户端中途消失必须留下「搬到多少字节 / 跑了多久」的证据，并落盘
   ok("[414] client gone 记字节与耗时", tun414.includes("client gone ") && tun414.includes("st.down}B/"));
   ok("[414] client gone 立刻推 DO", tun414.includes("await PEND.flush(st.env, true, 1)"));
-  ok("[414] PEND 已导入", tun414.includes('import { PEND } from "../store/pend";'));
+  ok("[414] PEND 与 pendAdd 已导入", tun414.includes('import { PEND, pendAdd } from "../store/pend";'));
   // ?limit= 收窄 JSON（默认仍全量）
   ok("[414] json 支持 limit", tools414.includes('searchParams.get("limit")') && tools414.includes("limit > 0 ? rows.slice(0, limit) : rows"));
   const ctx414 = {

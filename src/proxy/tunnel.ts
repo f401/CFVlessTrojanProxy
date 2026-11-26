@@ -3,7 +3,7 @@ import { FIRST_BYTE_MS, WS_OPEN, closeQuietly, errMsg, safeSend, toU8 } from "..
 import { logErr, rttMark } from "../nodes/metrics";
 import { nsDecay, NodeStatsTable } from "../nodes/score";
 import { cnt } from "../core/counter";
-import { PEND } from "../store/pend";
+import { PEND, pendAdd } from "../store/pend";
 import { S } from "../core/state";
 import type { Connection } from "./connection";
 
@@ -112,7 +112,12 @@ export function pipeBack(
       );
       // 直接 await 一次强制上报，而不是 kickFlush：kick 走 setTimeout(0)，
       // 客户端已经走了以后这个 isolate 很可能等不到定时器就被回收，证据永远进不了 DO。
-      if (st && st.env && st.id) await PEND.flush(st.env, true, 1).catch(() => {});
+      // 而且必须先往账本登记一行 —— flush 的入口是「账本为空就早退」，
+      // 没有这行 pending，错误环根本不会被拼进请求体（body.e）。
+      if (st && st.env && st.id) {
+        pendAdd(st.id, 0, 0);
+        await PEND.flush(st.env, true, 1).catch(() => {});
+      }
       closeQuietly(sock);
       const clientGone = !ws || ws.readyState !== WS_OPEN;
       if (st && !st.notified) {
@@ -125,7 +130,10 @@ export function pipeBack(
           const goneMs = st.tAttach ? Date.now() - st.tAttach : 0;
           logErr(`client gone ${st.down}B/${goneMs}ms`, st.node || "");
           // 立刻推一次 DO：isolate 被回收时内存里的错误环会一起消失，只有落盘的才算证据
-          if (st.env && st.id) await PEND.flush(st.env, true, 1).catch(() => {});
+          if (st.env && st.id) {
+            pendAdd(st.id, 0, 0);
+            await PEND.flush(st.env, true, 1).catch(() => {});
+          }
         } else if (st.down === 0 && onClose) {
           // 连上了却一个下行字节都没给就报错：与「上游正常关闭、零字节」（close 路径）
           // 是同一种可观察事实，必须走同一本账 —— attacher 的 onClose 会记 eCloseP、
