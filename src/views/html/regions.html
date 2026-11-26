@@ -1,11 +1,11 @@
 <!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>地区出口 · {{idShort}}</title>
 <style>
-:root{--bd:#e3e7ec;--mut:#78808a;--pri:#2f6fd0;--ok:#1a7f37;--bad:#b42318}
+:root{--bd:#e3e7ec;--mut:#78808a;--pri:#2f6fd0;--ok:#1a7f37;--bad:#b42318;--sel:#eef6ff}
 *{box-sizing:border-box}
 body{font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;color:#1f2329;background:#f5f7fa}
-.wrap{max-width:1180px;margin:0 auto;padding:20px}
-header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.wrap{max-width:1240px;margin:0 auto;padding:18px 18px 72px}
+header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px}
 header h1{font-size:20px;margin:0}
 .mu{color:var(--mut);font-size:12.5px}
 a{color:var(--pri);text-decoration:none}
@@ -16,26 +16,57 @@ a:hover{text-decoration:underline}
 input[type=text]{padding:5px 8px;border:1px solid var(--bd);border-radius:6px;font:inherit}
 button{padding:5px 14px;border:1px solid var(--pri);background:var(--pri);color:#fff;border-radius:6px;cursor:pointer;font:inherit}
 button:hover{filter:brightness(.95)}
+button[disabled]{opacity:.55;cursor:default;filter:none}
+.ghost{background:#fff;color:var(--pri)}
 .lnkbtn{background:none;border:none;color:var(--pri);padding:0;text-decoration:underline;font-size:12.5px}
-.cgroup{font-size:15px;margin:16px 0 6px;display:flex;align-items:center;gap:8px}
+.lnkbtn[disabled]{color:var(--mut);text-decoration:none}
+.cgroup{font-size:15px;margin:16px 0 6px;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.cgroup:hover{color:var(--pri)}
 .cgroup input[type=checkbox]{width:16px;height:16px}
+.cgroup .caret{display:inline-block;width:12px;color:var(--mut);transition:transform .12s}
+.cgroup.closed .caret{transform:rotate(-90deg)}
 table{border-collapse:collapse;width:100%;font-size:12.5px;background:#fff}
 td,th{border:1px solid var(--bd);padding:5px 8px;text-align:left;vertical-align:top}
-th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
+th{background:#f8fafc;position:sticky;top:44px;font-weight:600;white-space:nowrap;z-index:2}
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px}
 .u{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;word-break:break-all}
 .ipx{font-family:ui-monospace,monospace;font-weight:600;color:#0b4fa8;white-space:nowrap}
 .b{display:inline-block;padding:1px 7px;border-radius:9px;font-size:11.5px;white-space:nowrap}
 .b.g{background:#e7f6ec;color:var(--ok)}.b.n{background:#eef0f2;color:#555}
 .b.r{background:#fdeceb;color:var(--bad)}.b.u{background:#f2f4f7;color:var(--mut)}
 .tip{color:#5b6472;font-size:12.5px;margin:6px 0}
-.result{white-space:pre-wrap;background:#f0f6ff;border:1px solid #cfe0ff;border-radius:6px;padding:8px 10px;margin-top:8px;font-size:12.5px;display:none}
-.result.show{display:block}
+#result{position:fixed;right:16px;bottom:64px;max-width:min(520px,86vw);white-space:pre-wrap;background:#0f172a;color:#e8eefc;border-radius:10px;padding:10px 13px;font-size:12.5px;box-shadow:0 8px 24px rgba(15,23,42,.24);display:none;z-index:60}
+#result.show{display:block}
+#result.err{background:#7f1d1d}
+#toolbar{position:sticky;top:0;z-index:20;background:rgba(245,247,250,.96);backdrop-filter:blur(6px);border-bottom:1px solid var(--bd);margin:8px -18px 0;padding:8px 18px}
+#toolbar .bar{gap:10px}
+.chip{border:1px solid var(--bd);background:#fff;color:#3d4652;border-radius:999px;padding:3px 12px;font-size:12.5px;cursor:pointer}
+.chip.on{border-color:var(--pri);background:var(--sel);color:var(--pri);font-weight:600}
+.stat{font-variant-numeric:tabular-nums;font-weight:600;color:#0b4fa8}
+.savebar{position:fixed;left:0;right:0;bottom:0;z-index:50;background:rgba(255,255,255,.97);border-top:1px solid var(--bd);padding:8px 18px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;box-shadow:0 -2px 10px rgba(16,24,40,.05)}
+tr.sel{background:var(--sel)}
+tr.hide{display:none}
+.empty{text-align:center;padding:26px 10px;color:var(--mut)}
+@media (max-width:640px){.wrap{padding:12px 10px 72px}header h1{font-size:17px}#toolbar{margin:8px -10px 0;padding:8px 10px}th{top:74px}}
 </style>
 <div class="wrap">
 <header><h1>地区出口选择 · {{idShort}}</h1>
   <span class="mu">{{coverageText}}</span>
   <a href="{{jsonLink}}">JSON 数据</a><a href="{{backLink}}">返回面板</a>
 </header>
+
+<div id="toolbar">
+  <div class="bar">
+    <input type="text" id="q" size="22" placeholder="搜索 IP / 国家 / 组织">
+    <button type="button" class="chip on" data-filter="all">全部</button>
+    <button type="button" class="chip" data-filter="sel">已选</button>
+    <button type="button" class="chip" data-filter="ok">可用</button>
+    <button type="button" class="chip" data-filter="no">黑洞</button>
+    <span class="mu">节点 <span class="stat" id="cntShown">0</span>/<span class="stat" id="cntAll">0</span> · 已选 <span class="stat" id="cntSel">0</span> 个 · 地区 <span class="stat" id="cntCc">0</span> 个</span>
+    <button type="button" class="chip" data-act="expand">展开全部</button>
+    <button type="button" class="chip" data-act="collapse">折叠全部</button>
+  </div>
+</div>
 
 <div class="card">
   <div class="bar">
@@ -47,9 +78,8 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
   <div class="bar" style="margin-top:10px">
     <label for="checkSite">节点连通测试</label>
     <input type="text" id="checkSite" size="26" placeholder="example.com" value="{{siteValue}}">
-    <span class="mu">填网站后点表格「测连通」，查看该节点能否打开它并识别是否被 ban · 每节点+站点 1 分钟最多一次</span>
+    <span class="mu">填站点后点表格「测连通」，确认该节点能否打开它并识别是否被 ban · 每节点+站点 1 分钟最多一次</span>
   </div>
-  <div class="result" id="result"></div>
 </div>
 
 <div class="card bar" id="pager">
@@ -65,16 +95,27 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
     <input type="text" id="targetHost" name="targetHost" size="24" placeholder="example.com" value="{{siteValue}}">
     <label for="topN">每区节点数</label>
     <input type="text" id="topN" name="topN" size="2" value="{{topNValue}}">
-    <button type="submit">保存选择</button>
-    <span class="tip">勾选的地区/节点才会进订阅；不勾地区 = 自动挑全部。探测类按钮结果在上方内联显示，不离开本页。</span>
+    <span class="tip">勾选的地区/节点才会进订阅；不勾地区 = 自动挑全部。探测类按钮结果在右下角浮层显示，不离开本页。</span>
   </div>
   {{groupsHtml}}
 </form>
 </div>
+<div id="result"></div>
+<div class="savebar">
+  <span class="mu">已选 <span class="stat" id="cntSel2">0</span> 个节点</span>
+  <button type="submit" form="saveForm">保存选择</button>
+  <span class="mu">保存后订阅立即生效</span>
+</div>
 <script>
 (function(){
   var result=document.getElementById('result');
-  function show(t){result.textContent=t;result.classList.add('show');}
+  var timer=0;
+  function show(t,err){
+    clearTimeout(timer);
+    result.textContent=t;
+    result.className='show'+(err?' err':'');
+    if(!err)timer=setTimeout(function(){result.className='';},4200);
+  }
   // 未探测节点（data-probed=0）默认折叠，点开关切换
   var folded=true;
   function applyFold(){document.querySelectorAll('tr[data-probed="0"]').forEach(function(tr){tr.style.display=folded?'none':'';});}
@@ -88,6 +129,44 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
     document.querySelectorAll('input[name="pinnedNodes"]:checked').forEach(function(c){out.push(c.value);});
     return out;
   }
+  // 顶部统计与筛选：所有过滤都在本地收窄可见行，不发请求
+  var filter='all';
+  function rows(){return Array.prototype.slice.call(document.querySelectorAll('table tr[data-node]'));}
+  function isSel(tr){var c=tr.querySelector('input[name="pinnedNodes"]');return !!(c&&c.checked);}
+  function matchFilter(tr){
+    if(filter==='sel'&&!isSel(tr))return false;
+    if(filter==='ok'&&tr.getAttribute('data-reach')!=='1')return false;
+    if(filter==='no'&&tr.getAttribute('data-reach')!=='-1')return false;
+    var q=(document.getElementById('q').value||'').trim().toLowerCase();
+    if(!q)return true;
+    return (tr.getAttribute('data-search')||tr.textContent||'').toLowerCase().indexOf(q)>=0;
+  }
+  function refresh(){
+    var all=rows(),shown=0,sel=0,cc={};
+    all.forEach(function(tr){
+      var ok=matchFilter(tr);
+      tr.classList.toggle('hide',!ok);
+      if(ok)shown++;
+      if(isSel(tr)){sel++;tr.classList.add('sel');var g=tr.getAttribute('data-cc');if(g)cc[g]=1;}
+      else tr.classList.remove('sel');
+    });
+    document.getElementById('cntShown').textContent=shown;
+    document.getElementById('cntAll').textContent=all.length;
+    document.getElementById('cntSel').textContent=sel;
+    document.getElementById('cntSel2').textContent=sel;
+    document.getElementById('cntCc').textContent=Object.keys(cc).length;
+    // 组头显示该组被筛掉多少，避免「组还在但行全没了」的困惑
+    document.querySelectorAll('h2.cgroup').forEach(function(h){
+      var tb=h.nextElementSibling&&h.nextElementSibling.classList.contains('tw')?h.nextElementSibling:null;
+      if(!tb)return;
+      var trs=Array.prototype.slice.call(tb.querySelectorAll('tr[data-node]'));
+      var live=trs.filter(function(t){return !t.classList.contains('hide');}).length;
+      h.style.opacity=live?'':'0.45';
+    });
+  }
+  refresh();
+  document.addEventListener('input',function(ev){if(ev.target&&ev.target.id==='q')refresh();});
+  document.addEventListener('change',function(ev){if(ev.target&&ev.target.name==='pinnedNodes')refresh();if(ev.target&&ev.target.name==='regions')refresh();});
   function probe(action,extra,json,reloadSite){
     var fd=new FormData();
     fd.set('op',action);
@@ -96,28 +175,58 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
     fetch({{postActionJson}},{method:'POST',body:fd}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return json?r.json():r.text();})
       .then(function(data){
         if(json&&data&&data.ok&&data.key){
-          // 重探结果回填对应表格行：质量徽章 / 类型 / 来源
+          // 重探结果回填对应表格行：质量徽章 / 类型 / 组织 / 来源
           var row=document.querySelector('tr[data-node="'+data.key.replace(/"/g,'')+'"]');
           if(row){
             var lv=row.querySelector('td[data-cell="level"]');if(lv)lv.innerHTML=data.badge||'';
             var kd=row.querySelector('td[data-cell="kind"]');if(kd)kd.innerHTML=data.kindHtml||'';
             var og=row.querySelector('td[data-cell="org"]');if(og)og.textContent=data.org||'—';
             var sc=row.querySelector('td[data-cell="source"]');if(sc)sc.textContent='重探 '+(data.cc||'')+(data.label||'')+(data.reachable===true?' · 可用':data.reachable===false?' · 黑洞':'');
+            if(data.reachable===true)row.setAttribute('data-reach','1');
+            else if(data.reachable===false)row.setAttribute('data-reach','-1');
+            row.setAttribute('data-probed','1');
+            refresh();
           }
           show('重探 '+(data.cc||'')+data.key+'：'+(data.label||''));
         }else show(typeof data==='string'?data:JSON.stringify(data));
         if(reloadSite){sessionStorage.setItem('rgProbeResult',typeof data==='string'?data:JSON.stringify(data));setTimeout(function(){location.href='?site='+encodeURIComponent(reloadSite);},500);}
       })
-      .catch(function(e){show('请求失败（'+e.message+'），请检查网络后重试');});
+      .catch(function(e){show('请求失败（'+e.message+'），请检查网络后重试',1);});
   }
   document.addEventListener('click',function(ev){
+    // 组头点击折叠该组；点勾选框本身不触发
+    var h=ev.target.closest('h2.cgroup');
+    if(h&&!ev.target.matches('input')){
+      ev.preventDefault();
+      var tb=h.nextElementSibling;
+      if(tb&&tb.classList.contains('tw')){var hid=tb.style.display==='none';tb.style.display=hid?'':'none';h.classList.toggle('closed',!hid);}
+      return;
+    }
     var b=ev.target.closest('button');if(!b)return;
+    if(b.dataset.filter){
+      ev.preventDefault();
+      filter=b.dataset.filter;
+      document.querySelectorAll('button[data-filter]').forEach(function(x){x.classList.toggle('on',x===b);});
+      refresh();return;
+    }
+    if(b.dataset.act==='expand'||b.dataset.act==='collapse'){
+      ev.preventDefault();
+      var open=b.dataset.act==='expand';
+      document.querySelectorAll('h2.cgroup').forEach(function(x){
+        var tb=x.nextElementSibling;
+        if(tb&&tb.classList.contains('tw')){tb.style.display=open?'':'none';x.classList.toggle('closed',!open);}
+      });
+      return;
+    }
     if(b.dataset.act==='site-probe'){
       ev.preventDefault();
       var site=document.getElementById('probeSite').value.trim();
-      if(!site){show('请先填写要探测的网站');return;}
+      if(!site){show('请先填写要探测的网站',1);return;}
       // 只对勾选的节点探测；没勾则服务端回退全池自动挑
       var nodes=checkedNodes();
+      b.disabled=true;var old=b.textContent;b.textContent='探测中…';
+      var done=function(){b.disabled=false;b.textContent=old;};
+      setTimeout(done,8000);
       probe('probe',{site:site,nodes:nodes.join(',')},false,site);return;
     }
     if(b.dataset.act==='toggle-unprobed'){ev.preventDefault();folded=!folded;applyFold();b.textContent=folded?'显示未探测节点':'隐藏未探测节点';return;}
@@ -125,11 +234,13 @@ th{background:#f8fafc;position:sticky;top:0;font-weight:600;white-space:nowrap}
       ev.preventDefault();
       var op=b.getAttribute('value')||'';
       if(op.indexOf('nodecheck:')===0){
-        var site=document.getElementById('checkSite').value.trim();
-        if(!site){show('请先填写节点连通测试的网站');return;}
-        probe(op,{checkSite:site});
+        var site2=document.getElementById('checkSite').value.trim();
+        if(!site2){show('请先填写节点连通测试的网站',1);return;}
+        b.disabled=true;var t2=b.textContent;b.textContent='测试中…';setTimeout(function(){b.disabled=false;b.textContent=t2;},8000);
+        probe(op,{checkSite:site2});
       }else if(op==='requality'){
         // 按钮自带 key + json=1，结果回填对应行，不跳转
+        b.disabled=true;var t3=b.textContent;b.textContent='重探中…';setTimeout(function(){b.disabled=false;b.textContent=t3;},8000);
         probe('requality',{key:b.dataset.key||'',json:'1'},true);
       }
     }

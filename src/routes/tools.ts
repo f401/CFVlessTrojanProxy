@@ -361,7 +361,7 @@ export class RegionsView {
           const nodecheck = `<td><button type="button" name="op" value="nodecheck:${escapeHtml(r.key)}" data-probe="1" class="lnkbtn">测连通</button></td>`;
           const pinnedChecked = pinnedSelected.has(r.key) ? " checked" : ""; // 回填已 pin；保存后进手动组
           const [exitIp] = splitRelay(r.key, 443); // 出站 IP 单独成列，便于确认出口地址
-          return `<tr data-node="${escapeHtml(r.key)}" data-probed="${r.probed ? 1 : 0}">
+          return `<tr data-node="${escapeHtml(r.key)}" data-probed="${r.probed ? 1 : 0}" data-reach="${r.reach > 0 ? 1 : r.reach < 0 ? -1 : 0}" data-cc="${escapeHtml(g.country)}" data-search="${escapeHtml((r.key + " " + r.country + " " + r.org + " " + r.source).toLowerCase())}">
             <td><input type="checkbox" name="pinnedNodes" value="${escapeHtml(r.key)}"${pinnedChecked}></td>
             <td class="u">${escapeHtml(r.key)}</td>
             <td>${escapeHtml(r.country || "—")}</td>
@@ -381,10 +381,10 @@ export class RegionsView {
       const check = `<input type="checkbox" name="regions" value="${cc}"${checked}>`;
       const probedN = g.rows.filter((r) => r.probed).length;
       const groupBadge = probedN ? `<span class="b g">已知 ${probedN}</span>` : `<span class="b u">未探测</span>`;
-      parts.push(`<h2 class="cb cgroup">${check} ${cc} ${groupBadge} <span class="mu">${g.rows.length} 个节点</span></h2>
-        <table><tr><th>选</th><th>节点</th><th>国家</th><th>出站 IP</th><th>组织</th><th>质量</th><th>类型</th><th>族</th><th>出口族事实</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th><th>连通测试</th></tr>${body}</table>`);
+      parts.push(`<h2 class="cb cgroup" data-cc="${cc}"><span class="caret">▾</span>${check} ${cc} ${groupBadge} <span class="mu">${g.rows.length} 个节点</span></h2>
+        <div class="tw"><table><tr><th>选</th><th>节点</th><th>国家</th><th>出站 IP</th><th>组织</th><th>质量</th><th>类型</th><th>族</th><th>出口族</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th><th>连通测试</th></tr>${body}</table></div>`);
     }
-    return parts.join("") || '<div class="mu">本 isolate 还没有探到任何节点（稍后刷新重试）</div>';
+    return parts.join("") || '<div class="empty">本 isolate 还没有探到任何节点 · <a href="?rebuild=1">重建池子</a> 或稍后刷新</div>';
   }
 
   /**

@@ -13064,7 +13064,8 @@ if (fs.existsSync(midPath)) {
   };
   W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
   const html378 = await (await W.regions(ctx378)).text();
-  ok("[378] HTML 有出口族事实列", html378.includes("出口族事实"));
+  // 列头从「出口族事实」简写成「出口族」（列没删，窄屏少挤一点）
+ok("[378] HTML 有出口族列", html378.includes("出口族"));
   ok("[378] HTML 有成功率列", html378.includes("成功率") && html378.includes("100%"));
   ok("[378] HTML 有重探按钮", html378.includes('value="requality"') && html378.includes("重探质量"));
   ok("[378] HTML 有网站探测表单", html378.includes('id="probeSite"') && html378.includes("开始探测"));
@@ -14164,6 +14165,48 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   ok("[412] 池子 TTL 仍是 24 小时", fs.readFileSync("src/px/probe.ts", "utf8").includes("24 * 3600e3"));
 }
 
+
+
+// ---- 第 413 组：地区面板 UI 改版（搜索筛选 / 吸底保存 / 横向滚动 / 折叠 / 浮层提示） ----
+{
+  const tpl413 = fs.readFileSync("src/views/html/regions.html", "utf8");
+  const tools413 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  ok("[413] 搜索框", tpl413.includes('id="q"') && tpl413.includes("搜索 IP"));
+  ok("[413] 筛选按钮三档", tpl413.includes('data-filter="sel"') && tpl413.includes('data-filter="ok"') && tpl413.includes('data-filter="no"'));
+  ok("[413] 统计计数位", tpl413.includes('id="cntShown"') && tpl413.includes('id="cntSel"') && tpl413.includes('id="cntCc"'));
+  ok("[413] 吸底保存条", tpl413.includes('class="savebar"') && tpl413.includes('form="saveForm"'));
+  ok("[413] 横向滚动容器样式", tpl413.includes(".tw{overflow-x"));
+  ok("[413] 折叠箭头样式", tpl413.includes(".cgroup .caret") && tpl413.includes(".cgroup.closed"));
+  ok("[413] 浮层提示可标错", tpl413.includes("#result.err") && tpl413.includes("show('请先填写要探测的网站',1)"));
+  ok("[413] 筛选是客户端收窄", tpl413.includes("function matchFilter") && tpl413.includes("classList.toggle('hide'"));
+  ok("[413] 组头点击折叠", tpl413.includes("closest('h2.cgroup')") && tpl413.includes("classList.toggle('closed'"));
+  ok("[413] 行属性 data-search/data-reach/data-cc", tools413.includes('data-search="') && tools413.includes('data-reach="') && tools413.includes('data-cc="'));
+  ok("[413] 表格套 tw 容器", tools413.includes('<div class="tw"><table>'));
+  ok("[413] 组头带折叠箭头", tools413.includes('<span class="caret">'));
+  ok("[413] 空态给重建入口", tools413.includes("重建池子"));
+  // 渲染一遍：确认占位符都替换掉、行属性真的出现在 HTML 里
+  const saveSeed413 = W.S.seed;
+  const saveAlive413 = new Map(W.S.alive);
+  W.S.alive.clear();
+  W.S.seed = { v: 7, byColo: { US: { nodes: [{ k: "198.51.100.9:443", h: "198.51.100.9", p: 443, cc: "US" }] } } };
+  const ctx413 = {
+    url: new URL("https://edge.example.com/regions"),
+    request: { method: "GET" },
+    env: {}, id: "u413", pageKey: "",
+    auth: { list: [{ id: "u413", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
+  };
+  W.S.regionRowsCache = null;
+  const html413 = await (await W.regions(ctx413)).text();
+  ok("[413] 渲染后无占位符残留", !html413.includes("{{") , html413.slice(0, 120));
+  ok("[413] 渲染出搜索框", html413.includes('id="q"'));
+  ok("[413] 渲染出行属性", html413.includes('data-search="') && html413.includes('data-cc="US"'));
+  ok("[413] 渲染出吸底保存", html413.includes('class="savebar"'));
+  // 空态分支由源码锁覆盖（运行时池子里总有行）
+  W.S.alive.clear();
+  for (const [k, v] of saveAlive413) W.S.alive.set(k, v);
+  W.S.seed = saveSeed413;
+  W.S.regionRowsCache = null;
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
