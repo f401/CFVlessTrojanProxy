@@ -1,7 +1,7 @@
 import { SC } from "../core/const";
 import { flushSnap, PEND } from "../store/index";
 import { HOOK } from "../core/hook";
-import { hostDirectMark, hostNodeMark } from "../nodes/metrics";
+import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { FO, LAT } from "../core/obs";
 import { NodeStatsTable } from "../nodes/score";
@@ -433,6 +433,8 @@ export class ConnSettle {
 export interface TailConn {
   /** 连接 id（null / 空串表示握手期就结束，没有解析出目标） */
   readonly id: string | null;
+  /** 已经搬给客户端的字节数（收尾证据要用：0 表示还没出数据就结束了） */
+  readonly down: number;
   /** 释放上游 socket 与计数名额 */
   release(): void;
   /** 冲一次本地账本（force 为真时忽略节流） */
@@ -457,6 +459,10 @@ export class SessionTail {
     conn.release();
     // 握手期就结束的连接（占大多数）以前完全不可见，这里补一个计数
     if (!conn.id) cnt("noPayload");
+    // 收尾这条路一定跑得到（socket 释放、账本 flush 都在这里），所以它也是唯一能证明
+    // 「Worker 确实收到了连接结束」的地方：搬过数据才记，避免把每次握手都刷成噪音。
+    // 断流若是这一条缺失 ⇒ 连接根本没走到收尾（isolate 被杀 / 边缘没把 close 交上来）。
+    if (conn.down > 0) logErr(`dl close ${conn.down}B`, "");
     conn.flush(true);
     if (!ctx || !ctx.waitUntil) {
       // 本地/单测没有 waitUntil：直接返回，别把 Promise 挂成未处理的 rejection
