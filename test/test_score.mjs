@@ -14207,6 +14207,56 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   W.S.seed = saveSeed413;
   W.S.regionRowsCache = null;
 }
+
+
+// ---- 第 414 组：大文件断流的可观测性（safeSend 布尔 / client gone 落盘 / ?limit= / 文档同步） ----
+{
+  const util414 = fs.readFileSync("src/core/util.ts", "utf8");
+  const tun414 = fs.readFileSync("src/proxy/tunnel.ts", "utf8");
+  const tools414 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  const lim414 = fs.readFileSync("docs/LIMITS.md", "utf8");
+  const conn414 = fs.readFileSync("src/proxy/connection.ts", "utf8");
+  // safeSend 以前静默 return：客户端走了管道还得再搬 512KB 才发现
+  ok("[414] safeSend 返回布尔", util414.includes("export function safeSend(ws: WebSocketLike, data: Uint8Array): boolean"));
+  ok("[414] safeSend 未开连接返回 false", util414.includes("if (!ws || ws.readyState !== WS_OPEN) return false;"));
+  ok("[414] safeSend 异常也返回 false", util414.includes("/* 对端已关闭：与 readyState 检查同等语义，交给调用方收尾 */"));
+  eq("[414] safeSend 未开连接返回 false（行为）", W.safeSend({ readyState: 3 }, new Uint8Array(1)), false);
+  let sent414 = 0;
+  eq("[414] safeSend 开会话返回 true（行为）", W.safeSend({ readyState: 1, send: () => { sent414++; } }, new Uint8Array(1)), true);
+  eq("[414] safeSend 真的发了", sent414, 1);
+  // 发不出去要让 pipe 立刻收尾
+  ok("[414] 写失败抛 client gone", tun414.includes('if (!safeSend(ws, merged)) throw new Error("client gone");') && tun414.includes('} else if (!safeSend(ws, u8)) {'));
+  // 客户端中途消失必须留下「搬到多少字节 / 跑了多久」的证据，并落盘
+  ok("[414] client gone 记字节与耗时", tun414.includes("client gone ") && tun414.includes("st.down}B/"));
+  ok("[414] client gone 立刻推 DO", tun414.includes("kickFlush(st.env, st.id)"));
+  ok("[414] kickFlush 已导入", tun414.includes('import { kickFlush } from "../store/pend";'));
+  // ?limit= 收窄 JSON（默认仍全量）
+  ok("[414] json 支持 limit", tools414.includes('searchParams.get("limit")') && tools414.includes("limit > 0 ? rows.slice(0, limit) : rows"));
+  const ctx414 = {
+    url: new URL("https://edge.example.com/regions?format=json&limit=2"),
+    request: { method: "GET" },
+    env: {}, id: "u414", pageKey: "",
+    auth: { list: [{ id: "u414", pwd: "p", note: "", enabled: true, managed: true, regions: [] }], uuids: new Set(), trojan: new Map(), ok: true },
+  };
+  const save414 = W.S.seed;
+  W.S.seed = { v: 7, byColo: { US: { nodes: [
+    { k: "198.51.100.1:443", h: "198.51.100.1", p: 443, cc: "US" },
+    { k: "198.51.100.2:443", h: "198.51.100.2", p: 443, cc: "US" },
+    { k: "198.51.100.3:443", h: "198.51.100.3", p: 443, cc: "US" },
+  ] } } };
+  W.S.regionRowsCache = null;
+  const j414 = JSON.parse(await (await W.regions(ctx414)).text());
+  eq("[414] limit=2 只回两行", j414.nodes.length, 2);
+  const ctx414b = { ...ctx414, url: new URL("https://edge.example.com/regions?format=json") };
+  W.S.regionRowsCache = null;
+  const j414b = JSON.parse(await (await W.regions(ctx414b)).text());
+  ok("[414] 不带 limit 仍全量", j414b.nodes.length >= 3);
+  W.S.seed = save414;
+  W.S.regionRowsCache = null;
+  // 文档漂移：真实阈值 4MB/180s/64MB
+  ok("[414] LIMITS 背压阈值同步", lim414.includes("4 MB") && lim414.includes("180 s") && lim414.includes("64 MB"));
+  ok("[414] connection 注释不再写 16MB/60秒", !conn414.includes("缓冲涨到 16MB 上限或等满 60 秒") && conn414.includes("WS_STALL_MS（180s）"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

@@ -205,3 +205,4 @@ export { ProxySession, handleUpgrade } from "./proxy/session";
 
 
 export { CONNECT_MS, FIRST_BYTE_MS, FIRST_UP_MS, UP_STALL_MS } from "./core/util";
+export { safeSend } from "./core/util";

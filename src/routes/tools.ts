@@ -255,7 +255,7 @@ export class RegionsView {
    * @returns 展示行数组
    */
   private rows(target: string): RegionNodeRow[] {
-    // 重建 1600 行 + ICU 排序在 CF 上逼近 10ms CPU（TTL 到期即 1102）；缓存 30 秒且命中只看寿命，后台 probe 改 alive 也不触发重建（面板允许短暂陈旧，POST 探测会主动失效）。
+    // 重建 1600 行 + ICU 排序逼近 10ms CPU（TTL 到期即 1102）；缓存 30 秒、命中只看寿命，后台 probe 改 alive 不重建动失效）。
     const now = Date.now();
     const aliveSig = [...S.alive.keys()].join(",");
     const poolSig = S.pool.map((x) => `${x.h}:${x.p}`).join(",");
@@ -321,7 +321,7 @@ export class RegionsView {
   }
 
   /**
-   * 功能：JSON 输出（保留旧契约，?format=json 显式请求）。
+   * 功能：JSON 输出（保留旧契约，?format=json 显式请求；?limit= 可收窄条数）。
   * @param rows 展示行
   * @param target 目标站点
   * @returns JSON 响应
@@ -425,7 +425,7 @@ export class RegionsView {
   /** 功能：POST 手动探测，指定网站走 runTfb、逐节点走质量重探；@returns 结果文本或等待提示 */
   private async probe(f: FormData): Promise<Response> {
     const op = String(f.get("op") || "");
-    // POST 可能落到没 GET 过的 isolate：国家码只在本机内存，先惰性载入 alive/seed（aliveList 带 30 分钟缓存）。
+    // POST 可能落到没 GET 过的 isolate：先惰性载入 alive/seed（aliveList 带 30 分钟缓存）。
     if (this.c.env && !S.alive.size && !(S.seed.byColo && Object.keys(S.seed.byColo).length)) {
       await aliveList(this.c.env);
     }
@@ -476,8 +476,7 @@ export class RegionsView {
       }
       return new Response(`重探 ${cc}${key}：${tags.join(" / ")}`);
     }
-    // 对指定节点测用户输入的网站：钉一条中继跑 runTfb，看连通与是否被 ban。
-    // 只做诊断展示，不额外写封禁（runTfb 内部仍按「两批共识 + 有 2xx」的硬规则写判定表）。
+    // 对指定节点测用户输入的网站：钉一条中继跑 runTfb 看连通与被 ban；只诊断展示，runTfb 内部仍按「两批共识 + 有 2xx」写判定
     if (op.startsWith("nodecheck:")) {
       const key = op.slice("nodecheck:".length).trim().slice(0, 256);
       const site = String(f.get("checkSite") || "").trim().slice(0, 256);
@@ -533,9 +532,7 @@ export class RegionsView {
       // 不在 POST 入口清整表缓存：重建 1600 行会累积触发 1102；四个站点相关列本就渲染时补算，节点列表/静态列靠 30 秒 TTL 自然过期。
       return this.post();
     }
-    // 冷 isolate 的 alive/seed 都还在内存里没载入：先看一眼名单与游标再渲染，
-    // 否则本机房刚起来时面板恒空（KV 里其实有节点）。aliveList 内部走 30 分钟缓存，
-    // 暖 isolate 上这一次几乎零成本，和 /proxyip、订阅的载入路径一致。
+    // 冷 isolate 先载名单再渲染，否则面板恒空；aliveList 自带 30 分钟缓存，暖 isolate 几乎零成本
     if (this.c.env && !S.alive.size && !(S.seed.byColo && Object.keys(S.seed.byColo).length)) {
       await aliveList(this.c.env);
     }
@@ -543,7 +540,11 @@ export class RegionsView {
     await ensureIsoCountries();
     const target = (this.c.url.searchParams.get("site") || "").slice(0, 256);
     const rows = this.rows(target);
-    if (this.c.url.searchParams.get("format") === "json") return this.jsonView(rows, target);
+    if (this.c.url.searchParams.get("format") === "json") {
+      // ?limit=N 收窄条数：全量 1600 行 ≈650KB，序列化吃满免费版 CPU（实测 3 并发 26% 被 503）；默认全量不动旧契约。
+      const limit = Math.max(0, Number(this.c.url.searchParams.get("limit")) || 0);
+      return this.jsonView(limit > 0 ? rows.slice(0, limit) : rows, target);
+    }
     // 全池可达 1600 条：服务端分页，避免一次性渲染数 MB HTML；JSON 仍返回全量
     const size = 40, pages = Math.max(1, Math.ceil(rows.length / size));
     const page = Math.min(pages, Math.max(1, Number(this.c.url.searchParams.get("page")) || 1));

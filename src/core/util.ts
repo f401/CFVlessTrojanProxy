@@ -196,14 +196,16 @@ export const WS_MAX_BUFFER = 64 * 1024 * 1024; // 硬上限放宽到 64MB：宁�
 export const WS_MSG_MAX = 256 * 1024;
 
 /**
- * 功能：安全发送——WS 未开或已关闭时静默丢弃（隧道里对端随时消失，不能因此抛错）。
+ * 功能：安全发送——WS 未开或已关闭时返回 false，由调用方决定收尾。
+ * 以前这里静默 return：管道还得再搬最多 512 KB 才发现客户端走了，
+ * 那段时间的 CPU 全白烧，断流归因也看不出是"谁先走"。
  * @param ws WebSocket 兼容对象
  * @param data 待发字节
- * @returns 无
+ * @returns 是否真的发出去了（false = 客户端已经不在）
  */
-export function safeSend(ws: WebSocketLike, data: Uint8Array) {
+export function safeSend(ws: WebSocketLike, data: Uint8Array): boolean {
   try {
-    if (!ws || ws.readyState !== WS_OPEN) return;
+    if (!ws || ws.readyState !== WS_OPEN) return false;
     // 大块拆帧：一次 send 超过约 1 MB 时运行时可能直接重置连接，
     // 表现就是「下载到 1 MB 左右必断」。
     if (data && data.length > WS_MSG_MAX) {
@@ -213,8 +215,10 @@ export function safeSend(ws: WebSocketLike, data: Uint8Array) {
     } else {
       ws.send(data);
     }
+    return true;
   } catch (e) {
-    /* 对端已关闭，忽略 */
+    /* 对端已关闭：与 readyState 检查同等语义，交给调用方收尾 */
+    return false;
   }
 }
 
@@ -429,7 +433,7 @@ export function probeUrlOf(url: URL): string {
 // 1) 对外导出面不变（六十多个调用点零改动，「行为不变」由测试证明）；
 // 2) `VERSION` 仍然只有这一处真源（`doc-audit` 与发版脚本都读它）。
 
-export const VERSION = "7.416";
+export const VERSION = "7.417";
 
 // `sha224` 单独一行：它 `import { toU8 } from "./bytes"`，若挂在 `bytes.ts` 的再导出里
 // 就会形成 `bytes → sha224 → bytes` 的真循环（`tools/check-arch.js` 会报文件级循环）。

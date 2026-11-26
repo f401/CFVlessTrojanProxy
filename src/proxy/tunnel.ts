@@ -3,6 +3,7 @@ import { FIRST_BYTE_MS, WS_OPEN, closeQuietly, errMsg, safeSend, toU8 } from "..
 import { logErr, rttMark } from "../nodes/metrics";
 import { nsDecay, NodeStatsTable } from "../nodes/score";
 import { cnt } from "../core/counter";
+import { kickFlush } from "../store/pend";
 import { S } from "../core/state";
 import type { Connection } from "./connection";
 
@@ -63,10 +64,12 @@ export function pipeBack(
             const merged = new Uint8Array(st.header.length + u8.length);
             merged.set(st.header, 0);
             merged.set(u8, st.header.length);
-            safeSend(ws, merged);
+            // 发不出去就是客户端已经走了：立刻抛错让 pipeTo 收尾，
+            // 别继续从上游搬数据（那是纯浪费，还会掩盖真实断点）
+            if (!safeSend(ws, merged)) throw new Error("client gone");
             st.headerSent = true;
-          } else {
-            safeSend(ws, u8);
+          } else if (!safeSend(ws, u8)) {
+            throw new Error("client gone");
           }
           if (!st.markedOk) {
             st.markedOk = true;
@@ -104,9 +107,15 @@ export function pipeBack(
       const clientGone = !ws || ws.readyState !== WS_OPEN;
       if (st && !st.notified) {
         if (clientGone) {
-          // 客户端自己走了（切网 / 关标签 / 取消）：不是节点的问题，不记失败、不冻结
+          // 客户端自己走了（切网 / 关标签 / 取消）：不是节点的问题，不记失败、不冻结。
+          // 但必须留下「走到多少字节、跑了多久」的证据：大文件断流到底是边缘丢连接
+          // 还是 isolate 被资源限额杀掉，只有这条记录能区分（后者连 catch 都不执行）。
           st.notified = true;
           cnt("ccut");
+          const goneMs = st.tAttach ? Date.now() - st.tAttach : 0;
+          logErr(`client gone ${st.down}B/${goneMs}ms`, st.node || "");
+          // 立刻推一次 DO：isolate 被回收时内存里的错误环会一起消失，只有落盘的才算证据
+          kickFlush(st.env, st.id);
         } else if (st.down === 0 && onClose) {
           // 连上了却一个下行字节都没给就报错：与「上游正常关闭、零字节」（close 路径）
           // 是同一种可观察事实，必须走同一本账 —— attacher 的 onClose 会记 eCloseP、

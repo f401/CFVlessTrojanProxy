@@ -183,7 +183,8 @@ export class ClientFlow {
         return false;
       }
       if ((ws.bufferedAmount || 0) > WS_MAX_BUFFER || Date.now() > deadline) {
-        // 缓冲涨到 16MB 上限或等满 60 秒：判定真卡死，主动断，别让一个连接拖住整个 isolate
+        // 缓冲涨到 WS_MAX_BUFFER（64MB）或等满 WS_STALL_MS（180s）：判定真卡死，
+        // 主动断，别让一个连接拖住整个 isolate（两值都在 core/util.ts）
         cnt("stall");
         this.stallMs += Date.now() - t0;
         try {
