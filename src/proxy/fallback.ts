@@ -114,7 +114,7 @@ export class SessionRouter {
    */
   async route(host: string, port: number): Promise<Socket | null> {
     // 钉单个节点的优先级最高：用户点名要这一条，节点失效就明确失败，不换节点不回落直连
-    if (this.o.pinnedNode) return this.viaPinned(host);
+    if (this.o.pinnedNode) return this.viaPinned(host, port);
     // 地区钉住是硬分流：找不到 / 连不上就明确失败，绝不回落到策略拨号（`?rg=` 的语义）
     if (this.o.ipRegion) return this.viaRegion(host);
     try {
@@ -157,12 +157,42 @@ export class SessionRouter {
   }
 
   /**
-   * 功能：拨用户点名的单个节点（`?node=`）—— 失效就明确失败，不换节点、不回落直连。
-   * @param host 目标主机（只用于失败日志）
+   * 功能：拨用户点名的单个节点（`?node=`）—— 需要中继时硬钉、失效即明确失败；
+   * 不需要中继（非 CF 托管站点）时走普通拨号（直连优先），只把该节点钉成中继候选。
+   *
+   * 为什么要分情况：中继是 CF 网络里的转发出口，它只可靠转发 CF 托管站点。
+   * 2026-11-26 实测（三个中继 × 五个站点）：经任一钉节点打 example.com/cloudflare.com/baidu
+   * 都有正常响应，打 github.com/www.google.com/www.gstatic.com 全部 TLS 失败。
+   * 而 Clash 的节点延迟测试默认探 `www.gstatic.com/generate_204`，所以无条件全量硬钉会让
+   * 钉住的节点在客户端里一律显示「失败」，非 CF 站点也真的上不去。
+   * @param host 目标主机
+   * @param port 目标端口
    * @returns socket 或 null（已记账并关连接）
    */
-  private async viaPinned(host: string): Promise<Socket | null> {
+  private async viaPinned(host: string, port: number): Promise<Socket | null> {
     const o = this.o;
+    // 这个目标要不要绕中继：?px=1 明说要，或者它是 CF 托管/在名单里/失败学习过
+    const wantPin = o.pxForce === 1 || (await DIALER.isCfTarget(o.env, host, o.budget).catch(() => false));
+    if (!wantPin) {
+      // 不需要中继：直连优先（本链路实测直连优于绕中继），但把用户点名的节点钉成中继候选，
+      // 真需要绕时不换别的节点（`forceRelayIp` 只改候选来源，不强制走中继）
+      cnt("pinDirect");
+      o.conn.forceRelayIp = o.pinnedNode || "";
+      try {
+        return await DIALER.open({
+          env: o.env,
+          request: o.request,
+          conn: o.conn,
+          mode: o.mode,
+          host,
+          port,
+          pxForce: o.pxForce,
+          budget: o.budget,
+        });
+      } catch (e) {
+        return this.viaFallback(host, e);
+      }
+    }
     // 用户点名节点：失败回调里记 rgFail 并关连接，绝不换节点/回落（?node= 的硬语义）
     const node = o.pinnedNode || "";
     const onFail = (msg: string) => {

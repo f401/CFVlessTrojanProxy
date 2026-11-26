@@ -19,6 +19,7 @@ export class Counter {
     "srcSkip",
     "pendSkip",
     "egSent",
+    "pinDirect",
     "rgFail",
     "psNote",
     "psDO",

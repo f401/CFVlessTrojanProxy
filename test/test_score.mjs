@@ -9709,7 +9709,9 @@ ok("空站点时通道判据也放行", W.SEL.picker.paths.chanOpen("", "203.0.1
   eq("[322] 入口短到一眼看完（≤20 行）", open322.split("\n").filter((l) => l.trim()).length <= 20, true);
   ok(
     "[322] 判定段负责 CF 托管识别、事实预热与连接事实",
-    cls322.includes("isCfHost(host, o.budget)") && cls322.includes("refreshCfHttp(host") && cls322.includes("conn.cf = cfHost") && cls322.includes("HOOK.vtLoad("),
+    cls322.includes("this.dohCf(host, o.budget)") &&
+      dial322.includes("await withTimeout(isCfHost(host, budget), 1200)") &&
+      cls322.includes("refreshCfHttp(host") && cls322.includes("conn.cf = cfHost") && cls322.includes("HOOK.vtLoad("),
     "classify",
   );
   ok(
@@ -12729,7 +12731,7 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
   const routerSrc372 = fs.readFileSync("src/proxy/fallback.ts", "utf8");
   const routeBody372 = routerSrc372.slice(routerSrc372.indexOf("async route("));
   ok("[372] 路由最高优先级走钉住", routeBody372.indexOf("if (this.o.pinnedNode) return this.viaPinned(") < routeBody372.indexOf("DIALER.open"));
-  ok("[372] 钉住失败不回落", routerSrc372.includes("不换节点、不回落"));
+  ok("[372] 钉住失败不回落", routerSrc372.includes("绝不换节点/回落"));
 
   // 清理
   W.S.seed = saveSeed372;
@@ -13649,7 +13651,7 @@ const dial393 = dialSrc393.replace(/\r\n/g, "\n");
 
 // 结构锁
 ok("[393] factLoad 在 DoH 判定之前启动",
-  dial393.indexOf("const factLoad = HOOK.vtLoad") < dial393.indexOf("for (let k = 0; k < 2 && !cfHost; k++)"));
+  dial393.indexOf("const factLoad = HOOK.vtLoad") < dial393.indexOf("if (needDoh) cfHost = await this.dohCf("));
 ok("[393] factLoad 吞掉加载异常", dial393.includes("HOOK.vtLoad(env).catch(() => {})"));
 ok("[393] DoH 后 await 已启动的 promise", dial393.includes("Promise.race([factLoad, new Promise"));
 ok("[393] 不再串行重启 vtLoad", !dial393.includes("await Promise.race([HOOK.vtLoad(env)"));
@@ -14085,6 +14087,36 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
     ok("[409] 过墙钟后发样本", (W.scoreParts(kWall, "tput", NOW409, false, 0).capBps || 0) > 0, "没发");
     W.S.nstat.delete(k409); W.S.nstat.delete(k403); W.S.nstat.delete(kWall);
   } finally { Date.now = realNow409; }
+}
+// [410] 钉节点按目标分流：中继只到得了 CF 托管站点，无条件硬钉会让 google/github 全挂
+{
+  const bud410 = W.BudgetedIO.unlimited();
+  // 固定直连模式且没有任何中继证据：非 CF 站点不该被硬钉到中继
+  // 旧代码没有这个方法时按失败计（抛异常会把后面整段断言跳过，A/B 就看不出差异）
+  const isCf410 = (env, host) =>
+    typeof W.DIALER.isCfTarget === "function" ? W.DIALER.isCfTarget(env, host, bud410) : Promise.resolve("missing");
+  ok("[410] 非自动模式不硬钉", (await isCf410({ proxyip: "direct" }, "github.com")) === false, "被误判需要中继");
+  // 失败学习过的站点：需要中继
+  const keepNeedPx410 = W.S.needPx.get("x.com");
+  W.S.needPx.set("x.com", Date.now() + 60000);
+  ok("[410] 学习过的站点需要中继", (await isCf410({ proxyip: "direct" }, "x.com")) === true, "学习记录没生效");
+  if (keepNeedPx410 === undefined) W.S.needPx.delete("x.com"); else W.S.needPx.set("x.com", keepNeedPx410);
+  // CF 托管缓存命中：需要中继
+  W.DIALER.cfHost.set("cached410.test", Date.now() + 60000);
+  ok("[410] CF 托管缓存命中需要中继", (await isCf410({ proxyip: "direct" }, "cached410.test")) === true, "缓存没被读");
+  W.DIALER.cfHost.delete("cached410.test");
+  // 计数键必须登记，否则 cnt 会打 unknown
+  ok("[410] pinDirect 计数键已登记", W.COUNTER.keys.includes("pinDirect"), "键没登记");
+  W.cnt("pinDirect");
+  // 源码锁：分流写在 viaPinned 里，硬钉语义仍在
+  const fb410 = fs.readFileSync("src/proxy/fallback.ts", "utf8");
+  ok("[410] 钉节点先判是否需要中继", fb410.includes('const wantPin = o.pxForce === 1 || (await DIALER.isCfTarget('), "没判目标类型");
+  ok("[410] 不需要中继时记 pinDirect", fb410.includes('cnt("pinDirect")'), "没记账");
+  ok("[410] 不需要中继时仍钉中继候选", fb410.includes('o.conn.forceRelayIp = o.pinnedNode || ""'), "丢掉了用户点名的节点");
+  ok("[410] 需要中继仍硬钉", fb410.indexOf('const wantPin =') < fb410.indexOf('const node = o.pinnedNode || "";'), "硬钉分支被删");
+  const dl410 = fs.readFileSync("src/proxy/dialer.ts", "utf8");
+  ok("[410] 拨号器暴露 isCfTarget", dl410.includes("  async isCfTarget(env: Env, host: string, budget: BudgetedIO): Promise<boolean> {"), "没有公有判定");
+  ok("[410] DoH 判定只写一处", dl410.split("await withTimeout(isCfHost(host, budget), 1200)").length - 1 === 1, "DoH 判定被复制");
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

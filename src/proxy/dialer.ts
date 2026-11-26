@@ -94,6 +94,52 @@ export class Dialer {
   }
 
   /**
+   * 功能：DoH 判「目标是否 CF 托管」，判到就写进本类的 30 分钟缓存（两次机会，抖动能救回来）。
+   * 抽成独立方法是因为「钉节点」分支也要问同一个问题：它不经过 `classify`，
+   * 拿不到那里的判定结果，只能自己问一次（同一份缓存，第二次是命中）。
+   * @param host 目标主机
+   * @param budget 本次调用的额度闸门（DoH 也占子请求）
+   * @returns 目标是否 CF 托管
+   */
+  private async dohCf(host: string, budget: BudgetedIO): Promise<boolean> {
+    // DoH 抖动会偶发失败，而这是判定层的关键输入：给两次机会（不做负缓存）。
+    for (let k = 0; k < 2; k++) {
+      try {
+        if (await withTimeout(isCfHost(host, budget), 1200)) {
+          this.cfHost.set(host, Date.now() + 1800000);
+          // 键是客户端请求里的站点名：先过期清理，再按「最早过期」压回上限
+          if (this.cfHost.size > SC.HOST_MEM_MAX) {
+            dropExpired(this.cfHost);
+            trimAged(this.cfHost);
+          }
+          return true;
+        }
+      } catch {
+        // DoH 失败按「不是 CF 托管」处理（与 classify 原语义一致），下次请求再问
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 功能：这个目标「需不需要中继」—— `?node=` 钉节点分支用它决定硬钉还是走普通拨号。
+   * 判据与 `classify` 同一口径：失败学习过的站点、proxyip 静态名单、CF 托管缓存、DoH 现判。
+   * 为什么需要它：中继是 CF 网络里的转发出口，只可靠转发 CF 托管站点；
+   * 对着 google/github 这类站点硬钉中继会 TLS 失败（实测 3/3、6/6 全红）。
+   * @param env Worker 环境
+   * @param host 目标主机
+   * @param budget 本次调用的额度闸门
+   * @returns 需要中继返回 true
+   */
+  async isCfTarget(env: Env, host: string, budget: BudgetedIO): Promise<boolean> {
+    if ((S.needPx.get(host) || 0) > Date.now()) return true;
+    if (isPxHost(env, host)) return true;
+    if ((this.cfHost.get(host) || 0) > Date.now()) return true;
+    // 只有 auto 模式才会真的用中继；固定直连/固定中继都由 env 决定，不必再问 DoH
+    if (env.proxyip !== "auto") return false;
+    return this.dohCf(host, budget);
+  }
+  /**
    * 功能：判定这次拨号的前提（目标是否 CF 托管、要不要绕中继），并写好连接上的事实。
    * 这一段会做 I/O（DoH 判 CF 托管、冷 isolate 读一次事实），所以只在 `open` 开头调用一次。
    * @param o 目标与模式
@@ -114,24 +160,7 @@ export class Dialer {
     // needDoh：提前启动，与 DoH 并行；cfHost 已缓存但事实未加载：也启动（保持原等待语义）。
     // 非 CF 且无需 DoH：不启动，避免多余 DO 子请求。
     const factLoad = HOOK.vtLoad && !S.vtLoaded && (needDoh || cfHost) ? HOOK.vtLoad(env).catch(() => {}) : null;
-    if (needDoh) {
-      // DoH 抖动会偶发失败，而这是判定层的关键输入：给两次机会（不做负缓存）。
-      for (let k = 0; k < 2 && !cfHost; k++) {
-        try {
-          cfHost = await withTimeout(isCfHost(host, o.budget), 1200);
-        } catch {
-          cfHost = false;
-        }
-      }
-      if (cfHost) {
-        this.cfHost.set(host, Date.now() + 1800000);
-        // 键是客户端请求里的站点名：先过期清理，再按「最早过期」压回上限
-        if (this.cfHost.size > SC.HOST_MEM_MAX) {
-          dropExpired(this.cfHost);
-          trimAged(this.cfHost);
-        }
-      }
-    }
+    if (needDoh) cfHost = await this.dohCf(host, o.budget);
     if (cfHost && factLoad) {
       // DoH 判定期间事实已在后台加载，这里通常立即返回；200ms 只是兜底上限。
       await Promise.race([factLoad, new Promise<void>((r) => setTimeout(r, 200))]);
