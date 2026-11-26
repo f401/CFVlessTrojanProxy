@@ -50,7 +50,10 @@ export function takePoolLine(line: string, src: string, seen: Map<string, PoolEn
   // 去重键是 ip:port——同一 IP 不同端口是两条不同的出口，不能合并
   const key = ip + ":" + port;
   if (seen.size >= POOL_MAX) return false; // 上游源可能大到离谱，硬上限防内存/ KV 值爆掉
-  if (!seen.has(key)) seen.set(key, { h: ip, p: port, src });
+  // 源里第四份清单是 `ip:port#CC`：国家码是客观事实（不跨 isolate 共享的约束只针对统计），
+  // 丢掉它地区分流就没有可用数据（`?rg=` 永远「暂无可用节点」）。
+  const cc = (line.match(/#([A-Za-z]{2})\b/) || [])[1];
+  if (!seen.has(key)) seen.set(key, { h: ip, p: port, src, cc: cc ? cc.toUpperCase() : "" });
   return true;
 }
 

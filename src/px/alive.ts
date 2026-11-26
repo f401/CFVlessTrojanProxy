@@ -148,7 +148,7 @@ export class AliveBoard {
       // 没有任何名单可用时，用候选池头部当起步：池子是 CF 优选 IP，对非 CF 目标才有中转价值
       for (const c of S.pool.slice(0, 32)) {
         const k = c.h + ":" + c.p;
-        if (!S.alive.has(k)) S.alive.set(k, { h: c.h, p: c.p, cc: "", ms: SC.P_TCP });
+        if (!S.alive.has(k)) S.alive.set(k, { h: c.h, p: c.p, cc: c.cc || "", ms: SC.P_TCP });
       }
     }
     for (const n of src.slice(0, SEED_COLD_N)) {

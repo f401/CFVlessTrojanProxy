@@ -14118,6 +14118,42 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   ok("[410] 拨号器暴露 isCfTarget", dl410.includes("  async isCfTarget(env: Env, host: string, budget: BudgetedIO): Promise<boolean> {"), "没有公有判定");
   ok("[410] DoH 判定只写一处", dl410.split("await withTimeout(isCfHost(host, budget), 1200)").length - 1 === 1, "DoH 判定被复制");
 }
+
+// ---- 411) 地区分流：国家码采集 + 按目标分流（7.414）----
+{
+  // 池子源里第四份清单是 `ip:port#CC`：以前整段被正则吞掉，地区分流因此永远「暂无可用节点」
+  const hasT411 = typeof W.takePoolLine === "function";
+  ok("[411] 测试窗口能拿到 takePoolLine", hasT411);
+  if (hasT411) {
+    const m411 = new Map();
+    W.takePoolLine("1.2.3.4:443#JP", "t", m411);
+    eq("[411] 池子行里的国家码被采下来", (m411.get("1.2.3.4:443") || {}).cc, "JP");
+    const m411b = new Map();
+    W.takePoolLine("5.6.7.8:8443", "t", m411b);
+    eq("[411] 没有国家码时留空", (m411b.get("5.6.7.8:8443") || {}).cc, "");
+    const m411c = new Map();
+    W.takePoolLine("9.9.9.9#de", "t", m411c);
+    eq("[411] 小写国家码统一成大写", (m411c.get("9.9.9.9:443") || {}).cc, "DE");
+  }
+  // 池子条目本身允许带 cc（客观事实，可随 seed 传播）
+  const dts411 = fs.readFileSync("types/app.d.ts", "utf8");
+  ok("[411] PoolEntry 允许带国家码", /interface PoolEntry \{[^}]*cc\?: string;/s.test(dts411));
+  // 三条链路上的源码锁：探活继承、冷启动继承
+  const scan411 = fs.readFileSync("src/px/scan.ts", "utf8");
+  ok("[411] 探活结果继承候选池的国家码", scan411.includes("if (!x.cc && batch[i] && batch[i].cc) x.cc = batch[i].cc;"));
+  const alive411 = fs.readFileSync("src/px/alive.ts", "utf8");
+  ok("[411] 冷启动从池子起步时带上国家码", alive411.includes("cc: c.cc || \"\""));
+  // 地区仍是硬分流（用户点名国家就拨该国节点），不按目标预判降级成直连
+  const fb411 = fs.readFileSync("src/proxy/fallback.ts", "utf8");
+  ok("[411] 地区硬分流的分支仍在", fb411.includes("o.regionPicker.open({ env: o.env, mode: o.mode, region"));
+  ok("[411] 地区分流不做「要不要中继」的预判", !fb411.includes("const wantRelay = o.pxForce === 1"));
+  // 非 CF 目标直连失败后不再浪费 connect 去试中继
+  ok("[411] 非 CF 目标不再试中继", fb411.includes('cnt("noRelayNonCf")') && fb411.includes("if (!st.cf && o.pxForce !== 1)"));
+  // 两个新计数键要登记，否则 /health 里看不到
+  const cnt411 = fs.readFileSync("src/core/counter.ts", "utf8");
+  ok("[411] noRelayNonCf 已登记", cnt411.includes('"noRelayNonCf"'));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

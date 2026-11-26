@@ -331,6 +331,8 @@ interface PoolEntry {
   h: string;
   p: number;
   src?: string;
+  /** 池子源里跟行写的国家码（如 `1.2.3.4:443#JP`），客观事实、可随 seed 传播 */
+  cc?: string;
 }
 
 /** RTT 学习表里的一条（按入口标签聚合） */

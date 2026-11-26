@@ -142,6 +142,9 @@ export class SessionRouter {
   private async viaRegion(host: string): Promise<Socket | null> {
     const o = this.o;
     const region = o.ipRegion || "";
+    // 地区是硬分流：用户点了国家就要那个国家的出口，这里不做「这个目标要不要中继」
+    // 的预判——预判会把 ?rg= 悄悄降级成直连，用户看不出地区为什么没生效。
+    // 「非 CF 目标别浪费中继」放在 viaFallback 的失败分支里（noRelayNonCf）。
     // 地区失败与「目标不可达」不是一回事：没节点 / 节点被策略禁止 / 节点连不上，三种都不说明目标站
     // 有问题。混记进 dead 会让面板上的 dead 同时代表两件事（v7.170 起分开计）。
     const onFail = (msg: string) => {
@@ -216,6 +219,15 @@ export class SessionRouter {
   private async viaFallback(host: string, err: unknown): Promise<Socket | null> {
     const o = this.o;
     const st = o.conn;
+    // 中继是 CF 托管站点的专用出口：非 CF 目标再试中继只会白花一次 connect 名额
+    // （?px=1 是人工强制的调试开关，仍然按用户要求试）。
+    if (!st.cf && o.pxForce !== 1) {
+      cnt("noRelayNonCf");
+      kickFlush(o.env, st.id);
+      logErr(`dead target ${host}: ${errMsg(err)}`);
+      o.onHangUp(1011, "连接目标失败");
+      throw err;
+    }
     const px0 = parseProxyIp(await SEL.current(o.env, o.mode, st, host, st.cf));
     if (!px0) {
       // 直连失败且没有可用中转 ⇒ 目标不可达（与「地区失败」严格区分）

@@ -110,7 +110,11 @@ export class ScanProbe {
       const x = rows[i].r;
       noteProbe(x);
       bumpProbeBad(rows[i].k, !!(x && !x.bad));
-      if (x && !x.bad) hits.push(x);
+      // 探活只回地址与耗时：国家码从这一批候选池条目里补上，否则进 alive 后永远是空
+      if (x && !x.bad) {
+        if (!x.cc && batch[i] && batch[i].cc) x.cc = batch[i].cc;
+        hits.push(x);
+      }
     }
     S.poolIdx = (idx + scanN) % Math.max(src.length, 1);
     S.probes += batch.length;

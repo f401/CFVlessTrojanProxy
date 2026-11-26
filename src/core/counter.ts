@@ -20,6 +20,7 @@ export class Counter {
     "pendSkip",
     "egSent",
     "pinDirect",
+    "noRelayNonCf",
     "rgFail",
     "psNote",
     "psDO",
