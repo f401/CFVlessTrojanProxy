@@ -105,6 +105,14 @@ export class AppState {
    */
   regionRowsCache: { t: number; key: string; rows: unknown[] } | null = null;
 
+  /**
+   * `?format=json` 的序列化结果缓存（key = 站点 | 条数上限）。
+   * 全量 1600 行序列化出来约 650 KB，每次重算 stringify + 覆盖率统计会吃满免费版 CPU
+   * （实测 3 并发 61 秒里 26% 被 503 Worker exceeded resource limits）。
+   * 与 regionRowsCache 同为 30 秒，面板轮询命中即零成本。
+   */
+  regionJsonCache: { t: number; key: string; text: string } | null = null;
+
   /** 本 isolate 累计下行字节（只用于取证：判断平台是否有「每 isolate 出流量上限」） */
   egressB = 0;
 

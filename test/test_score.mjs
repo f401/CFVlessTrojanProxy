@@ -12700,7 +12700,8 @@ console.log("\n368) 审查 D2/D3：事实快照形状与上报批次不并发");
 
   ok("[372] regions 端点已导出", typeof W.regions === "function" && typeof W.RegionsView === "function");
   const ctx372 = { url: new URL("https://edge.example.com/regions?format=json&site=example.com"), env: {}, id: "u372" };
-  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
+  W.S.regionRowsCache = null;
+W.S.regionJsonCache = null; // JSON 结果缓存与行缓存同寿命，一起清
   const resp372 = await W.regions(ctx372);
   eq("[372] 返回 200", resp372.status, 200);
   const body372 = await resp372.json();
@@ -12979,7 +12980,8 @@ if (fs.existsSync(midPath)) {
     env: {}, id: "u377", pageKey: "",
     auth: { list: [{ id: "u377", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
   };
-  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
+  W.S.regionRowsCache = null;
+W.S.regionJsonCache = null; // JSON 结果缓存与行缓存同寿命，一起清
   const respHtml377 = await W.regions(ctx377);
   eq("[377] 默认返回 200", respHtml377.status, 200);
   const html377 = await respHtml377.text();
@@ -13062,7 +13064,8 @@ if (fs.existsSync(midPath)) {
     env: {}, id: "u378", pageKey: "",
     auth: { list: [{ id: "u378", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
   };
-  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
+  W.S.regionRowsCache = null;
+W.S.regionJsonCache = null; // JSON 结果缓存与行缓存同寿命，一起清
   const html378 = await (await W.regions(ctx378)).text();
   // 列头从「出口族事实」简写成「出口族」（列没删，窄屏少挤一点）
 ok("[378] HTML 有出口族列", html378.includes("出口族"));
@@ -13111,7 +13114,8 @@ ok("[378] HTML 有出口族列", html378.includes("出口族"));
     request: { method: "GET" },
     env: env379, id: "u379",
   };
-  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
+  W.S.regionRowsCache = null;
+W.S.regionJsonCache = null; // JSON 结果缓存与行缓存同寿命，一起清
   const resp379 = await W.regions(ctx379);
   eq("[379] 冷 isolate 请求成功", resp379.status, 200);
   const body379 = await resp379.json();
@@ -13525,7 +13529,8 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
     env: {}, id: "u389", pageKey: "",
     auth: { list: [{ id: "u389", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"], pinnedNodes: ["203.0.113.60:8443"] }], uuids: new Set(), trojan: new Map(), ok: true },
   };
-  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
+  W.S.regionRowsCache = null;
+W.S.regionJsonCache = null; // JSON 结果缓存与行缓存同寿命，一起清
   const html389 = await (await W.regions(ctx389)).text();
   ok(`[${G}] 面板节点勾选框回填`, html389.includes('type="checkbox" name="pinnedNodes" value="203.0.113.60:8443" checked'));
   ok(`[${G}] 面板表头有选列`, html389.includes("<th>选</th>"));
@@ -13570,7 +13575,8 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
     env: {}, id: "u390", pageKey: "",
     auth: { list: [{ id: "u390", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
   };
-  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
+  W.S.regionRowsCache = null;
+W.S.regionJsonCache = null; // JSON 结果缓存与行缓存同寿命，一起清
   const html390 = await (await W.regions(ctx390)).text();
   ok(`[${G}] HTML 有测连通按钮`, html390.includes('value="nodecheck:198.51.100.9:443"'));
   ok(`[${G}] HTML 有 checkSite 框`, html390.includes('id="checkSite"'));
@@ -13609,7 +13615,8 @@ ok(`[${G}] 文档声明 47 个`, doc.includes("47 处声明"));
     env: {}, id: "u391", pageKey: "",
     auth: { list: [{ id: "u391", pwd: "p", note: "", enabled: true, managed: true, regions: ["US"] }], uuids: new Set(), trojan: new Map(), ok: true },
   };
-  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
+  W.S.regionRowsCache = null;
+W.S.regionJsonCache = null; // JSON 结果缓存与行缓存同寿命，一起清
   const html391 = await (await W.regions(ctx391)).text();
   ok("[391] HTML 有出站 IP 列", html391.includes("<th>出站 IP</th>") && html391.includes("ipx"));
   ok("[391] HTML 出站 IP 值", html391.includes("198.51.100.9"));
@@ -13800,7 +13807,8 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
     auth: { list: [{ id: "u398", pwd: "p", note: "", enabled: true, managed: true, regions: [] }], uuids: new Set(), trojan: new Map(), ok: true },
   };
   try {
-    W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
+    W.S.regionRowsCache = null;
+W.S.regionJsonCache = null; // JSON 结果缓存与行缓存同寿命，一起清
     const html398 = await (await W.regions(ctx398)).text();
     ok("[398] HTML 表头有国家列", html398.includes("<th>国家</th>"));
     ok("[398] HTML 行有国家码", html398.includes(">US</td>"));
@@ -13876,7 +13884,8 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   W.S.pool.length = 0;
   for (let i = 0; i < 45; i++) W.S.pool.push({ h: "203.0.113." + (i + 1), p: 443 });
   const ctx400 = { url: new URL("https://edge.example.com/regions"), env: {}, id: "u400", auth: { uuids: new Set(), list: [] } };
-  W.S.regionRowsCache = null; // TTL-only cache: isolate each test group
+  W.S.regionRowsCache = null;
+W.S.regionJsonCache = null; // JSON 结果缓存与行缓存同寿命，一起清
   const r1 = await W.regions({ ...ctx400, url: new URL("https://edge.example.com/regions?format=json") });
   const j1 = await r1.json();
   eq("[400] JSON 全量 45 节点", j1.nodes.length, 45);
@@ -14312,6 +14321,16 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   eq("[416] isolate 累计出流量是数字", typeof W.S.egressB, "number");
   const connSrc = fs.readFileSync("src/proxy/connection.ts", "utf8");
   ok("[416] Connection 持有 ctx", connSrc.includes("ctx: ExecutionContext;"));
+}
+
+// ---- [417] ?format=json 序列化结果缓存（1600 行 650 KB，重复 stringify 吃满免费版 CPU）----
+{
+  ok("[417] 状态表有 JSON 结果缓存", typeof W.S === "object" && "regionJsonCache" in W.S);
+  const tools417 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  ok("[417] 命中缓存就不再序列化", tools417.includes("hitJson && hitJson.key === jkey && nowJson - hitJson.t < 30000"));
+  ok("[417] 缓存键含站点与条数上限", tools417.includes("const jkey = target + \"|\" + limit;"));
+  ok("[417] 序列化后写回缓存", tools417.includes("S.regionJsonCache = { t: nowJson, key: jkey, text: bodyJson };"));
+  ok("[417] body 读掉后用同 headers 重新组装", tools417.includes("return new Response(bodyJson, { headers: respJson.headers });"));
 }
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

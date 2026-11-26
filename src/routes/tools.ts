@@ -113,11 +113,7 @@ export function familyLabel(f: IpFamily): string {
   return f === IpFamily.IPv6 ? "IPv6" : "IPv4";
 }
 
-/**
- * 功能：从存活表/seed 名单里查一个通道（IP / host:port / direct）的国家码，给探测结果标注出口国家。
-* @param relay 通道名："direct" / 纯 IP / host:port
-* @returns 两位大写国家码；查不到返回空串
- */
+/** 功能：从存活表/seed 名单里查一个通道（IP / host:port / direct）的国家码，给探测结果标注出口国家。；@param relay 通道名："direct" / 纯 IP / host:port；@returns 两位大写国家码；查不到返回空串 */
 export function countryOf(relay: string): string {
   if (relay === "direct") return String(S.colo || "").toUpperCase();
   const [host] = splitRelay(relay, 443);
@@ -139,20 +135,12 @@ export function countryOf(relay: string): string {
   return "";
 }
 
-/**
- * 功能：把国家码渲染成探测结果里的方括号前缀（查不到就不显示，避免每行都挂「??」）。
- * @param cc 两位国家码或空串
- * @returns "[US] " 或空串
- */
+/** 功能：把国家码渲染成探测结果里的方括号前缀（查不到就不显示，避免每行都挂「??」）。；@param cc 两位国家码或空串；@returns "[US] " 或空串 */
 export function ccTag(cc: string): string {
   return cc ? "[" + cc + "] " : "";
 }
 
-/**
- * 功能：代理/VPN 标记（只标记、不降级 —— 与 IpLevel 的判定口径一致）。
- * @param r 节点展示行
- * @returns "代理 VPN" / "—"
- */
+/** 功能：代理/VPN 标记（只标记、不降级 —— 与 IpLevel 的判定口径一致）。；@param r 节点展示行；@returns "代理 VPN" / "—" */
 export function flagLabel(r: RegionNodeRow): string {
   const flags: string[] = [];
   if (r.proxy) flags.push("代理");
@@ -160,11 +148,7 @@ export function flagLabel(r: RegionNodeRow): string {
   return flags.length ? escapeHtml(flags.join(" ")) : "—";
 }
 
-/**
- * 功能：出口族事实的可读标签（0 = 未知）。
- * @param f 出口族 4 / 6 / 0
- * @returns 可读文本
- */
+/** 功能：出口族事实的可读标签（0 = 未知）。；@param f 出口族 4 / 6 / 0；@returns 可读文本 */
 export function egLabel(f: number): string {
   return f === 4 ? "v4" : f === 6 ? "v6" : "—";
 }
@@ -543,7 +527,18 @@ export class RegionsView {
     if (this.c.url.searchParams.get("format") === "json") {
       // ?limit=N 收窄条数：全量 1600 行 ≈650KB，序列化吃满免费版 CPU（实测 3 并发 26% 被 503）；默认全量不动旧契约。
       const limit = Math.max(0, Number(this.c.url.searchParams.get("limit")) || 0);
-      return this.jsonView(limit > 0 ? rows.slice(0, limit) : rows, target);
+      const jkey = target + "|" + limit;
+      const hitJson = S.regionJsonCache;
+      const nowJson = Date.now();
+      // 序列化结果同样缓存 30 秒：行缓存省掉了重建，但 650 KB 的 stringify 与覆盖率统计每次都要重算
+      if (hitJson && hitJson.key === jkey && nowJson - hitJson.t < 30000) {
+        return new Response(hitJson.text, { headers: { "content-type": "application/json;charset=utf-8" } });
+      }
+      const respJson = this.jsonView(limit > 0 ? rows.slice(0, limit) : rows, target);
+      const bodyJson = await respJson.text();
+      S.regionJsonCache = { t: nowJson, key: jkey, text: bodyJson };
+      // respJson 的 body 已被读掉，必须用同 headers 重新组装
+      return new Response(bodyJson, { headers: respJson.headers });
     }
     // 全池可达 1600 条：服务端分页，避免一次性渲染数 MB HTML；JSON 仍返回全量
     const size = 40, pages = Math.max(1, Math.ceil(rows.length / size));
