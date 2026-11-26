@@ -116,7 +116,19 @@ export function pipeBack(
       // 没有这行 pending，错误环根本不会被拼进请求体（body.e）。
       if (st && st.env && st.id) {
         pendAdd(st.id, 0, 0);
-        await PEND.flush(st.env, true, 1).catch(() => {});
+        const push = (async () => {
+          await PEND.flush(st.env, true, 1).catch(() => {});
+          // 单飞期间这次会直接返回（只记 forceSkipped，补排又是 setTimeout）：
+          // 再补一次，确保这一行真的发出去了。
+          if (S.pend.size) await PEND.flush(st.env, true, 1).catch(() => {});
+        })();
+        // 还要挂 waitUntil：客户端断开后这次请求随时可能结束，裸 await 拿不到执行机会
+        // （7.420 线上 3 次 terminate 对照仍然 0 条记录，就是这一步缺的）。
+        try {
+          st.ctx.waitUntil(push);
+        } catch (e) {
+          await push;
+        }
       }
       closeQuietly(sock);
       const clientGone = !ws || ws.readyState !== WS_OPEN;
@@ -132,7 +144,15 @@ export function pipeBack(
           // 立刻推一次 DO：isolate 被回收时内存里的错误环会一起消失，只有落盘的才算证据
           if (st.env && st.id) {
             pendAdd(st.id, 0, 0);
-            await PEND.flush(st.env, true, 1).catch(() => {});
+            const push = (async () => {
+              await PEND.flush(st.env, true, 1).catch(() => {});
+              if (S.pend.size) await PEND.flush(st.env, true, 1).catch(() => {});
+            })();
+            try {
+              st.ctx.waitUntil(push);
+            } catch (e) {
+              await push;
+            }
           }
         } else if (st.down === 0 && onClose) {
           // 连上了却一个下行字节都没给就报错：与「上游正常关闭、零字节」（close 路径）

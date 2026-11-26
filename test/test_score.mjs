@@ -14263,6 +14263,44 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   ok("[415] 旧的 pipe 日志已换成带数据的证据行", !tun415.includes('logErr("pipe: " + errMsg(err)'));
   ok("[415] clientGone 分支仍单独记一条", tun415.includes("client gone ${st.down}B/${goneMs}ms"));
 }
+// ── 416. 断流证据必须挂 waitUntil（7.421）────────────────────────────────────
+{
+  const posted = [];
+  const env416 = {
+    METER: {
+      idFromName: (n) => n,
+      get: () => ({
+        fetch: async (url, init) => {
+          posted.push({ url: String(url), body: init && init.body ? String(init.body) : "" });
+          return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+        },
+      }),
+    },
+    uuid: "4241b903-8d39-4a17-8f4c-bb33b1630c33",
+  };
+  const waits = [];
+  const ctx416 = { waitUntil: (pr) => waits.push(pr) };
+  const st = new W.Connection(env416, ctx416, "tput", "t");
+  st.id = "4241b903-8d39-4a17-8f4c-bb33b1630c33";
+  st.down = 4096;
+  st.node = "198.51.100.1:443";
+  st.host = "example.com";
+  st.mark = 1e9;
+  st.tAttach = Date.now();
+  W.S.pend.clear();
+  W.S.errs.length = 0;
+  W.pipeBack(sockOf245("mid reset"), wsOf245(), st, () => {});
+  await new Promise((r) => setTimeout(r, 150));
+  ok("[416] 异常收尾把上报挂到了 waitUntil", waits.length >= 1);
+  await Promise.all(waits.map((pr) => Promise.resolve(pr).catch(() => {})));
+  const hit416 = posted.filter((x) => x.body.includes("dl end"));
+  ok("[416] dl end 证据真的随请求体发出", hit416.length >= 1, JSON.stringify(posted.map((x) => x.body.slice(0, 80))));
+  const src421 = fs.readFileSync("src/proxy/tunnel.ts", "utf8");
+  ok("[416] catch 里用 st.ctx.waitUntil 兜住上报", src421.includes("st.ctx.waitUntil(push)"));
+  ok("[416] 单飞被跳过时再补一次 flush", src421.includes("if (S.pend.size) await PEND.flush(st.env, true, 1)"));
+  const connSrc = fs.readFileSync("src/proxy/connection.ts", "utf8");
+  ok("[416] Connection 持有 ctx", connSrc.includes("ctx: ExecutionContext;"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
