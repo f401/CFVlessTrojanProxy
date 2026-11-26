@@ -14298,6 +14298,9 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   const src421 = fs.readFileSync("src/proxy/tunnel.ts", "utf8");
   ok("[416] catch 里用 st.ctx.waitUntil 兜住上报", src421.includes("st.ctx.waitUntil(push)"));
   ok("[416] 单飞被跳过时再补一次 flush", src421.includes("if (S.pend.size) await PEND.flush(st.env, true, 1)"));
+  // 7.422：账本那条路（单飞 / setTimeout / 账本为空早退）在「客户端刚走」时都走不通，
+  // 所以证据必须同时有一条不经账本的直接 /add。
+  ok("[416] 证据另走一次直接 /add", src421.includes('doFetch(senv, sid, "https://meter/add"'));
   const connSrc = fs.readFileSync("src/proxy/connection.ts", "utf8");
   ok("[416] Connection 持有 ctx", connSrc.includes("ctx: ExecutionContext;"));
 }

@@ -4,6 +4,7 @@ import { logErr, rttMark } from "../nodes/metrics";
 import { nsDecay, NodeStatsTable } from "../nodes/score";
 import { cnt } from "../core/counter";
 import { PEND, pendAdd } from "../store/pend";
+import { doFetch } from "../store/meter-client";
 import { S } from "../core/state";
 import type { Connection } from "./connection";
 
@@ -116,11 +117,19 @@ export function pipeBack(
       // 没有这行 pending，错误环根本不会被拼进请求体（body.e）。
       if (st && st.env && st.id) {
         pendAdd(st.id, 0, 0);
+        const sid = st.id;
+        const senv = st.env;
         const push = (async () => {
-          await PEND.flush(st.env, true, 1).catch(() => {});
+          // 最可靠的一条先发：直接 POST 一次 /add，不经账本（单飞 / setTimeout / 早退都绕开）。
+          // 7.420、7.421 两次 terminate 对照都没留下记录，说明账本那条路在「客户端刚走」时走不通。
+          await doFetch(senv, sid, "https://meter/add", {
+            method: "POST",
+            body: JSON.stringify({ up: 0, down: 0, conns: 0, e: S.errs.slice(-8) }),
+          }).catch(() => {});
+          await PEND.flush(senv, true, 1).catch(() => {});
           // 单飞期间这次会直接返回（只记 forceSkipped，补排又是 setTimeout）：
           // 再补一次，确保这一行真的发出去了。
-          if (S.pend.size) await PEND.flush(st.env, true, 1).catch(() => {});
+          if (S.pend.size) await PEND.flush(senv, true, 1).catch(() => {});
         })();
         // 还要挂 waitUntil：客户端断开后这次请求随时可能结束，裸 await 拿不到执行机会
         // （7.420 线上 3 次 terminate 对照仍然 0 条记录，就是这一步缺的）。
