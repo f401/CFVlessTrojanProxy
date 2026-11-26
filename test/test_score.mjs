@@ -8664,7 +8664,7 @@ ok("五个转发函数已删除，调用点直接用 PS 的方法", !["psNote", 
   eq("toHex(toU8(\"A\"))", W.toHex(W.toU8("A")), "41");
   eq("sha224Bytes 输出 28 字节", W.sha224Bytes(new Uint8Array(0)).length, 28);
   eq("errMsg 截断", W.errMsg("hello", 2), "he");
-  eq("WS_MAX_BUFFER 放宽到 64MB", W.WS_MAX_BUFFER, 64 * 1024 * 1024);
+  eq("WS_MAX_BUFFER 收到 16MB（7.425 内存 A/B）", W.WS_MAX_BUFFER, 16 * 1024 * 1024);
   eq("协议名仍在 proto-names.ts", [W.P_V.length, W.P_T.length], [5, 6]);
   eq("SHADOW_DEFAULT 仍是 5%", W.SHADOW_DEFAULT, 0.05);
   eq("uuidFromBytes 是 8-4-4-4-12", W.uuidFromBytes(new Uint8Array(16).fill(0xab)).split("-").map((x) => x.length), [8, 4, 4, 4, 12]);
@@ -14253,8 +14253,8 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   ok("[414] 不带 limit 仍全量", j414b.nodes.length >= 3);
   W.S.seed = save414;
   W.S.regionRowsCache = null;
-  // 文档漂移：真实阈值 4MB/180s/64MB
-  ok("[414] LIMITS 背压阈值同步", lim414.includes("4 MB") && lim414.includes("180 s") && lim414.includes("64 MB"));
+  // 文档漂移：真实阈值 4MB/180s/16MB（7.425 把硬上限从 64MB 收回 16MB）
+  ok("[414] LIMITS 背压阈值同步", lim414.includes("4 MB") && lim414.includes("180 s") && lim414.includes("16 MB"));
   ok("[414] connection 注释不再写 16MB/60秒", !conn414.includes("缓冲涨到 16MB 上限或等满 60 秒") && conn414.includes("WS_STALL_MS（180s）"));
   const tun415 = fs.readFileSync("src/proxy/tunnel.ts", "utf8");
   ok("[415] 异常收尾记录已搬字节与耗时", tun415.includes("dl end ${st ? st.down : 0}B/${endMs}ms"));
