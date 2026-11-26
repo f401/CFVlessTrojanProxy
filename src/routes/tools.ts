@@ -238,20 +238,21 @@ export class RegionsView {
    * @param target 目标站点（空 = 不算 RTT）
    * @returns 展示行数组
    */
-  private rows(target: string): RegionNodeRow[] {
+  private rows(): RegionNodeRow[] {
     // 重建 1600 行 + ICU 排序逼近 10ms CPU（TTL 到期即 1102）；缓存 30 秒、命中只看寿命，后台 probe 改 alive 不重建动失效）。
     const now = Date.now();
-    const aliveSig = [...S.alive.keys()].join(",");
-    const poolSig = S.pool.map((x) => `${x.h}:${x.p}`).join(",");
-    const seedSig = Object.values(S.seed?.byColo || {}).map((c) => (c.nodes || []).map((n) => n.k).join(",")).join("|");
-    const key = `${aliveSig}|${poolSig}|${seedSig}`; void key; // 指纹仅作写回标记，不参与命中：后台 probe 改 alive 让 key 每次变 → 每次重建 → 1102
     const cache = S.regionRowsCache;
     let rows = cache && now - cache.t < 30000 ? (cache.rows as RegionNodeRow[]) : null;
     if (!rows) {
+      // 指纹只在重建时算一次：热请求每次 join 1600 个 key 也是白花 CPU
+      const aliveSig = [...S.alive.keys()].join(",");
+      const poolSig = S.pool.map((x) => `${x.h}:${x.p}`).join(",");
+      const seedSig = Object.values(S.seed?.byColo || {}).map((c) => (c.nodes || []).map((n) => n.k).join(",")).join("|");
+      const key = `${aliveSig}|${poolSig}|${seedSig}`; void key; // 指纹仅作写回标记，不参与命中：后台 probe 改 alive 让 key 每次变 → 每次重建 → 1102
       const alive = new AliveBoard().list();
       const seeds = this.seedNodes();
       const keys = [...new Set([...alive.map((n) => `${n.h}:${n.p}`), ...seeds.keys(), ...S.pool.map((x) => `${x.h}:${x.p}`)])];
-      // alive 上限 800，逐 key find() 是 64 万次拼接；Map 查表把它压成 O(n)。
+      // alive 上限 800，逐 key find() 是 64 万次拼接；Map 压成 O(n)。
       const liveByKey = new Map<string, (typeof alive)[number]>(alive.map((n) => [`${n.h}:${n.p}`, n]));
       rows = keys.map((key) => {
         const [h, p] = splitRelay(key, 443), ip = h, seedCc = seeds.get(key) || "", live = liveByKey.get(key);
@@ -277,7 +278,7 @@ export class RegionsView {
           dnsV6: -1,
         } as RegionNodeRow;
       });
-      // 已探测在前，再按质量等级 → 国家 → key 稳定排序。
+      // 已探测在前，再按质量等级 → 国家 → key 排序。
       const rank: Record<string, number> = { good: 0, normal: 1, risky: 2 };
       rows.sort(
         (a, b) =>
@@ -289,7 +290,13 @@ export class RegionsView {
       );
       S.regionRowsCache = { t: now, key, rows };
     }
-    // 站点相关列与连通实测按 target 补算：换 site 只走 O(1) 查表，不重建 1600 行。
+    return rows;
+  }
+
+  /** 功能：给要渲染的那几行补上站点相关列；@param rows 切片后的行；@param target 站点；@returns 同一批行 */
+  private decorate(rows: RegionNodeRow[], target: string): RegionNodeRow[] {
+    // 只补切片：整表 1600 行 × 5 次查表就是 1102 的来源之一
+    const now = Date.now();
     const coloNow = S.colo || "??";
     const v6 = target ? DNS.v6Of(target, now) : -1;
     for (const r of rows) {
@@ -304,12 +311,7 @@ export class RegionsView {
     return rows;
   }
 
-  /**
-   * 功能：JSON 输出（保留旧契约，?format=json 显式请求；?limit= 可收窄条数）。
-  * @param rows 展示行
-  * @param target 目标站点
-  * @returns JSON 响应
-   */
+  /** 功能：JSON 输出（?format=json 显式请求，?limit= 可收窄）；@param rows 展示行；@param target 站点；@returns JSON 响应 */
   private jsonView(rows: RegionNodeRow[], target: string): Response {
     const keys = rows.map((r) => r.key);
     // 紧凑序列化：带缩进的 650 KB 光 stringify 就能吃满免费版 CPU，JSON 语义不变
@@ -317,16 +319,13 @@ export class RegionsView {
       nodes: rows,
       coverage: COVERAGE.stats(keys),
       target,
-      // 只给前 32 个节点算统计明细（nsOf 会算分，整池算太贵）
+      // 只给前 32 个节点算统计（nsOf 会算分，整池太贵）
       sample: Object.keys(nsOf(keys.slice(0, 32), 32)).length,
     });
     return new Response(text, { headers: { "content-type": "application/json;charset=utf-8" } });
   }
 
-  /**
-   * 功能：把分组后的节点渲染成 HTML 表格（每组一个勾选框 + 明细表）。
-   * @param rows 展示行；@param selected 已勾选地区；@param pinnedSelected 已勾选节点；@param withRtt 显示延迟；@returns HTML
-   */
+  /** 功能：把分组节点渲染成表格；@param rows 展示行；@param selected 已选地区；@param pinnedSelected 已选节点；@param withRtt 显示延迟；@returns HTML */
   private groupsHtml(rows: RegionNodeRow[], selected: Set<string>, pinnedSelected: Set<string>, withRtt: boolean, postAction: string): string {
     const parts: string[] = [];
     void postAction; // 按钮走面板脚本 fetch，不需要 formaction
@@ -373,12 +372,7 @@ export class RegionsView {
     return parts.join("") || '<div class="empty">本 isolate 还没有探到任何节点 · <a href="?rebuild=1">重建池子</a> 或稍后刷新</div>';
   }
 
-  /**
-   * 功能：渲染自助面板 HTML。
-  * @param rows 展示行
-  * @param target 目标站点
-  * @returns HTML 响应
-   */
+  /** 功能：渲染自助面板 HTML；@param rows 展示行；@param target 站点；@returns HTML 响应 */
   private htmlView(rows: RegionNodeRow[], target: string, page: number, pages: number, total: number): Response {
     // 只回填当前用户自己的地区/节点数；其他用户配置和表单 action 一律不含
     const me = this.c.auth.list.find((x) => x.id === this.c.id);
@@ -527,7 +521,7 @@ export class RegionsView {
     const wantJson = this.c.url.searchParams.get("format") === "json";
     if (!wantJson) await ensureIsoCountries();
     const target = (this.c.url.searchParams.get("site") || "").slice(0, 256);
-    const rows = this.rows(target);
+    const rows = this.rows(); // 建表与排序；站点相关列交给 decorate() 只补切片
     if (this.c.url.searchParams.get("format") === "json") {
       // 默认只回前 200 行：全量 1600 行序列化后仍近 400KB，3 并发实测 98% 被 1102 杀掉；
       // 需要全量的调用方显式写 ?limit=0，面板走 HTML 分页不受影响。
@@ -540,7 +534,7 @@ export class RegionsView {
       if (hitJson && hitJson.key === jkey && nowJson - hitJson.t < 30000) {
         return new Response(hitJson.text, { headers: { "content-type": "application/json;charset=utf-8" } });
       }
-      const respJson = this.jsonView(limit > 0 ? rows.slice(0, limit) : rows, target);
+      const respJson = this.jsonView(this.decorate(limit > 0 ? rows.slice(0, limit) : rows, target), target);
       const bodyJson = await respJson.text();
       S.regionJsonCache = { t: nowJson, key: jkey, text: bodyJson };
       return new Response(bodyJson, { headers: respJson.headers });
@@ -548,7 +542,7 @@ export class RegionsView {
     // 全池可达 1600 条：服务端分页，避免一次性渲染数 MB HTML；JSON 仍返回全量
     const size = 40, pages = Math.max(1, Math.ceil(rows.length / size));
     const page = Math.min(pages, Math.max(1, Number(this.c.url.searchParams.get("page")) || 1));
-    return this.htmlView(rows.slice((page - 1) * size, page * size), target, page, pages, rows.length);
+    return this.htmlView(this.decorate(rows.slice((page - 1) * size, page * size), target), target, page, pages, rows.length);
   }
 }
 
