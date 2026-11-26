@@ -48,6 +48,28 @@ export function pipeBack(
     }, Math.max(0, firstByteMs - elapsed));
   };
   armWd();
+  // 调试心跳（hb=1）：每 3 秒往 DO 记一条空增量 + 一条 hb 证据。
+  // 这是判定「断流到底是 isolate 被杀，还是平台只掐断了连接」的唯一办法：
+  // 前者心跳与连接同时停在那一刻；后者心跳会在连接断掉之后继续往下走。
+  // 只在显式 hb=1 时启用，正常流量零额外 DO 往返。
+  if (st && st.debugBeat && st.env && st.id) {
+    const hbEnv = st.env;
+    const hbId = st.id;
+    const loop = (async (): Promise<void> => {
+      for (let i = 0; i < 80; i += 1) {
+        await new Promise((r) => setTimeout(r, 3000));
+        await doFetch(hbEnv, hbId, "https://meter/add", {
+          method: "POST",
+          body: JSON.stringify({ up: 0, down: 0, conns: 0, e: [{ t: Date.now(), m: "hb", tag: "hb" }] }),
+        }).catch(() => {});
+      }
+    })();
+    try {
+      st.ctx.waitUntil(loop);
+    } catch (e) {
+      void loop;
+    }
+  }
 
   sock.readable
     .pipeTo(

@@ -14304,6 +14304,8 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   // 7.423：收尾（SessionTail.done）这条路一定跑得到，是「Worker 收到连接结束」的唯一见证。
   const settle423 = fs.readFileSync("src/proxy/conn-settle.ts", "utf8");
   ok("[416] 收尾也记字节证据", settle423.includes("if (conn.down > 0) logErr("));
+  // 7.424：hb=1 的调试心跳，用来分辨「isolate 被杀」与「只掐连接」
+  ok("[416] 有调试心跳且默认关闭", src421.includes("st.debugBeat && st.env && st.id") && src421.includes('m: "hb"'));
   const connSrc = fs.readFileSync("src/proxy/connection.ts", "utf8");
   ok("[416] Connection 持有 ctx", connSrc.includes("ctx: ExecutionContext;"));
 }

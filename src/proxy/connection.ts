@@ -290,6 +290,8 @@ export class Connection {
   // —— 身份与上下文 ——
   startedAt = Date.now();
   id: string | null = null;
+  /** 调试开关（查询串 hb=1）：这条连接每 3 秒往 DO 打一次心跳，用来判断断流后 isolate 还活不活 */
+  debugBeat = false;
   env: Env;
   ctx: ExecutionContext;
 

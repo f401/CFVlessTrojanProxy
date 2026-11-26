@@ -93,11 +93,13 @@ export class ProxySession {
     const szBytes = qs === "i" ? SC.SZ_I : qs === "s" ? SC.SZ_S : qs === "b" ? SC.SZ_B : 0;
     const qp = q.get("px");
     this.pxForce = qp === "1" ? 1 : qp === "0" ? -1 : 0;
+    // 调试心跳：只在显式带 hb=1 时启用（判断断流究竟是 isolate 被杀还是连接被平台掐断）
     // ?rx=<ip[:port]>：诊断用，钉住这一条连接走哪条中继（给吞吐体检脚本用）
     const qrx = (q.get("rx") || "").trim();
     this.rxPin = qrx && /^[0-9a-zA-Z.:\[\]-]{3,64}$/.test(qrx) ? qrx : "";
 
     this.conn = new Connection(env, ctx, this.mode, this.ipTag);
+    this.conn.debugBeat = q.get("hb") === "1"; // hb=1：调试心跳，断流取证用
     this.conn.targetBytes = szBytes;
     this.conn.forceRelayIp = this.rxPin;
     this.dns = new DnsLane(this.serverWS, this.conn);
