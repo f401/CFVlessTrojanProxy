@@ -83,9 +83,12 @@ export function pipeBack(
           // 说明杀连接的是 CPU 限额；若断点（按字节）基本不变，说明与 CPU 无关。
           if (st.debugBurn > 0 && st.down - st.burnAt >= 524288) {
             st.burnAt = st.down;
-            const burnTo = Date.now() + st.debugBurn;
-            while (Date.now() < burnTo) {
-              /* 故意空转烧 CPU */
+            // 不能用 Date.now() 判时：Workers 在同步段里时钟是冻结的，while 判时会变成死循环
+            // （7.426 实测：burn=1/2/8 全都在 512 KB 处被同一个死循环杀掉）。改成按迭代次数烧：
+            // burn=1 约 20 万次简单循环，量级约 1 ms。
+            let left = st.debugBurn * 200000;
+            while (left > 0) {
+              left -= 1;
             }
           }
           if (st.down > 0) clearWd(); // 首字节到了：链路不是黑洞，撤销看门狗

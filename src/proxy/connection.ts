@@ -293,7 +293,7 @@ export class Connection {
   /** 调试开关（查询串 hb=1）：这条连接每 3 秒往 DO 打一次心跳，用来判断断流后 isolate 还活不活 */
   debugBeat = false;
 
-  /** 调试烧 CPU：每 512 KB 同步空转多少毫秒（?burn=MS），只在取证时用 */
+  /** 调试烧 CPU：每 512 KB 空转 debugBurn×20 万次循环（?burn=N），只在取证时用 */
   debugBurn = 0;
 
   /** 上一次烧 CPU 时的下行字节数（判断是否又攒够 512 KB） */
