@@ -9,7 +9,7 @@ import { S } from "../core/state";
 import { QUALITY, QUALITY_PROBE, COVERAGE, CONN_OBS } from "../px/regions";
 import { AliveBoard, aliveList, ensurePool, nsOf } from "../px/pool";
 import { geoLabel, probeSni } from "../px/probe";
-import { html, json } from "../edge/respond";
+import { html } from "../edge/respond";
 import { splitRelay, relayIpOf } from "../core/relay-addr";
 import { CONNECT_MS } from "../core/util";
 import type { UserCtx } from "../edge/types";
@@ -312,13 +312,15 @@ export class RegionsView {
    */
   private jsonView(rows: RegionNodeRow[], target: string): Response {
     const keys = rows.map((r) => r.key);
-    return json({
+    // 紧凑序列化：带缩进的 650 KB 光 stringify 就能吃满免费版 CPU，JSON 语义不变
+    const text = JSON.stringify({
       nodes: rows,
       coverage: COVERAGE.stats(keys),
       target,
       // 只给前 32 个节点算统计明细（nsOf 会算分，整池算太贵）
       sample: Object.keys(nsOf(keys.slice(0, 32), 32)).length,
     });
+    return new Response(text, { headers: { "content-type": "application/json;charset=utf-8" } });
   }
 
   /**
@@ -521,12 +523,16 @@ export class RegionsView {
       await aliveList(this.c.env);
     }
     if (this.c.env && !S.pool.length) await ensurePool(this.c.env); // 冷 isolate 池空则载入，否则「列全池」只剩 alive
-    await ensureIsoCountries();
+    // JSON 只回原始行、不带补码出来的国家名：冷 isolate 上这张表要发一次 ip-api 子请求（实测 3 并发 42% 吃 503）
+    const wantJson = this.c.url.searchParams.get("format") === "json";
+    if (!wantJson) await ensureIsoCountries();
     const target = (this.c.url.searchParams.get("site") || "").slice(0, 256);
     const rows = this.rows(target);
     if (this.c.url.searchParams.get("format") === "json") {
-      // ?limit=N 收窄条数：全量 1600 行 ≈650KB，序列化吃满免费版 CPU（实测 3 并发 26% 被 503）；默认全量不动旧契约。
-      const limit = Math.max(0, Number(this.c.url.searchParams.get("limit")) || 0);
+      // 默认只回前 200 行：全量 1600 行序列化后仍近 400KB，3 并发实测 98% 被 1102 杀掉；
+      // 需要全量的调用方显式写 ?limit=0，面板走 HTML 分页不受影响。
+      const rawLimit = this.c.url.searchParams.get("limit");
+      const limit = rawLimit === null ? 200 : Math.max(0, Number(rawLimit) || 0);
       const jkey = target + "|" + limit;
       const hitJson = S.regionJsonCache;
       const nowJson = Date.now();
@@ -537,7 +543,6 @@ export class RegionsView {
       const respJson = this.jsonView(limit > 0 ? rows.slice(0, limit) : rows, target);
       const bodyJson = await respJson.text();
       S.regionJsonCache = { t: nowJson, key: jkey, text: bodyJson };
-      // respJson 的 body 已被读掉，必须用同 headers 重新组装
       return new Response(bodyJson, { headers: respJson.headers });
     }
     // 全池可达 1600 条：服务端分页，避免一次性渲染数 MB HTML；JSON 仍返回全量
