@@ -3,7 +3,7 @@ import { FIRST_BYTE_MS, WS_OPEN, closeQuietly, errMsg, safeSend, toU8 } from "..
 import { logErr, rttMark } from "../nodes/metrics";
 import { nsDecay, NodeStatsTable } from "../nodes/score";
 import { cnt } from "../core/counter";
-import { kickFlush } from "../store/pend";
+import { PEND } from "../store/pend";
 import { S } from "../core/state";
 import type { Connection } from "./connection";
 
@@ -101,7 +101,7 @@ export function pipeBack(
         },
       }),
     )
-    .catch((err) => {
+    .catch(async (err) => {
       // 每条异常收尾都留一条「搬到多少 / 多久 / WS 状态 / 是否已通知」的证据，并立刻推 DO：
       // 大文件断流到底是边缘或客户端先走（这条能落盘）还是 isolate 被资源限额杀掉
       // （catch 根本不执行 ⇒ 这条不会出现），只有这两者之差能区分。
@@ -110,7 +110,9 @@ export function pipeBack(
         `dl end ${st ? st.down : 0}B/${endMs}ms rs=${ws ? ws.readyState : -1} n=${st && st.notified ? 1 : 0} e=${errMsg(err)}`,
         st && st.node ? st.node : "",
       );
-      if (st) kickFlush(st.env, st.id);
+      // 直接 await 一次强制上报，而不是 kickFlush：kick 走 setTimeout(0)，
+      // 客户端已经走了以后这个 isolate 很可能等不到定时器就被回收，证据永远进不了 DO。
+      if (st && st.env && st.id) await PEND.flush(st.env, true, 1).catch(() => {});
       closeQuietly(sock);
       const clientGone = !ws || ws.readyState !== WS_OPEN;
       if (st && !st.notified) {
@@ -123,7 +125,7 @@ export function pipeBack(
           const goneMs = st.tAttach ? Date.now() - st.tAttach : 0;
           logErr(`client gone ${st.down}B/${goneMs}ms`, st.node || "");
           // 立刻推一次 DO：isolate 被回收时内存里的错误环会一起消失，只有落盘的才算证据
-          kickFlush(st.env, st.id);
+          if (st.env && st.id) await PEND.flush(st.env, true, 1).catch(() => {});
         } else if (st.down === 0 && onClose) {
           // 连上了却一个下行字节都没给就报错：与「上游正常关闭、零字节」（close 路径）
           // 是同一种可观察事实，必须走同一本账 —— attacher 的 onClose 会记 eCloseP、

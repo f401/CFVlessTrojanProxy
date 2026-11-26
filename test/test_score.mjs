@@ -14228,8 +14228,8 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   ok("[414] 写失败抛 client gone", tun414.includes('if (!safeSend(ws, merged)) throw new Error("client gone");') && tun414.includes('} else if (!safeSend(ws, u8)) {'));
   // 客户端中途消失必须留下「搬到多少字节 / 跑了多久」的证据，并落盘
   ok("[414] client gone 记字节与耗时", tun414.includes("client gone ") && tun414.includes("st.down}B/"));
-  ok("[414] client gone 立刻推 DO", tun414.includes("kickFlush(st.env, st.id)"));
-  ok("[414] kickFlush 已导入", tun414.includes('import { kickFlush } from "../store/pend";'));
+  ok("[414] client gone 立刻推 DO", tun414.includes("await PEND.flush(st.env, true, 1)"));
+  ok("[414] PEND 已导入", tun414.includes('import { PEND } from "../store/pend";'));
   // ?limit= 收窄 JSON（默认仍全量）
   ok("[414] json 支持 limit", tools414.includes('searchParams.get("limit")') && tools414.includes("limit > 0 ? rows.slice(0, limit) : rows"));
   const ctx414 = {
@@ -14259,7 +14259,7 @@ ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B
   const tun415 = fs.readFileSync("src/proxy/tunnel.ts", "utf8");
   ok("[415] 异常收尾记录已搬字节与耗时", tun415.includes("dl end ${st ? st.down : 0}B/${endMs}ms"));
   ok("[415] 异常收尾记录 WS 状态与是否已通知", tun415.includes("rs=${ws ? ws.readyState : -1} n=${st && st.notified ? 1 : 0}"));
-  ok("[415] 异常收尾立刻推 DO", tun415.includes("if (st) kickFlush(st.env, st.id);"));
+  ok("[415] 异常收尾当场 awaited 推 DO", tun415.includes("await PEND.flush(st.env, true, 1).catch(() => {});"));
   ok("[415] 旧的 pipe 日志已换成带数据的证据行", !tun415.includes('logErr("pipe: " + errMsg(err)'));
   ok("[415] clientGone 分支仍单独记一条", tun415.includes("client gone ${st.down}B/${goneMs}ms"));
 }
