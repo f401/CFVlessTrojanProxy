@@ -183,7 +183,7 @@ export class ClientFlow {
         return false;
       }
       if ((ws.bufferedAmount || 0) > WS_MAX_BUFFER || Date.now() > deadline) {
-        // 缓冲涨到 WS_MAX_BUFFER（16MB）或等满 WS_STALL_MS（180s）：判定真卡死，
+        // 缓冲涨到 WS_MAX_BUFFER（64MB）或等满 WS_STALL_MS（180s）：判定真卡死，
         // 主动断，别让一个连接拖住整个 isolate（两值都在 core/util.ts）
         cnt("stall");
         this.stallMs += Date.now() - t0;
@@ -292,6 +292,12 @@ export class Connection {
   id: string | null = null;
   /** 调试开关（查询串 hb=1）：这条连接每 3 秒往 DO 打一次心跳，用来判断断流后 isolate 还活不活 */
   debugBeat = false;
+
+  /** 调试烧 CPU：每 512 KB 同步空转多少毫秒（?burn=MS），只在取证时用 */
+  debugBurn = 0;
+
+  /** 上一次烧 CPU 时的下行字节数（判断是否又攒够 512 KB） */
+  burnAt = 0;
   env: Env;
   ctx: ExecutionContext;
 

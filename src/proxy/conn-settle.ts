@@ -462,7 +462,7 @@ export class SessionTail {
     // 收尾这条路一定跑得到（socket 释放、账本 flush 都在这里），所以它也是唯一能证明
     // 「Worker 确实收到了连接结束」的地方：搬过数据才记，避免把每次握手都刷成噪音。
     // 断流若是这一条缺失 ⇒ 连接根本没走到收尾（isolate 被杀 / 边缘没把 close 交上来）。
-    if (conn.down > 0) logErr(`dl close ${conn.down}B`, "");
+    if (conn.down > 0) logErr(`dl close ${conn.down}B iso=${Math.round(S.egressB / 1048576)}MB`, "");
     conn.flush(true);
     if (!ctx || !ctx.waitUntil) {
       // 本地/单测没有 waitUntil：直接返回，别把 Promise 挂成未处理的 rejection

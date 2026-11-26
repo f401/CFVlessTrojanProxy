@@ -99,7 +99,8 @@ export class ProxySession {
     this.rxPin = qrx && /^[0-9a-zA-Z.:\[\]-]{3,64}$/.test(qrx) ? qrx : "";
 
     this.conn = new Connection(env, ctx, this.mode, this.ipTag);
-    this.conn.debugBeat = q.get("hb") === "1"; // hb=1：调试心跳，断流取证用
+    this.conn.debugBeat = q.get("hb") === "1"; // hb=1：调试心跳，断流取证用；burn=MS：每 512KB 烧 MS 毫秒 CPU
+    this.conn.debugBurn = Number(q.get("burn") || 0) || 0;
     this.conn.targetBytes = szBytes;
     this.conn.forceRelayIp = this.rxPin;
     this.dns = new DnsLane(this.serverWS, this.conn);

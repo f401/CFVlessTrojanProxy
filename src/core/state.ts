@@ -105,6 +105,9 @@ export class AppState {
    */
   regionRowsCache: { t: number; key: string; rows: unknown[] } | null = null;
 
+  /** 本 isolate 累计下行字节（只用于取证：判断平台是否有「每 isolate 出流量上限」） */
+  egressB = 0;
+
 }
 
 export const S = new AppState();
