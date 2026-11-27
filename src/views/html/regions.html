@@ -27,7 +27,7 @@ button[disabled]{opacity:.55;cursor:default;filter:none}
 .cgroup.closed .caret{transform:rotate(-90deg)}
 table{border-collapse:collapse;width:100%;font-size:12.5px;background:#fff}
 td,th{border:1px solid var(--bd);padding:5px 8px;text-align:left;vertical-align:top}
-th{background:#f8fafc;position:sticky;top:44px;font-weight:600;white-space:nowrap;z-index:2}
+th{background:#f8fafc;font-weight:600;white-space:nowrap;z-index:2}
 .tw{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px}
 .u{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;word-break:break-all}
 .ipx{font-family:ui-monospace,monospace;font-weight:600;color:#0b4fa8;white-space:nowrap}
@@ -49,7 +49,7 @@ th{background:#f8fafc;position:sticky;top:44px;font-weight:600;white-space:nowra
 tr.sel{background:var(--sel)}
 tr.hide{display:none}
 .empty{text-align:center;padding:26px 10px;color:var(--mut)}
-@media (max-width:640px){.wrap{padding:12px 10px 72px}header h1{font-size:17px}#toolbar{margin:8px -10px 0;padding:8px 10px}th{top:74px}}
+@media (max-width:640px){.wrap{padding:12px 10px 72px}header h1{font-size:17px}#toolbar{margin:8px -10px 0;padding:8px 10px}}
 </style>
 <div class="wrap">
 <header><h1>地区出口选择 · {{idShort}}</h1>
@@ -137,7 +137,16 @@ tr.hide{display:none}
   }
   // 未探测节点（data-probed=0）默认折叠，点开关切换
   var folded=true;
-  function applyFold(){document.querySelectorAll('tr[data-probed="0"]').forEach(function(tr){tr.style.display=folded?'none':'';});}
+  function applyFold(){
+    document.querySelectorAll('table tr[data-node]').forEach(function(tr){
+      var tb=tr.closest('.tw');
+      var open=!tb||!tb.classList.contains('folded');
+      var unprobed=tr.matches('tr[data-probed="0"]');
+      var ok=matchFilter(tr)&&open&&(!folded||!unprobed);
+      tr.style.display=ok?'':'none';
+      tr.classList.toggle('hide',!matchFilter(tr));
+    });
+  }
   applyFold();
   // 分页链接按 data-show 显隐
   document.querySelectorAll('#pager a[data-show]').forEach(function(a){if(a.getAttribute('data-show')==='1')a.style.display='';});
@@ -162,10 +171,9 @@ tr.hide{display:none}
   }
   function refresh(){
     var all=rows(),shown=0,sel=0,cc={};
+    applyFold();
     all.forEach(function(tr){
-      var ok=matchFilter(tr);
-      tr.classList.toggle('hide',!ok);
-      if(ok)shown++;
+      if(tr.style.display!=='none')shown++;
       if(isSel(tr)){sel++;tr.classList.add('sel');var g=tr.getAttribute('data-cc');if(g)cc[g]=1;}
       else tr.classList.remove('sel');
     });
@@ -220,7 +228,7 @@ tr.hide{display:none}
     if(h&&!ev.target.matches('input')){
       ev.preventDefault();
       var tb=h.nextElementSibling;
-      if(tb&&tb.classList.contains('tw')){var hid=tb.style.display==='none';tb.style.display=hid?'':'none';h.classList.toggle('closed',!hid);}
+      if(tb&&tb.classList.contains('tw')){var hid=tb.classList.toggle('folded');h.classList.toggle('closed',hid);applyFold();refresh();}
       return;
     }
     var b=ev.target.closest('button');if(!b)return;
@@ -235,8 +243,9 @@ tr.hide{display:none}
       var open=b.dataset.act==='expand';
       document.querySelectorAll('h2.cgroup').forEach(function(x){
         var tb=x.nextElementSibling;
-        if(tb&&tb.classList.contains('tw')){tb.style.display=open?'':'none';x.classList.toggle('closed',!open);}
+        if(tb&&tb.classList.contains('tw')){tb.classList.toggle('folded',!open);x.classList.toggle('closed',!open);}
       });
+      applyFold();refresh();
       return;
     }
     if(b.dataset.act==='site-probe'){
@@ -250,7 +259,7 @@ tr.hide{display:none}
       setTimeout(done,8000);
       probe('probe',{site:site,nodes:nodes.join(',')},false,site);return;
     }
-    if(b.dataset.act==='toggle-unprobed'){ev.preventDefault();folded=!folded;applyFold();b.textContent=folded?'显示未探测节点':'隐藏未探测节点';return;}
+    if(b.dataset.act==='toggle-unprobed'){ev.preventDefault();folded=!folded;applyFold();refresh();b.textContent=folded?'显示未探测节点':'隐藏未探测节点';return;}
     if(b.dataset.probe==='1'){
       ev.preventDefault();
       var op=b.getAttribute('value')||'';

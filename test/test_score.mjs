@@ -14384,6 +14384,15 @@ W.S.regionJsonCache = null; // JSON 结果缓存与行缓存同寿命，一起�
   ok("[418] POST 有 op=socks", tl418.includes('if (op === "socks")'));
   }
 }
+{
+  const tpl419 = fs.readFileSync("src/views/html/regions.html", "utf8");
+  ok("[419] 表头不再粘性（横向滚动容器里 sticky 会压到行上）", !tpl419.includes("position:sticky;top:44px"));
+  ok("[419] 工具栏仍粘性", tpl419.includes("#toolbar{position:sticky;top:0"));
+  ok("[419] 行显隐只有一个入口", tpl419.includes("tr.matches('tr[data-probed=\"0\"]')") && tpl419.includes("tr.style.display=ok?'':'none'"));
+  ok("[419] 计数按实际显示统计", tpl419.includes("if(tr.style.display!=='none')shown++"));
+  ok("[419] 组折叠走 folded 类", tpl419.includes("tb.classList.toggle('folded')") && !tpl419.includes("tb.style.display=hid?'':'none'"));
+  ok("[419] 展开全部后重算显隐", tpl419.includes("tb.classList.toggle('folded',!open)") && tpl419.includes("applyFold();refresh();"));
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
