@@ -14343,6 +14343,47 @@ W.S.regionJsonCache = null; // JSON 结果缓存与行缓存同寿命，一起�
   ok("[418] 覆盖计数文案标明本页口径", tools418.includes("本页 已知 ${cov.total}"));
 }
 
+// ===== [418] 公共 SOCKS5 出口（?s5=）：通用出口，与只转 CF 托管站点的 proxyip 中继是两回事 =====
+{
+  const has418 = typeof W.socksConnectReq === "function" && typeof W.SocksPool === "function";
+  ok("[418] 测试窗口导出 SOCKS 握手与池子", has418);
+  if (has418) {
+  // ① IPv4 目标：VER=5 CMD=1 RSV=0 ATYP=1 + 4 字节地址 + 2 字节端口
+  const v4 = W.socksConnectReq({ host: "1.2.3.4", port: 443 });
+  eq("[418] IPv4 目标长度", v4.length, 10);
+  eq("[418] IPv4 前缀", Array.from(v4.slice(0, 4)).join(","), "5,1,0,1");
+  eq("[418] IPv4 地址与端口", Array.from(v4.slice(4)).join(","), "1,2,3,4,1,187");
+  // ② 域名目标：ATYP=3 + 1 字节长度 + 域名（example.com 是 11 字节）
+  const dom = W.socksConnectReq({ host: "example.com", port: 80 });
+  eq("[418] 域名目标 ATYP 与长度", Array.from(dom.slice(3, 5)).join(","), "3,11");
+  eq("[418] 域名目标末端端口", [dom[dom.length - 2], dom[dom.length - 1]].join(","), "0,80");
+  // ③ 抓列表：内网/保留地址丢掉、重复条目只留一条
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("1.2.3.4:1080\n10.0.0.1:1080\n1.2.3.4:1080\n5.6.7.8:9050\nbad line\n");
+  const pool = new W.SocksPool();
+  const n = await pool.refill({});
+  globalThis.fetch = origFetch;
+  eq("[418] 抓列表丢内网并去重", n, 2);
+  const snap = pool.snap();
+  eq("[418] 快照条目数", snap.rows.length, 2);
+  eq("[418] 未验证的不算可用", snap.ok, 0);
+  eq("[418] 未验证的不会被选中", pool.pick(), null);
+  eq("[418] 池内端口解析正确", snap.rows.map((r) => r.port).sort((a, b) => a - b).join(","), "1080,9050");
+  // ④ 记一次失败后 fails 增长（推进冷却的依据）
+  pool.markFail("1.2.3.4:1080");
+  eq("[418] markFail 记一次失败", pool.snap().rows.find((r) => r.h === "1.2.3.4").fails, 1);
+  eq("[418] 池子上限", W.SOCKS_MAX, 400);
+  // ⑤ 三处接线必须在：会话解析、路由分支、面板数据源
+  const ses418 = fs.readFileSync("src/proxy/session.ts", "utf8");
+  ok("[418] 会话解析 ?s5=", ses418.includes('q.get("s5")'));
+  const fb418 = fs.readFileSync("src/proxy/fallback.ts", "utf8");
+  ok("[418] 路由有 viaSocks 分支", fb418.includes("if (this.o.socksNode) return this.viaSocks(host, port);"));
+  ok("[418] 握手失败不回落到别的出口", fb418.includes('onHangUp(1011, "socks5 failed")'));
+  const tl418 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  ok("[418] JSON 暴露代理池", tl418.includes("s5: SOCKS.snap()"));
+  ok("[418] POST 有 op=socks", tl418.includes('if (op === "socks")'));
+  }
+}
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 

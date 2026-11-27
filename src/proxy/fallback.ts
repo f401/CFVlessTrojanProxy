@@ -15,6 +15,8 @@ import { HOOK } from "../core/hook";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 import { splitRelay } from "../core/relay-addr";
+import { socks5Open } from "../core/budgeted-io";
+import { SOCKS } from "../px/selector";
 
 /** CF 托管目标换节点时最多试几个候选：每个都是一次 connect()，别把免费计划的 6 并发吃光。 */
 const ALT_TRIES = 4;
@@ -84,6 +86,8 @@ export interface RouterOpts {
   ipRegion: string | null;
   /** `?node=` 用户钉住的单个节点 key（null 表示没钉；钉住时硬失败不回落） */
   pinnedNode: string | null;
+  /** `?s5=` 钉住的一条公共 SOCKS5 出口（null 表示没钉）：它能到任意站点，与 CF 中继不同 */
+  socksNode: string | null;
   /** 本次调用的额度闸门（建连只从这里取号） */
   budget: BudgetedIO;
   /** 地区钉住时用的挑选器（会话持有，router 只借用） */
@@ -113,6 +117,8 @@ export class SessionRouter {
    * @returns {Promise<Socket | null>} socket；地区路径失败或没有可用中继时返回 null（连接已被关）
    */
   async route(host: string, port: number): Promise<Socket | null> {
+    // `?s5=` 比钉节点更强：用户要的是「所有流量都从这一条公共出口走」，它是通用出口（能到任意站点）
+    if (this.o.socksNode) return this.viaSocks(host, port);
     // 钉单个节点的优先级最高：用户点名要这一条，节点失效就明确失败，不换节点不回落直连
     if (this.o.pinnedNode) return this.viaPinned(host, port);
     // 地区钉住是硬分流：找不到 / 连不上就明确失败，绝不回落到策略拨号（`?rg=` 的语义）
@@ -131,6 +137,38 @@ export class SessionRouter {
       });
     } catch (e) {
       return this.viaFallback(host, e);
+    }
+  }
+
+  /**
+   * 功能：`?s5=` 这一支 —— 经指定的公共 SOCKS5 代理打开到目标的通道（通用出口，任意站点都行）。
+   *
+   * 与 `?node=` 的区别：CF 网络里的中继只肯转发 CF 托管站点（实测 github/gstatic 一律
+   * `SSL alert number 40`），而公共 SOCKS5 代理是通用出口。所以这条既用于「全部流量走一个节点」，
+   * 也是验证代理池是否真能用的端到端手段。
+   * @param {string} host 目标主机
+   * @param {number} port 目标端口
+   * @returns {Promise<Socket | null>} 已握手的 socket；失败时已关连接并返回 null
+   */
+  private async viaSocks(host: string, port: number): Promise<Socket | null> {
+    const o = this.o;
+    const [ph, pp] = splitRelay(o.socksNode || "", 1080);
+    const key = ph + ":" + pp;
+    try {
+      const sock = await socks5Open(o.budget, { host: ph, port: pp }, { host, port });
+      cnt("s5Dial");
+      o.conn.node = key;
+      o.conn.via = "node";
+      o.conn.retried = true;
+      logErr(`socks5 -> ${key}`, host);
+      return sock;
+    } catch (e) {
+      // 连不上就记一条失败（推进冷却），并明确失败：用户点名了这一条，不偷偷换别的出口
+      SOCKS.markFail(key);
+      cnt("s5Bad");
+      logErr(`socks5 fail ${key}: ${errMsg(e)}`, host);
+      o.onHangUp(1011, "socks5 failed");
+      return null;
     }
   }
 

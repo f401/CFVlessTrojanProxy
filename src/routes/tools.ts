@@ -8,6 +8,7 @@ import { IpFamily, IpKind } from "../core/enums";
 import { S } from "../core/state";
 import { QUALITY, QUALITY_PROBE, COVERAGE, CONN_OBS } from "../px/regions";
 import { AliveBoard, aliveList, ensurePool, nsOf } from "../px/pool";
+import { SOCKS } from "../px/selector";
 import { geoLabel, probeSni } from "../px/probe";
 import { html } from "../edge/respond";
 import { splitRelay, relayIpOf } from "../core/relay-addr";
@@ -314,13 +315,12 @@ export class RegionsView {
   /** 功能：JSON 输出（?format=json 显式请求，?limit= 可收窄）；@param rows 展示行；@param target 站点；@returns JSON 响应 */
   private jsonView(rows: RegionNodeRow[], target: string): Response {
     const keys = rows.map((r) => r.key);
-    // 紧凑序列化：带缩进的 650 KB 光 stringify 就能吃满免费版 CPU，JSON 语义不变
-    const text = JSON.stringify({
+    const text = JSON.stringify({ // 紧凑序列化：带缩进的 650 KB 光 stringify 就吃满免费版 CPU
       nodes: rows,
       coverage: COVERAGE.stats(keys),
       target,
-      // 只给前 32 个节点算统计（nsOf 会算分，整池太贵）
-      sample: Object.keys(nsOf(keys.slice(0, 32), 32)).length,
+      sample: Object.keys(nsOf(keys.slice(0, 32), 32)).length, // 只算前 32 个（nsOf 会算分，整池太贵）
+      s5: SOCKS.snap(), // 通用出口（公共 SOCKS5）：能到任意站点，与 CF 中继是两回事
     });
     return new Response(text, { headers: { "content-type": "application/json;charset=utf-8" } });
   }
@@ -398,6 +398,7 @@ export class RegionsView {
       hasPrev: page > 1 ? "1" : "",
       hasNext: page < pages ? "1" : "",
       groupsHtml: this.groupsHtml(rows, selected, pinnedSelected, !!target, action),
+      s5Text: escapeHtml(`通用出口（公共 SOCKS5）：${SOCKS.snap().n} 条 · 已验证 ${SOCKS.snap().ok} 条`),
     });
     return html(body);
   }
@@ -411,6 +412,12 @@ export class RegionsView {
     }
     if (this.c.env && !S.pool.length) await ensurePool(this.c.env); // 冷 isolate 池空则载入，否则「列全池」只剩 alive
     await ensureIsoCountries();
+    if (op === "socks") { // 公共 SOCKS5 池：refill=1 先抓列表，再实测验证若干条（每条一次 connect）
+      if (String(f.get("refill") || "") === "1") await SOCKS.refill(this.c.env);
+      if (!SOCKS.snap().n) return new Response("公共代理池为空：请先抓取列表");
+      const r = await SOCKS.verify(this.c.budget);
+      return new Response(`公共代理：共 ${SOCKS.snap().n} 条，本轮验证成功 ${r.ok}、失败 ${r.bad}`);
+    }
     // 指定网站探测：复用 /debug?tfb 的同一实现，结果行会写进 CONN_OBS 供面板显示延迟
     if (op === "probe") {
       const site = String(f.get("site") || "").trim().slice(0, 256);

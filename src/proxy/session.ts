@@ -42,11 +42,11 @@ export class ProxySession {
   private readonly ipRegion: string | null;
   /** `?node=` 用户钉住的单个节点 key（host:port）；钉住时硬失败不回落 */
   private readonly pinnedNode: string | null;
-  // 地区钉住（`?rg=`）时的挑选器：只有 dialRegion 一个分支用它，所以挂在这个会话上，
-  // 而不是留成模块级单例（7.346 起 —— 模块级实例在门面上看不出「谁在用」）。
+  /** `?s5=` 钉住的公共 SOCKS5 出口（host:port）：通用出口，能到任意站点 */
+  private readonly socksNode: string | null;
+  // 地区钉住（`?rg=`）的挑选器：只有 dialRegion 用它，故挂在会话上而不是模块级单例（7.346 起）
   private readonly regionPicker = new RegionPicker();
-  // 上游挂载器没有任何字段（补救链的状态全在 Connection 里），但「谁在挂上游」属于会话自己：
-  // 7.354 前它是模块级 `ATTACHER`，读 session.ts 时看不出这个会话用什么挂载上游。
+  // 上游挂载器没有字段（补救链状态在 Connection 里），但「谁在挂上游」属于会话自己（7.354 前是模块级 `ATTACHER`）
   private readonly attacher = new Attacher();
   // 收尾（释放 / noPayload / 冲账本 / 冲快照）自成一类：它是唯一「连接已不可用还要花 IO 预算」的阶段
   private readonly tail = new SessionTail();
@@ -56,8 +56,7 @@ export class ProxySession {
   private readonly frames = new FirstFrame();
   // 往哪走的决策（地区硬分流 / 拨号策略 / 补救一条中继）在 7.362 起是单独对象，会话只问 route(host, port)
   private readonly router: SessionRouter;
-  // 用户表在 run() 里才读（ctor 只解析参数、不碰 KV）；给一份空表让类型成立，
-  // 真实值一定在首帧到达之前就绪。
+  // 用户表在 run() 里才读（ctor 只解析参数、不碰 KV）；先给空表让类型成立，真实值在首帧之前就绪
   private users: Auth = { uuids: new Set<string>(), trojan: new Map<string, string>(), list: [] };
 
   /**
@@ -75,8 +74,7 @@ export class ProxySession {
     this.clientWS = clientWS;
     this.serverWS = serverWS;
     serverWS.accept();
-    // 新版兼容日期下 message 事件默认给 Blob，不是 ArrayBuffer —— 不设这一行，
-    // 二进制帧会被 toU8() 当成空数组丢掉，VLESS 头解析失败后回 400，客户端看到的就是 SSLError。
+    // 新版兼容日期下 message 事件默认给 Blob：不设这行会让二进制帧被 toU8() 当空数组丢掉（→ 400 / SSLError）
     try {
       serverWS.binaryType = "arraybuffer";
     } catch (e) {}
@@ -85,6 +83,8 @@ export class ProxySession {
     this.ipTag = (q.get("ip") || "").slice(0, 48); // 标签只用于统计，别让超长 ?ip= 把快照撑大
     this.ipRegion = (q.get("rg") || "").trim().toUpperCase() || null;
     // ?node=host:port：用户点名的单个节点。只接受 host:port 形状、限长，防止超长串进日志/内存
+    const qs5 = (q.get("s5") || "").trim(); // ?s5=host:port：公共 SOCKS5 出口（通用，任意站点可达）
+    this.socksNode = qs5 && /^[0-9a-zA-Z.:\[\]-]{3,128}$/.test(qs5) ? qs5 : null;
     const qnode = (q.get("node") || "").trim();
     this.pinnedNode = qnode && /^[0-9a-zA-Z.:\[\]-]{3,128}$/.test(qnode) ? qnode : null;
     this.mode = this.readMode(q.get("mode"));
@@ -93,8 +93,7 @@ export class ProxySession {
     const szBytes = qs === "i" ? SC.SZ_I : qs === "s" ? SC.SZ_S : qs === "b" ? SC.SZ_B : 0;
     const qp = q.get("px");
     this.pxForce = qp === "1" ? 1 : qp === "0" ? -1 : 0;
-    // 调试心跳：只在显式带 hb=1 时启用（判断断流究竟是 isolate 被杀还是连接被平台掐断）
-    // ?rx=<ip[:port]>：诊断用，钉住这一条连接走哪条中继（给吞吐体检脚本用）
+    // hb=1：调试心跳（判断断流是 isolate 被杀还是连接被掐）；rx=<ip[:port]>：诊断钉一条中继（吞吐体检用）
     const qrx = (q.get("rx") || "").trim();
     this.rxPin = qrx && /^[0-9a-zA-Z.:\[\]-]{3,64}$/.test(qrx) ? qrx : "";
 
@@ -113,6 +112,7 @@ export class ProxySession {
       pxForce: this.pxForce,
       ipRegion: this.ipRegion,
       pinnedNode: this.pinnedNode,
+      socksNode: this.socksNode,
       budget: this.budget,
       regionPicker: this.regionPicker,
       onHangUp: (code, reason) => this.hangUp(code, reason),

@@ -91,6 +91,16 @@ tr.hide{display:none}
   想确认某个节点能否打开某站，用上方「测连通」实际试一次（每节点+站点 1 分钟一次）。
 </div>
 
+<div class="notice" id="s5box">
+  <b>{{s5Text}}</b>
+  <form method="post" action="{{postAction}}" style="display:inline">
+    <input type="hidden" name="op" value="socks"><input type="hidden" name="refill" value="1">
+    <button type="submit" class="lnkbtn">抓取并验证公共代理</button>
+  </form>
+  在订阅链接上加 <code>?s5=ip:port</code> 就能让全部流量都走其中一条：公共代理是<b>通用出口</b>（任意站点可达），
+  与上面那些「只转 CF 托管站点」的中继不是一回事。
+</div>
+
 <div class="card bar" id="pager">
   <span class="mu">{{pageInfo}}</span>
   <a href="{{prevHref}}" data-show="{{hasPrev}}" style="display:none">« 上一页</a>

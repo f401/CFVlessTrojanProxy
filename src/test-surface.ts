@@ -114,6 +114,8 @@ export { BUDGET_CAPS, BUDGET_KINDS, BudgetExhausted, BudgetLedger, isBudgetExhau
 export { BudgetedIO } from "./core/budgeted-io";
 export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, poolSources, POOL_SOURCES, POOL_ENOUGH, SOURCES, pxPolicy, RawProbe, takePoolLine } from "./px/probe";
 export { WarmPacer, WARM } from "./px/warm";
+export { SOCKS, SocksPool, SOCKS_SOURCES, SOCKS_MAX, SOCKS_VERIFY_MAX } from "./px/selector";
+export { socksConnectReq, socks5Open } from "./core/budgeted-io";
 export { regionListAsync, QUALITY_SOURCES, qualityFromIpApi, mergeQuality, IpQualityTable, QUALITY, QualityProbe, QUALITY_PROBE, ProbeCoverage, COVERAGE, ConnObservation, CONN_OBS } from "./px/regions";
 export { PEND, RESTORE_MAX, getSnap, kvGetStrict, nodeSnapGet, mergeNodeSnap, NODE_SNAP, NodeSnapCache, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
 export { SnapshotState, SNAP } from "./store/snapshot";
