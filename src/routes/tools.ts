@@ -384,7 +384,7 @@ export class RegionsView {
     const action = "/" + encodeURIComponent(this.c.id) + "/regions";
     const body = renderTemplate(regionsTpl, {
       idShort: escapeHtml(this.c.id.slice(0, 8)),
-      coverageText: `已知 ${cov.total} 节点 / 覆盖 ${cov.probed}`,
+      coverageText: `本页 已知 ${cov.total} 节点 / 覆盖 ${cov.probed}`,
       jsonLink: escapeHtml(action + "?format=json" + (target ? "&site=" + encodeURIComponent(target) : "")),
       backLink: escapeHtml(back),
       postAction: escapeHtml(action),

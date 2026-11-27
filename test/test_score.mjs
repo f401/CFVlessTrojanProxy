@@ -14332,6 +14332,17 @@ W.S.regionJsonCache = null; // JSON 结果缓存与行缓存同寿命，一起�
   ok("[417] 序列化后写回缓存", tools417.includes("S.regionJsonCache = { t: nowJson, key: jkey, text: bodyJson };"));
   ok("[417] body 读掉后用同 headers 重新组装", tools417.includes("return new Response(bodyJson, { headers: respJson.headers });"));
 }
+// ---- [418] 覆盖站点提示 + 面板可信度（本轮自举：展示 ISO 码与路由机场码分离的前提修正）----
+{
+  const tpl418 = fs.readFileSync("src/views/html/regions.html", "utf8");
+  const tools418 = fs.readFileSync("src/routes/tools.ts", "utf8");
+  ok("[418] 覆盖提示存在且用 CF 托管普适判据", tpl418.includes("这些节点能覆盖哪些站") && tpl418.includes("Cloudflare") && tpl418.includes(".notice"));
+  ok("[418] 提示不写死具体站点域名", !/\bgithub\b|\bgstatic\b|\bx\.com\b|\bgoogle\b/i.test(tpl418));
+  ok("[418] 筛选按钮用 CF 站口径", tpl418.includes('data-filter="ok">CF 可达') && tpl418.includes('data-filter="no">CF 不通'));
+  ok("[418] 重探回填清掉折叠 display 并重排", tpl418.includes("if(folded)row.style.display=''") && tpl418.includes("applyFold();"));
+  ok("[418] 覆盖计数文案标明本页口径", tools418.includes("本页 已知 ${cov.total}"));
+}
+
 console.log(`\n评分/选择单测：通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);
 
