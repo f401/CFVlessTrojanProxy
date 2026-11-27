@@ -496,7 +496,7 @@ export class RegionsView {
     const f = await this.c.request.formData();
     // 探测类 POST 不改用户配置，也不依赖用户表可读性；单独分派
     const opRaw = String(f.get("op") || "");
-    if (opRaw === "probe" || opRaw === "requality" || opRaw.startsWith("nodecheck:")) return this.probe(f);
+    if (opRaw === "probe" || opRaw === "requality" || opRaw === "socks" || opRaw.startsWith("nodecheck:")) return this.probe(f);
     const cur = this.c.auth;
     if (cur.ok === false) return new Response("用户表暂时读不到（KV 故障），请稍后重试", { status: 503 });
     const regions = f.getAll("regions").map(String);
