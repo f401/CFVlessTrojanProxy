@@ -231,8 +231,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `PathPrefs`（`SEL.picker.paths`） | `src/px/pickpath.ts` | 偏好过滤：判定层否决、入口族偏好（非 CF 出口优先，1.5x+50ms 带内）、站点通道偏好、拨号重试的「排除已试过」重扫；只读不写（7.345 起不再是模块级单例，由 `SEL.picker` 持有；`PREFS` 那个名字仍归入口偏好） |
 | `Rotation`（`SEL.rotation`） | `src/px/rotation.ts` | 什么时候换：最短驻留时间（`dwellOf`）、切走判据、扫描后的观察窗与定时复查；无字段（状态在 `S.curs`/`S.lastSwitch`），7.356 起由 `Selector` 持有并注入给 `FailBook`，模块级 `ROTATION` 已撤 |
 | `FailBook`（`SEL.fails`） | `src/px/failbook.ts` | 失败怎么记：节点级失败推进快速失败窗口并重算分数，站点级失败只进站点画像；要切走时调构造注入的 `rotation.maybeSwitch`（7.356 起换节点器由门面持有并传进来，不再引模块级单例） |
-| `IpQualityTable`（`QUALITY`） | `src/px/regions.ts` | 节点 IP 质量表（住宅/移动/商企/机房 + good/normal/risky + proxy/vpn 位），按节点键缓存 3 天、单源失败冷却 5 分钟；质量结论是客观属性，由 `SeedStore.packName` 搭 seed 便车跨 isolate 传播，`get`/`note`/`snapshot` 供选路与面板读取 |
-| `QualityProbe`（`QUALITY_PROBE`） | `src/px/regions.ts` | 6 源 IP 质量探测器：按 `QUALITY_SOURCES` 注册表逐源经 `BudgetedIO.fetch` 查询（ident.me 只回自身出口故探测跳过），合并信号成 `IpQuality`；不可达的源只记冷却不硬失败 |
+| `IpQualityTable`（`QUALITY`） | `src/px/regions.ts` | 节点 IP 质量表（住宅/移动/商企/机房 + good/normal/risky + proxy/vpn 位），按节点键缓存 3 天、单源失败冷却 5 分钟；7.436 起质量探测是自由函数 `qualityOf()`（无字段，按「类拥有状态、函数做计算」不再给实例）；质量结论是客观属性，由 `SeedStore.packName` 搭 seed 便车跨 isolate 传播，`get`/`note`/`snapshot` 供选路与面板读取 |
 | `ProbeCoverage`（`COVERAGE`） | `src/px/regions.ts` | 全池探测覆盖账本：记每个节点的 `lastProbeAt`/族，按最旧优先 `pick(keys, max)` 轮转以保证全池都被探过；纯本 isolate 内存，零 KV/DO 写 |
 | `ConnObservation`（`CONN_OBS`） | `src/px/regions.ts` | 按机房分桶的连通性观测表（colo\|node\|site → code/rtt/family/ok/at），服务面板的「目标站点延迟」；实测值不跨 isolate，上限 2000 + TTL 6 小时 |
 | `DnsCache`（`DNS_CACHE`） | `src/proxy/dial.ts` | DNS 解析缓存：`aaaa`/`v4All`/`aRecord` 三张 Map 从 `S` 迁入，TTL 与上限口径不变；三个 resolve 函数经它读写 |

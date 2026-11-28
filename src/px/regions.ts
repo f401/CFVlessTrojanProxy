@@ -346,59 +346,53 @@ export class IpQualityTable {
 export const QUALITY = new IpQualityTable();
 
 /**
- * 功能：按注册表依次查 6 个质量源，把结果合并成一条 IpQuality。
+ * 功能：探测一个 IP 的质量 —— 按注册表依次查 6 个质量源，把结果合并成一条 IpQuality。
+ * 为什么是函数而不是类：它没有任何字段（缓存与源冷却都在 `QUALITY` 上），
+ * 按 AGENTS §6「类拥有状态、函数做计算」，带实例的探测器只是多了一个全局名字。
+ * @param key 节点 key（含端口，用于缓存与覆盖记账）
+ * @param ip 要查的 IP（v4 字面量；v6 需先经支持 v6 的源）
+ * @param io 子请求出口（走它才扣 sub 额度，测试可注入桩）
+ * @param family 地址族
+ * @param now 当前时刻
+ * @returns 质量结论（先查缓存，命中则零请求）
  */
-export class QualityProbe {
-  /**
-   * 功能：探测一个 IP 的质量。
-  * @param key 节点 key（含端口，用于缓存与覆盖记账）
-  * @param ip 要查的 IP（v4 字面量；v6 需先经支持 v6 的源）
-  * @param io 子请求出口（走它才扣 sub 额度，测试可注入桩）
-  * @param family 地址族
-  * @param now 当前时刻
-  * @returns 质量结论（先查缓存，命中则零请求）
-   */
-  async qualityOf(key: string, ip: string, io: import("../core/budgeted-io").BudgetedIO, family: IpFamily, now = Date.now()): Promise<IpQuality> {
-    // 先查缓存：3 天内不重复请求（用户明确的额度纪律）
-    const cached = QUALITY.get(key, now);
-    if (cached) return cached;
-    const signals: QualitySignal[] = [];
-    let org = "";
-    for (const source of QUALITY_SOURCES) {
-      // ident.me 只返回调用者自己的出口，不能查指定 IP —— 注册表里保留仅是文档用途
-      if (source.name === "ident-me") continue;
-      // 失败冷却中的源本轮跳过，避免给已经挂掉的第三方反复送请求
-      if (QUALITY.sourceCooling(source.name, now)) continue;
-      try {
-        const resp = await io.fetch(source.url(ip), { headers: { "user-agent": "cf-proxyx/quality" } });
-        if (!resp.ok) {
-          QUALITY.failSource(source.name, now);
-          continue;
-        }
-        const row = (await resp.json()) as Record<string, unknown>;
-        const signal = source.parse(row);
-        if (signal) signals.push(signal);
-        // 探测质量时顺手记下该 IP 的 ISO 国家码：ip-api 的 countryCode 已在这次响应里，
-        // 零新增子请求；回填到展示用的 isoCc 表，让面板/探测结果能显示真实国家
-        if (source.name === "ipapi-com") {
-          if (row.org) org = String(row.org);
-          if (row.countryCode && ip && !ip.includes(":")) QUALITY.noteIso(ip, String(row.countryCode), now);
-        }
-      } catch {
-        // 某个源超时/不可达只记冷却，绝不拖垮整轮——这正是用户说的「部分网站不返回数据」
+export async function qualityOf(key: string, ip: string, io: import("../core/budgeted-io").BudgetedIO, family: IpFamily, now = Date.now()): Promise<IpQuality> {
+  // 先查缓存：3 天内不重复请求（用户明确的额度纪律）
+  const cached = QUALITY.get(key, now);
+  if (cached) return cached;
+  const signals: QualitySignal[] = [];
+  let org = "";
+  for (const source of QUALITY_SOURCES) {
+    // ident.me 只返回调用者自己的出口，不能查指定 IP —— 注册表里保留仅是文档用途
+    if (source.name === "ident-me") continue;
+    // 失败冷却中的源本轮跳过，避免给已经挂掉的第三方反复送请求
+    if (QUALITY.sourceCooling(source.name, now)) continue;
+    try {
+      const resp = await io.fetch(source.url(ip), { headers: { "user-agent": "cf-proxyx/quality" } });
+      if (!resp.ok) {
         QUALITY.failSource(source.name, now);
+        continue;
       }
+      const row = (await resp.json()) as Record<string, unknown>;
+      const signal = source.parse(row);
+      if (signal) signals.push(signal);
+      // 探测质量时顺手记下该 IP 的 ISO 国家码：ip-api 的 countryCode 已在这次响应里，
+      // 零新增子请求；回填到展示用的 isoCc 表，让面板/探测结果能显示真实国家
+      if (source.name === "ipapi-com") {
+        if (row.org) org = String(row.org);
+        if (row.countryCode && ip && !ip.includes(":")) QUALITY.noteIso(ip, String(row.countryCode), now);
+      }
+    } catch {
+      // 某个源超时/不可达只记冷却，绝不拖垮整轮——这正是用户说的「部分网站不返回数据」
+      QUALITY.failSource(source.name, now);
     }
-    const result = mergeQuality(signals, now);
-    if (org) result.org = org;
-    QUALITY.note(key, result);
-    COVERAGE.note(key, family, now);
-    return result;
   }
+  const result = mergeQuality(signals, now);
+  if (org) result.org = org;
+  QUALITY.note(key, result);
+  COVERAGE.note(key, family, now);
+  return result;
 }
-
-/** 质量探测器的进程内唯一实例 */
-export const QUALITY_PROBE = new QualityProbe();
 
 /**
  * 功能：全池 IP 探测覆盖账本，按「最久没探」优先轮转，确保每个节点迟早被探到。

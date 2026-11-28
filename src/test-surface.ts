@@ -126,7 +126,7 @@ export { REFILL_MAX, tlsHello, probeProxy, probeSni, refillPool, chunks, poolSou
 export { WarmPacer, WARM } from "./px/warm";
 export { SOCKS, SocksPool, SOCKS_SOURCES, SOCKS_MAX, SOCKS_VERIFY_MAX } from "./px/selector";
 export { socksConnectReq, socks5Open } from "./core/budgeted-io";
-export { regionListAsync, QUALITY_SOURCES, qualityFromIpApi, mergeQuality, IpQualityTable, QUALITY, QualityProbe, QUALITY_PROBE, ProbeCoverage, COVERAGE, ConnObservation, CONN_OBS } from "./px/regions";
+export { regionListAsync, QUALITY_SOURCES, qualityFromIpApi, mergeQuality, IpQualityTable, QUALITY, qualityOf, ProbeCoverage, COVERAGE, ConnObservation, CONN_OBS } from "./px/regions";
 export { PEND, RESTORE_MAX, getSnap, kvGetStrict, nodeSnapGet, mergeNodeSnap, NODE_SNAP, NodeSnapCache, flushSnap, usageSnapWrite, readStats, restorePick } from "./store/index";
 export { SnapshotState, SNAP } from "./store/snapshot";
 export { doFetch, meterGet } from "./store/meter-client";

@@ -8,7 +8,7 @@ import { ISOLATE } from "../core/state";
 import { SEED_STORE } from "../px/seed";
 import { NODE_MEMORY } from "../core/node-memory";
 import { IpFamily, IpKind } from "../core/enums";
-import { QUALITY, QUALITY_PROBE, COVERAGE, CONN_OBS } from "../px/regions";
+import { QUALITY, qualityOf, COVERAGE, CONN_OBS } from "../px/regions";
 import { aliveList, ensurePool, nsOf, AliveBoard } from "../px/pool";
 import { SOCKS } from "../px/selector";
 import { geoLabel, probeSni } from "../px/probe";
@@ -280,7 +280,7 @@ export class RegionsView {
       QUALITY.recheckMark(qk);
       const [h] = splitRelay(key, 443);
       const fam = h.includes(":") ? IpFamily.IPv6 : IpFamily.IPv4;
-      const q = await QUALITY_PROBE.qualityOf(key, h, this.c.budget, fam);
+      const q = await qualityOf(key, h, this.c.budget, fam);
       // 质量只查 IP 情报不拨节点；补一次拨号（扣 connect 不占 sub），黑洞节点当场暴露
       const [rh, rp] = splitRelay(key, 443);
       const sn = await probeSni(rh, rp, "www.cloudflare.com", CONNECT_MS, this.c.budget);

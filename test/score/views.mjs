@@ -583,10 +583,10 @@ export async function case276({ ok, W, eq }) {
     eq("[371] 6h 后过期", co.rttOf("HKG", "1.2.3.4:443", "x.com", now371 + 6 * 3600_000 + 1), null);
   }
 
-  // QualityProbe：缓存命中零请求；注入的 io 未调用即证明
+  // qualityOf：缓存命中零请求；注入的 io 未调用即证明（7.436 起由类改为自由函数）
   {
     const t = new W.IpQualityTable();
-    const probe = new W.QualityProbe();
+    const probe = { qualityOf: W.qualityOf };
     const saveRows = W.QUALITY.rows;
     t.note("cached:443", qGood, now371);
     W.QUALITY.rows = t.rows;
@@ -904,7 +904,7 @@ export async function case282({ regionsSource, readView, fs, ok, eq, W }) {
   ok("[378] 组级也按已探优先", tools378.includes("a[1].some((r) => r.probed) ? 1 : 0"));
   // 探测按钮：指定网站（runTfb）+ 逐节点质量重探（qualityOf），且都限流
   ok("[378] 指定网站探测复用 tfb", tools378.includes("runTfb({ env: this.c.env }, site, n, list"));
-  ok("[378] 质量重探复用 probe", tools378.includes("QUALITY_PROBE.qualityOf(key, h, this.c.budget, fam)"));
+  ok("[378] 质量重探复用 probe", tools378.includes("await qualityOf(key, h, this.c.budget, fam)"));
   ok("[378] 两类探测都限流", tools378.includes('QUALITY.recheckReady(ck, 60_000)') && tools378.includes('QUALITY.recheckReady(qk, 60_000)'));
   ok("[378] 冷却表放进状态持有者且有界", regionsSrc378.includes("readonly recheckCool = new BoundedMap<string, number>"));
   // 模板：指定网站探测表单 + 重探按钮的样式类
