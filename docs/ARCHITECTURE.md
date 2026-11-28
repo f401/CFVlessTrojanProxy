@@ -41,7 +41,7 @@ fetch(request)
      ├─ /admin                      routes/admin
      ├─ /<uuid>/{page,cl,sb,ty,...}  routes/subscription
      ├─ /<uuid>/{proxyip,debug}     routes/tools
-     ├─ /<uuid>/logs                routes/logs
+     ├─ /<uuid>/logs                routes/health（7.438 起 logs 并入 health，同为只读诊断）
      └─ scheduled                   routes/cron（30 分钟一轮；探活默认 ceil(池/4)、上限 min(SCAN_MAX=400, SCAN_SUB=48)；死候选本地记忆后不再占名额）
 ```
 
@@ -49,8 +49,8 @@ fetch(request)
 
 | 归属 | 位置 | 生命周期 |
 |---|---|---|
-| 节点统计 / 游标 / 站点画像 | `NODE_MEMORY` / `SELECTION_MEMORY` / `HOSTS`（独立所有者） | isolate |
-| 选中结果缓存 | `S.curs` / `S.hostRankCache`（30s） | isolate |
+| 节点统计 / 站点画像 | `NODE_MEMORY` / `SELECTION_MEMORY` / `HOSTS`（独立所有者） | isolate |
+| 排行缓存 | `NODE_MEMORY.rankCache`（20 秒 + 大池分片） | isolate |
 | 候选名单 | `px/seed` ↔ KV `px:seed` | 跨 isolate（只传名字，不传统计） |
 | 用量 | `store` PEND → `Meter` DO → KV 快照 | 全局唯一 |
 | 加密密钥 | `KEY_BOX`（模块级常量对象） | isolate |
@@ -71,7 +71,7 @@ tools/check-dead.mjs 死导出（导出函数/常量必须在全仓有真实引�
 tools/doc-audit.mjs 注释 / 类表 / 活文档引用 / 表格列数与反引号 / 文档挂在 import 上 / H6 编号连续 / 版本口径 / JSDoc 类型与签名一致
   · H6 编号必须从 1 连续到最大值（7.231 的第 188 行、7.233 的第 190 行都是漏写，表格语法合法所以没人报）
   · `AGENTS.md` 头部的仓库版本、缺陷数、「差 N 个版本」三者必须与 `src/core/util.ts` 的 `VERSION`、H6 表最大编号对齐
-test/*.mjs        协议 186 / 冒烟 30 / 评分 4309 / 页面 31 / 状态 25 断言 + 8 项逐字节 golden（含数据面模拟）；`src` 与 `types` 的 any 数量均为 0
+test/*.mjs        协议 186 / 冒烟 30 / 评分 4305 / 页面 31 / 状态 25 断言 + 8 项逐字节 golden（含数据面模拟）；`src` 与 `types` 的 any 数量均为 0
 obf/*.js          预处理 + 混淆（Meter 类名保留）
 scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → obf → PUT
 ```
@@ -81,7 +81,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 ## 5 不变量（改代码前先读）
 
 1. `export class Meter` 名字不能变（DO 命名空间绑定），混淆器 `reservedNames: ["^Meter$"]`。
-2. 17 个绑定名不能变；`env.proxyip` 在混淆阶段会被改写成计算属性。
+2. 18 个绑定名不能变；`env.proxyip` 在混淆阶段会被改写成计算属性。
 3. 订阅输出必须逐字节稳定（`test/golden.json`）。
 4. 热路径只做"加字节 + 比阈值 + 发送"，其余搬到 tick。
 5. 账务只在连接收尾结算一次；`nsOk` 必须由成功连接调用（历史上漏掉过，导致节点表永远 n=0）。
@@ -90,8 +90,8 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 8. 落盘前读旧值（seed / snap / usage）必须用 `kvGetStrict`；读失败要跳过写，不能当空表覆盖。
 9. cron 与手动 `?refresh=1` 互斥：`CRON_LOCK` 覆盖整轮 cron，忙时不再排队；
    否则两轮 `cronScan` 会双跑探活、双写 seed、互相覆盖 `poolIdx`。
-10. 排行缓存只准用 `invalidateRank()` 作废，不要手写 `S.rankCache.t = 0` ——
-    两个模式的时间戳要一起清，漏一个就会出现"失败后排行不失效"。
+10. 排行缓存只准用 `NodeStatsTable.invalidateRank()` 作废（它清 `NODE_MEMORY.rankCache`），
+    不要手写时间戳 —— 两个模式要一起清，漏一个就会出现「失败后排行不失效」。
 
 ## 6 目录之外的约定
 
@@ -170,7 +170,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 每条含 `t / k / ms / dn / up / ok`；落盘走现有的 `/add` 批次（`body.cl`），不新增请求。
 目标流量：`?sz=i|s|b` 随连接声明 S，见 docs/history/评分机制_final.md §2.4。
 
-## 7 代码风格
+## 8 代码风格
 
 - 统一由 Prettier 格式化：`printWidth=120`、2 空格、双引号、分号；配置在 `.prettierrc.json`。
 - 修改后跑 `npm run format`，再跑 `npm run arch && npm test`。
@@ -185,7 +185,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 - 落盘前读旧值必须用 `kvGetStrict`：读失败要跳过写，不能把"读不到"当"空表"，
   否则 seed / snap / usage 快照会用空对象覆盖别的 isolate 的数据。
 
-## 8 设计取舍：有状态服务用类，纯计算用函数
+## 9 设计取舍：有状态服务用类，纯计算用函数
 
 - **有状态边界用类**：`IsolateContext`（入口元数据）、`SeedStore`（信誉表）、
   `Selector`（选路策略）、`Meter`（DO 账本）、`Connection`（单连接生命周期）。
@@ -195,6 +195,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
   领域所有者/DO，而不是无状态模块实例；纯函数直接调用比服务定位器更轻。
 - **选择器放 `px/`**：它需要“当前中转出口/存活池”，放在中转域后 `nodes` 不再反向依赖 `px`，
   这是 v7 拆环的关键一步。
+- **route 层的读模型**：`routes/*` 只做 HTTP 形状（分页、JSON、表单），凡是要把“池子 + 存活表 +
+  若干事实表”装配成展示数据的，放 `route/` 下的读模型（`panel-rows.ts`）。理由：路由文件曾经
+  各自动手 import 4–7 层（`debug.ts` 一度 28 个 import），改一张表要动一圈；装配口径收在一处后，
+  新增一张事实表只改读模型。缓存跟着读模型走，放进 `routes/` 会造成 `route → routes` 反向依赖。
 
 ## 类与职责（OOP 视图）
 
@@ -295,7 +299,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `DebugMeterProbes` | `src/routes/debug.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
 | `DebugTables` | `src/routes/debug.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：`read()` 只按固定顺序编排，每个分支一个方法、只认自己那个参数键（`?blk=` 等自己取参数、自己拼载荷）；只读表、不拨号、不改状态，`&do=1` 时只有 `healthRows()` 与 `connRows()` 会多一次 DO 往返 |
 | `ProxyipView` | `src/routes/proxyip.ts` | `/proxyip` 的六个方法：只读报表（`?day`、`?src`）、两个管理员动作（`?reset` 清表、`?refresh` 跑一轮探活）、默认视图分三段——`liveRows()` 并内存表与跨 isolate 快照并按模式排序、`explain()` 只在 `?why=1` 时算画像与分项、`poolReport()` 只拼字段 |
-| `RegionsView` | `src/routes/tools.ts` | 地区查询、分页、JSON 缓存和 POST 操作编排；展示投影不改写共享基础行；HTML 渲染委托 views/regions.ts；冷启动会载入名单，HTML 可补国家码，不能声明全程零 I/O |
+| `RegionsView` | `src/routes/region-panel.ts` | 地区查询、分页、JSON 缓存和 POST 操作编排；展示投影不改写共享基础行；HTML 渲染委托 views/regions.ts；冷启动会载入名单，HTML 可补国家码，不能声明全程零 I/O |
 | `AdminView`（`admin` 门面） | `src/routes/admin.ts` | `/admin` 的四个分支各占一个方法：登出只清 cookie、登录做挑战-应答与限速、用户操作要读改写整份托管用户表（`cur.ok === false` 时必须拒绝，否则会把缺失用户整份删掉）、面板按用户数扇出 DO 往返并被 `ADMIN_STATS_MAX` 截断 |
 | `RateLimiter`（`RATE_LIMIT`） | `src/edge/auth.ts` | 登录尝试的固定窗口限流：`take` 判「这个来源这一分钟还能不能试」、`reset` 在成功登录后清零、`size` 供诊断；表按 `RL_MAX` 有界（超限只淘汰「计数最小且最旧」的一条，绝不整体清空、绝不淘汰刚写入的来源），7.355 起由类持有而不是裸 `Map` |
 | `SubscriptionRoutes`（`subscription` 门面） | `src/routes/subscription.ts` | 控制页与订阅：`page()` 读用量 + 存活表两次往返、`feed(kind)` 把 clash / sing-box / 明文链接三种格式收成一条路（差别只有渲染器与 content-type，见 `FEEDS` 表）、`stats()` 的 JSON 分支零额外往返、`statsHtml()` 才并跨 isolate 快照；页面直接调用 renderHtml / renderStatsHtml，不再创建无状态页包装 |
@@ -316,6 +320,20 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 
 自由函数集中在 `src/core/{util,net,hist,quota,hosts,hostmem,relay-addr,table,enums,types,facts,hook,state,const,counter,lock,latobs,firstobs,node-snapshot,transport}.ts`（编解码 / SHA-224 / WS / 超时 / 并发 / 环境解析 / 协议名 / 错误文本都在 `util.ts` 一个文件里，7.290 起不再拆分；SHA-224 内部按「补位 `sha224Pad()` / 展开 `sha224Words()` / 压缩 `sha224Mix()`」三步各自成函数，7.338 起）、`src/proxy/protocol.ts`、`src/views/{panel,regions,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。
 
+| `EntryMemory`（`src/core/client-memory.ts`） | `src/core/client-memory.ts` | 入口侧记忆：客户端 IP / 机房的出现次数与命中数，只活在本 isolate |
+| `ErrorMemory`（`src/core/client-memory.ts`） | `src/core/client-memory.ts` | 错误环：本 isolate 最近若干条错误，快照合并时只追加不覆盖 |
+| `NodeMemory`（`src/core/node-memory.ts`） | `src/core/node-memory.ts` | 节点统计表、排行缓存（20 秒 + 大池分片）、在途引用计数 |
+| `RelayDemand`（`src/core/relay-demand.ts`） | `src/core/relay-demand.ts` | 中继需求登记：哪些站点/通道明确要中继，供选路与预算参考 |
+| `IsolateContext`（`ISOLATE`） | `src/core/state.ts` | 入口元数据只留域名与机房码（AppState 与 `S` 已删除） |
+| `TrafficMemory`（`src/core/traffic-memory.ts`） | `src/core/traffic-memory.ts` | 连接漏斗、上下行聚合与累计出流量（`egressB` 用于诊断平台限额） |
+| `PoolMemory`（`src/px/pool-memory.ts`） | `src/px/pool-memory.ts` | 池子行、代际、构建时间、扫描游标、探活统计与冷却起点 |
+| `SelectionMemory`（`src/px/selection-memory.ts`） | `src/px/selection-memory.ts` | 当前/上一个中继、切换时刻与切换计数、失败次数 |
+| `FactSwitches` | `src/route/factflags.ts` | `env.facts` 解析后的开关现值（`none` / `eg` / `eg,ps` / `all`） |
+| `RegionPageCache`（`REGION_CACHE`） | `src/route/panel-rows.ts` | 地区面板的基础行与 JSON 文本缓存，装配口径也在同一文件的读模型里 |
+| `KvWriteState` | `src/store/kv.ts` | KV 写计数、配额耗尽标记与冷却时刻 |
+| `MeterClientState` | `src/store/meter-client.ts` | 计量 DO 的调用计数与响应缓存 |
+| `UsageMemory` | `src/store/usage-memory.ts` | 尚未落盘的用量增量（`rows` / `dirtyBytes`），flush 成功后清零 |
+
 ## 注释约定
 
 - **函数级**：每个函数体上方必须有 `/** 功能 / @param / @returns */`，由 `tools/doc-audit.mjs --max 0` 在 preflight 里强制性把关。
@@ -323,45 +341,12 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 - **HTML 模板不写体内注释**：模板字面量里的 `//` 会原样发给浏览器。`tools/body-audit.mjs` 自动跳过这类函数（body 只有一条 `return \`…\`;`）。
 - 体检：`node tools/body-audit.mjs [--min 12] [--top 30]` 列出「体内零注释的长函数」，靠它维持存量不回流。
 
-## 文档索引
+## 文档在哪
 
-`docs/README.md` 是索引与阅读顺序；下表只列**当前有效**的七份（历史设计稿与逐版测量
-记录统一归档在 `docs/history/`，不进本表，免得读者照着早已落地的方案改代码）。
+索引、阅读顺序与归档规则只在 [`docs/README.md`](README.md) 维护一处，本文件不重复列表。
 
-| 文档 | 用途 |
-|---|---|
-| [docs/v8.md](v8.md) | 设计正稿：事实层 / 判定 / 选路 / 预算 / 迁移 / 证据分级 / 业务 403 安全证明 |
-| [docs/v8实现清单.md](v8实现清单.md) | 一页可勾选的硬规则，每条带数字与 § 出处；H6 表是缺陷台账（编号连续，门禁校验） |
-| [docs/LIMITS.md](LIMITS.md) | 免费计划额度与平台限制实测 |
-| [docs/命名约定.md](命名约定.md) | 命名规则、ALLOW 短名的理由表、模块级实例准入（`tools/check-names.mjs` 的判据来源） |
-| [docs/本地验证.md](本地验证.md) | 哪些能本地验、哪些必须真 CF，以及量测纪律 |
-| [docs/审计覆盖.md](审计覆盖.md) | 审计边界：哪些已系统性看过、哪些只能真机验、哪些判定过不必重开 |
-| [docs/history/](history/) | 历史归档：v6/v7 重构计划、评分算法演进、判定层验收记录、吞吐诊断、节点选择仿真日志 |
-
-## 文档管理约定
-
-- `docs/` 顶层只放**描述当前系统**的文档；一旦某份文档描述的是「当时打算怎么做」，就
-  `git mv` 进 `docs/history/`，并在文件开头标一行「历史文档，勿照此改代码」。
-- 活文档（`ARCHITECTURE.md`、`v8.md`、`LIMITS.md`）里提到的路径、`SC.常量`、裸函数名和
-  类名必须真实存在 —— `tools/doc-audit.mjs` 的 `livingRefs` 会逐个核对，归档文档不参与。
-- 同一件事只在一处写：硬规则进 `v8实现清单.md`，机制与取舍进 `v8.md`，类与归属进本文件，
-  历史证据进 `docs/history/`。
 ## 领域状态所有权
 
-AppState 与 S 已删除。入口元数据只保留域名及机房；低层的跨域观测协议放在 core，计量、池、选路与页面缓存各自持有，不通过一个根对象转发。
-
-| 类 | 文件 | 职责 |
-|---|---|---|
-| `EntryMemory` | `src/core/client-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
-| `ErrorMemory` | `src/core/client-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
-| `NodeMemory` | `src/core/node-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
-| `RelayDemand` | `src/core/relay-demand.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
-| `IsolateContext` | `src/core/state.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
-| `TrafficMemory` | `src/core/traffic-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
-| `PoolMemory` | `src/px/pool-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
-| `SelectionMemory` | `src/px/selection-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
-| `FactSwitches` | `src/route/factflags.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
-| `RegionPageCache` | `src/routes/region-panel.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
-| `KvWriteState` | `src/store/kv.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
-| `MeterClientState` | `src/store/meter-client.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
-| `UsageMemory` | `src/store/usage-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+AppState 与 `S` 已删除：入口元数据只保留域名与机房（`ISOLATE`），其余字段各自归属领域类，
+由 `tools/state-owners.json` 逐字段登记（`tools/check-state-owner.mjs` 防回潮）。
+每个所有者的字段含义写在类里（`tools/check-members.mjs` 保证字段有注释），本文件不再逐类复述。
