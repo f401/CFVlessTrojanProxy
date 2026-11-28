@@ -1,7 +1,7 @@
+import { NODE_MEMORY } from "../core/node-memory";
 // 冷 isolate 起搏：池子里一条存活中继都没有时，就地探几个候选。
 // 与 pool.ts 分开放，是因为 pool.ts 已经贴着单文件 560 行的架构上限。
 import { SC } from "../core/const";
-import { S } from "../core/state";
 import { isCfIp } from "../core/net";
 import { NodeStatsTable } from "../nodes/score";
 import { chunks, probeProxy } from "./probe";
@@ -16,16 +16,16 @@ export class WarmPacer {
 export const WARM = new WarmPacer();
 
 /**
- * 功能：冷 isolate 的按需起搏 —— 一条存活中继都没有时，就地探几个候选写进 `S.alive`。
+ * 功能：冷 isolate 的按需起搏 —— 一条存活中继都没有时，就地探几个候选写进 `NODE_MEMORY.alive`。
  *       没有它，新机房（或被回收过的 isolate）要等 30 分钟一轮的 cron 才有中继可用，
  *       而这段时间里对 CF 托管站点的每个请求都只能直连（实测必 403）。
  * @param env 环境绑定
  * @param n 本轮最多探几个（默认 6，等于免费计划的并发上限）
- * @returns 本次探活成功并写进 `S.alive` 的条数
+ * @returns 本次探活成功并写进 `NODE_MEMORY.alive` 的条数
  */
 export async function seedAlive(env: Env, n = SC.PROBE_CONC): Promise<number> {
   const pool = await ensurePool(env);
-  if (!pool.length || S.alive.size) return 0;
+  if (!pool.length || NODE_MEMORY.alive.size) return 0;
   const now = Date.now();
   // 节流 5 分钟：冷启动只该付一次代价，不能让每个冷请求都烧 6 条连接。
   if (now - (WARM.lastProbeAt || 0) < 300000) return 0;
@@ -43,7 +43,7 @@ export async function seedAlive(env: Env, n = SC.PROBE_CONC): Promise<number> {
       const k = seg[j].h + ":" + seg[j].p;
       bumpProbeBad(k, !!(x && !x.bad));
       if (!x || x.bad) continue;
-      S.alive.set(k, { h: x.h, p: x.p, cc: (x as { cc?: string }).cc || "", ms: x.ms });
+      NODE_MEMORY.alive.set(k, { h: x.h, p: x.p, cc: (x as { cc?: string }).cc || "", ms: x.ms });
       // 不要把探活的 RTT 写进「真实首字节」的两个矩（nsLatency）：它是 ClientHello→ServerHello
       // 到中继的往返，比经中继的 TTFB 小一个数量级。写进去以后，第一条真实请求会被当成
       // 成倍的延迟回归 —— nsLatency 里的 CUSUM 立刻越线，把这个刚起搏出来的中继冻结 60 秒，

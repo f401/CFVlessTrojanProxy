@@ -172,7 +172,7 @@ export class EgFacts extends FactTable<EgEntry, EgRow> {
 
   /**
    * 功能：列出已知 v4 出口，最近的在前。
-   * 用途：冷 isolate 里 `S.alive` 还是空的时候，用它兜底挑一条「已验证能把页面送回来」的中继，
+   * 用途：冷 isolate 里 `NODE_MEMORY.alive` 还是空的时候，用它兜底挑一条「已验证能把页面送回来」的中继，
    * 而不是退回直连（CF→CF 直连几乎必被自家边缘拒）。
    * @param {number} now 当前时间（用于过滤过期行）
    * @returns {string[]} 中继 IP 列表

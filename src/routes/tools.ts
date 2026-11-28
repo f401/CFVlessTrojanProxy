@@ -1,3 +1,8 @@
+import { POOL_MEMORY } from "../px/pool-memory";
+import { REGION_CACHE } from "./region-cache";
+import { ISOLATE } from "../core/state";
+import { SEED_STORE } from "../px/seed";
+import { NODE_MEMORY } from "../core/node-memory";
 /**
  * 诊断/浏览类只读路由：proxyip（池子报表）、debug（内部探针）、regions（地区节点浏览器）。
  */
@@ -5,7 +10,6 @@ export { proxyip } from "./proxyip";
 export { debug } from "./debug";
 
 import { IpFamily, IpKind } from "../core/enums";
-import { S } from "../core/state";
 import { QUALITY, QUALITY_PROBE, COVERAGE, CONN_OBS } from "../px/regions";
 import { AliveBoard, aliveList, ensurePool, nsOf } from "../px/pool";
 import { SOCKS } from "../px/selector";
@@ -14,7 +18,9 @@ import { html } from "../edge/respond";
 import { splitRelay, relayIpOf } from "../core/relay-addr";
 import { CONNECT_MS } from "../core/util";
 import type { UserCtx } from "../edge/types";
-import { escapeHtml, renderTemplate } from "../views/panel";
+import { renderRegionsPage, levelBadge, kindLabel, ccTag } from "../views/regions";
+import type { RegionNodeRow } from "../views/regions";
+export { levelBadge, kindLabel, familyLabel, ccTag, flagLabel, egLabel, psLabel, dnsLabel, groupRows } from "../views/regions";
 import { regionConfigList, saveUsers } from "../proxy/protocol";
 import { runTfb } from "../route/tfb";
 import { EG } from "../route/egfacts";
@@ -22,7 +28,6 @@ import { PS } from "../route/psfacts";
 import { DEAD } from "../route/deadfacts";
 import { BLK } from "../route/blkfacts";
 import { DNS } from "../route/dnsfacts";
-import regionsTpl from "../views/html/regions.html";
 
 /** RFC 5737 文档地址段：不浪费子请求查、也避免测试假 IP 污染展示缓存 */
 function isDocIp(h: string): boolean {
@@ -33,8 +38,8 @@ function isDocIp(h: string): boolean {
 async function ensureIsoCountries(): Promise<number> {
   // 只查 IPv4 出口（v6 字面量含冒号，第三方源对它的字段不稳定），alive ∪ seed 去重
   const hosts = new Set<string>();
-  for (const n of S.alive.values()) if (n.h && !n.h.includes(":")) hosts.add(n.h);
-  const byColo = (S.seed && S.seed.byColo) || {};
+  for (const n of NODE_MEMORY.alive.values()) if (n.h && !n.h.includes(":")) hosts.add(n.h);
+  const byColo = (SEED_STORE.document && SEED_STORE.document.byColo) || {};
   for (const bucket of Object.values(byColo)) {
     for (const n of bucket?.nodes || []) if (n.h && !n.h.includes(":")) hosts.add(n.h);
   }
@@ -62,140 +67,26 @@ export function nodeCheckConclusion(status: number, bytes: number): string {
   return "无应答（连不上或超时）";
 }
 
-/** 单个节点在浏览器里的展示行 */
-export interface RegionNodeRow {
-  key: string;        // host:port 键（订阅 `?node=` 用这个值）
-  country: string;    // 国家码，空 = 未知地区
-  family: IpFamily;   // v4 / v6
-  alive: boolean;     // 是否在本 isolate 存活表
-  source: string;     // 来源：alive / seed / 两者
-  kind: IpKind;       // 质量种类，unknown = 未探过
-  level: string;      // good / normal / risky
-  proxy: boolean;     // 是否代理
-  vpn: boolean;       // 是否 VPN
-  org: string;        // IP 所属组织（客观属性，随质量表跨 isolate 传播）
-  reach: number;      // 连通实测：1=可用 / -1=黑洞 / 0=未测（本 isolate CONN_OBS，不跨 isolate）
-  probed: boolean;    // 覆盖账本里记过探测
-  rtt: number | null; // 目标站点延迟（毫秒，null = 没测）
-  egFamily: number;   // 出口族事实 4/6/0（0=未知）
-  psOk: number;       // 站点成功率 0..1，-1=无样本
-  dead: boolean;      // 是否被判死（连接层连不上）
-  blkPenalty: number; // 封锁代价倍数，1=无封锁
-  dnsV6: number;      // DNS 事实 1=有 AAAA/0=无/-1=不知道
-}
-
-/** 功能：把质量等级渲染成带文字徽章（不只靠颜色）；@param level 质量等级；@returns 已转义 HTML */
-export function levelBadge(level: string): string {
-  const map: Record<string, [string, string]> = {
-    good: ["g", "良好"],
-    normal: ["n", "一般"],
-    risky: ["r", "风险"],
-    unknown: ["u", "未探"],
-  };
-  const [cls, text] = map[String(level)] || map.unknown;
-  return `<span class="b ${cls}">${text}</span>`;
-}
-
-/** 功能：线路类型枚举翻译成中文标签并附原始值；@param kind 线路类型；@returns 已转义 HTML */
-export function kindLabel(kind: IpKind): string {
-  const map: Record<string, string> = {
-    residential: "住宅",
-    mobile: "移动",
-    business: "企业",
-    hosting: "机房",
-    unknown: "未知",
-  };
-  const raw = String(kind);
-  return `${escapeHtml(map[raw] || "未知")} <span class="mu">${escapeHtml(raw)}</span>`;
-}
-
-/** 功能：地址族可读标签；@param f 地址族枚举；@returns "IPv4" 或 "IPv6" */
-export function familyLabel(f: IpFamily): string {
-  return f === IpFamily.IPv6 ? "IPv6" : "IPv4";
-}
-
 /** 功能：从存活表/seed 名单里查一个通道（IP / host:port / direct）的国家码，给探测结果标注出口国家。；@param relay 通道名："direct" / 纯 IP / host:port；@returns 两位大写国家码；查不到返回空串 */
 export function countryOf(relay: string): string {
-  if (relay === "direct") return String(S.colo || "").toUpperCase();
+  if (relay === "direct") return String(ISOLATE.colo || "").toUpperCase();
   const [host] = splitRelay(relay, 443);
   // 展示优先真实 ISO 码：alive.cc / seed 桶键是机场码，不能当出口国家
   const iso = QUALITY.getIso(host);
   if (iso) return iso;
   // 先按完整 key 命中，再按 host 扫存活表（探测结果可能只带 IP 不带端口）
-  const exact = S.alive.get(relay) || S.alive.get(host + ":443");
+  const exact = NODE_MEMORY.alive.get(relay) || NODE_MEMORY.alive.get(host + ":443");
   if (exact?.cc) return String(exact.cc).toUpperCase();
-  for (const node of S.alive.values()) {
+  for (const node of NODE_MEMORY.alive.values()) {
     if (node.h === host && node.cc) return String(node.cc).toUpperCase();
   }
-  const byColo = (S.seed && S.seed.byColo) || {};
+  const byColo = (SEED_STORE.document && SEED_STORE.document.byColo) || {};
   for (const [cc, bucket] of Object.entries(byColo)) {
     for (const n of bucket?.nodes || []) {
       if ((n.h === host || n.k === relay) && (n.cc || cc)) return String(n.cc || cc).toUpperCase();
     }
   }
   return "";
-}
-
-/** 功能：把国家码渲染成探测结果里的方括号前缀（查不到就不显示，避免每行都挂「??」）。；@param cc 两位国家码或空串；@returns "[US] " 或空串 */
-export function ccTag(cc: string): string {
-  return cc ? "[" + cc + "] " : "";
-}
-
-/** 功能：代理/VPN 标记（只标记、不降级 —— 与 IpLevel 的判定口径一致）。；@param r 节点展示行；@returns "代理 VPN" / "—" */
-export function flagLabel(r: RegionNodeRow): string {
-  const flags: string[] = [];
-  if (r.proxy) flags.push("代理");
-  if (r.vpn) flags.push("VPN");
-  return flags.length ? escapeHtml(flags.join(" ")) : "—";
-}
-
-/** 功能：出口族事实的可读标签（0 = 未知）。；@param f 出口族 4 / 6 / 0；@returns 可读文本 */
-export function egLabel(f: number): string {
-  return f === 4 ? "v4" : f === 6 ? "v6" : "—";
-}
-
-/**
- * 功能：站点成功率事实的可读标签，-1 表示无样本。
- * @param p 0..1 的成功率或 -1
- * @returns 可读文本
- */
-export function psLabel(p: number): string {
-  return p < 0 ? "—" : Math.round(p * 100) + "%";
-}
-
-/**
- * 功能：DNS AAAA 事实标签（1 有 / 0 无 / -1 不知道）。
- * @param v DNS 事实值
- * @returns 可读文本
- */
-export function dnsLabel(v: number): string {
-  return v === 1 ? "有" : v === 0 ? "无" : "—";
-}
-
-/**
- * 功能：把节点行按国家码分组，组按码字典序、组内沿用传入顺序（调用方已按质量排好）。
- * @param rows 节点展示行
- * @returns 分组数组（地区码可能为空，渲染时用「未知」占位）
- */
-export function groupRows(rows: RegionNodeRow[]): { country: string; rows: RegionNodeRow[] }[] {
-  const groups = new Map<string, RegionNodeRow[]>();
-  // 所有国家都分桶（含未探过的），每个桶都要有勾选框：冷 isolate 里大部分节点没探过，
-  // 若把未探的单独扔掉勾选框，用户就没法选地区了。已探/未探的先后用「组」和「行」两级排序表达。
-  for (const r of rows) {
-    const k = r.country || "??";
-    const list = groups.get(k);
-    if (list) list.push(r);
-    else groups.set(k, [r]);
-  }
-  // rows() 已按 probed/alive/质量 排好，这里组内顺序原样保留；
-  // 组级排序：有已探节点的国家在前，全未探的国家在后，各自按国家码字典序。
-  return [...groups.entries()]
-    .sort((a, b) => {
-      const pa = a[1].some((r) => r.probed) ? 1 : 0;
-      const pb = b[1].some((r) => r.probed) ? 1 : 0;
-      return pb - pa || a[0].localeCompare(b[0]);
-    })
-    .map(([country, list]) => ({ country, rows: list }));
 }
 
 /**
@@ -224,7 +115,7 @@ export class RegionsView {
    */
   private seedNodes(): Map<string, string> {
     const out = new Map<string, string>();
-    const byColo = (S.seed && S.seed.byColo) || {};
+    const byColo = (SEED_STORE.document && SEED_STORE.document.byColo) || {};
     for (const [cc, bucket] of Object.entries(byColo)) {
       for (const n of bucket?.nodes || []) {
         const k = n.k || `${n.h}:${n.p}`;
@@ -242,17 +133,11 @@ export class RegionsView {
   private rows(): RegionNodeRow[] {
     // 重建 1600 行 + ICU 排序逼近 10ms CPU（TTL 到期即 1102）；缓存 30 秒、命中只看寿命，后台 probe 改 alive 不重建动失效）。
     const now = Date.now();
-    const cache = S.regionRowsCache;
-    let rows = cache && now - cache.t < 30000 ? (cache.rows as RegionNodeRow[]) : null;
+    let rows = REGION_CACHE.freshRows(now);
     if (!rows) {
-      // 指纹只在重建时算一次：热请求每次 join 1600 个 key 也是白花 CPU
-      const aliveSig = [...S.alive.keys()].join(",");
-      const poolSig = S.pool.map((x) => `${x.h}:${x.p}`).join(",");
-      const seedSig = Object.values(S.seed?.byColo || {}).map((c) => (c.nodes || []).map((n) => n.k).join(",")).join("|");
-      const key = `${aliveSig}|${poolSig}|${seedSig}`; void key; // 指纹仅作写回标记，不参与命中：后台 probe 改 alive 让 key 每次变 → 每次重建 → 1102
       const alive = new AliveBoard().list();
       const seeds = this.seedNodes();
-      const keys = [...new Set([...alive.map((n) => `${n.h}:${n.p}`), ...seeds.keys(), ...S.pool.map((x) => `${x.h}:${x.p}`)])];
+      const keys = [...new Set([...alive.map((n) => `${n.h}:${n.p}`), ...seeds.keys(), ...POOL_MEMORY.rows.map((x) => `${x.h}:${x.p}`)])];
       // alive 上限 800，逐 key find() 是 64 万次拼接；Map 压成 O(n)。
       const liveByKey = new Map<string, (typeof alive)[number]>(alive.map((n) => [`${n.h}:${n.p}`, n]));
       rows = keys.map((key) => {
@@ -289,7 +174,7 @@ export class RegionsView {
           (a.country < b.country ? -1 : a.country > b.country ? 1 : 0) ||
           (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
       );
-      S.regionRowsCache = { t: now, key, rows };
+      REGION_CACHE.rows = { t: now, rows };
     }
     return rows;
   }
@@ -298,18 +183,17 @@ export class RegionsView {
   private decorate(rows: RegionNodeRow[], target: string): RegionNodeRow[] {
     // 只补切片：整表 1600 行 × 5 次查表就是 1102 的来源之一
     const now = Date.now();
-    const coloNow = S.colo || "??";
+    const coloNow = ISOLATE.colo || "??";
     const v6 = target ? DNS.v6Of(target, now) : -1;
-    for (const r of rows) {
+    // 基础行由缓存共享；派生站点字段写入新对象，避免本次展示污染下一次请求。
+    return rows.map((r) => {
       const ip = relayIpOf(r.key);
       const reachRow = CONN_OBS.get(coloNow, r.key, "@reach", now);
-      r.reach = reachRow ? (reachRow.ok ? 1 : -1) : 0;
-      r.rtt = target ? CONN_OBS.rttOf(coloNow, r.key, target, now) : null;
-      r.psOk = target ? PS.okOf(target, ip, now) : -1;
-      r.blkPenalty = target ? BLK.penOf(target, ip, now) : 1;
-      r.dnsV6 = v6;
-    }
-    return rows;
+      return { ...r, reach: reachRow ? (reachRow.ok ? 1 : -1) : 0,
+        rtt: target ? CONN_OBS.rttOf(coloNow, r.key, target, now) : null,
+        psOk: target ? PS.okOf(target, ip, now) : -1,
+        blkPenalty: target ? BLK.penOf(target, ip, now) : 1, dnsV6: v6 };
+    });
   }
 
   /** 功能：JSON 输出（?format=json 显式请求，?limit= 可收窄）；@param rows 展示行；@param target 站点；@returns JSON 响应 */
@@ -325,92 +209,25 @@ export class RegionsView {
     return new Response(text, { headers: { "content-type": "application/json;charset=utf-8" } });
   }
 
-  /** 功能：把分组节点渲染成表格；@param rows 展示行；@param selected 已选地区；@param pinnedSelected 已选节点；@param withRtt 显示延迟；@returns HTML */
-  private groupsHtml(rows: RegionNodeRow[], selected: Set<string>, pinnedSelected: Set<string>, withRtt: boolean, postAction: string): string {
-    const parts: string[] = [];
-    void postAction; // 按钮走面板脚本 fetch，不需要 formaction
-    // 每国一个勾选框+表：回填勾选，避免保存时丢掉已选地区
-    for (const g of groupRows(rows)) {
-      // 每个国家（含全未探的国家）都给勾选框：冷 isolate 里也必须能选地区
-      const cc = escapeHtml(g.country);
-      const checked = selected.has(g.country) ? " checked" : "";
-      const rttHead = withRtt ? "<th>到站延迟</th><th>成功率</th><th>封锁</th>" : "";
-      const body = g.rows
-        .map((r) => {
-          // 每个字段都过 escapeHtml；延迟是数字，转成字符串后同样转义
-          const rtt = withRtt
-            ? `<td>${r.rtt == null ? "—" : escapeHtml(Math.round(r.rtt) + " ms")}</td><td>${escapeHtml(psLabel(r.psOk))}</td><td>${r.blkPenalty > 1 ? "封锁" : "—"}</td>`
-            : "";
-          // type=button + data-key 避开 submit 竞态；value 带 key，网站走 checkSite 字段
-          const recheck = `<td><button type="button" name="op" value="requality" data-probe="1" data-key="${escapeHtml(r.key)}" class="lnkbtn">重探质量</button></td>`;
-          const nodecheck = `<td><button type="button" name="op" value="nodecheck:${escapeHtml(r.key)}" data-probe="1" class="lnkbtn">测连通</button></td>`;
-          const pinnedChecked = pinnedSelected.has(r.key) ? " checked" : ""; // 回填已 pin；保存后进手动组
-          const [exitIp] = splitRelay(r.key, 443); // 出站 IP 单独成列，便于确认出口地址
-          return `<tr data-node="${escapeHtml(r.key)}" data-probed="${r.probed ? 1 : 0}" data-reach="${r.reach > 0 ? 1 : r.reach < 0 ? -1 : 0}" data-cc="${escapeHtml(g.country)}" data-search="${escapeHtml((r.key + " " + r.country + " " + r.org + " " + r.source).toLowerCase())}">
-            <td><input type="checkbox" name="pinnedNodes" value="${escapeHtml(r.key)}"${pinnedChecked}></td>
-            <td class="u">${escapeHtml(r.key)}</td>
-            <td>${escapeHtml(r.country || "—")}</td>
-            <td class="ipx">${escapeHtml(exitIp)}</td>
-            <td data-cell="org">${escapeHtml(r.org || "—")}</td>
-            <td data-cell="level">${levelBadge(r.level)}</td>
-            <td data-cell="kind">${kindLabel(r.kind)}</td>
-            <td>${familyLabel(r.family)}</td>
-            <td>${egLabel(r.egFamily)}</td>
-            <td>${r.dead ? "判死" : "—"}</td>
-            <td>${withRtt ? escapeHtml(dnsLabel(r.dnsV6)) : "—"}</td>
-            <td>${flagLabel(r)}</td>
-            <td class="mu" data-cell="source">${escapeHtml(r.source)}${r.probed ? " · 已覆盖" : ""}${r.reach > 0 ? " · 可用" : r.reach < 0 ? " · 黑洞" : ""}</td>${rtt}${recheck}${nodecheck}
-          </tr>`;
-        })
-        .join("");
-      const check = `<input type="checkbox" name="regions" value="${cc}"${checked}>`;
-      const probedN = g.rows.filter((r) => r.probed).length;
-      const groupBadge = probedN ? `<span class="b g">已知 ${probedN}</span>` : `<span class="b u">未探测</span>`;
-      parts.push(`<h2 class="cb cgroup" data-cc="${cc}"><span class="caret">▾</span>${check} ${cc} ${groupBadge} <span class="mu">${g.rows.length} 个节点</span></h2>
-        <div class="tw"><table><tr><th>选</th><th>节点</th><th>国家</th><th>出站 IP</th><th>组织</th><th>质量</th><th>类型</th><th>族</th><th>出口族</th><th>判死</th><th>DNS</th><th>标记</th><th>来源</th>${rttHead}<th>操作</th><th>连通测试</th></tr>${body}</table></div>`);
-    }
-    return parts.join("") || '<div class="empty">本 isolate 还没有探到任何节点 · <a href="?rebuild=1">重建池子</a> 或稍后刷新</div>';
-  }
-
   /** 功能：渲染自助面板 HTML；@param rows 展示行；@param target 站点；@returns HTML 响应 */
   private htmlView(rows: RegionNodeRow[], target: string, page: number, pages: number, total: number): Response {
-    // 只回填当前用户自己的地区/节点数；其他用户配置和表单 action 一律不含
+    // 查询编排只组装当前用户的只读数据；HTML 与安全转义由视图层负责。
     const me = this.c.auth.list.find((x) => x.id === this.c.id);
-    const selected = new Set((me?.regions || []).map((x) => String(x).toUpperCase()));
-    const pinnedSelected = new Set((me?.pinnedNodes || []).map((x) => String(x)));
-    const back = "/" + encodeURIComponent(this.c.id) + (this.c.pageKey ? "?k=" + encodeURIComponent(this.c.pageKey) : "");
     const cov = COVERAGE.stats(rows.map((r) => r.key));
-    // 模板占位符全部 escapeHtml；groupsHtml 由分组函数自己保证转义
-    const action = "/" + encodeURIComponent(this.c.id) + "/regions";
-    const body = renderTemplate(regionsTpl, {
-      idShort: escapeHtml(this.c.id.slice(0, 8)),
-      coverageText: `本页 已知 ${cov.total} 节点 / 覆盖 ${cov.probed}`,
-      jsonLink: escapeHtml(action + "?format=json" + (target ? "&site=" + encodeURIComponent(target) : "")),
-      backLink: escapeHtml(back),
-      postAction: escapeHtml(action),
-      // 给面板脚本 fetch 用：JSON 字符串字面量（含引号），action 由 UUID 构造不含引号，安全
-      postActionJson: JSON.stringify(action),
-      siteValue: escapeHtml(target),
-      topNValue: escapeHtml(String(me?.regionTopN || 3)),
-      pageInfo: `第 ${page}/${pages} 页 · 共 ${total} 节点`,
-      prevHref: escapeHtml(action + "?page=" + (page - 1) + (target ? "&site=" + encodeURIComponent(target) : "")),
-      nextHref: escapeHtml(action + "?page=" + (page + 1) + (target ? "&site=" + encodeURIComponent(target) : "")),
-      hasPrev: page > 1 ? "1" : "",
-      hasNext: page < pages ? "1" : "",
-      groupsHtml: this.groupsHtml(rows, selected, pinnedSelected, !!target, action),
-      s5Text: escapeHtml(`通用出口（公共 SOCKS5）：${SOCKS.snap().n} 条 · 已验证 ${SOCKS.snap().ok} 条`),
-    });
-    return html(body);
+    const socks = SOCKS.snap();
+    return html(renderRegionsPage({ rows, target, page, pages, total, userId: this.c.id,
+      pageKey: this.c.pageKey || "", regions: me?.regions || [], pinnedNodes: me?.pinnedNodes || [],
+      topN: me?.regionTopN || 3, coveredCount: cov.probed, socksCount: socks.n, socksOk: socks.ok }));
   }
 
   /** 功能：POST 手动探测，指定网站走 runTfb、逐节点走质量重探；@returns 结果文本或等待提示 */
   private async probe(f: FormData): Promise<Response> {
     const op = String(f.get("op") || "");
     // POST 可能落到没 GET 过的 isolate：先惰性载入 alive/seed（aliveList 带 30 分钟缓存）。
-    if (this.c.env && !S.alive.size && !(S.seed.byColo && Object.keys(S.seed.byColo).length)) {
+    if (this.c.env && !NODE_MEMORY.alive.size && !(SEED_STORE.document.byColo && Object.keys(SEED_STORE.document.byColo).length)) {
       await aliveList(this.c.env);
     }
-    if (this.c.env && !S.pool.length) await ensurePool(this.c.env); // 冷 isolate 池空则载入，否则「列全池」只剩 alive
+    if (this.c.env && !POOL_MEMORY.rows.length) await ensurePool(this.c.env); // 冷 isolate 池空则载入，否则「列全池」只剩 alive
     await ensureIsoCountries();
     if (op === "socks") { // 公共 SOCKS5 池：refill=1 先抓列表，再实测验证若干条（每条一次 connect）
       if (String(f.get("refill") || "") === "1") await SOCKS.refill(this.c.env);
@@ -454,7 +271,7 @@ export class RegionsView {
       const [rh, rp] = splitRelay(key, 443);
       const sn = await probeSni(rh, rp, "www.cloudflare.com", CONNECT_MS, this.c.budget);
       const reachable = !!sn.hs && !sn.err;
-      CONN_OBS.note(S.colo || "??", key, "@reach", reachable ? 200 : 0, sn.hs || 0, fam, Date.now());
+      CONN_OBS.note(ISOLATE.colo || "??", key, "@reach", reachable ? 200 : 0, sn.hs || 0, fam, Date.now());
       const tags = [String(q.level), String(q.kind), q.proxy ? "代理" : "", q.vpn ? "VPN" : ""].filter(Boolean);
       const cc = ccTag(countryOf(key));
       // 面板按钮带 json=1：返回结构化结果供前端回填表格对应行，不跳转；文本路径保持不变（兼容旧测试/脚本）
@@ -506,7 +323,9 @@ export class RegionsView {
     const chosen = regionConfigList(cur, this.c.id, regions, topN, targetHost, pinnedNodes);
     if (!chosen.ok) return new Response(chosen.err, { status: 404 });
     await saveUsers(this.c.env, chosen.list);
-    return new Response(null, { status: 303, headers: { location: "/" + encodeURIComponent(this.c.id) + "/regions" } });
+    // 保存后的跳转仍需页面口令，否则配置成功却落到 403；保留无口令部署的原地址。
+    const suffix = this.c.pageKey ? "?k=" + encodeURIComponent(this.c.pageKey) : "";
+    return new Response(null, { status: 303, headers: { location: "/" + encodeURIComponent(this.c.id) + "/regions" + suffix } });
   }
 
   /**
@@ -520,10 +339,10 @@ export class RegionsView {
       return this.post();
     }
     // 冷 isolate 先载名单再渲染，否则面板恒空；aliveList 自带 30 分钟缓存，暖 isolate 几乎零成本
-    if (this.c.env && !S.alive.size && !(S.seed.byColo && Object.keys(S.seed.byColo).length)) {
+    if (this.c.env && !NODE_MEMORY.alive.size && !(SEED_STORE.document.byColo && Object.keys(SEED_STORE.document.byColo).length)) {
       await aliveList(this.c.env);
     }
-    if (this.c.env && !S.pool.length) await ensurePool(this.c.env); // 冷 isolate 池空则载入，否则「列全池」只剩 alive
+    if (this.c.env && !POOL_MEMORY.rows.length) await ensurePool(this.c.env); // 冷 isolate 池空则载入，否则「列全池」只剩 alive
     // JSON 只回原始行、不带补码出来的国家名：冷 isolate 上这张表要发一次 ip-api 子请求（实测 3 并发 42% 吃 503）
     const wantJson = this.c.url.searchParams.get("format") === "json";
     if (!wantJson) await ensureIsoCountries();
@@ -535,15 +354,15 @@ export class RegionsView {
       const rawLimit = this.c.url.searchParams.get("limit");
       const limit = rawLimit === null ? 200 : Math.max(0, Number(rawLimit) || 0);
       const jkey = target + "|" + limit;
-      const hitJson = S.regionJsonCache;
       const nowJson = Date.now();
+      const hitJson = REGION_CACHE.freshJson(jkey, nowJson);
       // 序列化结果同样缓存 30 秒：行缓存省掉了重建，但 650 KB 的 stringify 与覆盖率统计每次都要重算
-      if (hitJson && hitJson.key === jkey && nowJson - hitJson.t < 30000) {
-        return new Response(hitJson.text, { headers: { "content-type": "application/json;charset=utf-8" } });
+      if (hitJson !== null) {
+        return new Response(hitJson, { headers: { "content-type": "application/json;charset=utf-8" } });
       }
       const respJson = this.jsonView(this.decorate(limit > 0 ? rows.slice(0, limit) : rows, target), target);
       const bodyJson = await respJson.text();
-      S.regionJsonCache = { t: nowJson, key: jkey, text: bodyJson };
+      REGION_CACHE.json = { t: nowJson, key: jkey, text: bodyJson };
       return new Response(bodyJson, { headers: respJson.headers });
     }
     // 全池可达 1600 条：服务端分页，避免一次性渲染数 MB HTML；JSON 仍返回全量

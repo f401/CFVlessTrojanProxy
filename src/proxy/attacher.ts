@@ -1,6 +1,6 @@
+import { RELAY_DEMAND } from "../core/relay-demand";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
-import { S } from "../core/state";
 import { SC } from "../core/const";
 import { trimAged } from "../core/hostmem";
 import { cnt } from "../core/counter";
@@ -226,8 +226,8 @@ export class Attacher {
     // 窗口读 SC.PX_LEARN —— 7.226 之前这里内联 6 * 3600e3，judge 里另有一份 21_600_000。
     // 上限用 SC.PX_MAX：以前这里手写一段「先清过期、再删最旧一条」，而 judge 写
     // 同一张表的两条路径完全绕过了它（7.182 统一成 trimAged，按最早过期先删）。
-    S.needPx.set(host, Date.now() + SC.PX_LEARN);
-    trimAged(S.needPx, SC.PX_MAX);
+    RELAY_DEMAND.set(host, Date.now() + SC.PX_LEARN);
+    trimAged(RELAY_DEMAND, SC.PX_MAX);
     logErr(`empty close -> proxyip ${px.host}`, host);
     if (checkTarget(px.host, px.port)) {
       this.endClient(clientSocket, 1011, "proxyip blocked");

@@ -7,7 +7,6 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 const W = await import(process.env.BUNDLE ? pathToFileURL(resolve(process.env.BUNDLE)).href : "../test/_bundle.mjs");
 
-const S = W.S;
 const MB = 1048576;
 
 /* ---------- 可控时钟 + 可复现随机 ---------- */
@@ -44,7 +43,7 @@ const ENV = { pxDwellMin: 0, pxShadow: process.env.PXSHADOW === undefined ? 0.05
 if (process.env.RANK === "raw") {
   const gate = Number(process.env.GATE || 0.02);
   W.SEL.pick = (_env, mode) => {
-    const list = W.candsFor(mode);
+    const list = W.CANDS.list(mode);
     if (!list.length) return "";
     let best = "", bv = Infinity;
     for (const x of list) {
@@ -62,8 +61,8 @@ if (process.env.RGN === "fast") {
   const gate = Number(process.env.RGN_GATE || 0.08);
   W.SEL.region = async (_env, cc, mode, avoid = "") => {
     const want = String(cc || "").toUpperCase();
-    const list = W.candsFor(mode).filter((r) => {
-      const a = S.alive.get(r.k);
+    const list = W.CANDS.list(mode).filter((r) => {
+      const a = W.NODE_MEMORY.alive.get(r.k);
       return a && String(a.cc || "").toUpperCase() === want && r.k !== avoid;
     });
     if (!list.length) return null;
@@ -75,7 +74,7 @@ if (process.env.RGN === "fast") {
       if (v < bv) { bv = v; best = r.k; }
     }
     if (!best) best = list[0].k;
-    return S.alive.get(best) || null;
+    return W.NODE_MEMORY.alive.get(best) || null;
   };
 }
 
@@ -96,19 +95,19 @@ if (process.env.ROUTE === "softmax") {
     }
     return list[0].k;
   };
-  W.SEL.pick = (_env, mode) => draw(W.candsFor(mode).slice(0, K));
+  W.SEL.pick = (_env, mode) => draw(W.CANDS.list(mode).slice(0, K));
   W.SEL.region = async (_env, cc, mode, avoid = "") => {
     const want = String(cc || "").toUpperCase();
     if (!want) return null;
-    const list = W.candsFor(mode)
+    const list = W.CANDS.list(mode)
       .filter((r) => {
-        const a = S.alive.get(r.k);
+        const a = W.NODE_MEMORY.alive.get(r.k);
         return a && String(a.cc || "").toUpperCase() === want && r.k !== avoid;
       })
       .slice(0, K);
     const k = draw(list);
     if (!k) return null;
-    const a = S.alive.get(k);
+    const a = W.NODE_MEMORY.alive.get(k);
     return a || null;
   };
 }
@@ -319,26 +318,26 @@ const qn = new Map();
 
 function reset() {
   NOW = T0;
-  S.alive.clear();
-  S.nstat.clear();
-  S.hostNode.clear();
-  S.hostDirect.clear();
-  S.hostRankCache.clear();
-  S.curs = { lat: "", tput: "" };
-  S.prev = { lat: "", tput: "" };
-  S.lastSwitch = { lat: 0, tput: 0 };
-  S.switchHits = { lat: [], tput: [] };
-  S.inflight.clear();
-  S.rankCache = { t: 0, at: {}, v: {}, step: {} };
-  S.candN = 0;
-  S.pxFailMem = 0;
-  S.pxFailSeen = 0;
-  S.seedAt = NOW;
+  W.NODE_MEMORY.alive.clear();
+  W.NODE_MEMORY.stats.clear();
+  W.HOSTS.nodes.clear();
+  W.HOSTS.direct.clear();
+  W.NODE_MEMORY.rankCache.clear();
+  W.SELECTION_MEMORY.current = { lat: "", tput: "" };
+  W.SELECTION_MEMORY.previous = { lat: "", tput: "" };
+  W.SELECTION_MEMORY.switchedAt = { lat: 0, tput: 0 };
+  W.SELECTION_MEMORY.switches = { lat: [], tput: [] };
+  W.NODE_MEMORY.inflight.clear();
+
+  W.NODE_MEMORY.candidateCount = 0;
+  W.SELECTION_MEMORY.failCount = 0;
+  W.SELECTION_MEMORY.failSeen = 0;
+
   byKey.clear();
 }
 
 function addNode(n) {
-  S.alive.set(n.key, { h: n.id, p: 443, cc: n.cc, ms: n.probeTcp + n.tls });
+  W.NODE_MEMORY.alive.set(n.key, { h: n.id, p: 443, cc: n.cc, ms: n.probeTcp + n.tls });
   const s = W.NodeStatsTable.nsGet(n.key);
   s.tcp = n.probeTcp;
   s.tls = n.tls;
@@ -374,7 +373,7 @@ async function request(n, mode, burst, jitter, bytes = 0) {
     qn.set(n.key, (qn.get(n.key) || 0) + 1);
     // 生产里 Connection 一连上就 syncInflight，同一 tick 内的后续请求能看到排队变化；
     // 只在 tick 开始时重建会让 12/s 场景的 12 个请求全看到 q=0、全挤同一个节点。
-    if (CONC) S.inflight.set(n.key, qn.get(n.key) || 0); // 只有并发场景才有"在途"语义
+    if (CONC) W.NODE_MEMORY.inflight.set(n.key, qn.get(n.key) || 0); // 只有并发场景才有"在途"语义
   }
   // STALLFIX：把背压时间从采样分母里扣掉（模拟"只算真正在传的时间"）
   const stallMs = process.env.STALLFIX ? n.stall * dur : 0;
@@ -431,7 +430,7 @@ async function run(sc, hours, seedVal) {
   CONC = !!sc.conc;
   busyUntil.clear();
   qn.clear();
-  S.inflight.clear();
+  W.NODE_MEMORY.inflight.clear();
   pool = sc.pool();
   universe = pool;
   pending = [];
@@ -490,7 +489,7 @@ async function run(sc, hours, seedVal) {
         addNode(n);
       }
       if (sc.eventDel) {
-        S.alive.delete(sc.eventDel);
+        W.NODE_MEMORY.alive.delete(sc.eventDel);
         byKey.delete(sc.eventDel);
         pool = pool.filter((x) => x.key !== sc.eventDel);
       }
@@ -509,11 +508,11 @@ async function run(sc, hours, seedVal) {
     }
     if (sc.flap) byKey.get("flap:443").burst = Math.floor(t / 600) % 5 === 0;
 
-    // 并发场景：把"还在传的请求"折成 S.inflight，和生产的 Connection.syncInflight 同口径
+    // 并发场景：把"还在传的请求"折成 W.NODE_MEMORY.inflight，和生产的 Connection.syncInflight 同口径
     if (CONC) {
       for (const [k, t] of busyUntil) if (t <= NOW) { busyUntil.delete(k); qn.delete(k); }
-      S.inflight.clear();
-      for (const [k, cnt] of qn) if (cnt > 0) S.inflight.set(k, cnt);
+      W.NODE_MEMORY.inflight.clear();
+      for (const [k, cnt] of qn) if (cnt > 0) W.NODE_MEMORY.inflight.set(k, cnt);
     }
     const nReq = Math.floor(rate) + (rnd() < rate - Math.floor(rate) ? 1 : 0);
     for (let q = 0; q < nReq; q++) {
@@ -524,7 +523,7 @@ async function run(sc, hours, seedVal) {
       } else {
         key = W.SEL.pick(ENV, mode, { host: "", sz: szB });
       }
-      const cur = S.curs[mode];
+      const cur = W.SELECTION_MEMORY.current[mode];
       if (cur && cur !== lastCurs) {
         switches++;
         lastCurs = cur;
@@ -586,7 +585,7 @@ async function run(sc, hours, seedVal) {
   }
   ratios.sort((a, b) => a - b);
   if (process.env.DBG && dscope.size) {
-    console.error("[dscope]", [...dscope].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k}:${v}`).join(" "), "alive=" + S.alive.size);
+    console.error("[dscope]", [...dscope].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k}:${v}`).join(" "), "alive=" + W.NODE_MEMORY.alive.size);
   }
   return {
     name: sc.name,
@@ -611,7 +610,7 @@ async function run(sc, hours, seedVal) {
     reuse: reuseAt < 0 ? "" : fmt(reuseAt - (sc.eventAt || 0)),
     fakeShare: (fakeHits / Math.max(1, reqs)) * 100,
     onEventPct: sc.eventAt ? (onEvent / Math.max(1, afterEvent)) * 100 : 0,
-    covered: S.alive.size,
+    covered: W.NODE_MEMORY.alive.size,
     probes: probeN,
     total: universe.length,
   };

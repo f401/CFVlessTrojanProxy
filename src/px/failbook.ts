@@ -1,3 +1,5 @@
+import { NODE_MEMORY } from "../core/node-memory";
+import { SELECTION_MEMORY } from "./selection-memory";
 // 失败怎么记：节点级失败推进快速失败窗口并重算分数，站点级失败只进站点画像（跨 isolate 不共享）。
 // 记账的形状是「谁失败 → 罚多重 → 什么时候清」，与「挑谁」（./pickpath）、「什么时候换」（./rotation）分开。
 
@@ -5,7 +7,6 @@ import { SC } from "../core/const";
 import { logErr } from "../nodes/metrics";
 import { pxPolicy } from "./probe";
 import { freezeNode, isBlack, isFrozen, NodeStatsTable, CANDS } from "../nodes/score";
-import { S } from "../core/state";
 import type { Rotation } from "./rotation";
 
 /**
@@ -44,31 +45,31 @@ export class FailBook {
       return;
     }
     const m = mode === "lat" ? "lat" : "tput";
-    const prev = S.prev[m];
+    const prev = SELECTION_MEMORY.previous[m];
     const now = Date.now();
     if (
-      k === S.curs[m] &&
+      k === SELECTION_MEMORY.current[m] &&
       prev &&
-      S.alive.has(prev) &&
+      NODE_MEMORY.alive.has(prev) &&
       !isBlack(prev) &&
       !isFrozen(prev) &&
-      now - (S.lastSwitch[m] || 0) < SC.ROLL_WIN
+      now - (SELECTION_MEMORY.switchedAt[m] || 0) < SC.ROLL_WIN
     ) {
-      S.curs[m] = prev;
-      S.prev[m] = "";
-      S.lastSwitch[m] = now;
+      SELECTION_MEMORY.current[m] = prev;
+      SELECTION_MEMORY.previous[m] = "";
+      SELECTION_MEMORY.switchedAt[m] = now;
       freezeNode(k);
       logErr(`rollback(${m}) ${k} -> ${prev}`, "60s");
       return;
     }
     // 回滚不成（prev 已坏 / 超出 ROLL_WIN）就重排第一：bestFor 会跳过黑名单与冻结，
     // 失败的节点交给 nsFail 的退避阶梯，不是在这里硬判死
-    if (k === S.curs[m]) {
+    if (k === SELECTION_MEMORY.current[m]) {
       const b = CANDS.best(m);
       if (b && b !== k) {
-        S.prev[m] = k;
-        S.curs[m] = b;
-        S.lastSwitch[m] = now;
+        SELECTION_MEMORY.previous[m] = k;
+        SELECTION_MEMORY.current[m] = b;
+        SELECTION_MEMORY.switchedAt[m] = now;
         logErr(`fail-switch(${m}) ${k} -> ${b}`, "");
       }
     }
@@ -87,18 +88,18 @@ export class FailBook {
       if (k) NodeStatsTable.nsSiteFail(k);
       return;
     }
-    const node = k || S.curs[mode === "lat" ? "lat" : "tput"] || S.curs.tput || S.curs.lat || "";
+    const node = k || SELECTION_MEMORY.current[mode === "lat" ? "lat" : "tput"] || SELECTION_MEMORY.current.tput || SELECTION_MEMORY.current.lat || "";
     this.onFail(env, mode, node, !!trial);
     if (trial) return; // 影子/站点试探失败不惩罚主游标，也不进全局失败记忆
-    S.pxFailSeen = 1;
-    S.pxFailMem += 1;
+    SELECTION_MEMORY.failSeen = 1;
+    SELECTION_MEMORY.failCount += 1;
     const { fail, force } = pxPolicy(env);
-    if (S.pxFailMem < fail) return;
-    const n = S.pxFailMem;
-    S.pxFailMem = 0;
+    if (SELECTION_MEMORY.failCount < fail) return;
+    const n = SELECTION_MEMORY.failCount;
+    SELECTION_MEMORY.failCount = 0;
     if (n >= force) {
-      S.prev.tput = "";
-      S.prev.lat = "";
+      SELECTION_MEMORY.previous.tput = "";
+      SELECTION_MEMORY.previous.lat = "";
     }
     // 到量了：两个模式各自重新评估一次（判定在 Rotation 里，这里只触发）
     this.rotation.maybeSwitch(env, "lat");
@@ -107,8 +108,8 @@ export class FailBook {
 
   /** 链路健康：清零计数。成功样本由 Connection.flush 在收尾时统一记一次。 */
   async resetFail(_env: Env, _k: string) {
-    if (!S.pxFailSeen) return;
-    S.pxFailSeen = 0;
-    S.pxFailMem = 0;
+    if (!SELECTION_MEMORY.failSeen) return;
+    SELECTION_MEMORY.failSeen = 0;
+    SELECTION_MEMORY.failCount = 0;
   }
 }

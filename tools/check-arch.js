@@ -57,7 +57,8 @@ for (const f of files) {
     const to = layerOf(target + ".ts");
     deps.add(to);
     if (from === to) continue;
-    if (!RANK[from] || !RANK[to]) continue;             // entry / test 文件不参与方向校验
+    // core 的合法层级是 0，不能用真假值判断，否则 core 的反向依赖会绕过门禁。
+    if (RANK[from] === undefined || RANK[to] === undefined) continue; // entry / test 文件不参与方向校验
     if (RANK[to] > RANK[from] && !ALLOW.has(`${from}->${to}`)) {
       problems.push(`${rel}: 反向依赖 ${from} -> ${to}`);
     }

@@ -147,9 +147,9 @@ const ctx = { waitUntil: () => {} };
 const env = () => ({ uuids: UUID, pwd: PWD, proxyip: "" });
 
 function reset() {
-  W.S.pend.clear();
-  W.S.stats.clear();
-  W.S.inflight.clear();
+  W.PEND.rows.clear();
+  W.USAGE_MEMORY.rows.clear();
+  W.NODE_MEMORY.inflight.clear();
   W.PEND.flushTimer && clearTimeout(W.PEND.flushTimer);
   W.PEND.flushTimer = null;
   created.length = 0;
@@ -202,8 +202,8 @@ reset();
 /* ---------- 3. 地区硬要求：只拨 DE 节点 ---------- */
 reset();
 {
-  W.S.alive.clear();
-  W.S.alive.set("de.example.com:443", { h: "de.example.com", p: 443, cc: "DE", ms: 50 });
+  W.NODE_MEMORY.alive.clear();
+  W.NODE_MEMORY.alive.set("de.example.com:443", { h: "de.example.com", p: 443, cc: "DE", ms: 50 });
   const e = { ...env(), proxyip: "auto" };
   const resp = await W.handleUpgrade(req("/?rg=DE"), e, ctx);
   const client = resp.webSocket;
@@ -224,7 +224,7 @@ reset();
 /* ---------- 4. 地区无节点：直接 1011，不回直连 ---------- */
 reset();
 {
-  W.S.alive.clear();
+  W.NODE_MEMORY.alive.clear();
   const e = { ...env(), proxyip: "auto" };
   const resp = await W.handleUpgrade(req("/?rg=JP"), e, ctx);
   const client = resp.webSocket;
@@ -259,10 +259,10 @@ reset();
 /* ---------- 6. 地区首选连不上 → 同国备选 + 坏节点冷却 ---------- */
 reset();
 {
-  W.S.alive.clear();
-  W.S.nstat.clear();
-  W.S.alive.set("de1.example.com:443", { h: "de1.example.com", p: 443, cc: "DE", ms: 30 });
-  W.S.alive.set("de2.example.com:443", { h: "de2.example.com", p: 443, cc: "DE", ms: 90 });
+  W.NODE_MEMORY.alive.clear();
+  W.NODE_MEMORY.stats.clear();
+  W.NODE_MEMORY.alive.set("de1.example.com:443", { h: "de1.example.com", p: 443, cc: "DE", ms: 30 });
+  W.NODE_MEMORY.alive.set("de2.example.com:443", { h: "de2.example.com", p: 443, cc: "DE", ms: 90 });
   const hook = globalThis.__simConnect;
   const failKeys = new Set(["de1.example.com:443"]);
   globalThis.__simConnect = async (o) => {
@@ -278,7 +278,7 @@ reset();
     client.peer.emit("message", { data: vless(UUID, "target.example.com") });
     await tick(30);
     ok("首选失败后换同国备选", created.some((s) => s.key === "de2.example.com:443"), created.map((s) => s.key).join(","));
-    ok("首选节点进入冷却", (W.S.nstat.get("de1.example.com:443") || {}).blackUntil > Date.now());
+    ok("首选节点进入冷却", (W.NODE_MEMORY.stats.get("de1.example.com:443") || {}).blackUntil > Date.now());
     const de2 = created.find((s) => s.key === "de2.example.com:443");
     if (de2) {
       de2.push(new Uint8Array([6, 6]));

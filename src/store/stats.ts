@@ -1,8 +1,8 @@
-import { S } from "../core/state";
+import { USAGE_MEMORY } from "./usage-memory";
 import { PEND, pendAdd } from "./pend";
 import { getSnap, usageSnapGet } from "./snapshot";
 import { cnt } from "../core/counter";
-import { doFetch, meterGet } from "./meter-client";
+import { doFetch, meterGet, METER_CLIENT } from "./meter-client";
 
 /* 用量视图：Meter DO 读取 / 本地缓存 / 面板口径 */
 
@@ -106,20 +106,10 @@ export function mergeNodeSnap(
  */
 export function statBump(id: string, up: number, down: number, isNewConn?: boolean) {
   if (!id) return;
-  // 先记账本：本地 S.stats 只是面板用的即时视图，真正计费在 DO 侧，
+  // 先记账本：本地 USAGE_MEMORY.rows 只是面板用的即时视图，真正计费在 DO 侧，
   // 顺序反了会出现「面板有量、账单没有」
   pendAdd(id, up, down, isNewConn); // 全局帐本（DO）
-  let s = S.stats.get(id);
-  if (!s) {
-    s = { up: 0, down: 0, conns: 0, first: Date.now(), last: Date.now() };
-    S.stats.set(id, s);
-  }
-  s.up += up || 0;
-  s.down += down || 0;
-  // snapBytes 是「自上次快照以来」的增量，落盘后清零，用来判断何时该写快照
-  S.snapBytes += (up || 0) + (down || 0);
-  if (isNewConn) s.conns += 1;
-  s.last = Date.now();
+  USAGE_MEMORY.add(id, up, down, isNewConn);
 }
 
 /**
@@ -133,8 +123,8 @@ export function statBump(id: string, up: number, down: number, isNewConn?: boole
  * @returns {up, down, conns, todayUp, todayDown, firstSeen, lastSeen, backend, persisted, seed}
  */
 export async function readStats(env: Env, id: string) {
-  const local = S.stats.get(id) || { up: 0, down: 0, conns: 0, first: 0, last: 0 };
-  const pend = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
+  const local = USAGE_MEMORY.rows.get(id) || { up: 0, down: 0, conns: 0, first: 0, last: 0 };
+  const pend = PEND.rows.get(id) || { up: 0, down: 0, conns: 0 };
   const total = await meterGet(env, id);
   if (!total) return kvView(env, id, local);
   const seed = await seedFromSnap(env, id, total);
@@ -169,7 +159,7 @@ async function seedFromSnap(
     }
     // 回填成功：DO 现在返回的是「历史 + 0」，顺手把缓存刷成同一个值
     const next = await r.json();
-    S.meterCache.set(id, { v: next, t: Date.now() });
+    METER_CLIENT.cache.set(id, { v: next, t: Date.now() });
     return { total: next, seed: "ok" };
   } catch (e) {
     cnt("statsSeedFail");

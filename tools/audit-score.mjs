@@ -2,24 +2,23 @@
 //   用法：node test/mk_test.mjs && node tools/audit-score.mjs
 import * as W from "../test/_bundle.mjs";
 
-const S = W.S;
 const reset = () => {
-  S.alive.clear();
-  S.nstat.clear();
-  S.hostNode.clear();
-  S.hostDirect.clear();
-  S.hostRankCache.clear();
-  S.curs = { lat: "", tput: "" };
-  S.prev = { lat: "", tput: "" };
-  S.lastSwitch = { lat: 0, tput: 0 };
-  S.switchHits = { lat: [], tput: [] };
-  S.inflight.clear();
-  S.rankCache = { t: 0, at: {}, v: {}, step: {} };
-  S.candN = 0;
+  W.NODE_MEMORY.alive.clear();
+  W.NODE_MEMORY.stats.clear();
+  W.HOSTS.nodes.clear();
+  W.HOSTS.direct.clear();
+  W.NODE_MEMORY.rankCache.clear();
+  W.SELECTION_MEMORY.current = { lat: "", tput: "" };
+  W.SELECTION_MEMORY.previous = { lat: "", tput: "" };
+  W.SELECTION_MEMORY.switchedAt = { lat: 0, tput: 0 };
+  W.SELECTION_MEMORY.switches = { lat: [], tput: [] };
+  W.NODE_MEMORY.inflight.clear();
+
+  W.NODE_MEMORY.candidateCount = 0;
 };
 const node = (k, patch = {}) => {
   const i = k.lastIndexOf(":");
-  S.alive.set(k, { h: k.slice(0, i), p: Number(k.slice(i + 1)) || 443, cc: patch.cc || "", ms: patch.tcp || 100 });
+  W.NODE_MEMORY.alive.set(k, { h: k.slice(0, i), p: Number(k.slice(i + 1)) || 443, cc: patch.cc || "", ms: patch.tcp || 100 });
   Object.assign(W.NodeStatsTable.nsGet(k), patch);
 };
 
@@ -41,7 +40,7 @@ for (const [cur, best] of [
   reset();
   node("cur:443", { tcp: cur, tls: 60, okW: 20, failW: 2 });
   node("best:443", { tcp: best, tls: 60, okW: 20, failW: 2 });
-  S.curs.lat = "cur:443";
+  W.SELECTION_MEMORY.current.lat = "cur:443";
   const a = W.scoreParts("cur:443", "lat");
   const b = W.scoreParts("best:443", "lat");
   const hOld = Math.max(20, a.score * 0.15);
@@ -61,14 +60,14 @@ reset();
 node("de1:443", { tcp: 60, tls: 10, okW: 5, failW: 0, tS: 5, eCloseP: 6, cc: "DE" });
 node("de2:443", { tcp: 180, tls: 20, okW: 20, failW: 1, tS: 20, eCloseP: 0, cc: "DE" });
 const sus = W.emptyCloseSuspect("de1:443");
-const inCands = W.candsFor("lat").some((x) => x.k === "de1:443");
+const inCands = W.CANDS.list("lat").some((x) => x.k === "de1:443");
 const regionPick = await W.SEL.region({}, "DE", "lat");
 console.log(`可疑(de1)=${sus}  candsFor 收录=${inCands}  region 选中=${regionPick && regionPick.h + ":" + regionPick.p}`);
 
 reset();
 node("jp1:443", { tcp: 60, tls: 10, okW: 20, failW: 1, tS: 20, cc: "JP" });
 node("jp2:443", { tcp: 70, tls: 10, okW: 20, failW: 1, tS: 20, cc: "JP" });
-S.inflight.set("jp1:443", 9);
+W.NODE_MEMORY.inflight.set("jp1:443", 9);
 const herd = await W.SEL.region({}, "JP", "lat");
 console.log(`jp1 在途=9，jp2 在途=0 → region 选中=${herd && herd.h + ":" + herd.p}`);
 
@@ -91,7 +90,7 @@ console.log("\n[4] 站点画像 bad 的衰减（两次被拒 → 空闲 7 小时
 reset();
 W.hostNodeMark("decay.test", "n1:443", { ok: false, bad: true, ttfb: 0 });
 W.hostNodeMark("decay.test", "n1:443", { ok: false, bad: true, ttfb: 0 });
-const rec = S.hostNode.get("decay.test").get("n1:443");
+const rec = W.HOSTS.nodes.get("decay.test").get("n1:443");
 const before = W.hostScore(rec, "lat", Date.now());
 rec.at -= 7 * 3600e3;
 W.hostNodeMark("decay.test", "n1:443", { ok: true, bad: false, ttfb: 100 });
@@ -127,8 +126,8 @@ for (let i = 0; i < 400; i++) {
 for (const m of ["lat", "tput"]) {
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < 50; i++) {
-    S.rankCache = { t: 0, at: {}, v: {}, step: {} };
-    W.candsFor(m);
+
+    W.CANDS.list(m);
   }
   const us = Number(process.hrtime.bigint() - t0) / 50 / 1000;
   console.log(`candsFor(${m}) ≈ ${us.toFixed(0)} µs/次`);

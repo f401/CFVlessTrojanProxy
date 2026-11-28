@@ -33,33 +33,6 @@ export function escapeHtml(s: unknown) {
   return String(s).replace(/[&<>"']/g, (c) => MAP[c]);
 }
 
-// ---- 并入自 pageview.ts ----
-interface StatsIn {
-  env: Env;
-  id: string;
-  stats: StatsView;
-  learned: Record<string, RttEntry>;
-  nodeRows: StatsNodeRow[];
-  errs: ErrItem[];
-}
-
-/**
- * 页面视图（P6-3）：面板 / 统计 / 登录 / 管理台都从这一个对象出。
- * 序列化全在 views 层，routes 只负责取数与包 header。
- */
-export class PageView {
-  /** 用户面板（/<uuid>/page） */
-  panel(env: Env, url: URL, id: string, host: string, key: string, info: PanelInfo): string {
-    return renderHtml(env, url, id, host, key, info);
-  }
-
-  /** 用量统计页（/<uuid>/stats?format=html） */
-  stats(o: StatsIn): string {
-    return renderStatsHtml(o.env, o.id, o.stats, o.learned, o.nodeRows, o.errs);
-  }
-
-}
-
 /**
  * 功能：把 HTML 模板里的 `{{name}}` 占位符替换成调用方算好的值。
  *
@@ -270,7 +243,7 @@ export class PanelView {
   private identity(): Record<string, string> {
     return {
       idRow: this.row("UUID", this.id, true),
-      pwdRow: this.row("密码", escapeHtml(String(this.info[P_T + "Pwd"] || "（未配置）")), true),
+      pwdRow: this.row("密码", `<details class="credential"><summary>点击查看密码</summary><code>${escapeHtml(String(this.info[P_T + "Pwd"] || "（未配置）"))}</code></details>`, true),
       protoRow: this.row("协议", this.protos.join(" + "), false),
     };
   }

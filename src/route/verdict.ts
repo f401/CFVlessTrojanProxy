@@ -11,6 +11,8 @@ import type { ChanToken, EpochMs, HostName, SampleCount } from "../core/types";
 
 /** 判定表同步账本：7.369 起从 AppState 下放，只有判定层读写 */
 export class VtSyncLedger {
+  /** 所有事实分片加载成功后才置真，失败保持可重试。 */
+  loaded = false;
   /** 新学到、尚未上报成功的强证据 */
   pending = new Map<string, { s: number; t: number }>();
   /** 已上报成功的证据（去重） */

@@ -1,8 +1,10 @@
+import { SELECTION_MEMORY } from "./selection-memory";
+import { NODE_MEMORY } from "../core/node-memory";
+import { POOL_MEMORY } from "./pool-memory";
 // 挑路编排：池子就绪 → 站点画像 → 判定偏好 → 重扫。四段无独立生命周期，同文件一次看完换节点的原因。
 
 import { ensurePool, pxGet, aliveList } from "./pool";
 import { seedAlive } from "./warm";
-import { S } from "../core/state";
 import { shadowRate } from "../core/util";
 import { hostKey, HOSTS } from "../nodes/metrics";
 import { cnt } from "../core/counter";
@@ -46,11 +48,11 @@ export const READY = new PoolReadyClock();
  */
 export async function ensureReady(env: Env): Promise<void> {
   // 只看「池子确实没有」且距上次尝试超过 60 秒：池子有就绝不读 KV，冷启动也不会每个请求都读一次
-  if (!S.pool.length && Date.now() - (READY.lastAttemptAt || 0) > 60000) {
+  if (!POOL_MEMORY.rows.length && Date.now() - (READY.lastAttemptAt || 0) > 60000) {
     READY.lastAttemptAt = Date.now();
     // 最多等 700ms：ensurePool 会读 KV 代际键，必要时还要去公开源抓列表，
     // 实测在冷 isolate 上能拖到 2–4 秒——那是用户已经在等首字节的时间，
-    // 不能整段押在这里。超时就先放行（有 S.alive 就用，没有就走直连），
+    // 不能整段押在这里。超时就先放行（有 NODE_MEMORY.alive 就用，没有就走直连），
     // 让后台继续把池子补齐，下一条连接就能用上。
     await Promise.race([
       ensurePool(env).catch(() => 0),
@@ -62,8 +64,8 @@ export async function ensureReady(env: Env): Promise<void> {
   // 会把 p50 拖到 6 秒（实测 7.63）。7.67 曾试过「最多等 1500ms」，tput 仍是 10/20 而
   // p50 从 1.9s 涨到 3.1s —— 说明探活成功只证明「TCP 通」，不证明「出口是 v4」，
   // 等它没用。要按出口地址族排中继，得在探测时顺便问中继「你出去是什么地址」。
-  if (!S.alive.size) void seedAlive(env).catch(() => {});
-  // 补游标（`S.curs`）与两代候选的关系：pxGet 是唯一入口，挑路之前必须调过一次
+  if (!NODE_MEMORY.alive.size) void seedAlive(env).catch(() => {});
+  // 补游标（`SELECTION_MEMORY.current`）与两代候选的关系：pxGet 是唯一入口，挑路之前必须调过一次
   await pxGet(env);
 }
 
@@ -126,12 +128,12 @@ export class SitePick {
    * @returns {string} 可用的游标键；池子里一条都没有时返回空串
    */
   private syncCursor(mode: Mode): string {
-    let cur = S.curs[mode];
+    let cur = SELECTION_MEMORY.current[mode];
     // 游标可能是上一代候选池里的节点（池子刷新后 alive 里已没有它）：以前会一直把连接拨到
     // 这个死地址，直到 cron 的 maybeSwitch 才发现。它只做面板展示，真正走谁由③决定。
-    if (!cur || !S.alive.has(cur) || isBlack(cur) || isFrozen(cur)) {
+    if (!cur || !NODE_MEMORY.alive.has(cur) || isBlack(cur) || isFrozen(cur)) {
       cur = CANDS.best(mode);
-      S.curs[mode] = cur;
+      SELECTION_MEMORY.current[mode] = cur;
     }
     return cur;
   }
@@ -139,14 +141,14 @@ export class SitePick {
   /**
    * 功能：按站点画像挑一条 —— 至少 3 个节点有样本、且首选样本不超过 2 小时才敢覆盖全局。
    * @param {string} host 目标站点（原始写法，画像查询用）
-   * @param {string} fam 站点族键（`hostKey(host)`，读写 `S.hostNode` 用）
+   * @param {string} fam 站点族键（`hostKey(host)`，读写 `HOSTS.nodes` 用）
    * @param {'lat'|'tput'} mode 选路模式
    * @param {number} now 当前时间
    * @param {object|null} st 连接状态（会写 st.node）
    * @returns {string} 挑中的候选键；画像不够用时返回空串（交回调用方继续往下走）
    */
   private byProfile(host: string, fam: string, mode: Mode, now: number, st: PickState | null): string {
-    const hm = S.hostNode.get(fam);
+    const hm = HOSTS.nodes.get(fam);
     const tried = hm ? hm.size : 0;
     // 少于 3 个节点有样本时排序没有比较意义（下面也要求 sampled>=3），
     // 直接跳过：省掉一次遍历全部节点的 hostRank 构建。
@@ -184,7 +186,7 @@ export class SitePick {
     const base = shadowRate(env);
     // ①②的随机数消耗顺序必须固定：影子这一步排在站点画像之后、抽样之前
     if (!(cur && base > 0 && !(st && st.retried) && Math.random() < base)) return "";
-    const hm = S.hostNode.get(fam);
+    const hm = HOSTS.nodes.get(fam);
     if (hm && hm.size >= 3) return "";
     const t0 = HOSTS.untried(host, mode);
     if (!t0) return "";
@@ -220,7 +222,7 @@ export class SitePick {
    */
   private spill(key: string, mode: Mode): string {
     // 在途少于 2 条时不用管：两条并发的上限就是免费计划的常态
-    if (!key || (S.inflight.get(key) || 0) < 2) return "";
+    if (!key || (NODE_MEMORY.inflight.get(key) || 0) < 2) return "";
     const cur = costOf(key, mode);
     let alt = "";
     let bv = Infinity;
@@ -230,7 +232,7 @@ export class SitePick {
       // 代价超过 1.5 倍就宁可排队：溢出的目的是削峰，不是把流量送给慢节点
       if (x.v > cur * 1.5) continue;
       // 只在「确实比当前更空」时换，否则会在两个同样忙的节点间来回弹
-      if ((S.inflight.get(x.k) || 0) >= (S.inflight.get(key) || 0)) continue;
+      if ((NODE_MEMORY.inflight.get(x.k) || 0) >= (NODE_MEMORY.inflight.get(key) || 0)) continue;
       if (x.v < bv) {
         bv = x.v;
         alt = x.k;
@@ -249,8 +251,8 @@ export class SitePick {
     let bk = Infinity;
     let bs = Infinity;
     // 遍历存活表而不是候选表：候选表是「可用」的排序结果，这里恰恰是它们全都不可用的时候
-    for (const k of S.alive.keys()) {
-      const s = S.nstat.get(k);
+    for (const k of NODE_MEMORY.alive.keys()) {
+      const s = NODE_MEMORY.stats.get(k);
       // 冷却有两种（判死 / 冻结），取更晚的那个作为「最早能再试」的时刻
       const until = Math.max(s ? s.blackUntil : 0, s ? s.freeUntil : 0);
       const v = costOf(k, mode);
@@ -273,7 +275,7 @@ export class SitePick {
 
 /**
  * 偏好过滤：每条方法只回答「按这条规则，下一个该是谁」。
- * 它们都读 `S.alive` / `S.nstat`，但都不写 —— 落选不惩罚、不冷却，那是 failbook 的事。
+ * 它们都读 `NODE_MEMORY.alive` / `NODE_MEMORY.stats`，但都不写 —— 落选不惩罚、不冷却，那是 failbook 的事。
  */
 export class PathPrefs {
   /**
@@ -301,12 +303,12 @@ export class PathPrefs {
     const now = Date.now();
     let best = "";
     let bv = Infinity;
-    for (const k of S.alive.keys()) {
+    for (const k of NODE_MEMORY.alive.keys()) {
       // 已试过的那条要跳过：pFail 惩罚不足以让它在同一秒内掉出第一
       if (exclude && exclude.has(k)) continue;
       if (isBlack(k) || isFrozen(k) || this.vetoed(host, k)) continue;
       const ip = relayIpOf(k);
-      if (cfOnly && isCfIp((S.alive.get(k) || { h: "" } as { h?: string }).h || "")) continue;
+      if (cfOnly && isCfIp((NODE_MEMORY.alive.get(k) || { h: "" } as { h?: string }).h || "")) continue;
       if (!prefer(host, ip)) continue;
       const v = costOf(k, mode, now);
       if (v < bv) {
@@ -338,7 +340,7 @@ export class PathPrefs {
     const now = Date.now();
     let nk = "";
     let nv = Infinity;
-    for (const [rk, a] of S.alive) {
+    for (const [rk, a] of NODE_MEMORY.alive) {
       if (exclude && exclude.has(rk)) continue;
       if (isCfIp(a.h) || isBlack(rk) || isFrozen(rk) || this.vetoed(host, rk)) continue;
       const v = costOf(rk, mode, now);
@@ -368,7 +370,7 @@ export class PathPrefs {
     let bk = "";
     let bv = Infinity;
     // 扫的是存活表而不是候选表：候选表已经按「可用」截过，被排除的那条可能就在前面占位
-    for (const [k, a] of S.alive) {
+    for (const [k, a] of NODE_MEMORY.alive) {
       if (exclude.has(k) || isBlack(k) || isFrozen(k) || this.vetoed(host, k)) continue;
       // CF 托管目标上，CF 边缘中继第二轮大概率还是 403，白等第二个 2.5 秒
       if (cfOnly && isCfIp(a.h)) continue;
@@ -476,9 +478,9 @@ export class PickPath {
     const scored = pool.map((x) => ({ x, v: costOf(keyOf(x), mode) })).sort((a, b) => a.v - b.v);
     const band = scored.filter((r) => r.v <= scored[0].v * 1.5 + 50).slice(0, 8);
     let pick = band[0];
-    let load = S.inflight.get(keyOf(pick.x)) || 0;
+    let load = NODE_MEMORY.inflight.get(keyOf(pick.x)) || 0;
     for (const r of band) {
-      const l = S.inflight.get(keyOf(r.x)) || 0;
+      const l = NODE_MEMORY.inflight.get(keyOf(r.x)) || 0;
       if (l < load) {
         pick = r;
         load = l;

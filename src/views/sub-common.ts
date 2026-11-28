@@ -1,5 +1,5 @@
+import { ISOLATE } from "../core/state";
 import { secretPwd, probeUrlOf } from "../core/util";
-import { S } from "../core/state";
 import { IpFamily, IpLevel } from "../core/enums";
 import { AliveBoard } from "../px/alive";
 import { QUALITY, CONN_OBS } from "../px/regions";
@@ -524,7 +524,7 @@ export class RegionSubscription {
         const q = QUALITY.getFor(n.h, n.p, now);
         const level = q ? q.level : IpLevel.Normal;
         const fam = String(n.h).includes(":") ? IpFamily.IPv6 : IpFamily.IPv4;
-        const rtt = cfg.targetHost ? CONN_OBS.rttOf(S.colo || "", `${n.h}:${n.p}`, cfg.targetHost, now) : null;
+        const rtt = cfg.targetHost ? CONN_OBS.rttOf(ISOLATE.colo || "", `${n.h}:${n.p}`, cfg.targetHost, now) : null;
         const labelParts = [`${ccUpper}-${level}`, fam, n.h];
         if (rtt != null) labelParts.push(`${rtt}ms`);
         const entry = edgeIps.length ? String(edgeIps[edgeIdx++ % edgeIps.length]) : host;

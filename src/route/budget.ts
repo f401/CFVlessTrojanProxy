@@ -1,3 +1,4 @@
+import { ISOLATE } from "../core/state";
 // 子请求预算：一轮 cron 给「准入探活」多少次 connect()，以及还剩多少 fetch 子请求额度。
 // 这是两笔账，不能混：
 //   ① connect() 探活吃的是「同时打开的 socket」额度（SC.PROBE_CONC = 6），不占 fetch 子请求；
@@ -8,7 +9,6 @@
 // 7.186 之前这里还有一个 `cap` 字段自称「本轮总闸」，但它零读取点：单测拿它当上界做断言，
 // 生产侧从来没有任何减法 —— 等于在验证一条不存在的约束（六型里的「假仪表」）。
 import { SC } from "../core/const";
-import { S } from "../core/state";
 import { VT } from "./verdict";
 import { DOH_ENDPOINTS } from "../proxy/dial";
 import { REFILL_MAX } from "../px/probe";
@@ -99,5 +99,5 @@ export function planRound(poolN: number, aliveN: number): Plan {
  */
 export function planView(poolN: number, aliveN: number): Plan & { verds: number; site: string } {
   const p = planRound(poolN, aliveN);
-  return { ...p, verds: VT.all().length, site: S.site || "" };
+  return { ...p, verds: VT.all().length, site: ISOLATE.site || "" };
 }

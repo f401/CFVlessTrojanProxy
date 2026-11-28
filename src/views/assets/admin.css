@@ -1,0 +1,17 @@
+body{font:15px/1.6 -apple-system,system-ui,sans-serif;margin:0;padding:20px;max-width:1000px;color:#1f2328}
+h1{font-size:18px;margin:0 0 4px}
+.sub{color:#6b7280;font-size:13px;margin-bottom:18px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+td,th{border:1px solid #e3e6ea;padding:7px 9px;text-align:left;vertical-align:top}
+th{background:#fafbfc}
+.u{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}
+.mu{color:#9ca3af}
+tr.off td{opacity:.5}
+button{padding:3px 8px;font-size:12px;margin:1px;border:1px solid #d1d5db;background:#fff;border-radius:4px;cursor:pointer}
+button:hover{background:#f3f4f6}
+.lnk{white-space:nowrap}
+a.btn{display:inline-block;padding:3px 8px;font-size:12px;border:1px solid #d1d5db;border-radius:4px;color:#1f2328;text-decoration:none;background:#fff}
+a.btn:hover{background:#f3f4f6}
+.add{margin:16px 0;padding:12px;border:1px solid #e3e6ea;border-radius:8px;background:#fafbfc}
+input[type=text]{padding:5px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:13px}
+code{background:#f3f4f6;padding:1px 5px;border-radius:4px}

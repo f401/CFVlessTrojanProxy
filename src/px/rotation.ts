@@ -1,3 +1,7 @@
+import { ISOLATE } from "../core/state";
+import { SEED_STORE } from "./seed";
+import { NODE_MEMORY } from "../core/node-memory";
+import { SELECTION_MEMORY } from "./selection-memory";
 // 什么时候换节点：最短驻留时间（dwellOf）、切走判据、切完之后的观察窗与复查。
 // 「挑谁」在 ./pickpath，「失败怎么记」在 ./failbook —— 这个文件只管「换不换」。
 
@@ -6,7 +10,6 @@ import { logErr } from "../nodes/metrics";
 import { MODES } from "./const";
 import { cnt } from "../core/counter";
 import { isBlack, isFrozen, scoreParts, CANDS } from "../nodes/score";
-import { S } from "../core/state";
 
 /**
  * 切换后的最短驻留时间。pxDwellMin 只接受正数覆盖；未设置 / 0 / 非法时
@@ -22,26 +25,24 @@ export function dwellOf(env: Env, mode: Mode) {
 
 /**
  * 轮换策略：每隔一段时间（或一次扫描之后）判断「现在这条还值不值得留」，
- * 决定是否切到抽样器给的下一条。跨请求状态全在 `S` 里（`S.curs`/`S.cand`/`S.afterAt`）。
+ * 决定是否切到抽样器给的下一条。游标与切换窗口由 SELECTION_MEMORY 持有，候选缓存由 CANDS 持有。
  */
 export class Rotation {
   /** 重新评估是否该换节点（cron 与失败路径共用） */
   maybeSwitch(env: Env, mode: Mode) {
     const m = mode === "lat" ? "lat" : "tput";
     const now = Date.now();
-    const cur = S.curs[m];
+    const cur = SELECTION_MEMORY.current[m];
     const cands = CANDS.list(m);
     if (!cands.length) return false;
     const best = cands[0];
     if (!cur) {
-      S.curs[m] = best.k;
-      S.lastSwitch[m] = now;
+      SELECTION_MEMORY.current[m] = best.k;
+      SELECTION_MEMORY.switchedAt[m] = now;
       return true;
     }
-    if (!S.alive.has(cur) || isBlack(cur) || isFrozen(cur)) {
-      S.prev[m] = cur;
-      S.curs[m] = best.k;
-      S.lastSwitch[m] = now;
+    if (!NODE_MEMORY.alive.has(cur) || isBlack(cur) || isFrozen(cur)) {
+      SELECTION_MEMORY.switchTo(m, best.k, now);
       return true;
     }
     if (best.k === cur) return false;
@@ -53,17 +54,15 @@ export class Rotation {
       m === "tput" ? Math.max(1, cp.e10Ms * SC.H_TPUT) : Math.max(SC.H_LAT, cp.latencyMs * SC.H_LAT_REL);
     if (cv - best.v <= h) return false;
     const dwell = dwellOf(env, m);
-    if (now - (S.lastSwitch[m] || 0) < dwell) return false;
-    const hits = (S.switchHits[m] || []).filter((t) => now - t < 3600000);
+    if (now - (SELECTION_MEMORY.switchedAt[m] || 0) < dwell) return false;
+    const hits = (SELECTION_MEMORY.switches[m] || []).filter((t) => now - t < 3600000);
     if (hits.length >= SC.BUDGET) {
-      S.switchHits[m] = hits;
+      SELECTION_MEMORY.switches[m] = hits;
       return false;
     }
     hits.push(now);
-    S.switchHits[m] = hits;
-    S.prev[m] = cur;
-    S.curs[m] = best.k;
-    S.lastSwitch[m] = now;
+    SELECTION_MEMORY.switches[m] = hits;
+    SELECTION_MEMORY.switchTo(m, best.k, now);
     cnt("sw");
     logErr(`switch(${m}) ${cur} -> ${best.k}`, "v=" + Math.round(cv) + ">" + Math.round(best.v));
     return true;
@@ -83,8 +82,8 @@ export class Rotation {
   sched(env: Env) {
     const h = env.pxSchedH === undefined ? 6 : Number(env.pxSchedH) || 0;
     if (!(h > 0)) return;
-    const seedBucket = (S.seed.byColo || {})[S.colo || "*"] || {};
-    const last = Math.max(S.lastSwitch.lat || 0, S.lastSwitch.tput || 0, seedBucket.lastSwitch || 0);
+    const seedBucket = (SEED_STORE.document.byColo || {})[ISOLATE.colo || "*"] || {};
+    const last = Math.max(SELECTION_MEMORY.switchedAt.lat || 0, SELECTION_MEMORY.switchedAt.tput || 0, seedBucket.lastSwitch || 0);
     // 冷启动（还没有任何切换记录）不要轮换：否则第一条 cron 会把刚选出的第 1 名
     // 换成第 2 名，第 2 名因此拿到最初 10 分钟的全部样本，反过来把第 1 名永久压住。
     if (!last) return;
@@ -95,14 +94,12 @@ export class Rotation {
       const bs = cands[0].v;
       const pair = cands.filter((x) => x.v <= bs * 1.3).slice(0, 2);
       if (pair.length < 2) continue;
-      const next = S.curs[m] === pair[0].k ? pair[1].k : pair[0].k;
-      if (!next || next === S.curs[m]) continue;
-      const prev = S.curs[m];
-      S.curs[m] = next;
-      S.lastSwitch[m] = Date.now();
-      S.prev[m] = prev;
+      const next = SELECTION_MEMORY.current[m] === pair[0].k ? pair[1].k : pair[0].k;
+      if (!next || next === SELECTION_MEMORY.current[m]) continue;
+      const prev = SELECTION_MEMORY.current[m];
+      SELECTION_MEMORY.switchTo(m, next, Date.now());
       logErr(`sched(${m}) ${prev} -> ${next}`, "sched");
     }
-    S.seedDirty = true;
+    NODE_MEMORY.statisticsDirty = true;
   }
 }

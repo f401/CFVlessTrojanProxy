@@ -1,9 +1,10 @@
-import { S } from "../core/state";
+import { ENTRY_MEMORY, ERROR_MEMORY } from "../core/client-memory";
+import { USAGE_MEMORY } from "./usage-memory";
 import { RTT_MAX, SC } from "../core/const";
 import { eachLimit } from "../core/util";
 import { cnt } from "../core/counter";
 import { kvGet, kvGetStrict, kvSet } from "./kv";
-import { doFetch, meterGet } from "./meter-client";
+import { doFetch, meterGet, METER_CLIENT } from "./meter-client";
 
 /* 快照：用量灾备（KV）+ 合成快照 */
 
@@ -13,6 +14,14 @@ export const FLUSH_DIRTY = 2 * 1024 * 1024; // 脏字节门槛
 export const FLUSH_MAX_MS = 7200000; // 最迟 2 小时必落一次
 export const FLUSH_GAP = 2700000; // 全局闸门：45 分钟内已有别的 isolate 写过就不再写
 export const SNAP_TTL = 300000;
+
+/** 固定本轮提交的读数，成功确认不能吃掉 await 期间生产的新增量。 */
+interface SnapshotBatch {
+  usage: Map<string, StatsLocal>;
+  rtt: Map<string, Record<string, RttEntry>>;
+  errors: ErrItem[];
+  dirtyBytes: number;
+}
 
 /** 快照模块的本地状态：7.369 起从 AppState 下放到这里，只有本模块读写 */
 export class SnapshotState {
@@ -242,7 +251,7 @@ export async function restoreUsage(env: Env, id: string, snap?: UsageSnap) {
     const r = await doFetch(env, id, "https://meter/set", { method: "POST", body: JSON.stringify(u) });
     if (!r.ok) return null;
     const v = await r.json();
-    S.meterCache.set(id, { v, t: Date.now() });
+    METER_CLIENT.cache.set(id, { v, t: Date.now() });
     return v;
   } catch (e) {
     return null;
@@ -258,7 +267,7 @@ export async function restoreUsage(env: Env, id: string, snap?: UsageSnap) {
 export async function flushSnap(env: Env, force?: boolean): Promise<void> {
   const kv = env.STATS;
   if (!kv) return;
-  const hasData = S.stats.size > 0 || S.rtt.size > 0 || S.errs.length > 0;
+  const hasData = USAGE_MEMORY.rows.size > 0 || ENTRY_MEMORY.rows.size > 0 || ERROR_MEMORY.rows.length > 0;
   if (!hasData) return;
 
   const now = Date.now();
@@ -266,7 +275,7 @@ export async function flushSnap(env: Env, force?: boolean): Promise<void> {
   // 关键：按"时间"节流，而不是按"脏字节"。
   // 以前 snapBytes >= 2MB 就写 —— 一天 12 GB 流量 = 6000 次写，直接把
   // 免费额度（1000/天）打爆。
-  const due = !!force || (S.snapBytes >= FLUSH_DIRTY && since >= FLUSH_MIN_MS) || since >= FLUSH_MAX_MS;
+  const due = !!force || (USAGE_MEMORY.dirtyBytes >= FLUSH_DIRTY && since >= FLUSH_MIN_MS) || since >= FLUSH_MAX_MS;
   if (!due) return;
   // 全局闸门失败/跳过时不能每条连接都再去读一次 KV：5 分钟内只检查一次。
   // force 必须绕过它，否则 force 就是个死开关（v7.201：强制落盘连续调两次，第二次被
@@ -302,11 +311,18 @@ async function writeSnap(env: Env, now: number, force = false): Promise<void> {
   // 别人 45 分钟内写过就跳过：自己的增量留在内存里下一轮合并，一条不丢
   if (gateHeld(prev, now, force)) return;
   const next = seedSnap(prev, now);
-  mergeUsage(next, now);
-  mergeRtt(next);
+  // 数值和学习桶必须复制：正在关闭的连接仍会修改原对象。
+  const batch: SnapshotBatch = {
+    usage: new Map([...USAGE_MEMORY.rows].map(([id, row]) => [id, { ...row }])),
+    rtt: new Map([...ENTRY_MEMORY.rows].map(([id, bucket]) => [id, Object.fromEntries(Object.entries(bucket).map(([tag, row]) => [tag, { ...row }]))])),
+    errors: ERROR_MEMORY.rows.slice(),
+    dirtyBytes: USAGE_MEMORY.dirtyBytes,
+  };
+  mergeUsage(next, now, batch.usage);
+  mergeRtt(next, batch.rtt);
   trimRtt(next);
-  mergeErrs(next);
-  await commitSnap(env, next, now);
+  mergeErrs(next, batch.errors);
+  await commitSnap(env, next, now, batch);
 }
 
 /**
@@ -368,8 +384,8 @@ function seedSnap(prev: SnapDoc, now: number): SnapDoc {
  * @param now 当前时间（给缺 `first` 的新行兜底）
  * @returns 无
  */
-function mergeUsage(next: SnapDoc, now: number): void {
-  for (const [id, s] of S.stats) {
+function mergeUsage(next: SnapDoc, now: number, rows: Map<string, StatsLocal>): void {
+  for (const [id, s] of rows) {
     const p = next.stats[id] || { up: 0, down: 0, conns: 0, first: s.first, last: s.last };
     next.stats[id] = {
       up: (p.up || 0) + (s.up || 0),
@@ -387,8 +403,8 @@ function mergeUsage(next: SnapDoc, now: number): void {
  * @param next 待写快照（就地修改）
  * @returns 无
  */
-function mergeRtt(next: SnapDoc): void {
-  for (const [id, bucket] of S.rtt) {
+function mergeRtt(next: SnapDoc, nowRows: Map<string, Record<string, RttEntry>>): void {
+  for (const [id, bucket] of nowRows) {
     // 不能直接复用 prev 里的普通对象：tag="__proto__" 时赋值会改原型而不是写键
     const tgt = Object.create(null) as Record<string, RttEntry>;
     const oldTgt = next.rtt[id];
@@ -432,27 +448,26 @@ function trimRtt(next: SnapDoc): void {
  * @param next 待写快照（就地修改）
  * @returns 无
  */
-function mergeErrs(next: SnapDoc): void {
-  if (S.errs.length) next.errs = next.errs.concat(S.errs).slice(-50);
+function mergeErrs(next: SnapDoc, rows: ErrItem[]): void {
+  if (rows.length) next.errs = next.errs.concat(rows).slice(-50);
 }
 
 /**
- * 功能：落盘并在成功后清空本地读数（失败时本地原样留着，下一轮重试）。
+ * 功能：落盘并在成功后确认本轮读数（失败时本地原样留着，下一轮重试）。
  * @param env 环境变量
  * @param next 待写快照
  * @param now 当前时间（成功时记进 `SNAP.written`）
  * @returns 无
  */
-async function commitSnap(env: Env, next: SnapDoc, now: number): Promise<void> {
+async function commitSnap(env: Env, next: SnapDoc, now: number, batch: SnapshotBatch): Promise<void> {
   try {
     await kvSet(env, "snap", next, { expirationTtl: 86400 * 30 });
     SNAP.cache = { v: next, t: Date.now() };
     SNAP.written = now;
-    S.snapBytes = 0;
-    // 只有写成功才清：KV 抖动时这些增量必须留到下一轮，否则这一段流量永久消失
-    S.stats.clear();
-    S.rtt.clear();
-    S.errs.length = 0;
+    // 只确认本轮发送的增量；在途新连接、新 RTT、新错误都留到下一轮。
+    USAGE_MEMORY.acknowledge(batch.usage, batch.dirtyBytes);
+    ENTRY_MEMORY.acknowledge(batch.rtt);
+    ERROR_MEMORY.acknowledge(batch.errors);
   } catch (e) {
     // 同 usageSnapWrite：KV 写不上去时快照停在旧值，事后只能从「重装后用量从 0 起算」发现
     cnt("snapFlushFail");
@@ -464,7 +479,7 @@ async function commitSnap(env: Env, next: SnapDoc, now: number): Promise<void> {
  *
  * 读失败必须**抛错**，不能返回空快照：`SNAP_TTL` 是 5 分钟，一旦把「KV 抖动」
  * 当成「还没有快照」，`/<uuid>/logs` 的错误列表、`readStats` 的 KV 回退、
- * `loadRtt` 的延迟学习会在 5 分钟里一致地骗人（`loadRtt` 还会顺带把 `S.rttMiss`
+ * `loadRtt` 的延迟学习会在 5 分钟里一致地骗人（`loadRtt` 还会顺带把 `ENTRY_MEMORY.misses`
  * 压上 10 分钟，KV 恢复了也读不到）。三个调用方本来就都有 try/catch，抛出去各自降级。
  * @param env 环境变量
  * @param fresh 忽略缓存

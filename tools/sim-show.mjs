@@ -3,7 +3,6 @@
 //   node test/mk_test.mjs && node tools/sim-show.mjs [小时数]
 import * as W from "../test/_bundle.mjs";
 
-const S = W.S;
 const MB = 1048576;
 const ENV = { pxDwellMin: 0, pxShadow: 0.05, pxSchedH: 6 };
 
@@ -52,7 +51,7 @@ const rttOf = (n) => n.tcp + n.tls * 1.2;
 const costOf = (n, size) => (n.pf >= 1 ? Infinity : (rttOf(n) + (size / (n.bw * MB)) * 1000) / (1 - n.pf));
 
 const install = (n) => {
-  S.alive.set(n.key, { h: n.id, p: 443, cc: "", ms: Math.round(n.probe + n.tls) });
+  W.NODE_MEMORY.alive.set(n.key, { h: n.id, p: 443, cc: "", ms: Math.round(n.probe + n.tls) });
   const s = W.NodeStatsTable.nsGet(n.key);
   s.tcp = n.probe;
   s.tls = n.tls;
@@ -62,16 +61,16 @@ const install = (n) => {
 function reset() {
   NOW = Date.UTC(2026, 2, 1);
   rs = 7;
-  S.alive.clear();
-  S.nstat.clear();
-  S.hostNode.clear();
-  S.hostDirect.clear();
-  S.hostRankCache.clear();
-  S.curs = { lat: "", tput: "" };
-  S.prev = { lat: "", tput: "" };
-  S.lastSwitch = { lat: 0, tput: 0 };
-  S.switchHits = { lat: [], tput: [] };
-  S.inflight.clear();
+  W.NODE_MEMORY.alive.clear();
+  W.NODE_MEMORY.stats.clear();
+  W.HOSTS.nodes.clear();
+  W.HOSTS.direct.clear();
+  W.NODE_MEMORY.rankCache.clear();
+  W.SELECTION_MEMORY.current = { lat: "", tput: "" };
+  W.SELECTION_MEMORY.previous = { lat: "", tput: "" };
+  W.SELECTION_MEMORY.switchedAt = { lat: 0, tput: 0 };
+  W.SELECTION_MEMORY.switches = { lat: [], tput: [] };
+  W.NODE_MEMORY.inflight.clear();
   W.NodeStatsTable.invalidateRank();
   for (const n of NODES) install(n);
 }

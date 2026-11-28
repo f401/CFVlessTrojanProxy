@@ -2,7 +2,6 @@
 //   用法：node test/mk_test.mjs && node tools/sim-scale.mjs [小时数]
 import * as W from "../test/_bundle.mjs";
 
-const S = W.S;
 const MB = 1048576;
 
 let NOW = Date.UTC(2026, 0, 1);
@@ -45,26 +44,26 @@ function buildPool(n, cc) {
 
 function reset() {
   NOW = Date.UTC(2026, 0, 1);
-  S.alive.clear();
-  S.nstat.clear();
-  S.hostNode.clear();
-  S.hostDirect.clear();
-  S.hostRankCache.clear();
-  S.curs = { lat: "", tput: "" };
-  S.prev = { lat: "", tput: "" };
-  S.lastSwitch = { lat: 0, tput: 0 };
-  S.switchHits = { lat: [], tput: [] };
-  S.inflight.clear();
-  S.rankCache = { t: 0, at: {}, v: {}, step: {} };
-  S.candN = 0;
-  S.pxFailMem = 0;
-  S.pxFailSeen = 0;
-  S.seedAt = NOW;
+  W.NODE_MEMORY.alive.clear();
+  W.NODE_MEMORY.stats.clear();
+  W.HOSTS.nodes.clear();
+  W.HOSTS.direct.clear();
+  W.NODE_MEMORY.rankCache.clear();
+  W.SELECTION_MEMORY.current = { lat: "", tput: "" };
+  W.SELECTION_MEMORY.previous = { lat: "", tput: "" };
+  W.SELECTION_MEMORY.switchedAt = { lat: 0, tput: 0 };
+  W.SELECTION_MEMORY.switches = { lat: [], tput: [] };
+  W.NODE_MEMORY.inflight.clear();
+
+  W.NODE_MEMORY.candidateCount = 0;
+  W.SELECTION_MEMORY.failCount = 0;
+  W.SELECTION_MEMORY.failSeen = 0;
+
 }
 
 function install(pool) {
   for (const n of pool) {
-    S.alive.set(n.key, { h: n.id, p: 443, cc: n.cc, ms: n.probeTcp + n.tls });
+    W.NODE_MEMORY.alive.set(n.key, { h: n.id, p: 443, cc: n.cc, ms: n.probeTcp + n.tls });
     const s = W.NodeStatsTable.nsGet(n.key);
     s.tcp = n.probeTcp;
     s.tls = n.tls;
@@ -128,14 +127,14 @@ async function run(n, hours, seedVal) {
   const mem = (process.memoryUsage().heapUsed - mem0) / MB;
 
   const candLat = bench(() => {
-    S.rankCache = { t: 0, at: {}, v: {}, step: {} };
-    W.candsFor("lat");
+
+    W.CANDS.list("lat");
   });
   const candTput = bench(() => {
-    S.rankCache = { t: 0, at: {}, v: {}, step: {} };
-    W.candsFor("tput");
+
+    W.CANDS.list("tput");
   }, 10);
-  S.seedAt = NOW + 3600e3; // 让 SeedStore.read 直接返回，只量选路本身
+
   const reg = await benchAsync(() => W.SEL.region(ENV, "DE", "lat"), 10);
   const pickUs = bench(() => W.SEL.pick(ENV, "lat", { host: "" }), 500);
 
@@ -153,9 +152,9 @@ async function run(n, hours, seedVal) {
     NOW += 1000;
     if (t % 1800 === 0) cron(pool2);
     const key = W.SEL.pick(ENV, "lat", { host: "" });
-    if (S.curs.lat && S.curs.lat !== last) {
+    if (W.SELECTION_MEMORY.current.lat && W.SELECTION_MEMORY.current.lat !== last) {
       sw++;
-      last = S.curs.lat;
+      last = W.SELECTION_MEMORY.current.lat;
     }
     hits.set(key, (hits.get(key) || 0) + 1);
     const node = byKey.get(key);
@@ -174,7 +173,7 @@ async function run(n, hours, seedVal) {
 
   // seed 体积：SEED_MAX=40，看看 40 个节点占多少字节
   const seedBytes = (() => {
-    const rows = pool2.slice(0, 40).map((x) => W.SeedStore.packNode(x.key));
+    const rows = pool2.slice(0, 40).map((x) => W.SEED_STORE.packName(x.key));
     return JSON.stringify(rows).length;
   })();
 
@@ -182,14 +181,14 @@ async function run(n, hours, seedVal) {
     const hits = new Map();
     // 只统计最后一次 pick 的分数分布
     const rows = [...hits.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
-    console.log("[dump]", n, "active", S.active.lat.size, "hasGood", S.active.lat.has("good:443"), "candN", S.candN,
+    console.log("[dump]", n, "alive", W.NODE_MEMORY.alive.size, "hasGood", W.NODE_MEMORY.alive.has("good:443"), "candN", W.NODE_MEMORY.candidateCount,
       rows.map(([k, v]) => {
         const nd = byKey.get(k);
         return k + ":" + v + (nd ? "(" + Math.round(nd.tcp) + "ms," + Math.round(100 * nd.pFail) + "%)" : "");
       }).join(" "));
   }
   let seen = 0;
-  for (const st of S.nstat.values()) if ((st.okW || 0) + (st.failW || 0) >= 2) seen++;
+  for (const st of W.NODE_MEMORY.stats.values()) if ((st.okW || 0) + (st.failW || 0) >= 2) seen++;
   return {
     n,
     seen,

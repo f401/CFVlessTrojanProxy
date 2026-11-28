@@ -3,7 +3,6 @@
 //   用法：node test/mk_test.mjs && node tools/sim-real.mjs [小时数]
 import * as W from "../test/_bundle.mjs";
 
-const S = W.S;
 const MB = 1048576;
 const K = 1024;
 
@@ -55,7 +54,7 @@ if (process.env.RANK === "ts2") {
   W.SEL.pick = (_env, mode) => {
     const now = Date.now();
     if (!memAt || now - memAt > 20000 || !mem.length) {
-      const rows = W.candsFor(mode)
+      const rows = W.CANDS.list(mode)
         .map((x) => ({ k: x.k, lat: W.scoreParts(x.k, mode).latencyMs }))
         .sort((a, b) => a.lat - b.lat);
       mem = rows.slice(0, K).map((x) => x.k);
@@ -69,13 +68,13 @@ if (process.env.RANK === "ts2") {
       const v = p.latencyMs + gauss() * sd;
       if (v < bv) { bv = v; best = k; }
     }
-    return best || (W.candsFor(mode)[0] || { k: "" }).k;
+    return best || (W.CANDS.list(mode)[0] || { k: "" }).k;
   };
 }
 if (process.env.RANK === "ts") {
   const gate = Number(process.env.GATE || 0.02);
   W.SEL.pick = (_env, mode) => {
-    const all = W.candsFor(mode);
+    const all = W.CANDS.list(mode);
     if (!all.length) return "";
     const K = Number(process.env.KTOP || 0);
     let pool = all;
@@ -110,7 +109,7 @@ if (process.env.RANK === "rawsoft") {
   const gate = Number(process.env.GATE || 0.02);
   const T = Number(process.env.TEMP || 20);
   W.SEL.pick = (_env, mode) => {
-    const all = W.candsFor(mode);
+    const all = W.CANDS.list(mode);
     const list = [];
     for (const x of all) {
       const p = W.scoreParts(x.k, mode);
@@ -132,7 +131,7 @@ if (process.env.RANK === "rawsoft") {
 if (process.env.RANK === "raw") {
   const gate = Number(process.env.GATE || 0.02);
   W.SEL.pick = (_env, mode) => {
-    const list = W.candsFor(mode);
+    const list = W.CANDS.list(mode);
     if (!list.length) return "";
     let best = "", bv = Infinity;
     for (const x of list) {
@@ -148,7 +147,7 @@ if (process.env.RANK === "raw") {
 /* 备选设计：乐观初始化 + 贪心（没测过的节点按"已知最好"估，而不是 51 秒先验） */
 if (process.env.ALT === "optim") {
   W.SEL.pick = (_env, mode) => {
-    const list = W.candsFor(mode);
+    const list = W.CANDS.list(mode);
     if (!list.length) return "";
     let bestE = Infinity;
     for (const x of list) {
@@ -201,28 +200,28 @@ let pool = [];
 
 function reset() {
   NOW = Date.UTC(2026, 1, 2);
-  S.alive.clear();
-  S.nstat.clear();
-  S.hostNode.clear();
-  S.hostDirect.clear();
-  S.hostRankCache.clear();
-  S.curs = { lat: "", tput: "" };
-  S.prev = { lat: "", tput: "" };
-  S.lastSwitch = { lat: 0, tput: 0 };
-  S.switchHits = { lat: [], tput: [] };
-  S.inflight.clear();
-  S.rankCache = { t: 0, at: {}, v: {}, step: {} };
-  S.candN = 0;
-  S.pxFailMem = 0;
-  S.pxFailSeen = 0;
-  S.seedAt = NOW;
+  W.NODE_MEMORY.alive.clear();
+  W.NODE_MEMORY.stats.clear();
+  W.HOSTS.nodes.clear();
+  W.HOSTS.direct.clear();
+  W.NODE_MEMORY.rankCache.clear();
+  W.SELECTION_MEMORY.current = { lat: "", tput: "" };
+  W.SELECTION_MEMORY.previous = { lat: "", tput: "" };
+  W.SELECTION_MEMORY.switchedAt = { lat: 0, tput: 0 };
+  W.SELECTION_MEMORY.switches = { lat: [], tput: [] };
+  W.NODE_MEMORY.inflight.clear();
+
+  W.NODE_MEMORY.candidateCount = 0;
+  W.SELECTION_MEMORY.failCount = 0;
+  W.SELECTION_MEMORY.failSeen = 0;
+
   byKey.clear();
   pool = [];
   seq = 0;
 }
 
 function install(n, isNew = false) {
-  S.alive.set(n.key, { h: n.id, p: 443, cc: n.cc, ms: Math.round(n.probeTcp + n.tls) });
+  W.NODE_MEMORY.alive.set(n.key, { h: n.id, p: 443, cc: n.cc, ms: Math.round(n.probeTcp + n.tls) });
   const s = W.NodeStatsTable.nsGet(n.key);
   s.tcp = n.probeTcp;
   s.tls = n.tls;
@@ -232,7 +231,7 @@ function install(n, isNew = false) {
 }
 
 function drop(n) {
-  S.alive.delete(n.key);
+  W.NODE_MEMORY.alive.delete(n.key);
   byKey.delete(n.key);
   pool = pool.filter((x) => x !== n);
 }
@@ -264,8 +263,8 @@ async function request(n, mode, size, siteShare, jitter) {
 // REST=0 表示"全测"（旧行为），用来量化这段预算的代价。
 function cron(probeFail) {
   const restN = process.env.REST === undefined ? 12 : Number(process.env.REST);
-  const cur = S.curs.tput || S.curs.lat;
-  const top3 = W.candsFor("tput")
+  const cur = W.SELECTION_MEMORY.current.tput || W.SELECTION_MEMORY.current.lat;
+  const top3 = W.CANDS.list("tput")
     .map((x) => x.k)
     .filter((k) => k !== cur)
     .slice(0, 3);
@@ -333,7 +332,7 @@ async function run(p, hours, seedVal) {
       const mode = p.tputShare && rnd() < p.tputShare ? "tput" : "lat";
       const size = mode === "tput" ? 10 * MB : rnd() < 0.85 ? 90 * K : 600 * K;
       const key = W.SEL.pick(ENV, mode, { host: "" });
-      const curNow = S.curs[mode];
+      const curNow = W.SELECTION_MEMORY.current[mode];
       if (mode === "tput") {
         if (curNow && curNow !== lastTput) {
           sw++;
@@ -386,8 +385,8 @@ async function run(p, hours, seedVal) {
   if (process.env.DUMP) {
     const rows = [...byKey.values()].map((n) => ({ k: n.key, bw: +n.bw.toFixed(1), tcp: Math.round(n.tcp), pf: +n.pFail.toFixed(3), sc: Math.round(W.costOf(n.key, "tput")), hits: hits.get(n.key) || 0, cost: Math.round(costOf(n, 10 * MB)) }));
     rows.sort((a, b) => a.cost - b.cost);
-    console.log("[dump]", p.name, "cur", S.curs.tput);
-    console.log("[dump] oracle", rows[0], "cursor", rows.find((r) => r.k === S.curs.tput));
+    console.log("[dump]", p.name, "cur", W.SELECTION_MEMORY.current.tput);
+    console.log("[dump] oracle", rows[0], "cursor", rows.find((r) => r.k === W.SELECTION_MEMORY.current.tput));
     console.log("[dump] top-score", rows.slice().sort((a, b) => a.sc - b.sc).slice(0, 3));
   }
   if (process.env.DUMP) {

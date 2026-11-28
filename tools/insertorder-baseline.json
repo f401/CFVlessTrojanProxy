@@ -11,7 +11,7 @@
   },
   {
     "file": "src/route/tfb.ts",
-    "snippet": "const first = S.tfbV.keys().next();",
+    "snippet": "const first = TFB.verdicts.keys().next();",
     "why": "tfRemember() 刻意先 delete 再 set（7.224），所以从头删 = 删最久没再被探过的站点，两批共识才不会对最该封锁的站点失效"
   }
 ]

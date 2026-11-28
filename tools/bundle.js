@@ -4,6 +4,7 @@
 const path = require("path");
 const fs = require("fs");
 const esbuild = require("esbuild");
+const { viewAssetsPlugin } = require("./view-assets.cjs");
 
 const ROOT = path.resolve(__dirname, "..");
 const common = {
@@ -16,6 +17,7 @@ const common = {
   legalComments: "none",
   charset: "utf8",
   loader: { ".html": "text" },
+  plugins: [viewAssetsPlugin],
   absWorkingDir: ROOT,
   logLevel: "warning",
 };

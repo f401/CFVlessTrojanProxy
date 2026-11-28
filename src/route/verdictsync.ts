@@ -1,10 +1,8 @@
 // 判定表的跨 isolate 同步：只同步「强证据」（blocked/dead），带 30 分钟 TTL。
 // 目标 isolate 冷启动时拉一次，之后靠本地的记录增量回传，避免每请求都读 DO。
-import { S } from "../core/state";
 import { VT, VT_TTL_MS, VT_SYNC } from "./verdict";
 import { HEALTH } from "./relay-health";
 import { FactsStore, type FactsBody } from "./factsstore";
-import { EG } from "./egfacts";
 import { cnt } from "../core/counter";
 import { dropExpired, trimAged } from "../core/hostmem";
 import { doFetch } from "../store/meter-client";
@@ -77,7 +75,7 @@ export function vtNack(): void {
  * @returns {Promise<void>} 读完 resolve（失败也 resolve）
  */
 export async function vtLoad(env: Env): Promise<void> {
-  if (S.vtLoaded) return;
+  if (VT_SYNC.loaded) return;
   // 失败后 60 秒内不重试（一次抖动不该让首字节为坏运气反复排队），过期后允许再试一次
   if (VT_SYNC.coolUntil > Date.now()) return;
   if (VT_SYNC.flight) {
@@ -112,7 +110,7 @@ function vtShape(b: unknown): b is WireBody {
   const o = b as WireBody;
   // 七张表必须都在：factsOut() 恒发全七张（空表也是空数组）。
   // 只看 vt/hl 时，一个缺 eg/ps/dead/blk2/dns 的旧缓存或裁剪过的响应会被当成完整事实，
-  // 于是 S.vtLoaded 被置真、FactsStore.load 静默跳过缺的表 —— 本 isolate 余生看不到那五类事实。
+  // 于是 VT_SYNC.loaded 被置真、FactsStore.load 静默跳过缺的表 —— 本 isolate 余生看不到那五类事实。
   const FACT_TABLES = ["vt", "hl", "eg", "ps", "dead", "blk2", "dns"];
   return FACT_TABLES.every((k) => Array.isArray((o as unknown as Record<string, unknown>)[k]));
 }
@@ -166,7 +164,7 @@ async function vtFetch(env: Env): Promise<void> {
     }
     if (Array.isArray(jj.hl)) HEALTH.merge(jj.hl);
     // 只有真的拿到 DO 的回答才算「读过」：否则失败的 isolate 会一直带着空事实选路
-    S.vtLoaded = true;
+    VT_SYNC.loaded = true;
     const nf = FactsStore.load(jj);
     cnt("egDO", nf.eg);
     cnt("psDO", nf.ps);
@@ -178,7 +176,7 @@ async function vtFetch(env: Env): Promise<void> {
     VT_SYNC.coolUntil = Date.now() + 60000;
   } finally {
     // 订阅层（views）不能 import route，所以把「哪些中继已知是 v4 出口」放进 S，供渲染直接取用
-    S.eg4Top = EG.v4List().slice(0, 8);
+
     VT_SYNC.flight = null;
   }
 }

@@ -1,4 +1,9 @@
-import { S } from "../core/state";
+import { METER_CLIENT } from "../store/meter-client";
+import { SELECTION_MEMORY } from "../px/selection-memory";
+import { KV_WRITES } from "../store/kv";
+import { POLICY } from "../route/policy";
+import { POOL_MEMORY } from "../px/pool-memory";
+import { NODE_MEMORY } from "../core/node-memory";
 import { vtAck, vtDelta, vtLoad, vtNack } from "../route/verdictsync";
 import { doFetch, PEND, restoreUsage } from "../store/index";
 import { DebugNets } from "./debug-nets";
@@ -15,7 +20,7 @@ import { Prefs } from "../route/prefs";
 import { PS } from "../route/psfacts";
 import { HEALTH } from "../route/relay-health";
 import { REL_SAMPLE_TTL, RELPERF } from "../route/relperf";
-import { VT } from "../route/verdict";
+import { VT, VT_SYNC } from "../route/verdict";
 import { errMsg, withTimeout } from "../core/util";
 import { adminOnly } from "../edge/auth";
 import { NodeStatsTable } from "../nodes/score";
@@ -105,7 +110,7 @@ export class DebugTables {
     if (!q.get("rt")) return null;
     // 站点名是客户端可控的，截断到 80 字符再进表，避免拿它当无界键
     const host = String(q.get("rt") || "").slice(0, 80);
-    return json({ host, rows: RELPERF.snap(host), alive: S.alive.size, ttl: REL_SAMPLE_TTL });
+    return json({ host, rows: RELPERF.snap(host), alive: NODE_MEMORY.alive.size, ttl: REL_SAMPLE_TTL });
   }
 
   /**
@@ -138,7 +143,7 @@ export class DebugTables {
    */
   private planRows(q: URLSearchParams): Response | null {
     if (q.get("plan") !== "1") return null;
-    return json({ plan: planView(S.pool.length, S.alive.size), counters: cntView() });
+    return json({ plan: planView(POOL_MEMORY.rows.length, NODE_MEMORY.alive.size), counters: cntView() });
   }
 
   /**
@@ -151,8 +156,8 @@ export class DebugTables {
     if (!host) return null;
     // 这里曾经还回三个恒空字段（ips / nodes / rows），它们来自已删除的扫描器，
     // 于是「扫描结果为空」和「根本没有扫描」在响应里长得一模一样（v7.154 删掉）
-    const plan = planView(S.pool.length, S.alive.size);
-    const pol = { same: S.polSame, diff: S.polDiff, why: S.polWhy };
+    const plan = planView(POOL_MEMORY.rows.length, NODE_MEMORY.alive.size);
+    const pol = { same: POLICY.same, diff: POLICY.different, why: POLICY.reasons };
     return json({ host, table: VT.all(), pol, plan, counters: cntView() });
   }
 
@@ -186,7 +191,7 @@ export class DebugTables {
    */
   private prefsRows(q: URLSearchParams): Response | null {
     if (q.get("prefs") !== "1") return null;
-    return json({ prefs: Prefs.json(60), pol: { same: S.polSame, diff: S.polDiff, why: S.polWhy } });
+    return json({ prefs: Prefs.json(60), pol: { same: POLICY.same, diff: POLICY.different, why: POLICY.reasons } });
   }
 
   /**
@@ -250,7 +255,7 @@ export class DebugActions {
       committed: !!commit.ok && !commit.skipped,
       gen: commit.gen || 0,
       reason: commit.reason || "",
-      kvLastWrite: S.kvStat,
+      kvLastWrite: KV_WRITES.status,
       extra: EXTRA_HOSTS,
     });
   }
@@ -274,12 +279,12 @@ export class DebugActions {
     stat.freeUntil = 0;
     stat.streak = 0;
     const fx = await flushPx(c.env, true);
-    S.pxFailMem = 0;
+    SELECTION_MEMORY.failCount = 0;
     // 钉节点要跟着写 KV 锚点，否则别的 isolate 起来会挑回原来那条（返回 ok 但没落盘就是谎报）
     return json({
       ok: true,
       cur: want,
-      curs: S.curs,
+      curs: SELECTION_MEMORY.current,
       anchor: fx.ok ? "ok" : "fail",
       note: fx.ok ? undefined : fx.err,
     });
@@ -329,7 +334,7 @@ export class DebugActions {
       seedStatus = r.status;
       seeded = await r.json();
       // 回填成功后立刻刷新本地缓存：否则下一次 `/` 仍读到回填前的 0
-      S.meterCache.set(id, { v: seeded, t: Date.now() });
+      METER_CLIENT.cache.set(id, { v: seeded, t: Date.now() });
     } catch (e) {
       return json({ ok: false, error: String(errMsg(e)) });
     }
@@ -472,7 +477,7 @@ export async function debug(c: DebugCtx): Promise<Response> {
     try {
       const rows = vtDelta();
       if (rows.length) {
-        // 走 `doFetch`：它同时把这次子请求记进 `S.doCalls`，绕过它 `/health` 的计数就少一块
+        // 走 `doFetch`：它同时把这次子请求记进 `METER_CLIENT.calls`，绕过它 `/health` 的计数就少一块
         const userId = String(env.uuid || env.uuids).split(",")[0].trim().toLowerCase();
         const r = await doFetch(env, userId, "https://meter/add", {
           method: "POST",
@@ -487,7 +492,7 @@ export async function debug(c: DebugCtx): Promise<Response> {
       // 写回失败不影响本次诊断：nack 让 pending 下轮重发，vtLoad 会重新尝试读
       vtNack();
     }
-    S.vtLoaded = false;
+    VT_SYNC.loaded = false;
     await vtLoad(env);
   }
 

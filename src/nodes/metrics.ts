@@ -1,13 +1,13 @@
+import { NODE_MEMORY } from "../core/node-memory";
+import { ENTRY_MEMORY } from "../core/client-memory";
 import { RTT_MAX, SC } from "../core/const";
-import { S } from "../core/state";
 import { getSnap, kvGetStrict } from "../store/index";
 import { TEN_MB, costOf, isBlack, isFrozen, CANDS } from "./score";
 
 // ---- 并入自 rtt.ts ----
 // 入口 RTT 学习：按用户记「入口标签 → RTT / 机房 / 带宽 / 成败」，供订阅里的入口排序使用。
 //
-// 状态在 `S.rtt`（本 isolate 内存）与 KV 快照里，这里只做读写与淘汰，所以按约定不配类 ——
-// 没有独占的跨请求可变状态，做成类只会多一层转发（见 AGENTS.md「类」那一节）。
+// EntryMemory 独占本地增量及负缓存，快照层按已提交计数确认；学习计算不反向依赖存储编排。
 
 /** 控制每个用户的入口标签数：?ip= 是用户可传的，不设上限能把 snap 写成超大 KV 值 */
 function trimRtt(bucket: Record<string, RttEntry>) {
@@ -27,10 +27,10 @@ function trimRtt(bucket: Record<string, RttEntry>) {
 export function rttMark(id: string | null, tag: string | null, ok: boolean) {
   if (!id || !tag) return;
   // 每个用户一张「入口标签 → 计数」小表，第一次见到这个用户才建
-  let bucket = S.rtt.get(id);
+  let bucket = ENTRY_MEMORY.rows.get(id);
   if (!bucket) {
     bucket = Object.create(null) as Record<string, RttEntry>; // 防 ?ip=__proto__ 污染原型
-    S.rtt.set(id, bucket);
+    ENTRY_MEMORY.rows.set(id, bucket);
   }
   // 新标签建空记录；ts 供 trimRtt 按时间淘汰，ok/fail 是这台入口的成败计数
   const e = bucket[tag] || { rtt: 0, colo: "", bw: 0, hits: 0, ok: 0, fail: 0, ts: Date.now() };
@@ -56,10 +56,10 @@ export function rttLearn(cf: CfMeta | null, tag: string | null, id: string | nul
 
   // 按 UUID 记录：自用场景下最准，也不会和别人的统计互相污染
   const key = id;
-  let bucket = S.rtt.get(key);
+  let bucket = ENTRY_MEMORY.rows.get(key);
   if (!bucket) {
     bucket = Object.create(null) as Record<string, RttEntry>;
-    S.rtt.set(key, bucket);
+    ENTRY_MEMORY.rows.set(key, bucket);
   }
 
   const cur = bucket[tag];
@@ -87,20 +87,19 @@ export function rttLearn(cf: CfMeta | null, tag: string | null, id: string | nul
  */
 export async function loadRtt(env: Env, id: string) {
   if (!id) return {};
-  const mem = S.rtt.get(id) || {};
+  const mem = ENTRY_MEMORY.rows.get(id) || {};
   if (!env.STATS) return mem;
   try {
     const snap = await getSnap(env);
     let stored: Record<string, RttEntry> = ((snap.rtt || {}) as Record<string, Record<string, RttEntry>>)[id] || {};
-    if (!Object.keys(stored).length && (S.rttMiss.get(id) || 0) < Date.now()) {
+    if (!Object.keys(stored).length && (ENTRY_MEMORY.misses.get(id) || 0) < Date.now()) {
       // 老键 rtt:<id> 只用于迁移；不存在时记住 10 分钟，避免每次刷订阅都打一次 KV。
       // 必须严格读：`kvGet` 会把 KV 异常吞成 null，于是「读不到」被记成「没有旧键」，
       // 给这个用户压上 10 分钟的 rttMiss —— KV 恢复了也拿不到学到的延迟（v7.206）。
       stored = (await kvGetStrict<Record<string, RttEntry>>(env, `rtt:${id}`)) || {};
-      if (Object.keys(stored).length) S.rttMiss.delete(id);
+      if (Object.keys(stored).length) ENTRY_MEMORY.misses.delete(id);
       else {
-        if (S.rttMiss.size > 500) S.rttMiss.clear();
-        S.rttMiss.set(id, Date.now() + 10 * 60000);
+        ENTRY_MEMORY.missing(id);
       }
     }
     const out = { ...stored, ...mem };
@@ -167,9 +166,12 @@ export function hostScore(s: HNStat, mode: Mode, now: number): number {
  *
  * 它与全局节点分的区别：全局分回答「这台节点好不好」，站点画像回答「这台节点打这个站好不好」。
  * 有些节点整体很快，但某个站一直被它挡（IP 级封锁），只有站点级样本能看出来。
- * 内存表都在 S.hostNode / S.hostDirect 里，本类只负责读写与淘汰，不跨 isolate 共享。
+ * 内存表都在 HOSTS.nodes / HOSTS.direct 里，本类只负责读写与淘汰，不跨 isolate 共享。
  */
 export class HostProfile {
+  /** 每族最多 12 个节点、最多 120 族，写入路径负责按活跃时刻淘汰。 */
+  nodes = new Map<string, Map<string, HNStat>>();
+  direct = new Map<string, HDirect>();
   /**
    * 功能：记一次（站点, 节点）的连接结果，必要时淘汰最久未更新的域名/节点。
    * @param host 目标域名（内部转成站点族）
@@ -194,7 +196,7 @@ export class HostProfile {
    * 功能：取（站点族, 节点）的统计行，缺行就补齐（两张表各自压上限）。
    * @param fam 站点族
    * @param node 节点 key
-   * @returns 可写的统计行（就地修改即生效，行在 `S.hostNode` 里）
+   * @returns 可写的统计行（就地修改即生效，行在 `this.nodes` 里）
    */
   private entryOf(fam: string, node: string): HNStat {
     const m = this.famMap(fam);
@@ -212,11 +214,11 @@ export class HostProfile {
    * @returns 该族的节点表（就地修改即生效）
    */
   private famMap(fam: string): Map<string, HNStat> {
-    const hit = S.hostNode.get(fam);
+    const hit = this.nodes.get(fam);
     if (hit) return hit;
     this.evictHost();
     const fresh = new Map<string, HNStat>();
-    S.hostNode.set(fam, fresh);
+    this.nodes.set(fam, fresh);
     return fresh;
   }
 
@@ -226,10 +228,10 @@ export class HostProfile {
    */
   private evictHost(): void {
     // 键来自客户端请求的目标站点名，不设上限会被历史站点撑爆内存（120 条线性扫可接受）
-    if (S.hostNode.size < HN_MAX_HOSTS) return;
+    if (this.nodes.size < HN_MAX_HOSTS) return;
     let oldKey = "";
     let oldAt = Infinity;
-    for (const [k, v] of S.hostNode) {
+    for (const [k, v] of this.nodes) {
       // 一族里任何一台节点更新过，这一族就算「最近活跃过」
       let last = 0;
       for (const s of v.values()) if (s.at > last) last = s.at;
@@ -238,7 +240,7 @@ export class HostProfile {
         oldKey = k;
       }
     }
-    if (oldKey) S.hostNode.delete(oldKey);
+    if (oldKey) this.nodes.delete(oldKey);
   }
 
   /**
@@ -288,8 +290,8 @@ export class HostProfile {
     if (o.ok) s.ok += 1;
     if (o.bad) s.bad += 1;
     // 中途 bps 采样不失效：一次视频播放每 60 秒就刷一次，排行 30 秒本来也会过期
-    S.hostRankCache.delete(fam + "|lat");
-    S.hostRankCache.delete(fam + "|tput");
+    NODE_MEMORY.rankCache.delete(fam + "|lat");
+    NODE_MEMORY.rankCache.delete(fam + "|tput");
   }
 
   /**
@@ -322,21 +324,21 @@ export class HostProfile {
     // 和 hostNodeMark 用同一个族键：写 www.x.com、读 x.com 时不能对不上
     const fam = hostKey(host);
     if (!fam) return;
-    if (S.hostDirect.size >= HN_MAX_HOSTS) {
+    if (this.direct.size >= HN_MAX_HOSTS) {
       let oldK = "",
         oldT = Infinity;
-      for (const [k, v] of S.hostDirect)
+      for (const [k, v] of this.direct)
         if (v.at < oldT) {
           oldT = v.at;
           oldK = k;
         }
-      if (oldK) S.hostDirect.delete(oldK);
+      if (oldK) this.direct.delete(oldK);
     }
-    const e = S.hostDirect.get(fam) || { ok: 0, bad: 0, at: 0 };
+    const e = this.direct.get(fam) || { ok: 0, bad: 0, at: 0 };
     if (ok) e.ok += 1;
     else e.bad += 1;
     e.at = Date.now();
-    S.hostDirect.set(fam, e);
+    this.direct.set(fam, e);
   }
 
   /**
@@ -350,14 +352,14 @@ export class HostProfile {
     if (!fam) return [];
     const mkey = fam + "|" + (mode === "lat" ? "lat" : "tput");
     const now = Date.now();
-    const hit = S.hostRankCache.get(mkey);
+    const hit = NODE_MEMORY.rankCache.get(mkey);
     if (hit && now - hit.t < 30000) return hit.v;
 
-    const m = S.hostNode.get(fam);
+    const m = this.nodes.get(fam);
     const out: RankRow[] = [];
     if (m) {
       for (const [k, s] of m) {
-        if (!S.alive.has(k) || isBlack(k) || isFrozen(k)) continue;
+        if (!NODE_MEMORY.alive.has(k) || isBlack(k) || isFrozen(k)) continue;
         const hs = hostScore(s, mode, now);
         // 站点级没有该模式的样本：回退全局同模式分数，别用另一种模式冒充
         out.push({ k, v: hs >= 0 ? hs : costOf(k, mode) });
@@ -371,8 +373,8 @@ export class HostProfile {
       }
     }
     out.sort((a, b) => a.v - b.v);
-    if (S.hostRankCache.size > 80) S.hostRankCache.clear();
-    S.hostRankCache.set(mkey, { t: now, v: out });
+    NODE_MEMORY.rankCache.set(mkey, { t: now, v: out });
+    if (NODE_MEMORY.rankCache.size > 80) NODE_MEMORY.rankCache.prune(now);
     return out;
   }
 
@@ -383,19 +385,19 @@ export class HostProfile {
    * @returns 节点 key；没有候选时返回空串
    */
   untried(host: string, mode: Mode): string {
-    const m = S.hostNode.get(hostKey(host));
+    const m = this.nodes.get(hostKey(host));
     // 直接用全局排行（20 秒缓存）：它就是按 costOf 升序排好的，
     // 取第一个没在这个站试过的即可。以前这里对每个节点现算 costOf，
     // 200 个候选时单次 pick 要 1 ms，全花在重复计算上。
     //
-    // 「刚试过」也要跳过：站点画像是在连接结束时才写 S.hostNode，而冷启动的
+    // 「刚试过」也要跳过：站点画像是在连接结束时才写 this.nodes，而冷启动的
     // 影子试探可能在同一秒里并发两三条 —— 只看 hostNode 会让它们挑到同一个节点，
     // 试探就白做了（这个站只多了一行样本）。lastTry 正是为此写的，7.212 接上。
     const now = Date.now();
     let recent = "";
     for (const r of CANDS.list(mode)) {
       if (m && m.has(r.k)) continue;
-      const s = S.nstat.get(r.k);
+      const s = NODE_MEMORY.stats.get(r.k);
       if (s && now - (s.lastTry || 0) < SC.UNTRIED_GAP) {
         if (!recent) recent = r.k;
         continue;

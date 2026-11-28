@@ -1,3 +1,4 @@
+import { BoundedMap } from "../core/table";
 import { CONNECT_MS, timeoutSignal, withTimeout } from "../core/util";
 import { isCfIp, isPrivateHost } from "../core/net";
 import { splitRelay } from "../core/relay-addr";
@@ -9,15 +10,15 @@ export { DENY_PORTS, checkTarget, isPrivateHost } from "../core/net";
 /**
  * DNS 解析缓存：本 isolate 内的 A / AAAA / 全部 A 记录。
  * 每类缓存的 TTL 与上限不同（A/AAAA：5 分钟、500 条；全部 A：10 分钟、300 条），
- * 超限沿用「整表清空」口径，避免热路径里排序淘汰的开销。
+ * 超限按最旧时间收到低水位，保留仍有效的热缓存。
  */
 export class DnsCache {
   /** AAAA 记录缓存 */
-  readonly aaaa = new Map<string, { ip: string; t: number }>();
+  readonly aaaa = new BoundedMap<string, { ip: string; t: number }>({ max: 500, timeOf: (row) => row.t });
   /** 全部 A 记录缓存 */
-  readonly v4All = new Map<string, { ips: string[]; t: number }>();
+  readonly v4All = new BoundedMap<string, { ips: string[]; t: number }>({ max: 300, timeOf: (row) => row.t });
   /** v4 单条 A 记录缓存 */
-  readonly aRecord = new Map<string, { ip: string; t: number }>();
+  readonly aRecord = new BoundedMap<string, { ip: string; t: number }>({ max: 500, timeOf: (row) => row.t });
 
   /**
    * 读 AAAA 缓存：命中且未过期才返回。
@@ -31,15 +32,15 @@ export class DnsCache {
   }
 
   /**
-   * 写 AAAA 缓存（超限整表清空）。
+   * 写 AAAA 缓存（超限只淘汰最旧行）。
    * @param domain 域名
    * @param ip IPv6 地址
    * @param now 当前时刻（毫秒时间戳）
    * @returns 无
    */
   aaaaSet(domain: string, ip: string, now: number): void {
-    if (this.aaaa.size > 500) this.aaaa.clear();
     this.aaaa.set(domain, { ip, t: now });
+    if (this.aaaa.size > 500) this.aaaa.prune(now);
   }
 
   /**
@@ -54,15 +55,15 @@ export class DnsCache {
   }
 
   /**
-   * 写全部 A 记录缓存（超限整表清空）。
+   * 写全部 A 记录缓存（超限只淘汰最旧行）。
    * @param domain 域名
    * @param ips IPv4 列表
    * @param now 当前时刻（毫秒时间戳）
    * @returns 无
    */
   v4AllSet(domain: string, ips: string[], now: number): void {
-    if (this.v4All.size > 300) this.v4All.clear();
     this.v4All.set(domain, { ips, t: now });
+    if (this.v4All.size > 300) this.v4All.prune(now);
   }
 
   /**
@@ -77,15 +78,15 @@ export class DnsCache {
   }
 
   /**
-   * 写单条 A 记录缓存（超限整表清空）。
+   * 写单条 A 记录缓存（超限只淘汰最旧行）。
    * @param domain 域名
    * @param ip IPv4 地址
    * @param now 当前时刻（毫秒时间戳）
    * @returns 无
    */
   v4Set(domain: string, ip: string, now: number): void {
-    if (this.aRecord.size > 500) this.aRecord.clear();
     this.aRecord.set(domain, { ip, t: now });
+    if (this.aRecord.size > 500) this.aRecord.prune(now);
   }
 
   /**

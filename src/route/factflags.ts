@@ -1,8 +1,22 @@
-import { S } from "../core/state";
+
 
 
 /** 五类会影响选路的事实（`dns` 也在这里：它只在本 isolate 生效，但同样是乘数）。 */
 type FactName = "eg" | "ps" | "cap" | "blk" | "dns";
+
+/** 事实开关的 isolate 配置缓存，解析与其生命周期由同一对象管理。 */
+export class FactSwitches {
+  current: Set<FactName> | null = null;
+
+  /** 功能：首次读取时解析环境开关。@param raw 配置。@returns 打开的事实名 */
+  read(raw: unknown): Set<FactName> {
+    if (!this.current) this.current = factParse(raw);
+    return this.current;
+  }
+}
+
+/** 事实开关配置所有者。 */
+export const FACT_SWITCHES = new FactSwitches();
 
 /** 全部事实名，按「上线顺序」排列（与清单 §H4 的批次一致）。 */
 export const FACT_ALL: FactName[] = ["eg", "ps", "cap", "blk", "dns"];
@@ -58,8 +72,7 @@ export function factOnce(raw: string): ReadonlySet<FactName> {
  * @returns {Set<FactName>} 打开的事实集合
  */
 export function factOn(env: { facts?: string }): Set<FactName> {
-  if (!S.factSet) S.factSet = factParse(env.facts);
-  return S.factSet as Set<FactName>;
+  return FACT_SWITCHES.read(env.facts);
 }
 
 /**

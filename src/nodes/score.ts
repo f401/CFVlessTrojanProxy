@@ -1,12 +1,12 @@
+import { NODE_MEMORY } from "../core/node-memory";
 import { SC } from "../core/const";
-import { S } from "../core/state";
 import { availOf, effView, TEN_MB, ZERO_STAT, pFailFast, pFailOf, pStallOf, NodeStatsTable } from "./stat";
 import type { EffView } from "./stat";
 import { pcts } from "../core/hist";
 
 // ---- 并入自 score-health.ts ----
 /* 节点健康度：冷却黑名单、回滚冻结、空关闭可疑、可用性。
-   这里原本是 `Scorer` 类上的六个方法，但类里一个字段都没有 —— 状态全在 `S.nstat`，
+   这里原本是 `Scorer` 类上的六个方法，但类里一个字段都没有 —— 状态全在 `NODE_MEMORY.stats`，
    类只是一层命名空间。按 AGENTS.md 的约定（只有独占跨请求可变状态才配类），
    把判断还原成自由函数：谁读哪些表，一眼可见。 */
 
@@ -16,7 +16,7 @@ import { pcts } from "../core/hist";
  * @returns 在冷却期返回 true
  */
 export function isBlack(k: string): boolean {
-  const s = S.nstat.get(k);
+  const s = NODE_MEMORY.stats.get(k);
   // 冷却截止时间在证据表里，没有记录就当没罚过
   return !!(s && s.blackUntil > Date.now());
 }
@@ -27,7 +27,7 @@ export function isBlack(k: string): boolean {
  * @returns 被冻结返回 true
  */
 export function isFrozen(k: string): boolean {
-  const s = S.nstat.get(k);
+  const s = NODE_MEMORY.stats.get(k);
   return !!(s && s.freeUntil > Date.now());
 }
 
@@ -43,7 +43,7 @@ export function freezeNode(k: string): void {
   const s = NodeStatsTable.nsGet(k);
   s.freeUntil = Math.max(s.freeUntil || 0, Date.now() + SC.ROLL_FREEZE);
   // 站点排行里不能再推荐它：清缓存 + 打一次失效戳
-  S.hostRankCache.clear();
+  NODE_MEMORY.rankCache.clear();
   NodeStatsTable.invalidateRank();
 }
 
@@ -68,7 +68,7 @@ export function suspectOf(s: NodeStats | undefined): boolean {
  * @returns 可疑返回 true
  */
 export function emptyCloseSuspect(k: string): boolean {
-  return suspectOf(S.nstat.get(k));
+  return suspectOf(NODE_MEMORY.stats.get(k));
 }
 
 /**
@@ -81,8 +81,8 @@ export function emptyCloseSuspect(k: string): boolean {
  * @returns 可用返回 true
  */
 export function usable(k: string, now = Date.now()): boolean {
-  if (!S.alive.has(k) || isBlack(k) || isFrozen(k)) return false;
-  const s = S.nstat.get(k);
+  if (!NODE_MEMORY.alive.has(k) || isBlack(k) || isFrozen(k)) return false;
+  const s = NODE_MEMORY.stats.get(k);
   // 没有任何证据的新节点先当可用：不让人为的乐观把池子锁死
   if (!s) return true;
   const e = effView(s, now);
@@ -94,7 +94,7 @@ export function usable(k: string, now = Date.now()): boolean {
 
 // ---- 并入自 score-cost.ts ----
 /* 节点代价函数：把一条候选压成一个毫秒当量。排序（选路）与面板（`?dd`/`?pss`）读同一份分解，
-   避免「面板一套公式、选路另一套」。纯计算：除了只读 S.nstat / S.alive，不改任何状态。 */
+   避免「面板一套公式、选路另一套」。纯计算：除了只读 NODE_MEMORY.stats / NODE_MEMORY.alive，不改任何状态。 */
 
 /** 一次评分的完整分解（面板分项与选路排序共用） */
 interface ScoreParts {
@@ -159,8 +159,8 @@ export class ScoreModel {
     this.evaluatedAt = now;
     this.gateEnabled = withGate;
     this.targetBytes = bytes;
-    this.stats = S.nstat.get(k) || ZERO_STAT;
-    this.aliveEntry = S.alive.get(k);
+    this.stats = NODE_MEMORY.stats.get(k) || ZERO_STAT;
+    this.aliveEntry = NODE_MEMORY.alive.get(k);
     this.window = effView(this.stats, now);
   }
 
@@ -251,7 +251,7 @@ export class ScoreModel {
   private gateOf(): string {
     // 不计闸门时返回空串：调用方只在 `?dd` 这类诊断里要这段说明
     if (!this.gateEnabled) return "";
-    if (!S.alive.has(this.nodeKey)) return "not-alive";
+    if (!NODE_MEMORY.alive.has(this.nodeKey)) return "not-alive";
     if (isBlack(this.nodeKey)) return "black";
     if (isFrozen(this.nodeKey)) return "frozen";
     const e = this.window;
@@ -324,10 +324,10 @@ export function costOf(k: string, mode: Mode, now = Date.now()): number {
    为什么是类而不是四个模块函数：`ranked`/`list`/`next`/`best` 共用同一份排行缓存与
    同一份分片游标（大池一次算不完，靠每次挑选顺带推进一片），这两样东西没有第二个
    消费者，也不该躺在 `S` 里当第七十一个全局变量。
-   作废走 `S.rankGen` 代际号：统计表改了节点状态就 +1，本对象下次排行时发现代际变了
+   作废走 `NODE_MEMORY.generation` 代际号：统计表改了节点状态就 +1，本对象下次排行时发现代际变了
    就地自清——这样 `nodes/stat.ts` 不必反过来 import 本文件（那是文件级循环）。 */
 
-/** 排行缓存：`gen` 是写入时的代际号，与 `S.rankGen` 不等即时间戳作废 */
+/** 排行缓存：`gen` 是写入时的代际号，与 `NODE_MEMORY.generation` 不等即时间戳作废 */
 interface RankCache {
   gen: number;
   at: Partial<Record<Mode, number>>;
@@ -367,7 +367,7 @@ export class CandidateBoard {
   /** 功能：清空缓存与分片进度（分片中途换池子、测试之间复位用）。 */
   reset(): void {
     const c = this.cache;
-    c.gen = S.rankGen;
+    c.gen = NODE_MEMORY.generation;
     c.at = {};
     c.v = {};
     c.step = {};
@@ -385,14 +385,14 @@ export class CandidateBoard {
     const now = Date.now();
     const c = this.cache;
     // 小池不进缓存：测试与冷启动都要看到当前真实列表
-    const cached = S.alive.size >= CandidateBoard.CACHE_MIN ? c.v[m] : undefined;
+    const cached = NODE_MEMORY.alive.size >= CandidateBoard.CACHE_MIN ? c.v[m] : undefined;
     if (cached && now - (c.at[m] || 0) < CandidateBoard.TTL) return cached;
-    if (S.alive.size < CandidateBoard.CACHE_MIN || S.alive.size < CandidateBoard.SLICE_MIN) {
+    if (NODE_MEMORY.alive.size < CandidateBoard.CACHE_MIN || NODE_MEMORY.alive.size < CandidateBoard.SLICE_MIN) {
       return this.build(m, now);
     }
     let st = c.step[m];
     if (!st) {
-      st = { keys: [...S.alive.keys()], pos: 0, top: [], extra: [], ok: 0 };
+      st = { keys: [...NODE_MEMORY.alive.keys()], pos: 0, top: [], extra: [], ok: 0 };
       c.step[m] = st;
     }
     const end = Math.min(st.keys.length, st.pos + CandidateBoard.SLICE);
@@ -404,14 +404,14 @@ export class CandidateBoard {
       if (st.top.length < CandidateBoard.KEEP || v < st.top[st.top.length - 1].v) {
         this.insert(st.top, { k, v });
       } else if (st.extra.length < CandidateBoard.EXTRA) {
-        const s = S.nstat.get(k);
+        const s = NODE_MEMORY.stats.get(k);
         if (!(s && s.okW + s.failW >= SC.N_EFF_MIN)) st.extra.push({ k, v });
       }
     }
     st.pos = end;
-    // 只有整轮扫完才写 S.candN：切片中途的 st.ok 只是「扫过这一段」里的可用数，
+    // 只有整轮扫完才写 NODE_MEMORY.candidateCount：切片中途的 st.ok 只是「扫过这一段」里的可用数，
     // 被抽样器当成池子大小会让抽样宽度与 β 在同一个池子里来回跳（7.211）
-    if (st.pos >= st.keys.length) S.candN = st.ok;
+    if (st.pos >= st.keys.length) NODE_MEMORY.candidateCount = st.ok;
     if (st.pos < st.keys.length) {
       // 半程不重发表格（省掉每次挑选一次 concat）；只有冷启动时才把半程结果先用起来
       if (cached) return cached;
@@ -435,7 +435,7 @@ export class CandidateBoard {
   list(mode: Mode): RankRow[] {
     const out: RankRow[] = [];
     for (const r of this.ranked(mode)) {
-      if (S.alive.has(r.k) && !isBlack(r.k) && !isFrozen(r.k)) out.push(r);
+      if (NODE_MEMORY.alive.has(r.k) && !isBlack(r.k) && !isFrozen(r.k)) out.push(r);
     }
     return out;
   }
@@ -452,7 +452,7 @@ export class CandidateBoard {
     for (const x of this.list(mode)) {
       if (x.k === avoid) continue;
       if (want) {
-        const a = S.alive.get(x.k);
+        const a = NODE_MEMORY.alive.get(x.k);
         if (!a || String(a.cc || "").toUpperCase() !== want) continue;
       }
       return x.k;
@@ -472,8 +472,8 @@ export class CandidateBoard {
 
   /** 功能：代际号变了就把时间戳作废（排行与分片进度留着，见 `invalidateRank` 的理由）。 */
   private sync(): void {
-    if (this.cache.gen === S.rankGen) return;
-    this.cache.gen = S.rankGen;
+    if (this.cache.gen === NODE_MEMORY.generation) return;
+    this.cache.gen = NODE_MEMORY.generation;
     this.cache.at = {};
   }
 
@@ -484,7 +484,7 @@ export class CandidateBoard {
    */
   private stamp(m: Mode, now: number): void {
     const c = this.cache;
-    c.gen = S.rankGen;
+    c.gen = NODE_MEMORY.generation;
     c.at = { ...c.at, [m]: now };
   }
 
@@ -517,7 +517,7 @@ export class CandidateBoard {
   private build(m: Mode, now: number): RankRow[] {
     const top: RankRow[] = [];
     let usableN = 0;
-    for (const k of S.alive.keys()) {
+    for (const k of NODE_MEMORY.alive.keys()) {
       if (!usable(k)) continue;
       usableN++;
       const v = costOf(k, m);
@@ -525,18 +525,18 @@ export class CandidateBoard {
     }
     const seen = new Set(top.map((r) => r.k));
     let extra = 0;
-    for (const k of S.alive.keys()) {
+    for (const k of NODE_MEMORY.alive.keys()) {
       if (extra >= CandidateBoard.EXTRA) break;
       if (seen.has(k) || !usable(k)) continue;
-      const s = S.nstat.get(k);
+      const s = NODE_MEMORY.stats.get(k);
       if (s && s.okW + s.failW >= SC.N_EFF_MIN) continue;
       top.push({ k, v: costOf(k, m) });
       seen.add(k);
       extra++;
     }
-    S.candN = usableN;
+    NODE_MEMORY.candidateCount = usableN;
     // 小池不写缓存：否则一次 2 节点的小算例会把后面 30 节点的算例喂成旧表
-    if (S.alive.size >= CandidateBoard.CACHE_MIN) {
+    if (NODE_MEMORY.alive.size >= CandidateBoard.CACHE_MIN) {
       this.stamp(m, now);
       this.cache.v[m] = top;
     }
@@ -550,7 +550,7 @@ export const CANDS = new CandidateBoard();
 // ---- 门面（对外导出面保持不变） ----
 /* 节点评分门面：按「读哪些表、改哪些表」把原来的 371 行拆成三层，本文件只做再导出，
    所以调用点与单测一字未改（行为由既有 2618 条断言证明）。
-   · `score-health.ts` 健康度：冷却黑名单、回滚冻结、空关闭可疑、可用性（只读 S.nstat）
+   · `score-health.ts` 健康度：冷却黑名单、回滚冻结、空关闭可疑、可用性（只读 NODE_MEMORY.stats）
    · `score-cost.ts`   代价函数：把一条候选压成毫秒当量（纯计算，排序与面板共用）
    · `score-cands.ts`  候选表：谁能进候选、按什么顺序（排行缓存与分片重建）
    原来那个 `Scorer` 类一个字段都没有、方法全在读 S，属于「为空壳而 OOP」，7.288 起不再保留。 */

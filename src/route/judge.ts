@@ -1,8 +1,9 @@
+import { RELAY_DEMAND } from "../core/relay-demand";
+import { ISOLATE } from "../core/state";
 // 行为判定（OOP 版）：把「连接收尾的观测」变成判定表结论。
 // 只有这里会因流量写判定：probe 级证据（7.69 删除）与客户端回流（从来没接）都不存在。
 // 设计目标：① IP 级封锁 1 次请求就能感知；② 业务层 403 绝不被「拦截」——
 // 判定只影响「走哪条通道」，永不断开连接；某站点一条通道都不剩时自愈（VerdictTable.clearHost）。
-import { S } from "../core/state";
 import { PAGE_ABS } from "../core/facts";
 import { SC } from "../core/const";
 import { trimAged } from "../core/hostmem";
@@ -13,7 +14,7 @@ import { VT } from "./verdict";
 import { recordBlock, recordPass, recordTraffic } from "./observe";
 import { cnt } from "../core/counter";
 import { HEALTH } from "./relay-health";
-import { FACT } from "./factshadow";
+import { FACT, SHADOW_TABLE } from "./factshadow";
 import type { FactOut } from "./commitfact";
 import { PS } from "./psfacts";
 import { DNS } from "./dnsfacts";
@@ -140,7 +141,7 @@ export class Judge {
 
   /** 连接收尾的观测 */
   onTraffic(e: TrafficEvt): void {
-    if (e.host === S.site) return; // 探自己域名必 522（CF 自环），不构成任何通道证据
+    if (e.host === ISOLATE.site) return; // 探自己域名必 522（CF 自环），不构成任何通道证据
     // 事件自己的时间戳：回放/聚合的事件必须按发生时间归批，否则三批会被压成一批
     const ty = (e as { at?: number }).at ?? Date.now();
     this.facts(e, ty);
@@ -199,7 +200,7 @@ export class Judge {
     // 这里只喂证据，不决定顺序 —— 后果是代价 ×6（policy 里乘），候选永远不会被移出。
     if (e.via === "node" && e.node && e.host) {
       const nip = relayIpOf(e.node);
-      const row = S.peers.get(e.host);
+      const row = SHADOW_TABLE.peers.get(e.host);
       // 用事件时间 `ty` 而不是 `Date.now()`：回放/聚合的事件按发生时间判窗口，
       // 否则「同一批事件」在回放时永远看不到对照（与上面归批时钟是同一个坑）。
       const peerBig = !!row && row.some((x) => x.down >= BIG && ty - x.at <= PAGE_ABS.win);
@@ -280,10 +281,10 @@ export class Judge {
     if (!known) {
       if (n >= 2 || e.cf) {
         // 只提醒「下次优先中转」，不下判定
-        S.needPx.set(e.host, now + SC.PX_LEARN);
+        RELAY_DEMAND.set(e.host, now + SC.PX_LEARN);
         // 键是客户端带来的站点名，不是有限集合：以前只有 attacher 那条路封顶，
         // 这里两条路都能写，过期行又只有 cron 会清 —— 统一按 SC.PX_MAX 压回去。
-        trimAged(S.needPx, SC.PX_MAX);
+        trimAged(RELAY_DEMAND, SC.PX_MAX);
       }
       return;
     }
@@ -306,8 +307,8 @@ export class Judge {
   private markBlocked(e: TrafficEvt, chan: Chan, ck: string, now: number): void {
     this.memory.smCnt.delete(ck);
     recordBlock({ target: e.host, chan, down: e.down, ok: false });
-    S.needPx.set(e.host, now + SC.PX_LEARN);
-    trimAged(S.needPx, SC.PX_MAX);
+    RELAY_DEMAND.set(e.host, now + SC.PX_LEARN);
+    trimAged(RELAY_DEMAND, SC.PX_MAX);
   }
 
   /**

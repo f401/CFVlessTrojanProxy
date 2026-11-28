@@ -1,3 +1,6 @@
+import { NODE_MEMORY } from "../core/node-memory";
+import { ERROR_MEMORY } from "../core/client-memory";
+import { TRAFFIC_MEMORY } from "../core/traffic-memory";
 import type { Socket } from "cloudflare:sockets";
 import { FIRST_BYTE_MS, WS_OPEN, closeQuietly, errMsg, safeSend, toU8 } from "../core/util";
 import { logErr, rttMark } from "../nodes/metrics";
@@ -5,7 +8,6 @@ import { nsDecay, NodeStatsTable } from "../nodes/score";
 import { cnt } from "../core/counter";
 import { PEND, pendAdd } from "../store/pend";
 import { doFetch } from "../store/meter-client";
-import { S } from "../core/state";
 import type { Connection } from "./connection";
 
 /**
@@ -60,7 +62,7 @@ export function pipeBack(
         await new Promise((r) => setTimeout(r, 3000));
         await doFetch(hbEnv, hbId, "https://meter/add", {
           method: "POST",
-          body: JSON.stringify({ up: 0, down: 0, conns: 0, e: [{ t: Date.now(), m: `hb iso=${Math.round(S.egressB / 1048576)}MB`, tag: "hb" }] }),
+          body: JSON.stringify({ up: 0, down: 0, conns: 0, e: [{ t: Date.now(), m: `hb iso=${Math.round(TRAFFIC_MEMORY.egressBytes / 1048576)}MB`, tag: "hb" }] }),
         }).catch(() => {});
       }
     })();
@@ -78,7 +80,7 @@ export function pipeBack(
           const u8 = toU8(chunk);
           // 热路径：加字节 → 比阈值 → 发送。其余全在 tick 里（每 512 KB）
           st.down += u8.length;
-          S.egressB += u8.length; // 累计到 isolate 级：断点按连接看是随机的，按 isolate 看可能撞同一个数
+          TRAFFIC_MEMORY.egressBytes += u8.length; // 累计到 isolate 级：断点按连接看是随机的，按 isolate 看可能撞同一个数
           // 取证开关（?burn=MS）：每 512 KB 同步空转 MS 毫秒。若断点随 CPU 消耗等比提前，
           // 说明杀连接的是 CPU 限额；若断点（按字节）基本不变，说明与 CPU 无关。
           if (st.debugBurn > 0 && st.down - st.burnAt >= 524288) {
@@ -143,7 +145,7 @@ export function pipeBack(
       // （catch 根本不执行 ⇒ 这条不会出现），只有这两者之差能区分。
       const endMs = st && st.tAttach ? Date.now() - st.tAttach : 0;
       logErr(
-        `dl end ${st ? st.down : 0}B/${endMs}ms iso=${Math.round(S.egressB / 1048576)}MB rs=${ws ? ws.readyState : -1} n=${st && st.notified ? 1 : 0} e=${errMsg(err)}`,
+        `dl end ${st ? st.down : 0}B/${endMs}ms iso=${Math.round(TRAFFIC_MEMORY.egressBytes / 1048576)}MB rs=${ws ? ws.readyState : -1} n=${st && st.notified ? 1 : 0} e=${errMsg(err)}`,
         st && st.node ? st.node : "",
       );
       // 直接 await 一次强制上报，而不是 kickFlush：kick 走 setTimeout(0)，
@@ -159,12 +161,12 @@ export function pipeBack(
           // 7.420、7.421 两次 terminate 对照都没留下记录，说明账本那条路在「客户端刚走」时走不通。
           await doFetch(senv, sid, "https://meter/add", {
             method: "POST",
-            body: JSON.stringify({ up: 0, down: 0, conns: 0, e: S.errs.slice(-8) }),
+            body: JSON.stringify({ up: 0, down: 0, conns: 0, e: ERROR_MEMORY.rows.slice(-8) }),
           }).catch(() => {});
           await PEND.flush(senv, true, 1).catch(() => {});
           // 单飞期间这次会直接返回（只记 forceSkipped，补排又是 setTimeout）：
           // 再补一次，确保这一行真的发出去了。
-          if (S.pend.size) await PEND.flush(senv, true, 1).catch(() => {});
+          if (PEND.rows.size) await PEND.flush(senv, true, 1).catch(() => {});
         })();
         // 还要挂 waitUntil：客户端断开后这次请求随时可能结束，裸 await 拿不到执行机会
         // （7.420 线上 3 次 terminate 对照仍然 0 条记录，就是这一步缺的）。
@@ -184,13 +186,13 @@ export function pipeBack(
           st.notified = true;
           cnt("ccut");
           const goneMs = st.tAttach ? Date.now() - st.tAttach : 0;
-          logErr(`client gone ${st.down}B/${goneMs}ms iso=${Math.round(S.egressB / 1048576)}MB`, st.node || "");
+          logErr(`client gone ${st.down}B/${goneMs}ms iso=${Math.round(TRAFFIC_MEMORY.egressBytes / 1048576)}MB`, st.node || "");
           // 立刻推一次 DO：isolate 被回收时内存里的错误环会一起消失，只有落盘的才算证据
           if (st.env && st.id) {
             pendAdd(st.id, 0, 0);
             const push = (async () => {
               await PEND.flush(st.env, true, 1).catch(() => {});
-              if (S.pend.size) await PEND.flush(st.env, true, 1).catch(() => {});
+              if (PEND.rows.size) await PEND.flush(st.env, true, 1).catch(() => {});
             })();
             try {
               st.ctx.waitUntil(push);
@@ -226,7 +228,7 @@ export function pipeBack(
               // 中途断流的节点先凉 60 秒；站点级试探不冻结（可能只是对这个站不行）
               if (!st.hostTrial) {
                 sn.freeUntil = Math.max(sn.freeUntil || 0, now + 60000);
-                S.hostRankCache.clear(); // 站点排行不能继续推荐刚断流的节点
+                NODE_MEMORY.rankCache.clear(); // 站点排行不能继续推荐刚断流的节点
                 NodeStatsTable.invalidateRank();
               }
               sn.at = now;

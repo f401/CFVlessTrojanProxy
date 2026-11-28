@@ -436,9 +436,9 @@ eq("都没有返回空串", W.PEND.id({}), "");
     byColo: { "*": { ts: now, nodes: [{ k: "seed-node:443", h: "seed-node", p: 443, ms: 50 }] } },
     cnt: null,
   };
-  W.S.seed = seedDoc;
+  W.SEED_STORE.document = seedDoc;
   W.SEED_STORE.readAt = now;
-  W.S.seedDirty = true;
+  W.NODE_MEMORY.statisticsDirty = true;
   let puts = 0;
   const envSeed = {
     STATS: {
@@ -450,7 +450,7 @@ eq("都没有返回空串", W.PEND.id({}), "");
   };
   await W.flushPx(envSeed, false);
   eq("非 force 在 20 分钟节流内跳过", puts, 0);
-  W.S.seedDirty = true;
+  W.NODE_MEMORY.statisticsDirty = true;
   await W.flushPx(envSeed, true);
   ok("force 必须写进 KV", puts > 0);
 }
@@ -483,17 +483,17 @@ eq("都没有返回空串", W.PEND.id({}), "");
 
 /* ---------- 老 RTT 条目缺 hits/rtt 时不能变 NaN ---------- */
 {
-  W.S.rtt.clear();
+  W.ENTRY_MEMORY.rows.clear();
   W.rttLearn({ clientTcpRtt: 100, colo: "HKG" }, "tag", "rtt-u");
-  const b = W.S.rtt.get("rtt-u").tag;
+  const b = W.ENTRY_MEMORY.rows.get("rtt-u").tag;
   eq("RTT 首次写入", [b.rtt, b.hits], [100, 1]);
   // 模拟早期版本写下的条目：没有 hits，rtt 也是 0
-  W.S.rtt.get("rtt-u").tag = { rtt: 0, colo: "", bw: 0, ok: 0, fail: 0, ts: 0 };
+  W.ENTRY_MEMORY.rows.get("rtt-u").tag = { rtt: 0, colo: "", bw: 0, ok: 0, fail: 0, ts: 0 };
   W.rttLearn({ clientTcpRtt: 200, colo: "HKG" }, "tag", "rtt-u");
-  const c = W.S.rtt.get("rtt-u").tag;
+  const c = W.ENTRY_MEMORY.rows.get("rtt-u").tag;
   ok("老条目补 hits", c.hits === 1, String(c.hits));
   ok("老条目 rtt 不变 NaN", Number.isFinite(c.rtt) && c.rtt > 0, String(c.rtt));
-  W.S.rtt.clear();
+  W.ENTRY_MEMORY.rows.clear();
 }
 
 /* ---------- UDP/53 分帧：Trojan 带地址前缀，VLESS 带 ver 头 ---------- */
@@ -651,12 +651,12 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
 
 /* ---------- 直连统计按站点族合并 ---------- */
 {
-  W.S.hostDirect.clear();
+  W.HOSTS.direct.clear();
   W.hostDirectMark("api.x.com", true);
   W.hostDirectMark("x.com", false);
-  const d = W.S.hostDirect.get("x.com");
+  const d = W.HOSTS.direct.get("x.com");
   eq("直连统计按站点族合并", [d.ok, d.bad], [1, 1]);
-  W.S.hostDirect.clear();
+  W.HOSTS.direct.clear();
 }
 
 /* ---------- 节点明细上限：默认 64，可按需放开 ---------- */
@@ -666,7 +666,7 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   for (const k of keys) W.NodeStatsTable.nsGet(k);
   eq("nsOf 默认最多 64 条", Object.keys(W.nsOf(keys)).length, 64);
   eq("nsOf 可放开到全部", Object.keys(W.nsOf(keys, 70)).length, 70);
-  for (const k of keys) W.S.nstat.delete(k);
+  for (const k of keys) W.NODE_MEMORY.stats.delete(k);
 }
 
 /* ---------- nsOk 必须推进 at（否则衰减基准永远停在旧时刻） ---------- */
@@ -675,7 +675,7 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   s.at = Date.now() - 1000;
   W.NodeStatsTable.nsOk("at-check:443", 50, 20);
   ok("nsOk 更新 at", Date.now() - s.at < 500, String(Date.now() - s.at));
-  W.S.nstat.delete("at-check:443");
+  W.NODE_MEMORY.stats.delete("at-check:443");
 }
 
 /* ---------- withTimeout：正常值 / 超时 ---------- */
@@ -772,9 +772,9 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
 
 /* ---------- 全局候选名单：新探到的节点不能永远排在第 41 位 ---------- */
 {
-  W.S.alive.clear();
-  W.S.nstat.clear();
-  W.S.seed = {
+  W.NODE_MEMORY.alive.clear();
+  W.NODE_MEMORY.stats.clear();
+  W.SEED_STORE.document = {
     v: 6,
     ts: 0,
     poolGen: 0,
@@ -785,10 +785,10 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
   };
   W.SEED_STORE.readAt = 0;
   for (let i = 0; i < 40; i++) {
-    W.S.seed.byColo["*"].nodes.push({ k: `old${i}:443`, h: `old${i}`, p: 443, cc: "", ms: 100 });
+    W.SEED_STORE.document.byColo["*"].nodes.push({ k: `old${i}:443`, h: `old${i}`, p: 443, cc: "", ms: 100 });
   }
   for (let i = 0; i < 5; i++) {
-    W.S.alive.set(`new${i}:443`, { h: `new${i}`, p: 443, cc: "", ms: 50 + i });
+    W.NODE_MEMORY.alive.set(`new${i}:443`, { h: `new${i}`, p: 443, cc: "", ms: 50 + i });
   }
   let saved = null;
   const envSeed = {
@@ -839,10 +839,10 @@ eq("NAT64 编码", W.nat64FromV4("1.2.3.4"), "[2001:67c:2960:6464::0102:0304]");
 
   W.SNAP.checked = 0;
   W.SNAP.busy = false;
-  W.S.stats.set("flush-u", { up: 1, down: 2, conns: 1, first: Date.now(), last: Date.now() });
+  W.USAGE_MEMORY.rows.set("flush-u", { up: 1, down: 2, conns: 1, first: Date.now(), last: Date.now() });
   await W.flushSnap(envDown, true);
   eq("snap 读失败时不覆盖旧快照", puts, 0);
-  W.S.stats.delete("flush-u");
+  W.USAGE_MEMORY.rows.delete("flush-u");
 
   const envDown2 = {
     STATS: envDown.STATS,

@@ -1,5 +1,6 @@
+import { POOL_MEMORY } from "../px/pool-memory";
+import { NODE_MEMORY } from "../core/node-memory";
 import { SC } from "../core/const";
-import { S } from "../core/state";
 import { isCfIp } from "../core/net";
 import { DIRECT } from "./channel";
 import { VT } from "./verdict";
@@ -235,7 +236,7 @@ function cfEgressChoice(r: Ranked, code: number): Choice | null {
 /**
  * 功能：冷 isolate 兜底 —— 用事实层里「送回整页」的 v4 出口。
  *
- * 为什么需要：`S.alive` 还没探出来时 `stick` 是空的，原来的结局是直连 → 403。事实层里已有
+ * 为什么需要：`NODE_MEMORY.alive` 还没探出来时 `stick` 是空的，原来的结局是直连 → 403。事实层里已有
  * 别处观测到的 v4 出口（钉中继实测 9/9 200、直连约 1/6），先把它们用起来，失败交给 dialer 重试。
  * @returns 选中的通道；没有可用出口时返回 null
  */
@@ -272,6 +273,10 @@ export function decideCf(c: Ctx, r: Ranked, src: PinSource): Choice | null {
 
 /** 选路策略：纯内存、可单测；所有「哪条通道」的判断都收敛在这里 */
 export class Policy implements PinSource {
+  /** 策略影子计数，与该策略实例同生命周期。 */
+  same = 0;
+  different = 0;
+  reasons: Record<string, number> = {};
   /**
    * 冷启动钉住表：站点 → { 中继 IP, 到期时间 }。
    *
@@ -433,18 +438,18 @@ export class Policy implements PinSource {
   shadow(c: Ctx): Choice {
     const d = this.decide(c);
     const want = d.chan.kind !== "d";
-    if (want === c.legacyWantsRelay) S.polSame++;
-    else S.polDiff++;
-    S.polWhy[d.why] = (S.polWhy[d.why] || 0) + 1;
+    if (want === c.legacyWantsRelay) this.same++;
+    else this.different++;
+    this.reasons[d.why] = (this.reasons[d.why] || 0) + 1;
     return d;
   }
 
   /** 中继候选：先看本 isolate 已探活的节点，冷启动退到池子名单（否则「403 但没有中继」会继续直连） */
   relays(): string[] {
     // 存活表按健康度排序：整页多、无响应少的中继排前面（废中继不再滞留）
-    const alive = HEALTH.rank(Array.from(S.alive.keys()).map(ipOf)).slice(0, 16);
+    const alive = HEALTH.rank(Array.from(NODE_MEMORY.alive.keys()).map(ipOf)).slice(0, 16);
     if (alive.length) return alive;
-    return HEALTH.rank(S.pool.filter((x) => !isCfIp(x.h)).map((x) => x.h)).slice(0, 8);
+    return HEALTH.rank(POOL_MEMORY.rows.filter((x) => !isCfIp(x.h)).map((x) => x.h)).slice(0, 8);
   }
 
   /** 该站点 × 该中继是否被实测判 ok（probe 或端到端） */

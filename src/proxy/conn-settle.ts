@@ -1,3 +1,4 @@
+import { TRAFFIC_MEMORY } from "../core/traffic-memory";
 import { SC } from "../core/const";
 import { flushSnap, PEND } from "../store/index";
 import { HOOK } from "../core/hook";
@@ -6,7 +7,6 @@ import { cnt } from "../core/counter";
 import { FO, LAT } from "../core/obs";
 import { NodeStatsTable } from "../nodes/score";
 import { markSeedDirty } from "../px/seed";
-import { S } from "../core/state";
 import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";
 import { relayIpOf } from "../core/relay-addr";
 
@@ -244,12 +244,12 @@ export class ConnSettle {
 
     // 漏斗按「归一到三档」的 via 记：`v6` 是直连的 IPv6 变体，不能算成中继
     const via = v.via === "node" || v.via === "v6" ? v.via : "direct";
-    S.funnel[via] = (S.funnel[via] || 0) + du + dd;
+    TRAFFIC_MEMORY.account(via, du + dd);
     statBump(v.id || "", du, dd, false);
     v.reportedUp = v.up;
     v.reportedDown = v.down;
     // 攒够阈值就立刻刷（0 表示「马上」），否则交给调度器按节流窗口处理
-    scheduleFlush(v.env, S.pendBytes >= PEND_FLUSH_BYTES ? 0 : undefined);
+    scheduleFlush(v.env, PEND.bytes >= PEND_FLUSH_BYTES ? 0 : undefined);
   }
 
   /**
@@ -299,7 +299,7 @@ export class ConnSettle {
   }
 
   /**
-   * 功能：把这条连接并进「节点 → 连接观测」聚合表（`S.cagg`）。
+   * 功能：把这条连接并进「节点 → 连接观测」聚合表（`TRAFFIC_MEMORY.aggregates`）。
    * @param v 连接的只读视图
    * @returns {void}
    */
@@ -308,22 +308,22 @@ export class ConnSettle {
     // 连接观测按节点聚合（n/ok/p50/p95）：40 条原始记录只能盖住 40 个节点，
     // 聚合后同样载重能覆盖全池（2000 个节点也就 400 条聚合记录）。
     const ck = v.node || "direct";
-    let g = S.cagg.get(ck);
+    let g = TRAFFIC_MEMORY.aggregates.get(ck);
     if (!g) {
       g = { n: 0, ok: 0, dn: 0, v: [] };
-      if (S.cagg.size >= CAGG_MAX) {
+      if (TRAFFIC_MEMORY.aggregates.size >= CAGG_MAX) {
         // 表满时淘汰样本数最少的那条：它信息量最低，而按插入序删会优先删掉最早记录的热节点
         let worst = "";
         let wn = Infinity;
-        for (const [k2, g2] of S.cagg) {
+        for (const [k2, g2] of TRAFFIC_MEMORY.aggregates) {
           if (g2.n < wn) {
             wn = g2.n;
             worst = k2;
           }
         }
-        if (worst) S.cagg.delete(worst);
+        if (worst) TRAFFIC_MEMORY.aggregates.delete(worst);
       }
-      S.cagg.set(ck, g);
+      TRAFFIC_MEMORY.aggregates.set(ck, g);
     }
     g.n += 1;
     if (!v.failed) g.ok += 1;
@@ -350,7 +350,7 @@ export class ConnSettle {
     LAT.note(v.down > 64, Date.now() - v.startedAt);
     // 真实流量的"成功"样本：可用性(pFail/availOf)、面板成功率全靠它。
     // 早先只有失败才记账（nsFail），成功只走 SEL.resetFail()，而那里
-    // 第一行就是 `if (!S.pxFailSeen) return` —— 健康节点永远 n=0，
+    // 第一行就是 `if (!SELECTION_MEMORY.failSeen) return` —— 健康节点永远 n=0，
     // 面板显示"一个连接都没有"，可用性门槛也永远不触发。
     if (v.node && !v.failed && v.down > 0) NodeStatsTable.nsOk(v.node, 0, 0);
     this.relayRates(v);
@@ -462,7 +462,7 @@ export class SessionTail {
     // 收尾这条路一定跑得到（socket 释放、账本 flush 都在这里），所以它也是唯一能证明
     // 「Worker 确实收到了连接结束」的地方：搬过数据才记，避免把每次握手都刷成噪音。
     // 断流若是这一条缺失 ⇒ 连接根本没走到收尾（isolate 被杀 / 边缘没把 close 交上来）。
-    if (conn.down > 0) logErr(`dl close ${conn.down}B iso=${Math.round(S.egressB / 1048576)}MB`, "");
+    if (conn.down > 0) logErr(`dl close ${conn.down}B iso=${Math.round(TRAFFIC_MEMORY.egressBytes / 1048576)}MB`, "");
     conn.flush(true);
     if (!ctx || !ctx.waitUntil) {
       // 本地/单测没有 waitUntil：直接返回，别把 Promise 挂成未处理的 rejection

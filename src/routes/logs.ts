@@ -1,4 +1,4 @@
-import { S } from "../core/state";
+import { ERROR_MEMORY } from "../core/client-memory";
 import { getSnap, PEND } from "../store/index";
 import { json } from "../edge/respond";
 import { logErr } from "../nodes/errlog";
@@ -46,7 +46,7 @@ export async function logs(c: UserCtx): Promise<Response> {
   const now0 = Date.now();
   const seen = new Set<string>();
   const all: ErrItem[] = [];
-  for (const x of [...fromDo, ...stored, ...S.errs]) {
+  for (const x of [...fromDo, ...stored, ...ERROR_MEMORY.rows]) {
     if (!x || !x.t) continue;
     if (now0 - x.t > MAX_AGE) continue;
     const k = x.t + "|" + x.m + "|" + (x.tag || "");

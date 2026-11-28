@@ -20,7 +20,8 @@ export class BudgetedIO {
   constructor(private readonly ledger: BudgetLedger) {}
 
   /**
-   * 功能：开一本不设上限的门（只给单测与本地诊断用）。
+   * 功能：创建只计数、不拒绝的出口；请求补救链和本地诊断使用，cron 使用有限账本。
+   * 累计次数不等于同时连接数；此入口不能替代拨号并发、超时与平台资源限制。
    * @returns 额度无限的出口
    */
   static unlimited(): BudgetedIO {

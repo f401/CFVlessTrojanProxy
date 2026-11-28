@@ -2,11 +2,11 @@
  * 功能：`tfb`（目标站出口实测）的每站点起搏记账 —— 「上次探测时间」与「已轮换批次」两栏。
  *
  * 为什么要有这个类：这两栏原来是 `src/routes/cron.ts` 顶层的两个 `const … = new Map()`，
- * 只被「`S.needPx` 里过期的那些站点」这一条移除路径清理，而 `S.needPx` 本身还会被
+ * 只被「`RELAY_DEMAND` 里过期的那些站点」这一条移除路径清理，而 `RELAY_DEMAND` 本身还会被
  * `trimAged(…, SC.PX_MAX)` 淘汰（`src/route/judge.ts` 与 `src/proxy/attacher.ts` 各一处）
  * —— 被淘汰的站点在记账表里永久留行。键是客户端带来的站点名（不是有限集合），
  * 于是「上限」只存在于注释里。收类之后：状态有独占的持有者、`sweep()` 是唯一的清理入口、
- * 容量与 `S.needPx` 的上限同源（`SC.PX_MAX`），也给单测留了直接入口。
+ * 容量与 `RELAY_DEMAND` 的上限同源（`SC.PX_MAX`），也给单测留了直接入口。
  *
  * 7.251 起容量淘汰交给 `src/core/table.ts` 的 `BoundedMap`（「先删过期、超限按时间收到低水位」
  * 这条规则在全仓只有一份实现），这里只剩「哪些站点还该记账」这一层业务判据。
@@ -29,6 +29,8 @@ const BATCH_LIMIT = 3;
  * 功能：tfb 的每站点起搏账本（「上次开批时刻」+「本窗口已开批数」）。
  */
 export class TfbBook {
+  /** 上一批判定标签，配合两批共识与日志去重，清理随站点过期。 */
+  verdicts = new Map<string, string>();
   /** 站点 → 上次开批时刻（毫秒时间戳）；行本身就是时间戳，容量与淘汰由 `BoundedMap` 管 */
   private lastBatchAt = new BoundedMap<string, EpochMs>({ max: SC.PX_MAX, timeOf: (stamp) => stamp });
 
@@ -73,7 +75,7 @@ export class TfbBook {
 
   /**
    * 功能：按「还活着的站点表」清理记账，顺带把总量压到上限内 —— 唯一清理入口。
-   * @param keep 仍然有效的站点表（`S.needPx`：站点 → 到期时间戳）
+   * @param keep 仍然有效的站点表（`RELAY_DEMAND`：站点 → 到期时间戳）
    * @param now 当前时间戳（毫秒）
    * @returns 本次清掉的站点数（给日志与单测看）
    */

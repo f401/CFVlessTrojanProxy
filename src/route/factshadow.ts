@@ -1,3 +1,4 @@
+import { BoundedMap } from "../core/table";
 // 写入决策器的影子模式（v8 §3.2 的接线第 1 步）：只算「本会写什么」，一个字节都不写。
 //
 // 为什么先影子：v8 的 `commitFact` 有 19 条表驱动向量证明「规则自洽」，但真实流量的形状
@@ -12,7 +13,6 @@
 // · `bigTypical`：本站点见过的最大响应字节数（tiny 的相对判据要用）。
 // 两者都只在本 isolate 内存里（跨 isolate 不共享统计，见 AGENTS.md 硬约束 1）。
 import { cnt } from "../core/counter";
-import { S } from "../core/state";
 import type { TrafficEvt } from "../core/hook";
 import { BIG_WIN, commitFact, factKey, type FactCtx, type FactObs, type FactOut } from "./commitfact";
 import type { SampleCount } from "../core/types";
@@ -65,6 +65,8 @@ function chanKey(o: FactObs): string {
 
 /** 站点画像观察表：7.369 起从 AppState 下放，大响应只增不减（tiny 判据的尺度） */
 export class ShadowTable {
+  /** 同站点最近窗口的通道观测，每站点最多八条。 */
+  peers = new BoundedMap<string, Array<{ ck: string; down: number; at: number }>>({ max: 512, timeOf: (rows) => rows[rows.length - 1]?.at || 0 });
   bigTypical = new Map<string, number>();
 }
 
@@ -79,15 +81,18 @@ export const SHADOW_TABLE = new ShadowTable();
  */
 export function notePeer(o: FactObs, now: number): void {
   const ck = chanKey(o);
-  const cur = S.peers.get(o.host) || [];
+  const cur = SHADOW_TABLE.peers.get(o.host) || [];
   const next = cur.filter((x) => x.ck !== ck && now - x.at <= BIG_WIN);
   next.push({ ck, down: o.down || 0, at: now });
-  S.peers.set(o.host, next.slice(-8));
-  if (S.peers.size > 512) S.peers.clear();
+  SHADOW_TABLE.peers.set(o.host, next.slice(-8));
+  if (SHADOW_TABLE.peers.size > 512) SHADOW_TABLE.peers.prune(now);
   // bigTypical：只增不减地记录见过的最大响应（宁可把 tiny 判严，也别冤枉业务页）
   const typ = SHADOW_TABLE.bigTypical.get(o.host) || 0;
   if ((o.down || 0) > typ) SHADOW_TABLE.bigTypical.set(o.host, o.down || 0);
-  if (SHADOW_TABLE.bigTypical.size > 512) SHADOW_TABLE.bigTypical.clear();
+  if (SHADOW_TABLE.bigTypical.size > 512) {
+    // 尺度表随最近活跃站点裁剪，不能让一次溢出重置所有站点的相对判据。
+    for (const host of SHADOW_TABLE.bigTypical.keys()) if (!SHADOW_TABLE.peers.has(host)) SHADOW_TABLE.bigTypical.delete(host);
+  }
 }
 
 /**
@@ -99,7 +104,7 @@ export function notePeer(o: FactObs, now: number): void {
  */
 export function shadowCtx(o: FactObs, now: number, lastWriteAt = 0): FactCtx {
   const ck = chanKey(o);
-  const peers: FactObs[] = (S.peers.get(o.host) || [])
+  const peers: FactObs[] = (SHADOW_TABLE.peers.get(o.host) || [])
     .filter((x) => x.ck !== ck && now - x.at <= BIG_WIN)
     .map((x) => ({
       kind: "relay" as const,
@@ -147,7 +152,7 @@ export class FactShadow {
    * 下界、代价乘以 2。事实是「事实」，不是日志 —— 一条通道一分钟内的二十次失败
    * 说的是同一件事。
    */
-  private wrote = new Map<string, number>();
+  private wrote = new BoundedMap<string, number>({ max: 2048, timeOf: (at) => at });
 
   /**
    * 功能：对一条观测做出**唯一一次**裁决（生产与影子共用这一个结果），并顺带推进两个时钟。
@@ -173,7 +178,7 @@ export class FactShadow {
     // 只有 `R_THROTTLED` 本身不推进，否则一条被节流的观测会把下一个 60 秒也锁上。
     if (r.write || r.reason === "ok" || r.reason === "R_TINY_PEER") {
       this.wrote.set(factKey(o), now);
-      if (this.wrote.size > 2048) this.wrote.clear();
+      if (this.wrote.size > 2048) this.wrote.prune(now);
     }
     notePeer(o, now);
     return r;

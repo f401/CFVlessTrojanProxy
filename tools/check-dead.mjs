@@ -27,7 +27,12 @@ const walk = (d, a = []) => {
   return a;
 };
 const files = walk(root).map((p) => [p, fs.readFileSync(p, "utf8").split(/\r?\n/)]);
-const testFile = fs.existsSync("test/test_score.mjs") ? fs.readFileSync("test/test_score.mjs", "utf8") : "";
+// 测试按领域拆分后仍检查所有手写套件；生成包不能冒充真实测试引用。
+const testFiles = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+  const file = path.join(dir, entry.name);
+  return entry.isDirectory() ? testFiles(file) : entry.name.endsWith(".mjs") && entry.name !== "_bundle.mjs" ? [file] : [];
+});
+const testFile = testFiles("test").map((file) => fs.readFileSync(file, "utf8")).join("\n");
 
 // 声明：`export function f` 与 `export const c = (`（后者覆盖箭头函数；对象/单例同样计入）
 const decl = [];

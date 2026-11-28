@@ -185,7 +185,7 @@ export interface SocksRow {
 /**
  * 功能：公共 SOCKS5 代理池 —— 抓列表、实测验证、按延迟挑一条给数据面用。
  *
- * 为什么独立于 `S.pool`：那是 CF 网络里的 proxyip 中继，只肯转发 CF 托管站点；
+ * 为什么独立于 `POOL_MEMORY.rows`：那是 CF 网络里的 proxyip 中继，只肯转发 CF 托管站点；
  * 这里是通用出口（能到任意站点），拨号要先做 SOCKS5 握手，两者不能混在一张表里。
  * 状态放 isolate 内存：这些是「这台机器此刻的实测结果」，按硬约束不写 KV/seed。
  */

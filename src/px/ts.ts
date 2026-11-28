@@ -1,5 +1,5 @@
+import { NODE_MEMORY } from "../core/node-memory";
 import { SC } from "../core/const";
-import { S } from "../core/state";
 import { scoreParts, CANDS } from "../nodes/score";
 
 /** 一次抽样里的单根候选臂：键、乐观代价、是否样本不足（样本不足的豁免剪枝） */
@@ -67,13 +67,13 @@ export class ThompsonPicker {
   /**
    * 功能：取池子大小（抽样宽度与乐观面的分母）。
    *
-   * 为什么不能用候选表长度：`list` 已被 `CAND_KEEP` 截到 ≤288；也不能用 `S.candN` ——
+   * 为什么不能用候选表长度：`list` 已被 `CAND_KEEP` 截到 ≤288；也不能用 `NODE_MEMORY.candidateCount` ——
    * 大池分片重建期间它只反映「已经扫过的那一段」（2000 池实测在 128 → 2000 之间跳），
    * β 与抽样宽度会随切片进度变化 3 倍以上，等于把调好的大池参数作废（7.211）。
    * @returns 池子大小（存活表 → 候选数 → 候选表长度，逐级兜底）
    */
   private poolLen(): number {
-    const nPool = S.alive.size || S.candN || this.list.length;
+    const nPool = NODE_MEMORY.alive.size || NODE_MEMORY.candidateCount || this.list.length;
     return nPool;
   }
 
@@ -126,9 +126,9 @@ export class ThompsonPicker {
    * @returns 剪枝线（毫秒）
    */
   private cutOf(): number {
-    const head = this.list.length ? S.nstat.get(this.list[0].k) : undefined;
+    const head = this.list.length ? NODE_MEMORY.stats.get(this.list[0].k) : undefined;
     const seen = head && (head.pSum || 0);
-    const aliveMs = this.list.length ? S.alive.get(this.list[0].k)?.ms || 0 : 0;
+    const aliveMs = this.list.length ? NODE_MEMORY.alive.get(this.list[0].k)?.ms || 0 : 0;
     const latMin = seen || aliveMs || SC.P_TCP;
     return latMin * SC.TS_CUT_R + SC.TS_CUT_MS;
   }
@@ -144,7 +144,7 @@ export class ThompsonPicker {
     let capMax = SC.PRIOR_BPS;
     // 只扫前 poolWidth 名：那一批才是真正会被抽中的，全表扫会拖慢热路径
     for (let i = 0; i < this.list.length && i < this.poolWidth; i++) {
-      const st = S.nstat.get(this.list[i].k);
+      const st = NODE_MEMORY.stats.get(this.list[i].k);
       if (st && (st.capBps || 0) > capMax) capMax = st.capBps || 0;
     }
     return capMax;
@@ -205,14 +205,14 @@ export class ThompsonPicker {
       const k = this.list[i].k;
       // 超出抽样宽度的候选只在「样本不足」时补进来（上限 TS_EXTRA 个），否则大池里新节点永远当分母
       if (i >= this.poolWidth) {
-        const st = S.nstat.get(k);
+        const st = NODE_MEMORY.stats.get(k);
         const n = st ? st.okW + st.failW : 0;
         if (n >= SC.N_EFF_MIN || extra++ >= SC.TS_EXTRA) continue;
       }
       const p = scoreParts(k, this.mode, this.now, false, this.bytes);
       const spread = this.spreadOf(p);
       // 在途条数决定排队等待：低并发时 inflight=0，完全退化成不带排队的公式
-      const inflight = S.inflight.get(k) || 0;
+      const inflight = NODE_MEMORY.inflight.get(k) || 0;
       arms.push({ k, v: this.costOf(p, inflight, spread), low: p.confB < 0.05 || p.latN < 3 });
       if (p.score < bestMean) bestMean = p.score;
     }

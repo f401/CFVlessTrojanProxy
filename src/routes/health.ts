@@ -1,6 +1,11 @@
+import { PEND } from "../store/pend";
+import { METER_CLIENT } from "../store/meter-client";
+import { KV_WRITES } from "../store/kv";
+import { NODE_MEMORY } from "../core/node-memory";
+import { ENTRY_MEMORY, ERROR_MEMORY } from "../core/client-memory";
+import { USAGE_MEMORY } from "../store/usage-memory";
 import { P_T, VERSION } from "../core/util";
-import { S } from "../core/state";
-import { ERRS } from "../nodes/metrics";
+import { ERRS, HOSTS } from "../nodes/metrics";
 import { cntView } from "../core/counter";
 import { FACT } from "../route/factshadow";
 import { json, forbidden } from "../edge/respond";
@@ -26,11 +31,11 @@ export function health(c: RouteCtx): Response {
     ts: Date.now(),
     uuids: c.auth.uuids.size,
     [P_T]: c.auth.trojan.size,
-    statEntries: S.stats.size,
-    rttBuckets: S.rtt.size,
-    hostPrefs: S.hostNode.size,
-    candidates: S.candN,
-    errors: S.errs.length,
+    statEntries: USAGE_MEMORY.rows.size,
+    rttBuckets: ENTRY_MEMORY.rows.size,
+    hostPrefs: HOSTS.nodes.size,
+    candidates: NODE_MEMORY.candidateCount,
+    errors: ERROR_MEMORY.rows.length,
     errsByKind: ERRS.hist(),
     errsDup: ERRS.dropped(),
 cf: FACT.snap(),
@@ -44,15 +49,15 @@ cf: FACT.snap(),
     src: SOURCES.stat(),
     facts: factList(c.env),
     // short 是唯一的「池子够不够」判据：低于目标时 cron 那套扫描已经在满预算跑（7.179）
-    relays: (() => { const ips = [...S.alive.values()].map((x) => String(x.h || "")).filter(Boolean); const c = egCounts(ips); return { alive: ips.length, target: ALIVE_TARGET, short: ips.length < ALIVE_TARGET, eg4: c.v4, eg6: c.v6, egUnk: c.unk }; })(),
+    relays: (() => { const ips = [...NODE_MEMORY.alive.values()].map((x) => String(x.h || "")).filter(Boolean); const c = egCounts(ips); return { alive: ips.length, target: ALIVE_TARGET, short: ips.length < ALIVE_TARGET, eg4: c.v4, eg6: c.v6, egUnk: c.unk }; })(),
     blk: BLK.snap(),
     colo: (c.cf && c.cf.colo) || "",
     cnt: cntView(),
-    kvWrites: S.kvw,
-    doCalls: S.doCalls,
-    pendSize: S.pend.size,
-    pendMs: S.pendMs,
-    kvLastWrite: S.kvStat,
+    kvWrites: KV_WRITES.writes,
+    doCalls: METER_CLIENT.calls,
+    pendSize: PEND.rows.size,
+    pendMs: PEND.intervalMs,
+    kvLastWrite: KV_WRITES.status,
     version: VERSION,
   });
 }

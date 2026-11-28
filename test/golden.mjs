@@ -38,18 +38,16 @@ const learned = {
 const stats = { up: 17742682, down: 2493569125, conns: 16728, todayUp: 12345678, todayDown: 99887766 };
 
 function seedState() {
-  const S = W.S;
-  S.colo = "HKG";
-  S.curs = { lat: "edge-a.example.com:443", tput: "edge-b.example.com:443" };
-  S.funnel = { direct: 612, node: 3388, v6: 12 };
+  W.ISOLATE.colo = "HKG";
+  W.SELECTION_MEMORY.current = { lat: "edge-a.example.com:443", tput: "edge-b.example.com:443" };
+  W.TRAFFIC_MEMORY.funnel = { direct: 612, node: 3388, v6: 12 };
   for (const k of W.COUNTER.keys || []) { W.COUNTER.values[k] = 0; W.COUNTER.sent[k] = 0; }
   W.COUNTER.values.conn = 412; W.COUNTER.values.node = 388; W.COUNTER.values.direct = 24;
-  S.hostNode.clear();
-  S.hostNode.set("x.com", new Map([
+  W.HOSTS.nodes.clear();
+  W.HOSTS.nodes.set("x.com", new Map([
     ["edge-a.example.com:443", { n: 12, ok: 11, bad: 1, bytes: 8123456, ttfb: 193, at: Date.now() - 60000 }],
     ["edge-b.example.com:443", { n: 7, ok: 6, bad: 1, bytes: 2211334, ttfb: 402, at: Date.now() - 120000 }],
   ]));
-  return S;
 }
 
 const url = new URL("https://edge.example.com/" + UUID + "?ed=2048");

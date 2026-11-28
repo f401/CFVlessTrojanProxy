@@ -1,4 +1,4 @@
-import { S } from "../core/state";
+import { NODE_MEMORY } from "../core/node-memory";
 import { costOf, p90Of, ZERO_STAT } from "./score";
 
 /* 看板 view-model：把节点统计压成纯展示行，views 不再读 S / 算分 */
@@ -15,7 +15,7 @@ export function statsNodeRows(
   return (alive || [])
     .map((x: NodeEntry) => {
       const k = x.h + ":" + x.p;
-      const a1 = S.nstat.get(k) || ZERO_STAT;
+      const a1 = NODE_MEMORY.stats.get(k) || ZERO_STAT;
       const b1 = (nsMap && nsMap[k]) || {};
       const st = {
         ok: Math.max(a1.ok || 0, Number(b1.ok) || 0),

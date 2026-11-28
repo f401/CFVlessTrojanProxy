@@ -1,8 +1,11 @@
+import { ERROR_MEMORY } from "../core/client-memory";
+import { ISOLATE } from "../core/state";
+import { SELECTION_MEMORY } from "../px/selection-memory";
+import { TRAFFIC_MEMORY } from "../core/traffic-memory";
 import { P_T, shadowRate } from "../core/util";
-import { S } from "../core/state";
 import { dwellOf } from "../px/selector";
 import { SC } from "../core/const";
-import { PageView, fmtBytes } from "../views/panel";
+import { renderHtml, renderStatsHtml, fmtBytes } from "../views/panel";
 import { effectiveQuota, subHeaders } from "../core/quota";
 import { SubscriptionView, trojanPasswordOf } from "../views/sub";
 import type { SubKind } from "../views/sub";
@@ -52,13 +55,6 @@ const FEEDS: Record<string, { fmt: SubKind; json: boolean }> = {
 export class SubscriptionRoutes {
   private readonly c: UserCtx;
   /**
-   * 页面视图：控制页与统计页的 HTML 都从这一个对象出。
-   *
-   * 7.353 前它是模块级 `PAGES`（无状态的单例），由队列/路由持有之后，「谁渲染了页面」
-   * 在 `SubscriptionRoutes` 里就能读到，不必跳到 `panel.ts` 的尾部找实例。
-   */
-  private readonly pages = new PageView();
-  /**
    * 订阅渲染器：三种格式共用一张分派表。
    *
    * 7.358 前它是模块级 `SUBVIEW`。它是无字段的纯分派器，但订阅内容就是这个类的产出，
@@ -97,16 +93,16 @@ export class SubscriptionRoutes {
     const { env, url, id, host, pageKey, regions } = this.c;
     // 用量与存活表互不依赖，并行取：两个往返同时发出，面板首字节不叠加
     const [st, alive] = await Promise.all([readStats(env, id), aliveList(env)]);
-    const f: Record<string, number> = S.funnel || {};
+    const f: Record<string, number> = TRAFFIC_MEMORY.funnel || {};
     const ftot = (f.direct || 0) + (f.node || 0) + (f.v6 || 0);
     // 漏斗分母只算三档已知出口；一档都没走过时显示「-」，不要拿 0% 冒充「全走直连」
     const pctOf = (x: number) => (ftot > 0 ? Math.round((x / ftot) * 1000) / 10 + "%" : "-");
     const info = {
       regions,
       // 当前节点是 isolate 本地的（不跨 isolate 共享）；没定过就写「未定」而不是空串
-      curLat: S.curs.lat || "（未定）",
-      curTput: S.curs.tput || "（未定）",
-      colo: S.colo || "??",
+      curLat: SELECTION_MEMORY.current.lat || "（未定）",
+      curTput: SELECTION_MEMORY.current.tput || "（未定）",
+      colo: ISOLATE.colo || "??",
       funnel: `直连 ${pctOf(f.direct || 0)} · 中转 ${pctOf(f.node || 0)}` + (f.v6 ? ` · v6 ${pctOf(f.v6)}` : ""),
       aliveCount: alive.length,
       used: fmtBytes((st.up || 0) + (st.down || 0)),
@@ -118,7 +114,7 @@ export class SubscriptionRoutes {
         `滞回 15% · 驻留 ${Math.round(Math.min(dwellOf(env, "lat"), dwellOf(env, "tput")) / 60000)} 分钟 · ` +
         `每小时最多 ${SC.BUDGET} 次切换 · 影子 ${Math.round(shadowRate(env) * 100)}%`,
     };
-    return html(this.pages.panel(env, url, id, host, pageKey, info), 200, { "content-security-policy": CSP_STATIC });
+    return html(renderHtml(env, url, id, host, pageKey, info), 200, { "content-security-policy": CSP_STATIC });
   }
 
   /**
@@ -170,7 +166,7 @@ export class SubscriptionRoutes {
     mergeNodeSnap(nsMap, snap);
     const nodeRows = statsNodeRows(alive, nsMap);
     // 错误环只留最近 20 条并倒序：面板上一次刷屏会把更早的挤压掉，那是刻意的
-    const errs = S.errs.slice(-20).reverse();
-    return html(this.pages.stats({ env, id, stats: s, learned, nodeRows, errs }));
+    const errs = ERROR_MEMORY.rows.slice(-20).reverse();
+    return html(renderStatsHtml(env, id, s, learned, nodeRows, errs));
   }
 }

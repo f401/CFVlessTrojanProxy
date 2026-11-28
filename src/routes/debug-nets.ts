@@ -1,11 +1,10 @@
 import type { RouteCtx } from "../edge/types";
 import { errMsg, withTimeout } from "../core/util";
 import { json } from "../edge/respond";
-import { S } from "../core/state";
 import { St } from "../core/enums";
-import { diagVerdict, hostKey } from "../nodes/metrics";
+import { diagVerdict, hostKey, HOSTS } from "../nodes/metrics";
 import { httpProbe, isCfHost, resolveV4All, checkTarget, dohQuery, expandV6, resolveAAAA } from "../proxy/dial";
-import { cfHttpCode } from "../proxy/cfverdict";
+import { cfHttpCode, CF_HTTP } from "../proxy/cfverdict";
 import { probeSni, probeProxy } from "../px/probe";
 import { aliveList } from "../px/pool";
 import { BLK_TTL } from "../route/commitfact";
@@ -120,7 +119,7 @@ export class DebugDiag {
     const rows = this.sampleRows(alive, fam);
     const probe = url.searchParams.get("probe") === "1" ? await this.probeTops(alive, host) : null;
     const picked = this.pickBasis(rows, probe);
-    const direct = S.hostDirect.get(fam) || { ok: 0, bad: 0, at: 0 };
+    const direct = HOSTS.direct.get(fam) || { ok: 0, bad: 0, at: 0 };
     // 三段证据各自独立取：CF 托管事实（两次外部探测）、本 isolate 判定表、DO 里跨 isolate 的封锁环
     const cfVerdict = await this.cfFacts(host);
     const relayBlocked = this.relayBlocked();
@@ -167,7 +166,7 @@ export class DebugDiag {
     const ccOf: Record<string, string> = {};
     for (const a of alive) ccOf[a.h + ":" + a.p] = a.cc || "";
     const rows: DiagRow[] = [];
-    const m = S.hostNode.get(fam);
+    const m = HOSTS.nodes.get(fam);
     if (m) {
       for (const [node, s] of m) rows.push({ node, cc: ccOf[node] || "", ...s });
     }
@@ -226,7 +225,7 @@ export class DebugDiag {
    * 功能：取这个站点的「CF 托管 + 真实状态码」事实。
    *
    * Worker 自己发 HTTPS 请求时看得到状态码；走中继的 WebSocket 隧道是端到端 TLS，看不到状态行。
-   * 探到的状态码顺手写进本 isolate 的会话缓存（`S.cfHttp`），后续 `cfHttpCode()` 直接用。
+   * 探到的状态码顺手写进本 isolate 的会话缓存（`CF_HTTP.cache`），后续 `cfHttpCode()` 直接用。
    * @param host 目标站点
    * @returns 诊断用的四元组：解析出的 IP、是否 CF 托管、状态码与机房、缓存里的值、是否算被拦
    */
@@ -242,7 +241,7 @@ export class DebugDiag {
     const ips = await resolveV4All(host).catch(() => []);
     const cfHosted = await isCfHost(host).catch(() => false);
     const live = await httpProbe(host, 4000).catch(() => ({ code: 0, colo: "" }));
-    if (live.code) S.cfHttp.set(host, { code: live.code, colo: live.colo, t: Date.now() });
+    if (live.code) CF_HTTP.cache.set(host, { code: live.code, colo: live.colo, t: Date.now() });
     return {
       ips,
       cfHosted,

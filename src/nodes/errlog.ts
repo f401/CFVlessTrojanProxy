@@ -1,5 +1,5 @@
+import { ERROR_MEMORY } from "../core/client-memory";
 /* 错误账本：5 秒去重 + 10 分钟直方图 + 限流丢弃计数（每个 isolate 各自一份，不写 KV）。 */
-import { S } from "../core/state";
 
 /**
  * 功能：错误账本（每个 isolate 一份）：5 秒去重表 + 10 分钟分类直方图 + 限流丢弃计数。
@@ -102,8 +102,7 @@ export class ErrRing {
     this.seen.set(key, now0);
 
     try {
-      S.errs.push({ t: now0, m, tag: tag || "" });
-      while (S.errs.length > 50) S.errs.shift();
+      ERROR_MEMORY.append({ t: now0, m, tag: tag || "" });
     } catch (e) {}
     try {
       console.error("[err]", msg);

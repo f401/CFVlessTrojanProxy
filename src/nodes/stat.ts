@@ -1,5 +1,5 @@
+import { NODE_MEMORY } from "../core/node-memory";
 import { HIST_N, SC, HIST_BASE } from "../core/const";
-import { S } from "../core/state";
 import { pcts } from "../core/hist";
 
 // ---- 形状与刻度 ----
@@ -38,16 +38,16 @@ export const ZERO_STAT: NodeStats = {
 
 // ---- 并入自 stat-table.ts ----
 // 节点统计表本体：只负责「按 host:port 取条目」与「打掉排行缓存」，
-// 唯一碰 S.nstat / S.hostRankCache 的地方。统计怎么算在 ./stat-observe，
+// 唯一碰 NODE_MEMORY.stats / NODE_MEMORY.rankCache 的地方。统计怎么算在 ./stat-observe，
 // 怎么读在 ./stat-view —— 拆开是因为「表」有状态、「算」与「读」没有。
 
 
 /**
  * 功能：节点统计表本体 —— 按 host:port 取条目、打掉排行缓存，以及九个观测写入。
  * 为什么写入挂在类上：它们都要「取条目 → 衰减 → 累加 → 必要时作废缓存」这四步，
- * 而每一步的前提（表在 `S.nstat`、缓存在 `S.rankCache`）都是这张表自己的不变量；
+ * 而每一步的前提（表在 `NODE_MEMORY.stats`、缓存在 `NODE_MEMORY.rankCache`）都是这张表自己的不变量；
  * 留在模块函数里等于把这四步的纪律散在九个地方各写一遍（7.282 之前就是这样）。
- * 条目本身挂在 S.nstat 上（跨请求共享），所以它是仓里少数几个必须有状态的类之一。
+ * 条目留在 NODE_MEMORY；本类集中统计变换与缓存失效，避免 core 反向依赖评分层。
  */
 export class NodeStatsTable {
   /**
@@ -56,7 +56,7 @@ export class NodeStatsTable {
   * @returns {object} 统计对象
   */
   static nsGet(k: string): NodeStats {
-    let s: NodeStats | undefined = S.nstat.get(k);
+    let s: NodeStats | undefined = NODE_MEMORY.stats.get(k);
     // 懒初始化：节点第一次被记样本时才建对象。字段分四组——可用性、探活样本、真实流量、
     // 字节直方图（hist 是 32 档对数刻度，pcts 在上面插值）
     if (!s) {
@@ -73,7 +73,7 @@ export class NodeStatsTable {
         winAt: 0, winOk: 0, winFail: 0,
       };
       // 只在这里 set：别处一律拿引用改字段——换对象会让正在跑的连接持有的旧引用失效
-      S.nstat.set(k, s);
+      NODE_MEMORY.stats.set(k, s);
     }
     return s;
   }
@@ -82,7 +82,7 @@ export class NodeStatsTable {
   *  排行本身与进行中的分片进度都留着：否则每次失败都退化成「只有前 128 名」的半张表，
   *  失败密集时还会把分片循环反复打回起点（永远算不完一轮）。 */
   static invalidateRank() {
-    S.rankGen += 1;
+    NODE_MEMORY.invalidateRanks();
   }
 
   /**
@@ -102,7 +102,7 @@ export class NodeStatsTable {
     // （最多 80 个站点），等于把缓存关掉。`nsOk` 里那条「每条成功连接都清会让过滤缓存
     // 永远失效」是同一个教训，这里漏改了。
     if (viaP && before < EMPTY_CLOSE_BAD && s.eCloseP >= EMPTY_CLOSE_BAD) {
-      S.hostRankCache.clear();
+      NODE_MEMORY.rankCache.clear();
       this.invalidateRank();
     }
     s.at = now;
@@ -161,7 +161,7 @@ export class NodeStatsTable {
     if (s.probeFails >= 2) {
       s.blackUntil = Math.max(s.blackUntil || 0, now + 10 * 60000);
       // 探活也能拉黑节点：排行缓存里可能还留着它，下次 pick 不能继续推荐
-      S.hostRankCache.clear();
+      NODE_MEMORY.rankCache.clear();
       this.invalidateRank();
     }
     s.at = now;
@@ -181,7 +181,7 @@ export class NodeStatsTable {
     s.streak = (s.streak || 0) + 1;
     // 阶梯跟池子大小走：小池子把节点关 20 分钟等于把池子关掉（5 个节点关掉 1 个剩 4 个）。
     // 大池子才敢用长冷却 —— 800 个候选里挑最慢的比挑"刚失败过的"更亏。
-    const small = S.alive.size < 8;
+    const small = NODE_MEMORY.alive.size < 8;
     const ladder = small ? [10000, 60000, 180000, 300000] : [60000, 300000, 900000, 1200000];
     s.blackUntil = Math.max(s.blackUntil || 0, now + ladder[Math.min(s.streak, 4) - 1]);
     if (s.streak >= 4) s.streak = 0;     // 给第五次机会
@@ -191,7 +191,7 @@ export class NodeStatsTable {
       s.blackUntil = Math.max(s.blackUntil || 0, now + 5 * 60000);
     }
     s.at = now;
-    S.hostRankCache.clear();             // 冷却中的节点不该继续被站点排行推荐
+    NODE_MEMORY.rankCache.clear();             // 冷却中的节点不该继续被站点排行推荐
     this.invalidateRank();                    // 失败改变了排序前提
   }
 
@@ -249,7 +249,7 @@ export class NodeStatsTable {
     }
     s.bytesDown = (s.bytesDown || 0) + (bytes || 0);
     s.at = now;
-    S.seedDirty = true;
+    NODE_MEMORY.statisticsDirty = true;
   }
 
   /** 记录卡顿时长（背压累计） */

@@ -5,31 +5,24 @@
 ## 1 分层
 
 ```
-core/     const env-parse net state quota 无业务依赖：常量 / 配置解析 / 目标校验 /
-          bytes sha224 timeouts     字节编解码 / SHA-224 / 超时预算（util 只做门面）
-          ws concurrency errors     WS 发送与释放 / 有限并发 / 错误文本 / 协议名拼装
-          counter hist node-snapshot 日计数 / 直方图分位 / 节点快照
-store/    index kv crypto         适配器：KV / 加密 / 快照 / 计量 / Meter DO
-          snapshot pend stats
-          meter-client meter
-nodes/    stat(+types/table/view/observe) score(+health/cost/cands) site rtt diag metrics errlog  节点域：统计（表 / 派生 / 观测）、评分、站点画像/族键、入口 RTT、诊断结论
-px/       pool poolgen probe seed selector pickpath rotation failbook 中转域：候选池、抓取源、探活、选择器
-          const regions              共享常量 / 地区列表（打破 pool 互引）
-proxy/    protocol dial session     数据面：协议、拨号、会话
-          fallback tunnel connection
-          conn-settle conn-sample   连接结束时的结算流水线 / 纯采样换算（权重、卡顿窗口、KB/s）
-          ws-in                      客户端→上游字节流（8MB 上行队列上限）
-views/    sub* panel* html          纯渲染：sub-common（clash + singbox + links 三格式同住）+ panel/admin/stats
-edge/     respond types auth        响应与安全头、请求上下文、管理会话
-routes/   health subscription admin   proxyip debug(+tables/nets/actions) tools(barrel)
-          logs cron
-index.ts                            组装根：分发 + ws 升级 + cron
+core/     util / state / budget-ledger / budgeted-io / transport
+          常量、纯计算、isolate 状态、预算记账与 I/O 接口
+store/    KV / Meter DO / 增量上报 / 快照 / 加密
+nodes/    stat / score / metrics：节点统计、评分与站点画像
+px/       pool / probe / selector / scan / regions：候选池与探测
+proxy/    protocol / session / dialer / fallback / connection：数据面
+route/    policy / judge / facts：判断与策略，经 core/hook 注入
+views/    sub / panel / regions：订阅与纯页面渲染
+          html 骨架、assets 样式、client 脚本在构建时组合
+edge/     auth / respond / types：鉴权、安全头、上下文
+routes/   HTTP 与 cron 编排、输入校验和响应
+index.ts  组装根：HTTP、WebSocket、cron 分发
 ```
 
 依赖门禁（`npm run arch`）会拦住：反向依赖、目录级与**文件级**循环依赖、顶层 `let`、单文件 > 560 行、以及**任何 `any`**（`src/` 与 `types/` 一并检查；边界用 `unknown` + 收窄）。
 `types/*.d.ts` 里的全局 `declare` 只允许 `WebSocketPair`（Workers 真全局）；其余全局声明会掩盖漏 import，必须用显式 `import`。
 
-依赖图当前是**严格单向**的：`core → store → nodes → px → proxy → views → edge → routes`。`ALLOW` 表为空；`npm run arch` 会对全部层做循环检查，任何反向边都会失败。
+依赖图当前是**严格单向**的：`core → store → nodes → px → proxy → route → views → edge → routes`。`ALLOW` 表为空；`npm run arch` 会对全部层做循环检查，任何反向边都会失败。
 
 ## 2 一次请求怎么走
 
@@ -56,7 +49,7 @@ fetch(request)
 
 | 归属 | 位置 | 生命周期 |
 |---|---|---|
-| 节点统计 / 游标 / 站点画像 | `core/state` 的 `S`（按域分段） | isolate |
+| 节点统计 / 游标 / 站点画像 | `NODE_MEMORY` / `SELECTION_MEMORY` / `HOSTS`（独立所有者） | isolate |
 | 选中结果缓存 | `S.curs` / `S.hostRankCache`（30s） | isolate |
 | 候选名单 | `px/seed` ↔ KV `px:seed` | 跨 isolate（只传名字，不传统计） |
 | 用量 | `store` PEND → `Meter` DO → KV 快照 | 全局唯一 |
@@ -78,7 +71,7 @@ tools/check-dead.mjs 死导出（导出函数/常量必须在全仓有真实引�
 tools/doc-audit.mjs 注释 / 类表 / 活文档引用 / 表格列数与反引号 / 文档挂在 import 上 / H6 编号连续 / 版本口径 / JSDoc 类型与签名一致
   · H6 编号必须从 1 连续到最大值（7.231 的第 188 行、7.233 的第 190 行都是漏写，表格语法合法所以没人报）
   · `AGENTS.md` 头部的仓库版本、缺陷数、「差 N 个版本」三者必须与 `src/core/util.ts` 的 `VERSION`、H6 表最大编号对齐
-test/*.mjs        473 断言 + 8 项逐字节 golden（含数据面模拟）；`src` 与 `types` 的 any 数量均为 0
+test/*.mjs        协议 186 / 冒烟 30 / 评分 4309 / 页面 31 / 状态 25 断言 + 8 项逐字节 golden（含数据面模拟）；`src` 与 `types` 的 any 数量均为 0
 obf/*.js          预处理 + 混淆（Meter 类名保留）
 scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → obf → PUT
 ```
@@ -95,7 +88,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 6. DO 存储键 `"a"` 是单键格式，老键 `c/e/s/g` 只读兼容，不要回写。
 7. `rg=xx` 是**硬要求**：只在该国节点里选，找不到/连不上就断开，禁止回落到直连或全球节点。
 8. 落盘前读旧值（seed / snap / usage）必须用 `kvGetStrict`；读失败要跳过写，不能当空表覆盖。
-9. cron 与手动 `?refresh=1` 互斥：`S.cronBusy` 覆盖整轮 `cronOnce`，忙时不再排队；
+9. cron 与手动 `?refresh=1` 互斥：`CRON_LOCK` 覆盖整轮 cron，忙时不再排队；
    否则两轮 `cronScan` 会双跑探活、双写 seed、互相覆盖 `poolIdx`。
 10. 排行缓存只准用 `invalidateRank()` 作废，不要手写 `S.rankCache.t = 0` ——
     两个模式的时间戳要一起清，漏一个就会出现"失败后排行不失效"。
@@ -194,12 +187,12 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 
 ## 8 设计取舍：有状态服务用类，纯计算用函数
 
-- **有状态边界用类**：`AppState`（isolate 状态）、`SeedStore`（信誉表）、
+- **有状态边界用类**：`IsolateContext`（入口元数据）、`SeedStore`（信誉表）、
   `Selector`（选路策略）、`Meter`（DO 账本）、`Connection`（单连接生命周期）。
 - **纯计算保持函数**：`score/hist/net/quota` 与 `views` 渲染。它们无副作用，便于单测，
   也不会在热路径上引入 `this` 和对象分配。
 - **不把每个函数都塞进 class**：Workers 每个请求都可能是新 isolate，状态属于
-  `AppState`/DO，而不是模块实例；纯函数直接调用比服务定位器更轻。
+  领域所有者/DO，而不是无状态模块实例；纯函数直接调用比服务定位器更轻。
 - **选择器放 `px/`**：它需要“当前中转出口/存活池”，放在中转域后 `nodes` 不再反向依赖 `px`，
   这是 v7 拆环的关键一步。
 
@@ -304,10 +297,10 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `DebugMeterProbes` | `src/routes/debug.ts` | 六个「计量 DO 诊断」端点（burn/stage/tim/iter/burnjs/crypto）：规格是数据表，派发只有一条路径（校验 → 取实例 → 带超时 fetch → 包 `{ ok, doStatus, <item> }`） |
 | `DebugTables` | `src/routes/debug.ts` | 十一个只读诊断分支（dd/pss/eg/rt/blk/facts/plan/vt/hl/prefs/cl）：`read()` 只按固定顺序编排，每个分支一个方法、只认自己那个参数键（`?blk=` 等自己取参数、自己拼载荷）；只读表、不拨号、不改状态，`&do=1` 时只有 `healthRows()` 与 `connRows()` 会多一次 DO 往返 |
 | `ProxyipView` | `src/routes/proxyip.ts` | `/proxyip` 的六个方法：只读报表（`?day`、`?src`）、两个管理员动作（`?reset` 清表、`?refresh` 跑一轮探活）、默认视图分三段——`liveRows()` 并内存表与跨 isolate 快照并按模式排序、`explain()` 只在 `?why=1` 时算画像与分项、`poolReport()` 只拼字段 |
-| `RegionsView` | `src/routes/tools.ts` | `/regions` 只读节点浏览器：把存活表 ∪ seed 名单按 key 合并，补质量枚举/地址族/覆盖/目标站点延迟，Good 优先 Risky 排后；全程只读内存表，净增 KV/DO 额度 0 |
+| `RegionsView` | `src/routes/tools.ts` | 地区查询、分页、JSON 缓存和 POST 操作编排；展示投影不改写共享基础行；HTML 渲染委托 views/regions.ts；冷启动会载入名单，HTML 可补国家码，不能声明全程零 I/O |
 | `AdminView`（`admin` 门面） | `src/routes/admin.ts` | `/admin` 的四个分支各占一个方法：登出只清 cookie、登录做挑战-应答与限速、用户操作要读改写整份托管用户表（`cur.ok === false` 时必须拒绝，否则会把缺失用户整份删掉）、面板按用户数扇出 DO 往返并被 `ADMIN_STATS_MAX` 截断 |
 | `RateLimiter`（`RATE_LIMIT`） | `src/edge/auth.ts` | 登录尝试的固定窗口限流：`take` 判「这个来源这一分钟还能不能试」、`reset` 在成功登录后清零、`size` 供诊断；表按 `RL_MAX` 有界（超限只淘汰「计数最小且最旧」的一条，绝不整体清空、绝不淘汰刚写入的来源），7.355 起由类持有而不是裸 `Map` |
-| `SubscriptionRoutes`（`subscription` 门面） | `src/routes/subscription.ts` | 控制页与订阅：`page()` 读用量 + 存活表两次往返、`feed(kind)` 把 clash / sing-box / 明文链接三种格式收成一条路（差别只有渲染器与 content-type，见 `FEEDS` 表）、`stats()` 的 JSON 分支零额外往返、`statsHtml()` 才并跨 isolate 快照；页面视图 `PageView` 由它自己持有（7.353 起，不再有模块级 `PAGES`） |
+| `SubscriptionRoutes`（`subscription` 门面） | `src/routes/subscription.ts` | 控制页与订阅：`page()` 读用量 + 存活表两次往返、`feed(kind)` 把 clash / sing-box / 明文链接三种格式收成一条路（差别只有渲染器与 content-type，见 `FEEDS` 表）、`stats()` 的 JSON 分支零额外往返、`statsHtml()` 才并跨 isolate 快照；页面直接调用 renderHtml / renderStatsHtml，不再创建无状态页包装 |
 | `ProxySession` | `src/proxy/session.ts` | WebSocket 数据面的会话对象，7.362 起只剩「解析参数 / 起管道 101 / 帧分派」：首帧解析交给 `FirstFrame`、路由决策交给 `SessionRouter`、DNS 交给 `DnsLane`、收尾交给 `SessionTail`；`?rg=` 用的 `RegionPicker` 与额度闸门也由它持有 |
 | `UploadStream` | `src/proxy/ws-in.ts` | 客户端 → 上游的上行字节流：积压计数、超限关连接（1013）、正常关闭与异常各自收尾；`wsToStream()` 只是 `new UploadStream(ws, early).stream` |
 | `UserIndex` | `src/proxy/protocol.ts` | 用户表装配器：env（`uuid`/`uuids`、`trojan` 单密码与 `user:pass` 多密码）与 KV 托管用户合成一张表，维护「启用 id 集合」与「密码摘要 → 稳定 owner」；托管记录最后写，因此能覆盖 env 的启用状态 |
@@ -319,11 +312,11 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `DebugTf` | `src/routes/debug-nets.ts` | 判定批与真握手（子请求 + DO CPU，同文件） |
 | `DebugActions` | `src/routes/debug.ts` | 会改状态的诊断操作（refill/cur/restore/seed）：全部先过 `adminOnly`，都会写 KV 或 DO |
 | `RouteTable` | `src/routes/table.ts` | 路径 → 处理器的分发表，纯静态方法（7.360 起无模块级 `ROUTES` 实例） |
-| `SubscriptionView` / `PageView` / `PanelView` | `src/views/sub.ts`、`src/views/panel.ts` | 三种订阅格式与面板渲染（`PanelView` 六个分区各一方法、样式抽成 `PANEL_CSS`；`PageView` 无字段，7.353 起由 `SubscriptionRoutes` 自己持有实例，模块级 `PAGES` 已撤；`SubscriptionView` 同样无字段，7.358 起由 `SubscriptionRoutes` 自己持有（`this.view`），模块级 `SUBVIEW` 已撤） |
+| `SubscriptionView` / `PanelView` | `src/views/sub.ts`、`src/views/panel.ts` | 订阅渲染与控制页分区；页面入口直接调用纯渲染函数，已删除无字段的 PageView 包装；地区纯渲染位于 src/views/regions.ts，CSS/JS 在构建期展开 |
 | `RegionSubscription`（`REGION_SUB`） | `src/views/sub-common.ts` | 按用户地区配置生成 `?node=` 硬钉订阅条目：从存活表按地区+topN 挑具体节点，Good 优先 / Risky 排除 / Unknown 按 Normal，条目名带质量/族/IP/目标站延迟；无配置时回落原 `?rg=` 地区自动条目（保持 golden 字节不变） |
 | `Meter` | `src/store/meter.ts` | DO 里的用量账本 |
 
-自由函数集中在 `src/core/{util,net,hist,quota,hosts,hostmem,relay-addr,table,enums,types,facts,hook,state,const,counter,lock,latobs,firstobs,node-snapshot,transport}.ts`（编解码 / SHA-224 / WS / 超时 / 并发 / 环境解析 / 协议名 / 错误文本都在 `util.ts` 一个文件里，7.290 起不再拆分；SHA-224 内部按「补位 `sha224Pad()` / 展开 `sha224Words()` / 压缩 `sha224Mix()`」三步各自成函数，7.338 起）、`src/proxy/protocol.ts`、`src/views/{html,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。
+自由函数集中在 `src/core/{util,net,hist,quota,hosts,hostmem,relay-addr,table,enums,types,facts,hook,state,const,counter,lock,latobs,firstobs,node-snapshot,transport}.ts`（编解码 / SHA-224 / WS / 超时 / 并发 / 环境解析 / 协议名 / 错误文本都在 `util.ts` 一个文件里，7.290 起不再拆分；SHA-224 内部按「补位 `sha224Pad()` / 展开 `sha224Words()` / 压缩 `sha224Mix()`」三步各自成函数，7.338 起）、`src/proxy/protocol.ts`、`src/views/{panel,regions,sub-common,sub}.ts`（三种订阅格式与它们的共享 helper 现在都在 sub-common 里）：它们要么是纯计算，要么是字符串渲染，没有状态可装。
 
 ## 注释约定
 
@@ -355,3 +348,22 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
   类名必须真实存在 —— `tools/doc-audit.mjs` 的 `livingRefs` 会逐个核对，归档文档不参与。
 - 同一件事只在一处写：硬规则进 `v8实现清单.md`，机制与取舍进 `v8.md`，类与归属进本文件，
   历史证据进 `docs/history/`。
+## 领域状态所有权
+
+AppState 与 S 已删除。入口元数据只保留域名及机房；低层的跨域观测协议放在 core，计量、池、选路与页面缓存各自持有，不通过一个根对象转发。
+
+| 类 | 文件 | 职责 |
+|---|---|---|
+| `EntryMemory` | `src/core/client-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+| `ErrorMemory` | `src/core/client-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+| `NodeMemory` | `src/core/node-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+| `RelayDemand` | `src/core/relay-demand.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+| `IsolateContext` | `src/core/state.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+| `TrafficMemory` | `src/core/traffic-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+| `PoolMemory` | `src/px/pool-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+| `SelectionMemory` | `src/px/selection-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+| `FactSwitches` | `src/route/factflags.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+| `RegionPageCache` | `src/routes/region-cache.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+| `KvWriteState` | `src/store/kv.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+| `MeterClientState` | `src/store/meter-client.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |
+| `UsageMemory` | `src/store/usage-memory.ts` | 独立实例持有领域状态，生命周期方法与状态同处，详见 tools/state-owners.json |

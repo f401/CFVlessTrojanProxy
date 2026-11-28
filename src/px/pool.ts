@@ -1,3 +1,6 @@
+import { ISOLATE } from "../core/state";
+import { SELECTION_MEMORY } from "./selection-memory";
+import { NODE_MEMORY } from "../core/node-memory";
 // 候选池的对外门面：KV 快照、游标、面板明细与落盘节流。
 // 「谁能用」（存活表 / 探活冷却）搬去 ./alive，一轮维护搬去 ./scan —— 这个文件只剩读写口。
 
@@ -6,7 +9,6 @@ import { commitPool, ensurePool } from "./poolgen";
 import { SEED_WRITE_GAP } from "../core/const";
 import { capOf, p90Of, pFailOf, pStallOf, pctOf, scoreParts } from "../nodes/score";
 import { SEED_STORE } from "./seed";
-import { S } from "../core/state";
 import { pxGet } from "./alive";
 
 // 池子的代际读写搬去 ./poolgen（提交规则较长，混在本文件会顶到 560 行上限）；
@@ -29,7 +31,7 @@ export function nsOf(keys: string[], limit = 64) {
   let i = 0;
   for (const k of keys) {
     if (++i > limit) break;
-    const s = S.nstat.get(k);
+    const s = NODE_MEMORY.stats.get(k);
     if (!s) continue;
     // 有效样本数用衰减后的权重和，不是原始计数——面板上要跟「还有多少信息量」对齐
     const n = (s.okW || 0) + (s.failW || 0);
@@ -63,7 +65,7 @@ export function nsOf(keys: string[], limit = 64) {
 /**
  * 改内存里的当前节点（不落盘）。
  *
- * 曾经还带一个 `alive` 参数、可以把整个 `S.alive` 换掉 —— 全仓唯一调用者是
+ * 曾经还带一个 `alive` 参数、可以把整个 `NODE_MEMORY.alive` 换掉 —— 全仓唯一调用者是
  * `/<uuid>/debug?cur=`，只传 `cur`，那条分支从来没被走过（7.173 删掉）。
  * 换池子要走 `commitPool`：它管代际号、锚点与缩水守卫，直接替换内存会跟 KV 脱节。
  * @param env Worker 环境
@@ -73,8 +75,8 @@ export function nsOf(keys: string[], limit = 64) {
 export async function pxSet(env: Env, patch: { cur?: string | null }) {
   if (!patch) return pxGet(env);
   if (typeof patch.cur === "string") {
-    S.curs.tput = patch.cur;
-    S.curs.lat = patch.cur;
+    SELECTION_MEMORY.current.tput = patch.cur;
+    SELECTION_MEMORY.current.lat = patch.cur;
   }
   return pxGet(env);
 }
@@ -87,12 +89,12 @@ export async function pxSet(env: Env, patch: { cur?: string | null }) {
  */
 export async function flushPx(env: Env, force?: boolean) {
   if (!env || !env.STATS) return { ok: true, skipped: true };
-  if (!force && !S.seedDirty) return { ok: true, skipped: true };
+  if (!force && !NODE_MEMORY.statisticsDirty) return { ok: true, skipped: true };
   if (!force) {
-    const last = Math.max(S.seed.ts || 0);
+    const last = Math.max(SEED_STORE.document.ts || 0);
     // 两次落盘至少隔 SEED_WRITE_GAP：KV 写额度是硬指标，脏数据可以等下一轮
     if (Date.now() - last < SEED_WRITE_GAP) return { ok: true, skipped: true };
   }
-  S.nsWriteAt = Date.now();
-  return SEED_STORE.write(env, S.colo ? undefined : true, !!force);
+  SEED_STORE.nodeWrittenAt = Date.now();
+  return SEED_STORE.write(env, ISOLATE.colo ? undefined : true, !!force);
 }

@@ -1,6 +1,8 @@
+import { ISOLATE } from "../core/state";
+import { NODE_MEMORY } from "../core/node-memory";
+import { TFB } from "./tfbbook";
 /** 只用到 env（DO 存根），不引 edge 层类型，避免 route -> edge 反向依赖。 */
 type RouteCtx = { env: Env };
-import { S } from "../core/state";
 import { withTimeout } from "../core/util";
 import { IpFamily } from "../core/enums";
 import { CONN_OBS } from "../px/regions";
@@ -33,7 +35,7 @@ const TFB_MEM_MAX = 256;
  */
 export function tfBlockOk(prevTag: string, verdict: string): boolean {
   // 单批「有 2xx + 这条 403」可能只是一次限流或页面差异；cron 对同一站点间隔 ≥10 分钟，
-  // 两批都看到同样的分裂才落封锁。这也让 `S.tfbV` 从「只删不写」变成真的有读者。
+  // 两批都看到同样的分裂才落封锁。这也让 `TFB.verdicts` 从「只删不写」变成真的有读者。
   return verdict === "chan" && prevTag.startsWith("chan/");
 }
 
@@ -47,17 +49,17 @@ export function tfRemember(host: string, tag: string): void {
   // 先删再插：`Map.set` 对**已存在的键不移动插入位置**，只 set 的话淘汰序等于「首次探过的时间」——
   // 而每 30 分钟被 cron 复探的正是最先插进来的那些站点，它们会第一批被淘汰，
   // 于是「两批共识」（tfBlockOk 要 prevTag）对最该封锁的站点永远不成立（7.224）。
-  S.tfbV.delete(host);
-  S.tfbV.set(host, tag);
+  TFB.verdicts.delete(host);
+  TFB.verdicts.set(host, tag);
   // Map 保持插入顺序（先删再插保证了它就是「最近更新序」）：从头删就是最久没再更新的站点
-  while (S.tfbV.size > TFB_MEM_MAX) {
-    const first = S.tfbV.keys().next();
+  while (TFB.verdicts.size > TFB_MEM_MAX) {
+    const first = TFB.verdicts.keys().next();
     if (first.done) break;
-    S.tfbV.delete(first.value);
+    TFB.verdicts.delete(first.value);
   }
 }
 
-/** 兜底中继：本 isolate 还没跑过 cron 时 S.alive 为空，用几个已知可用的顶一下。 */
+/** 兜底中继：本 isolate 还没跑过 cron 时 NODE_MEMORY.alive 为空，用几个已知可用的顶一下。 */
 const SEED = ["185.253.117.147", "45.136.117.194", "91.215.154.80"];
 
 const stub0 = (c: RouteCtx) => c.env.METER.get(c.env.METER.idFromName("tf-probe"));
@@ -134,7 +136,7 @@ export function pickFresh(host: string, ips: string[], n: number): string[] {
  * @returns JSON 响应：verdict / escalate / rows
  */
 export async function runTfb(c: RouteCtx, host: string, n: number, list = "", cap = 3): Promise<Response> {
-  const own = [...S.alive.values()].map((x) => `${x.h}:${x.p}`);
+  const own = [...NODE_MEMORY.alive.values()].map((x) => `${x.h}:${x.p}`);
   // 保留面板勾选里的显式端口：旧写法 splitRelay(...)[0] 丢端口、relayAddr 又补 :443，
   // 探测端口与真实拨号端口不一致（pp≠443 时探测假 200/超时）。
   const pool = (list ? list.split(",") : own.length ? own : SEED)
@@ -157,7 +159,7 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = "", ca
   const okN = rows.filter((x) => x.ok && (x.status || 0) >= 200 && (x.status || 0) < 400).length;
   const badN = rows.filter((x) => (x.status || 0) >= 400).length;
   const verdict = tfClass(rows as Array<{ ok: boolean; status?: number; bytes?: number }>);
-  const prevTag = S.tfbV.get(host) || "";
+  const prevTag = TFB.verdicts.get(host) || "";
   // 两批共识：单批 `chan` 只当「怀疑」，不写判定表（写进去等于让这条中继 30 分钟不可用）
   const mayBlock = tfBlockOk(prevTag, verdict);
   for (const row of rows) {
@@ -167,7 +169,7 @@ export async function runTfb(c: RouteCtx, host: string, n: number, list = "", ca
     // 直连行没有节点 IP，跳过（它没有可展示的节点）；族按 IP 字面量判定。
     if (ip && ip !== "direct") {
       const family = ip.includes(":") ? IpFamily.IPv6 : IpFamily.IPv4;
-      CONN_OBS.note(S.colo, ip, host, Number(row.status || 0), Number(row.ms || 0), family, Date.now());
+      CONN_OBS.note(ISOLATE.colo, ip, host, Number(row.status || 0), Number(row.ms || 0), family, Date.now());
     }
     if (verdict === "chan" && row.status === 403 && mayBlock) VT.setState(host, ip === "direct" ? "d" : "r:" + ip, 2, 1);
     // 正证据同样按 2xx/3xx 记（存真实状态码：判定表的 stateOf 本来就把 2xx/3xx 归成 ok）

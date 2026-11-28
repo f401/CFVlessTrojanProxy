@@ -1,7 +1,10 @@
+import { POOL_MEMORY } from "../px/pool-memory";
+import { TRAFFIC_MEMORY } from "../core/traffic-memory";
+import { SELECTION_MEMORY } from "../px/selection-memory";
+import { NODE_MEMORY } from "../core/node-memory";
 import { errMsg, shadowRate } from "../core/util";
 
 import { SC } from "../core/const";
-import { S } from "../core/state";
 import { json } from "../edge/respond";
 import { HOSTS, logErr } from "../nodes/metrics";
 import { costOf, scoreParts, NodeStatsTable } from "../nodes/score";
@@ -136,21 +139,21 @@ export class ProxyipView {
   private async resetPool(): Promise<Response> {
     const deny = await adminOnly(this.c);
     if (deny) return deny;
-    S.alive = new Map();
-    S.nstat = new Map();
-    S.curs = { lat: "", tput: "" };
-    S.prev = { lat: "", tput: "" };
-    S.lastSwitch = { lat: 0, tput: 0 };
-    S.switchHits = { lat: [], tput: [] };
+    NODE_MEMORY.alive = new Map();
+    NODE_MEMORY.stats = new Map();
+    SELECTION_MEMORY.current = { lat: "", tput: "" };
+    SELECTION_MEMORY.previous = { lat: "", tput: "" };
+    SELECTION_MEMORY.switchedAt = { lat: 0, tput: 0 };
+    SELECTION_MEMORY.switches = { lat: [], tput: [] };
     this.lastManualAt = 0;
-    S.funnel = { direct: 0, node: 0, v6: 0 };
+    TRAFFIC_MEMORY.funnel = { direct: 0, node: 0, v6: 0 };
     // 站点画像/排行缓存也必须一起清：否则 reset 后 pick 还会推荐已经不存在的节点
-    S.hostNode.clear();
-    S.hostDirect.clear();
-    S.hostRankCache.clear();
+    HOSTS.nodes.clear();
+    HOSTS.direct.clear();
+    NODE_MEMORY.rankCache.clear();
     NodeStatsTable.invalidateRank();
-    S.candN = 0;
-    return json({ ok: true, alive: 0, curs: S.curs });
+    NODE_MEMORY.candidateCount = 0;
+    return json({ ok: true, alive: 0, curs: SELECTION_MEMORY.current });
   }
 
   /**
@@ -159,7 +162,7 @@ export class ProxyipView {
    */
   private async rebuildPool(): Promise<Response | null> {
     // poolBuilt 是「上次重建时间」；清零后 scan 里的 TTL 判断必然成立，于是重新抓源
-    S.poolBuilt = 0;
+    POOL_MEMORY.builtAt = 0;
     return this.refreshPool();
   }
 
@@ -171,7 +174,7 @@ export class ProxyipView {
     const deny = await adminOnly(this.c);
     if (deny) return deny;
     const sn = Number(this.url.searchParams.get("scan"));
-    S.scanN = Number.isFinite(sn) && sn > 12 ? sn : 12;
+    POOL_MEMORY.scanCount = Number.isFinite(sn) && sn > 12 ? sn : 12;
     // 与 cron 互斥：两轮 cronScan 并发会双跑探活、双写 seed、poolIdx 相互覆盖
     // 与 cron 共用同一个闸门（claim 带截止时间：卡死的一轮会被接管，手动 refresh 不再是死路）
     if (Date.now() - this.lastManualAt <= 5000) {
@@ -211,7 +214,7 @@ export class ProxyipView {
     const snapS = await nodeSnapGet(env, this.id);
     mergeNodeSnap(nsMap, snapS);
     const modeQ: "lat" | "tput" = this.url.searchParams.get("mode") === "lat" ? "lat" : "tput";
-    const blacklist = [...S.nstat.entries()].filter(([, s]) => s.blackUntil > Date.now()).map(([k]) => k);
+    const blacklist = [...NODE_MEMORY.stats.entries()].filter(([, s]) => s.blackUntil > Date.now()).map(([k]) => k);
     // 黑名单一律建 Set：alive×blacklist 的 includes 是 O(n²)，满池时 64 万次字符串比较，足以单独吃满 CPU 预算
     const blackSet = new Set(blacklist);
     const rows = alive
@@ -237,7 +240,7 @@ export class ProxyipView {
         };
       })
       .sort((a, b) => (modeQ === "lat" ? a.lat - b.lat : a.tput - b.tput))
-      .map((r) => ({ ...r, cur: S.curs.lat === r.node || S.curs.tput === r.node }));
+      .map((r) => ({ ...r, cur: SELECTION_MEMORY.current.lat === r.node || SELECTION_MEMORY.current.tput === r.node }));
     return { rows, modeQ, blacklist };
   }
 
@@ -253,7 +256,7 @@ export class ProxyipView {
     rows: Array<{ node: string; n: number; bytes: number }>,
   ): Record<string, unknown> {
     // 站点级偏好：哪些站被钉在了哪个节点上（最多 12 条，按样本数排）
-    const hostPref = [...S.hostNode.entries()]
+    const hostPref = [...HOSTS.nodes.entries()]
       .map(([h, m]) => {
         let n = 0,
           ok = 0,
@@ -284,7 +287,7 @@ export class ProxyipView {
       return {
         k: r.node,
         v: Math.round(sp.score),
-        chosen: S.curs[modeQ] === r.node,
+        chosen: SELECTION_MEMORY.current[modeQ] === r.node,
         // 与排序用的是同一份分项，不再另写一套诊断公式
         parts: {
           latencyMs: Math.round(sp.latencyMs),
@@ -318,11 +321,11 @@ export class ProxyipView {
       mode: "manual",
       colo: stat.colo || "??",
       cnt: cntView(),
-      current: S.curs.tput || S.curs.lat || "",
-      curs: { ...S.curs },
-      failCount: S.pxFailMem,
-      probeWhy: S.probeWhy,
-      probeColo: S.probeColo,
+      current: SELECTION_MEMORY.current.tput || SELECTION_MEMORY.current.lat || "",
+      curs: { ...SELECTION_MEMORY.current },
+      failCount: SELECTION_MEMORY.failCount,
+      probeWhy: POOL_MEMORY.probeWhy,
+      probeColo: POOL_MEMORY.probeColo,
       reProbeN: RETEST.count,
       funnel: stat.funnel || { direct: 0, node: 0, v6: 0 },
       rotatePolicy: {

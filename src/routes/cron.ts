@@ -1,9 +1,11 @@
+import { NODE_MEMORY } from "../core/node-memory";
+import { POOL_MEMORY } from "../px/pool-memory";
+import { RELAY_DEMAND } from "../core/relay-demand";
 import { eachLimit, errMsg } from "../core/util";
 
 import { logErr } from "../nodes/metrics";
 import { BudgetLedger } from "../core/budget-ledger";
 import { BudgetedIO } from "../core/budgeted-io";
-import { S } from "../core/state";
 import { cnt } from "../core/counter";
 import { CRON_LOCK } from "../core/lock";
 import { cronScan, flushPx } from "../px/pool";
@@ -48,9 +50,9 @@ async function tfbRound(env: Env): Promise<void> {
   const now = Date.now();
   // 站点过期就把「上一批判定」一起清；起搏记账由 TFB.sweep 按 keep 清理 ——
   // 它同时覆盖「被 trimAged 从 needPx 挤掉」的站点，旧版只清过期那一类，剩下的是永久留行
-  for (const [h, t] of S.needPx) if (t <= now) { S.needPx.delete(h); S.tfbV.delete(h); }
-  TFB.sweep(S.needPx, now);
-  for (const [host, until] of S.needPx) {
+  for (const [h, t] of RELAY_DEMAND) if (t <= now) { RELAY_DEMAND.delete(h); TFB.verdicts.delete(h); }
+  TFB.sweep(RELAY_DEMAND, now);
+  for (const [host, until] of RELAY_DEMAND) {
     if (until <= now) continue;
     // due() 里含三道坎：10 分钟间隔、30 分钟窗口归零、每窗口最多 3 批
     if (!TFB.due(host, now)) continue;
@@ -72,7 +74,7 @@ async function tfbRound(env: Env): Promise<void> {
 async function dnsRound(gate: BudgetedIO): Promise<void> {
   try {
     const now = Date.now();
-    const hosts = [...S.needPx.entries()]
+    const hosts = [...RELAY_DEMAND.entries()]
       .filter(([, until]) => until > now)
       .map(([h]) => h)
       .filter((h) => DNS.v6Of(h, now) < 0)
@@ -94,7 +96,7 @@ async function dnsRound(gate: BudgetedIO): Promise<void> {
 async function cronOnce(env: Env): Promise<void> {
   // 一轮 cron 的额度先算清：探活次数（connect 账）与剩余 fetch 额度（子请求账）。
   // 放在最外层是因为下面三段都要用：准入探活用 adm，续回用户数用 sub。
-  const plan = planRound(S.pool.length, S.alive.size);
+  const plan = planRound(POOL_MEMORY.rows.length, NODE_MEMORY.alive.size);
   // 一轮 cron = 一份额度：池子扫描、站点判定、DoH 探测都从这里取号（7.362）
   const gate = new BudgetedIO(new BudgetLedger("cron"));
   try {
@@ -112,7 +114,7 @@ async function cronOnce(env: Env): Promise<void> {
   } catch (e) {}
   // cronScan 内部已经落过一次 seed（且自带 55 分钟节流），这里只补写脏数据
   try {
-    if (S.seedDirty) {
+    if (NODE_MEMORY.statisticsDirty) {
       // flushPx 不抛错，只用返回值报告失败（seed 读失败、KV 写失败都在里面）：
       // 以前直接把返回值丢掉，于是「池子代际没前进」在别处表现为「选路慢慢变差」，查不到源头
       const fx = await flushPx(env);

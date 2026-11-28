@@ -1,9 +1,9 @@
+import { NODE_MEMORY } from "../core/node-memory";
 import type { Socket } from "cloudflare:sockets";
 import { errMsg, UP_STALL_MS, closeQuietly, releaseAll, withTimeout, WS_BUFFER_LIMIT, WS_MAX_BUFFER, WS_OPEN, WS_STALL_MS } from "../core/util";
 import { hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { NodeStatsTable } from "../nodes/score";
-import { S } from "../core/state";
 import { ConnSettle } from "./conn-settle";
 import { sampleWeight, SAMPLE_MIN_BYTES, SITE_MIN_BYTES, stalledWindow } from "./conn-settle";
 
@@ -488,9 +488,9 @@ export class Connection {
   syncInflight(): void {
     const k = this.node;
     if (k === this.inflightKey) return;
-    if (this.inflightKey) dropInflight(this.inflightKey);
+    if (this.inflightKey) NODE_MEMORY.release(this.inflightKey);
     this.inflightKey = k || "";
-    if (k) S.inflight.set(k, (S.inflight.get(k) || 0) + 1);
+    NODE_MEMORY.acquire(k);
   }
 
   /**
@@ -499,7 +499,7 @@ export class Connection {
    */
   clearInflight(): void {
     if (!this.inflightKey) return;
-    dropInflight(this.inflightKey);
+    NODE_MEMORY.release(this.inflightKey);
     this.inflightKey = "";
   }
 
@@ -534,15 +534,4 @@ export class Connection {
   release(): void {
     releaseAll(this);
   }
-}
-
-/**
- * 功能：把某个节点的在途计数减一（到 0 就删键，避免表里堆满零值）。
- * @param {string} key 节点键
- * @returns {void}
- */
-function dropInflight(key: string): void {
-  const n = (S.inflight.get(key) || 1) - 1;
-  if (n > 0) S.inflight.set(key, n);
-  else S.inflight.delete(key);
 }

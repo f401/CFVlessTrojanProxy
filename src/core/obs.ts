@@ -1,6 +1,6 @@
+import { NODE_MEMORY } from "./node-memory";
 import { cnt } from "./counter";
 import type { SampleCount } from "../core/types";
-import { S } from "./state";
 import { pcts } from "./hist";
 
 // ---- 并入自 src\core\firstobs.ts ----
@@ -193,8 +193,8 @@ export const LAT = new LatObs();
 export function spdSnapshot() {
   const out: Record<string, NodeSnap> = {};
   // 按累计下行挑前 16 个：真正在跑的大流量节点经常不在 Map 的前 16 位
-  const rows = [...S.nstat.entries()]
-    .filter(([k, s]) => S.alive.has(k) && ((s.trafficOkW || 0) + (s.trafficFailW || 0) > 0 || (s.bytesDown || 0) > 0))
+  const rows = [...NODE_MEMORY.stats.entries()]
+    .filter(([k, s]) => NODE_MEMORY.alive.has(k) && ((s.trafficOkW || 0) + (s.trafficFailW || 0) > 0 || (s.bytesDown || 0) > 0))
     .sort((a, b) => (b[1].bytesDown || 0) - (a[1].bytesDown || 0))
     .slice(0, 16);
   for (const [k, s] of rows) {
@@ -224,4 +224,4 @@ export function spdSnapshot() {
 // 1) 探活 RTT 不进这里 —— 探活是 ClientHello→ServerHello（40ms 量级），真实首字节含 TLS
 //    握手（400ms 量级）；混进来会让 CUSUM 把刚扫出来的中继冻 60 秒（7.185 修过三次）。
 // 2) 窗口只往前推，不因样本少回退。
-// 3) `clear()` 只清统计，不动 `S` 里的其它表。
+// 3) `clear()` 只清本观察器，不动其他领域所有者。

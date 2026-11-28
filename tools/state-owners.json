@@ -1,0 +1,314 @@
+[
+  {
+    "legacyField": "alive",
+    "owner": "NODE_MEMORY",
+    "member": "alive",
+    "module": "src/core/node-memory.ts"
+  },
+  {
+    "legacyField": "nstat",
+    "owner": "NODE_MEMORY",
+    "member": "stats",
+    "module": "src/core/node-memory.ts"
+  },
+  {
+    "legacyField": "hostRankCache",
+    "owner": "NODE_MEMORY",
+    "member": "rankCache",
+    "module": "src/core/node-memory.ts"
+  },
+  {
+    "legacyField": "rankGen",
+    "owner": "NODE_MEMORY",
+    "member": "generation",
+    "module": "src/core/node-memory.ts"
+  },
+  {
+    "legacyField": "candN",
+    "owner": "NODE_MEMORY",
+    "member": "candidateCount",
+    "module": "src/core/node-memory.ts"
+  },
+  {
+    "legacyField": "inflight",
+    "owner": "NODE_MEMORY",
+    "member": "inflight",
+    "module": "src/core/node-memory.ts"
+  },
+  {
+    "legacyField": "seedDirty",
+    "owner": "NODE_MEMORY",
+    "member": "statisticsDirty",
+    "module": "src/core/node-memory.ts"
+  },
+  {
+    "legacyField": "curs",
+    "owner": "SELECTION_MEMORY",
+    "member": "current",
+    "module": "src/px/selection-memory.ts"
+  },
+  {
+    "legacyField": "prev",
+    "owner": "SELECTION_MEMORY",
+    "member": "previous",
+    "module": "src/px/selection-memory.ts"
+  },
+  {
+    "legacyField": "lastSwitch",
+    "owner": "SELECTION_MEMORY",
+    "member": "switchedAt",
+    "module": "src/px/selection-memory.ts"
+  },
+  {
+    "legacyField": "switchHits",
+    "owner": "SELECTION_MEMORY",
+    "member": "switches",
+    "module": "src/px/selection-memory.ts"
+  },
+  {
+    "legacyField": "pxFailMem",
+    "owner": "SELECTION_MEMORY",
+    "member": "failCount",
+    "module": "src/px/selection-memory.ts"
+  },
+  {
+    "legacyField": "pxFailSeen",
+    "owner": "SELECTION_MEMORY",
+    "member": "failSeen",
+    "module": "src/px/selection-memory.ts"
+  },
+  {
+    "legacyField": "pool",
+    "owner": "POOL_MEMORY",
+    "member": "rows",
+    "module": "src/px/pool-memory.ts"
+  },
+  {
+    "legacyField": "poolIdx",
+    "owner": "POOL_MEMORY",
+    "member": "cursor",
+    "module": "src/px/pool-memory.ts"
+  },
+  {
+    "legacyField": "poolGen",
+    "owner": "POOL_MEMORY",
+    "member": "generation",
+    "module": "src/px/pool-memory.ts"
+  },
+  {
+    "legacyField": "poolBuilt",
+    "owner": "POOL_MEMORY",
+    "member": "builtAt",
+    "module": "src/px/pool-memory.ts"
+  },
+  {
+    "legacyField": "scanN",
+    "owner": "POOL_MEMORY",
+    "member": "scanCount",
+    "module": "src/px/pool-memory.ts"
+  },
+  {
+    "legacyField": "probes",
+    "owner": "POOL_MEMORY",
+    "member": "probes",
+    "module": "src/px/pool-memory.ts"
+  },
+  {
+    "legacyField": "hits",
+    "owner": "POOL_MEMORY",
+    "member": "hits",
+    "module": "src/px/pool-memory.ts"
+  },
+  {
+    "legacyField": "probeWhy",
+    "owner": "POOL_MEMORY",
+    "member": "probeWhy",
+    "module": "src/px/pool-memory.ts"
+  },
+  {
+    "legacyField": "probeColo",
+    "owner": "POOL_MEMORY",
+    "member": "probeColo",
+    "module": "src/px/pool-memory.ts"
+  },
+  {
+    "legacyField": "seed",
+    "owner": "SEED_STORE",
+    "member": "document",
+    "module": "src/px/seed.ts"
+  },
+  {
+    "legacyField": "nsWriteAt",
+    "owner": "SEED_STORE",
+    "member": "nodeWrittenAt",
+    "module": "src/px/seed.ts"
+  },
+  {
+    "legacyField": "needPx",
+    "owner": "RELAY_DEMAND",
+    "member": "",
+    "module": "src/core/relay-demand.ts"
+  },
+  {
+    "legacyField": "stats",
+    "owner": "USAGE_MEMORY",
+    "member": "rows",
+    "module": "src/store/usage-memory.ts"
+  },
+  {
+    "legacyField": "snapBytes",
+    "owner": "USAGE_MEMORY",
+    "member": "dirtyBytes",
+    "module": "src/store/usage-memory.ts"
+  },
+  {
+    "legacyField": "pend",
+    "owner": "PEND",
+    "member": "rows",
+    "module": "src/store/pend.ts"
+  },
+  {
+    "legacyField": "pendBytes",
+    "owner": "PEND",
+    "member": "bytes",
+    "module": "src/store/pend.ts"
+  },
+  {
+    "legacyField": "pendMs",
+    "owner": "PEND",
+    "member": "intervalMs",
+    "module": "src/store/pend.ts"
+  },
+  {
+    "legacyField": "meterCache",
+    "owner": "METER_CLIENT",
+    "member": "cache",
+    "module": "src/store/meter-client.ts"
+  },
+  {
+    "legacyField": "doCalls",
+    "owner": "METER_CLIENT",
+    "member": "calls",
+    "module": "src/store/meter-client.ts"
+  },
+  {
+    "legacyField": "kvw",
+    "owner": "KV_WRITES",
+    "member": "writes",
+    "module": "src/store/kv.ts"
+  },
+  {
+    "legacyField": "kvStat",
+    "owner": "KV_WRITES",
+    "member": "status",
+    "module": "src/store/kv.ts"
+  },
+  {
+    "legacyField": "hostNode",
+    "owner": "HOSTS",
+    "member": "nodes",
+    "module": "src/nodes/metrics.ts"
+  },
+  {
+    "legacyField": "hostDirect",
+    "owner": "HOSTS",
+    "member": "direct",
+    "module": "src/nodes/metrics.ts"
+  },
+  {
+    "legacyField": "rtt",
+    "owner": "ENTRY_MEMORY",
+    "member": "rows",
+    "module": "src/core/client-memory.ts"
+  },
+  {
+    "legacyField": "rttMiss",
+    "owner": "ENTRY_MEMORY",
+    "member": "misses",
+    "module": "src/core/client-memory.ts"
+  },
+  {
+    "legacyField": "errs",
+    "owner": "ERROR_MEMORY",
+    "member": "rows",
+    "module": "src/core/client-memory.ts"
+  },
+  {
+    "legacyField": "cagg",
+    "owner": "TRAFFIC_MEMORY",
+    "member": "aggregates",
+    "module": "src/core/traffic-memory.ts"
+  },
+  {
+    "legacyField": "funnel",
+    "owner": "TRAFFIC_MEMORY",
+    "member": "funnel",
+    "module": "src/core/traffic-memory.ts"
+  },
+  {
+    "legacyField": "egressB",
+    "owner": "TRAFFIC_MEMORY",
+    "member": "egressBytes",
+    "module": "src/core/traffic-memory.ts"
+  },
+  {
+    "legacyField": "cfHttp",
+    "owner": "CF_HTTP",
+    "member": "cache",
+    "module": "src/proxy/cfverdict.ts"
+  },
+  {
+    "legacyField": "vtLoaded",
+    "owner": "VT_SYNC",
+    "member": "loaded",
+    "module": "src/route/verdict.ts"
+  },
+  {
+    "legacyField": "factSet",
+    "owner": "FACT_SWITCHES",
+    "member": "current",
+    "module": "src/route/factflags.ts"
+  },
+  {
+    "legacyField": "peers",
+    "owner": "SHADOW_TABLE",
+    "member": "peers",
+    "module": "src/route/factshadow.ts"
+  },
+  {
+    "legacyField": "tfbV",
+    "owner": "TFB",
+    "member": "verdicts",
+    "module": "src/route/tfbbook.ts"
+  },
+  {
+    "legacyField": "polSame",
+    "owner": "POLICY",
+    "member": "same",
+    "module": "src/route/policy.ts"
+  },
+  {
+    "legacyField": "polDiff",
+    "owner": "POLICY",
+    "member": "different",
+    "module": "src/route/policy.ts"
+  },
+  {
+    "legacyField": "polWhy",
+    "owner": "POLICY",
+    "member": "reasons",
+    "module": "src/route/policy.ts"
+  },
+  {
+    "legacyField": "regionRowsCache",
+    "owner": "REGION_CACHE",
+    "member": "rows",
+    "module": "src/routes/region-cache.ts"
+  },
+  {
+    "legacyField": "regionJsonCache",
+    "owner": "REGION_CACHE",
+    "member": "json",
+    "module": "src/routes/region-cache.ts"
+  }
+]

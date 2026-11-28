@@ -3,7 +3,6 @@
 // 40 个节点 / 5 个 /24 / 每 30 分钟探一次 / 15% 概率遇到 4 倍抖动
 import * as W from "../test/_bundle.mjs";
 
-const S = W.S;
 const SC = W.SC;
 
 let NOW = Date.UTC(2026, 3, 1);
@@ -36,9 +35,9 @@ const SPIKE_X = Number(process.env.SPIKE_X || 4);
 function reset() {
   NOW = Date.UTC(2026, 3, 1);
   rs = 5;
-  S.nstat.clear();
-  S.probeWhy = {};
-  S.reProbe = [];
+  W.NODE_MEMORY.stats.clear();
+  W.POOL_MEMORY.probeWhy = {};
+
   for (const n of nodes) {
     const s = W.NodeStatsTable.nsGet(n.k);
     s.at = NOW;

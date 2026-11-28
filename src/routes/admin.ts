@@ -262,7 +262,7 @@ export function renderAdmin(
       const regionHref = base + "/regions" + kq;
       return `<tr class="${dis ? "off" : ""}">
         <td class="u">${escapeHtml(u.id)}</td>
-        <td class="u">${u.pwd ? escapeHtml(u.pwd) : "<span class='mu'>—</span>"}</td>
+        <td class="u">${u.pwd ? `<details class="credential"><summary>查看密码</summary><code>${escapeHtml(u.pwd)}</code></details>` : "<span class='mu'>—</span>"}</td>
         <td>${escapeHtml(u.note || "")}</td>
         <td>${dis ? "已禁用" : "正常"}</td>
         <td>${today}</td>

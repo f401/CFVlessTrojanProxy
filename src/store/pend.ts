@@ -1,10 +1,11 @@
-import { S } from "../core/state";
+import { TRAFFIC_MEMORY } from "../core/traffic-memory";
+import { ERROR_MEMORY } from "../core/client-memory";
 import { HOOK } from "../core/hook";
 import { SC } from "../core/const";
 import { cnt, cntDelta, cntUnsend } from "../core/counter";
 import { eachLimit } from "../core/util";
 import { spdSnapshot } from "../core/obs";
-import { doFetch } from "./meter-client";
+import { doFetch, METER_CLIENT } from "./meter-client";
 
 /* PEND 缓冲：连接侧只记增量，30 秒一批推给 Meter DO */
 
@@ -33,6 +34,10 @@ interface PendCarry {
  * 攒到 16 MB 或有定时器到期再一次性推。失败必须回滚，否则字节账会凭空消失。
  */
 export class PendingLedger {
+  /** 尚未提交的用户字节账；只由摘批与失败退回消费。 */
+  rows = new Map<string, PendEntry>();
+  bytes = 0;
+  intervalMs = 30000;
   /** 上次实际上报的时刻 */
   private flushedAt = 0;
   /** 单飞守卫：一次只跑一轮 flush，避免跨 flush ack 串扰 */
@@ -65,14 +70,14 @@ export class PendingLedger {
    */
   add(id: string, up: number, down: number, isNew?: boolean): void {
     if (!id) return;
-    const p = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
+    const p = this.rows.get(id) || { up: 0, down: 0, conns: 0 };
     p.up += up || 0;
     p.down += down || 0;
-    S.pendBytes += (up || 0) + (down || 0);
+    this.bytes += (up || 0) + (down || 0);
     if (isNew) p.conns += 1;
     // 以前超过 500 个用户就整体 clear()，一次丢掉所有未推送的字节账。
     // 用户数由用户表决定，内存有界，保留比丢账安全。
-    S.pend.set(id, p);
+    this.rows.set(id, p);
   }
 
   /**
@@ -88,7 +93,7 @@ export class PendingLedger {
       clearTimeout(this.flushTimer);
       this.flushTimer = null;
     }
-    const d = delay === undefined ? S.pendMs : delay;
+    const d = delay === undefined ? this.intervalMs : delay;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
       this.flush(env, true).catch(() => {});
@@ -103,7 +108,7 @@ export class PendingLedger {
    */
   kick(env: Env, id: string | null): void {
     if (!env || !id || !env.METER) return;
-    if (!S.pend.has(id)) S.pend.set(id, { up: 0, down: 0, conns: 0 });
+    if (!this.rows.has(id)) this.rows.set(id, { up: 0, down: 0, conns: 0 });
     this.schedule(env, 0);
   }
 
@@ -118,7 +123,7 @@ export class PendingLedger {
    * @returns 无
    */
   async flush(env: Env, force?: boolean, max: number = SC.PEND_MAX): Promise<void> {
-    if (!env || !env.METER || !S.pend.size) return;
+    if (!env || !env.METER || !this.rows.size) return;
     // 两批并发会各 carry 同一组事实增量：先回来的 ack() 把整张 pending 清空，
     // 后回来那批失败时 nack() 已无从撤销 —— 证据永久丢失。同一 isolate 只跑一批；
     // 被跳过的那批什么都没摘、也没登记 pending，证据仍在原表里等下一轮。
@@ -131,7 +136,7 @@ export class PendingLedger {
     }
     this.flushing = true;
     try {
-      if (!force && Date.now() - this.flushedAt < S.pendMs) return;
+      if (!force && Date.now() - this.flushedAt < this.intervalMs) return;
       this.flushedAt = Date.now();
       const batch = this.take(max);
       if (!batch.length) return;
@@ -176,7 +181,7 @@ export class PendingLedger {
    * @returns 批次（用户 id → 增量）；空数组表示账本里没有可发的
    */
   private take(max: number): Array<[string, PendEntry]> {
-    const all = [...S.pend.entries()];
+    const all = [...this.rows.entries()];
     if (!all.length) return [];
     const start = (this.cursor || 0) % all.length;
     const rotated = all.slice(start).concat(all.slice(0, start));
@@ -185,9 +190,9 @@ export class PendingLedger {
     this.cursor = (start + batch.length) % all.length;
     if (rotated.length > batch.length) cnt("pendSkip", rotated.length - batch.length);
     // 只摘掉这一批：在途期间新加的增量留在账本里，下一轮接着发（不是整表清空）
-    for (const [bid] of batch) S.pend.delete(bid);
-    S.pendBytes = 0;
-    for (const [, left] of S.pend) S.pendBytes += left.up + left.down;
+    for (const [bid] of batch) this.rows.delete(bid);
+    this.bytes = 0;
+    for (const [, left] of this.rows) this.bytes += left.up + left.down;
     return batch;
   }
 
@@ -214,7 +219,7 @@ export class PendingLedger {
     if (carry.owner || !mine) return body;
     body.c = { ...cd, d: today }; // 只挂一次，避免重复计
     body.spd = spdSnapshot(); // 节点快照：跨 isolate 可见
-    body.e = S.errs.slice(-8); // 错误也带上去：/logs 才能跨 isolate
+    body.e = ERROR_MEMORY.rows.slice(-8); // 错误也带上去：/logs 才能跨 isolate
     if (HOOK.vtDelta) {
       const vt = HOOK.vtDelta();
       if (vt.length) body.vt = vt;
@@ -233,7 +238,7 @@ export class PendingLedger {
     const cl = this.clSnap(40);
     if (cl.length) body.cl = cl; // 连接观测（按节点聚合）：同理，离线可标定
     // 三样增量都只是「登记进请求体」，真正的提交要等 DO 回 200：
-    // 这里以前顺手 S.cagg.clear()，一旦 POST 失败这 40 条观测就永久蒸发。
+    // 这里以前顺手 TRAFFIC_MEMORY.aggregates.clear()，一旦 POST 失败这 40 条观测就永久蒸发。
     carry.owner = String(id).toLowerCase();
     carry.sync = true;
     carry.rows = cl;
@@ -270,7 +275,7 @@ export class PendingLedger {
       // 按行相减，而不是把整张表清掉（v7.157）：在途期间新加的观测必须留下
       if (carry.rows.length) this.clAck(carry.rows);
     }
-    S.meterCache.delete(id); // 刚推过增量，缓存立即失效，避免读数倒退
+    METER_CLIENT.cache.delete(id); // 刚推过增量，缓存立即失效，避免读数倒退
   }
 
   /**
@@ -289,16 +294,16 @@ export class PendingLedger {
     mine: boolean,
     carry: PendCarry,
   ): void {
-    const cur = S.pend.get(id) || { up: 0, down: 0, conns: 0 };
-    S.pend.set(id, { up: cur.up + d.up, down: cur.down + d.down, conns: cur.conns + d.conns });
-    S.pendBytes += (d.up || 0) + (d.down || 0); // 回滚失败批次：健康页与立即刷新的判断要准
+    const cur = this.rows.get(id) || { up: 0, down: 0, conns: 0 };
+    this.rows.set(id, { up: cur.up + d.up, down: cur.down + d.down, conns: cur.conns + d.conns });
+    this.bytes += (d.up || 0) + (d.down || 0); // 回滚失败批次：健康页与立即刷新的判断要准
     if (carry.owner && String(id).toLowerCase() === carry.owner) {
       if (mine) cntUnsend(cd); // 日计数搭车主批次失败 → 基线退回，下轮重发
       if (carry.sync && HOOK.syncNack) HOOK.syncNack(); // 判定/中继增量退回，下轮重发
     }
     // 失败也要让用量缓存失效：在途期间别的 isolate 可能已经改了账本，
     // 留着旧缓存会让 readStats 继续返回过期值（与 ack 分支对称，1.2）
-    S.meterCache.delete(id);
+    METER_CLIENT.cache.delete(id);
   }
 
   /**
@@ -308,13 +313,13 @@ export class PendingLedger {
    */
   private backoff(bad: number): void {
     if (!bad) {
-      S.pendMs = Math.max(30000, Math.round(S.pendMs / 2));
+      this.intervalMs = Math.max(30000, Math.round(this.intervalMs / 2));
       return;
     }
     // 失败批次已经回滚进账本、间隔也翻倍了，但「这一轮一个都没发出去」与「这一轮没人有增量」
     // 在面板上完全一样。计数是唯一能区分两者的量：它连着涨说明 DO 侧一直没接受上报。
     cnt("pendFail", bad);
-    S.pendMs = Math.min(S.pendMs * 2, 60000);
+    this.intervalMs = Math.min(this.intervalMs * 2, 60000);
   }
 
   /**
@@ -324,7 +329,7 @@ export class PendingLedger {
    */
   clSnap(max = 40): ClRec[] {
     const out: ClRec[] = [];
-    for (const [k, g] of S.cagg) {
+    for (const [k, g] of TRAFFIC_MEMORY.aggregates) {
       if (!g.n) continue;
       const v = g.v.slice().sort((a, b) => a - b);
       // 分位用「上取整」索引：样本少时也要给出一个真实观测值，而不是 0
@@ -345,7 +350,7 @@ export class PendingLedger {
   /**
    * 功能：确认一批连接观测已进 DO，按「发出去多少」相减，而不是整表清空。
    *
-   * 为什么不能 clear()：`S.cagg` 里有两种「还没发出去的」东西 —— ① 这一轮被
+   * 为什么不能 clear()：`TRAFFIC_MEMORY.aggregates` 里有两种「还没发出去的」东西 —— ① 这一轮被
    * `clSnap(40)` 的上限挤掉的键（池子可以有 400 个聚合键，每次只发 40 条），
    * ② POST 在途期间新结束的连接（await 期间生产者还在写）。整表清空会把它们
    * 一起抹掉，等于每次上报都丢掉一部分观测，且没有任何计数能看出来。
@@ -356,14 +361,14 @@ export class PendingLedger {
    */
   clAck(sent: ClRec[]): void {
     for (const s of sent) {
-      const g = S.cagg.get(s.k);
+      const g = TRAFFIC_MEMORY.aggregates.get(s.k);
       if (!g) continue;
       g.n -= s.n;
       g.ok -= s.ok;
       g.dn -= s.dn;
       // 计数减到 0 就整键删掉：留着空壳会让 `clSnap` 继续为它算分位，
-      // 也会让 `S.cagg.size` 的 400 上限被死键占满。
-      if (g.n <= 0 && g.dn <= 0) S.cagg.delete(s.k);
+      // 也会让 `TRAFFIC_MEMORY.aggregates.size` 的 400 上限被死键占满。
+      if (g.n <= 0 && g.dn <= 0) TRAFFIC_MEMORY.aggregates.delete(s.k);
     }
   }
 }

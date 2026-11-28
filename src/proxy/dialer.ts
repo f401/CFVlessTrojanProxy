@@ -1,10 +1,10 @@
+import { RELAY_DEMAND } from "../core/relay-demand";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 import { SC } from "../core/const";
 import { HOOK } from "../core/hook";
 import { isPxHost } from "../core/hosts";
 import { isCfIp } from "../core/net";
-import { S } from "../core/state";
 import { cnt } from "../core/counter";
 import { CONNECT_MS, closeQuietly, withTimeout } from "../core/util";
 import { dropExpired, trimAged } from "../core/hostmem";
@@ -132,7 +132,7 @@ export class Dialer {
    * @returns 需要中继返回 true
    */
   async isCfTarget(env: Env, host: string, budget: BudgetedIO): Promise<boolean> {
-    if ((S.needPx.get(host) || 0) > Date.now()) return true;
+    if ((RELAY_DEMAND.get(host) || 0) > Date.now()) return true;
     if (isPxHost(env, host)) return true;
     if ((this.cfHost.get(host) || 0) > Date.now()) return true;
     // 只有 auto 模式才会真的用中继；固定直连/固定中继都由 env 决定，不必再问 DoH
@@ -149,7 +149,7 @@ export class Dialer {
     const { env, conn, host, pxForce } = o;
     // 难直连目标（如 x.com）：判据 = 名单 / 6h 学习 / CF 网段 / ?px=1，?px=0 一律直连
     // 顺序：中继优先（直连多半撞自家边缘），退 IPv4 拨号，再退普通直连
-    const learned = (S.needPx.get(host) || 0) > Date.now();
+    const learned = (RELAY_DEMAND.get(host) || 0) > Date.now();
     const onList = isPxHost(env, host);
     let cfHost = (this.cfHost.get(host) || 0) > Date.now();
     // 冷 isolate 首条 CF 连接必须在选路前拿到 EG 出口族事实：EG 空时 v4/v6 同权 ×2，
@@ -159,7 +159,7 @@ export class Dialer {
     const needDoh = !learned && !onList && !cfHost && env.proxyip === "auto";
     // needDoh：提前启动，与 DoH 并行；cfHost 已缓存但事实未加载：也启动（保持原等待语义）。
     // 非 CF 且无需 DoH：不启动，避免多余 DO 子请求。
-    const factLoad = HOOK.vtLoad && !S.vtLoaded && (needDoh || cfHost) ? HOOK.vtLoad(env).catch(() => {}) : null;
+    const factLoad = HOOK.vtLoad && (needDoh || cfHost) ? HOOK.vtLoad(env).catch(() => {}) : null;
     if (needDoh) cfHost = await this.dohCf(host, o.budget);
     if (cfHost && factLoad) {
       // DoH 判定期间事实已在后台加载，这里通常立即返回；200ms 只是兜底上限。

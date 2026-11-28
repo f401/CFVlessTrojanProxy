@@ -5,7 +5,6 @@
 // 而漏注册一个槽位从来不会有门禁报错（7.123 的 `HOOK.facts` 就是这样静默失效的）。
 import { HOOK } from "../core/hook";
 import type { DecisionIn, DecisionOut, DecisionWhy, TrafficEvt } from "../core/hook";
-import { S } from "../core/state";
 import { HEALTH } from "./relay-health";
 import { JUDGE } from "./judge";
 import { VT } from "./verdict";
@@ -16,7 +15,7 @@ import { DEAD } from "./deadfacts";
 import { CAP } from "./capfacts";
 import { FactsStore } from "./factsstore";
 import type { FactsDelta } from "./factsstore";
-import { FACT_ALL, factOnce } from "./factflags";
+import { FACT_ALL, factOnce, FACT_SWITCHES } from "./factflags";
 import type { Chan } from "./channel";
 
 /**
@@ -108,7 +107,7 @@ export class PolicyWiring {
     // 之前没注册这个槽位 -> DecisionIn.facts 恒 undefined -> scoreOf 走 FULL_ON，
     // 也就是「facts 绑定只影响 /health 显示、不影响选路」。这是 check-wire 抓不到的接线洞
     // （它扫的是符号是否有生产调用点，而槽位是「注册」不是「调用」）。
-    HOOK.facts = (): ReadonlySet<string> => (S.factSet ?? new Set<string>(FACT_ALL));
+    HOOK.facts = (): ReadonlySet<string> => (FACT_SWITCHES.current ?? new Set<string>(FACT_ALL));
     HOOK.factsFor = (raw: string): ReadonlySet<string> => factOnce(raw);
     HOOK.vtLoad = (env: Env): Promise<void> => vtLoad(env);
   }

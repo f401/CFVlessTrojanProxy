@@ -1,6 +1,13 @@
 import { errMsg } from "../core/util";
 
-import { S } from "../core/state";
+/** KV 写入观测与额度冷却；只记录本 isolate 的写请求结果。 */
+export class KvWriteState {
+  writes = 0;
+  status: { ok: boolean | null; key: string; at: number; err?: string; quota?: boolean; quotaAt?: number } = { ok: null, key: "", at: 0 };
+}
+
+/** KV 写入状态所有者。 */
+export const KV_WRITES = new KvWriteState();
 import { seal, unseal } from "./crypto";
 
 /* KV 读写：所有 KV 访问的唯一入口 */
@@ -50,19 +57,19 @@ export async function kvPut(kv: KVNamespace, key: string, val: string, opts?: { 
   // 注意：熔断期必须"抛错"而不是静默返回 —— 调用方（flushSnap 等）
   // 是靠 catch 判断写失败的，静默返回会让它以为写成功，直接把内存里的
   // 统计清空，配额耗尽期间的数据就真丢了。
-  if (S.kvStat && S.kvStat.quota && Date.now() - (S.kvStat.quotaAt || 0) < 10 * 60000) {
+  if (KV_WRITES.status && KV_WRITES.status.quota && Date.now() - (KV_WRITES.status.quotaAt || 0) < 10 * 60000) {
     const e = new Error("kv quota breaker: " + key);
     (e as Error & { breaker?: boolean }).breaker = true;
     throw e;
   }
-  S.kvw += 1;
+  KV_WRITES.writes += 1;
   try {
     await kv.put(key, val, opts);
-    S.kvStat = { ok: true, key, at: Date.now() };
+    KV_WRITES.status = { ok: true, key, at: Date.now() };
   } catch (e) {
     // 10048 = 当日写入额度耗尽；此时所有改动只在内存里生效，必须让调用方知道
     const emsg = String(errMsg(e));
-    S.kvStat = {
+    KV_WRITES.status = {
       ok: false,
       key,
       at: Date.now(),

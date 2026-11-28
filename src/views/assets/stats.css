@@ -1,0 +1,7 @@
+body{font:15px/1.6 -apple-system,system-ui,sans-serif;margin:24px;max-width:860px;color:#222}
+h2{font-size:17px;margin:24px 0 8px}
+table{border-collapse:collapse;width:100%;margin-bottom:6px}
+td,th{border:1px solid #ddd;padding:6px 9px;text-align:left}
+.u{font-family:ui-monospace,monospace;font-size:13px}
+.bar{height:10px;background:#eee;border-radius:5px;overflow:hidden}
+.bar>i{display:block;height:100%;background:#2f7ad6}

@@ -41,12 +41,13 @@ function reset() {
   for (const t of [W.EG, W.PS, W.BLK, W.DEAD, W.DNS, W.CAP]) {
     if (t && typeof t.clear === "function") t.clear();
   }
-  if (typeof W.vClear === "function") W.VT.clear();
-  const S = W.S;
-  for (const k of ["alive", "pool", "bigByHost", "bigChan", "peers", "bigTyp"]) {
-    const m = S && S[k];
-    if (m && typeof m.clear === "function") m.clear();
-  }
+  W.VT.clear();
+  W.NODE_MEMORY.alive.clear();
+  W.POOL_MEMORY.rows = [];
+  W.JUDGE.memory.bigByHost.clear();
+  W.JUDGE.memory.bigChan.clear();
+  W.SHADOW_TABLE.peers.clear();
+  W.SHADOW_TABLE.bigTypical.clear();
 }
 
 /** 一条连接：真实决策 → 模拟响应 → 用 judge 同一批函数喂事实 */

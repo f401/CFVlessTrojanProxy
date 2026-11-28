@@ -5,7 +5,7 @@
 // 走真实入口（`JUDGE.onTraffic` / `HOOK.*`），再从**外部可观测的结果**反推整条链是否接通。
 //
 // 三条纪律：
-// 1. 不手写内部状态。`S.peers` 这类环形由管线自己记录 —— 手工塞进去会被后一条事件覆盖，
+// 1. 不手写内部状态。`W.SHADOW_TABLE.peers` 这类环形由管线自己记录 —— 手工塞进去会被后一条事件覆盖，
 //    于是测的是脚本而不是代码（第一版就这么错过）。
 // 2. 时间戳显式给。三批确认要间隔 ≥60 秒，用 `at` 注入，不真的等。
 // 3. 只断言外部结果：代价倍数、行数、计数、`decide` 的选择、`/health` 的字段。
@@ -44,7 +44,7 @@ W.PS.clear();
 W.DEAD.clear();
 W.EG.clear();
 W.FO.clear();
-W.S.peers.clear();
+W.SHADOW_TABLE.peers.clear();
 W.SHADOW_TABLE.bigTypical.clear();
 
 // ── 1) eg：出口族事实写进去后，v4 的代价倍数应低于 v6 ─────────────────────────

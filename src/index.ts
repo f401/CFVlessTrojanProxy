@@ -1,3 +1,5 @@
+import { METER_CLIENT } from "./store/meter-client";
+import { ISOLATE } from "./core/state";
 import { errMsg } from "./core/util";
 
 import { handleUpgrade } from "./proxy/session";
@@ -12,7 +14,6 @@ import { loadUsers } from "./proxy/protocol";
 
 import { regionListAsync } from "./px/regions";
 
-import { S } from "./core/state";
 import { BudgetedIO } from "./core/budgeted-io";
 import { PEND } from "./store/index";
 
@@ -41,8 +42,7 @@ export default {
       // "edge.example.com:443:443" 这种坏地址；hostname 已经去掉端口
       const host = url.hostname || request.headers.get("Host") || "";
       const cf = request.cf || {};
-      S.colo = (cf && cf.colo) || S.colo || "??"; // 本 isolate 的机房：所有统计按它分桶
-      S.site = host;
+      ISOLATE.capture(host, cf.colo); // 本 isolate 的机房：所有统计按它分桶
 
       if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
         return await handleUpgrade(request, env, ctx);
@@ -84,12 +84,12 @@ export default {
 
       // 订阅 / 看用量之前：把本 isolate 还没送达的增量推给 DO，并把 DO 读缓存作废。
       // 用 pendFlush 自带的 30 秒节流，不再 force —— 订阅刷新再快也不该每 10 秒打一次 DO；
-      // 而且 readStats 会把尚未推上去的 S.pend 直接加回来，数字本来就是准的。
+      // 而且 readStats 会把尚未推上去的 PEND.rows 直接加回来，数字本来就是准的。
       // 只以路由表的 stats 标志为准：这里以前还抄了一份硬编码子路径列表，两处一旦漂移
       // 就会出现「表里标了 stats、装配根没推增量」的静默陈旧读数（v7.135 删掉那份副本）。
       if (env.METER && def.stats) {
         await PEND.flush(env);
-        S.meterCache.delete(id);
+        METER_CLIENT.cache.delete(id);
       }
 
       if (def.rtt) {

@@ -1,6 +1,7 @@
+import { ISOLATE } from "../core/state";
+import { POOL_MEMORY } from "./pool-memory";
 import { errMsg } from "../core/util";
 
-import { S } from "../core/state";
 import { logErr } from "../nodes/metrics";
 import { NodeStatsTable } from "../nodes/score";
 import { kvGetStrict, kvSet } from "../store/index";
@@ -18,17 +19,16 @@ import { SEED_STORE } from "./seed";
 export async function ensurePool(env: Env) {
   // 内存空 → 读种子表拿当前代际号，再按代际键取池子；
   // 代际号是两阶段提交的锚点，读一个键比扫 px:pool:* 前缀便宜得多
-  if (S.pool.length) return S.pool;
+  if (POOL_MEMORY.rows.length) return POOL_MEMORY.rows;
   await SEED_STORE.read(env);
-  const gen = S.seed.poolGen || 0;
+  const gen = SEED_STORE.document.poolGen || 0;
   // 没有代际号说明从没成功提交过池子：返回空，交给 cronScan 去拉源重建
   if (!gen) return [];
   try {
     const v = await kvGetStrict<PoolEntry[]>(env, "px:pool:" + gen);
     if (Array.isArray(v) && v.length) {
       // 截断到当前上限：KV 里的池子可能比配置的 POOL_MAX 大（上限被调小过）
-      S.pool = v.slice(0, POOL_MAX);
-      S.poolGen = gen;
+      POOL_MEMORY.adopt(v.slice(0, POOL_MAX), gen);
       NodeStatsTable.invalidateRank();
     }
   } catch (e) {
@@ -38,7 +38,7 @@ export async function ensurePool(env: Env) {
     // 这条 logErr 就是一句写在注释里的承诺（v7.192）。
     logErr("pool gen " + gen + " " + String(errMsg(e)).slice(0, 60), "kv");
   }
-  return S.pool;
+  return POOL_MEMORY.rows;
 }
 
 /**
@@ -53,7 +53,7 @@ export async function commitPool(env: Env, fresh: PoolEntry[], allowShrink = fal
   fresh = fresh.slice(0, POOL_MAX);
   const newN = fresh.length;
   if (!newN) return { ok: false, reason: "empty" };
-  // 代际号是跨 isolate 的锚点，而本地的 S.poolGen 只代表「这台见过的最大的号」，
+  // 代际号是跨 isolate 的锚点，而本地的 POOL_MEMORY.generation 只代表「这台见过的最大的号」，
   // 可能落后半小时：直接 +1 会撞上别的 isolate 已经提交过的号，
   // 结果用自己的（可能更小、更旧的）池子覆盖掉更新的那一代。
   // 所以写之前严格读一次 KV 锚点，号与裁剪判断都以它为准。
@@ -69,29 +69,27 @@ export async function commitPool(env: Env, fresh: PoolEntry[], allowShrink = fal
     logErr("pool anchor read " + String(errMsg(e)).slice(0, 60), "kv");
     return { ok: false, reason: "anchor read" };
   }
-  // 池子「缩水 60%」要比所有已知规模里最大的那个：本地 S.pool 可能停在好几代以前的
+  // 池子「缩水 60%」要比所有已知规模里最大的那个：本地 POOL_MEMORY.rows 可能停在好几代以前的
   // 小池子上（内存优先命中时不会跟随代际更新），只比它就会把 300 → 80 这种真缩水当成
   // 正常重建放过去，把别的 isolate 刚提交的大池子覆盖掉。锚点是跨 isolate 的真相。
-  const oldN = Math.max(S.pool.length, anchorN, Number(S.seed.poolN) || 0);
+  const oldN = Math.max(POOL_MEMORY.rows.length, anchorN, Number(SEED_STORE.document.poolN) || 0);
   if (!allowShrink && oldN && newN < oldN * 0.6) {
     return { ok: false, reason: `rejected ${newN} < 60% of ${oldN}` };
   }
-  const gen = Math.max(S.poolGen || 0, Number(S.seed.poolGen) || 0, anchorGen) + 1;
+  const gen = Math.max(POOL_MEMORY.generation || 0, Number(SEED_STORE.document.poolGen) || 0, anchorGen) + 1;
   try {
     await kvSet(env, "px:pool:" + gen, fresh, { expirationTtl: PX_TTL });
   } catch (e) {
     return { ok: false, reason: "kv " + String(errMsg(e)).slice(0, 60) };
   }
-  S.pool = fresh;
-  S.poolGen = gen;
+  POOL_MEMORY.adopt(fresh, gen, Date.now());
   NodeStatsTable.invalidateRank();
-  S.poolBuilt = Date.now();
-  S.seed.poolGen = gen;
+  SEED_STORE.document.poolGen = gen;
   // 第二阶段：把锚点写回 seed。写失败时新池子只活在本 isolate 里（冷启动会退回旧代际），
   // 所以失败要重试一次，还不成就记进错误环 —— 不能像以前那样返回 ok 就当已落盘。
-  let w = await SEED_STORE.write(env, S.colo ? undefined : true, true);
+  let w = await SEED_STORE.write(env, ISOLATE.colo ? undefined : true, true);
   if (!w.ok) {
-    w = await SEED_STORE.write(env, S.colo ? undefined : true, true);
+    w = await SEED_STORE.write(env, ISOLATE.colo ? undefined : true, true);
     if (!w.ok) logErr("pool anchor " + String(w.err || "write").slice(0, 60), "kv");
   }
   return { ok: true, gen, n: newN, anchored: w.ok };

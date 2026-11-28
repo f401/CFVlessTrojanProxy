@@ -1,4 +1,8 @@
-import { S } from "../core/state";
+import { RELAY_DEMAND } from "../core/relay-demand";
+import { SELECTION_MEMORY } from "./selection-memory";
+import { ISOLATE } from "../core/state";
+import { NODE_MEMORY } from "../core/node-memory";
+import { POOL_MEMORY } from "./pool-memory";
 import { logErr } from "../nodes/metrics";
 import { NodeStatsTable, isBlack, isFrozen, CANDS } from "../nodes/score";
 import { COOLDOWN, pxGet, bumpProbeBad, noteProbe, AliveBoard, ALIVE_MAX } from "./alive";
@@ -87,7 +91,7 @@ export class ScanProbe {
   async run(): Promise<void> {
     // 每轮扫多少：默认按「4 轮覆盖全池」，管理员的 ?scan= 只能往上抬，天花板 SCAN_MAX。
     // 120/轮时 1600 池要 6.7 小时才轮完，冷启动期（isolate 寿命短）等于永远只认识前 120 个。
-    const want = this.adm > 0 ? this.adm : Math.max(S.scanN || 12, Math.ceil(this.pool.length / 4));
+    const want = this.adm > 0 ? this.adm : Math.max(POOL_MEMORY.scanCount || 12, Math.ceil(this.pool.length / 4));
     // 子请求是硬上限：免费计划 50/次调用，每次探活 = 1 个 connect()。默认压在 48，
     // 付费计划或提高配额后用 env.scanSub 抬（仍不超过 SCAN_MAX）。
     const sub = Number(this.env.scanSub) > 0 ? Math.max(12, Number(this.env.scanSub)) : SC.SCAN_SUB;
@@ -96,14 +100,14 @@ export class ScanProbe {
     // 不再占名额。公开池里九成以上是死的，纯轮转时它们每轮都被重复探一遍，好候选永远排不上。
     const open = this.pool.filter((c) => {
       const k = c.h + ":" + c.p;
-      return !S.alive.has(k) && !COOLDOWN.skip(k);
+      return !NODE_MEMORY.alive.has(k) && !COOLDOWN.skip(k);
     });
     // 全都有结论时退回「没进池的候选」做低频复检（能在池里的靠头部复测 + 真实流量，不用再探活）
-    const live = this.pool.filter((c) => !S.alive.has(c.h + ":" + c.p));
+    const live = this.pool.filter((c) => !NODE_MEMORY.alive.has(c.h + ":" + c.p));
     const src = open.length ? open : live.length ? live : this.pool;
-    const idx = S.poolIdx % Math.max(src.length, 1);
+    const idx = POOL_MEMORY.cursor % Math.max(src.length, 1);
     const batch = src.slice(idx, idx + scanN);
-    S.probeColo = S.colo || "cron";
+    POOL_MEMORY.probeColo = ISOLATE.colo || "cron";
     const rows = await probeBatch(batch.map((c) => c.h + ":" + c.p), this.gate);
     const hits: ProbeHit[] = [];
     for (let i = 0; i < rows.length; i++) {
@@ -116,9 +120,9 @@ export class ScanProbe {
         hits.push(x);
       }
     }
-    S.poolIdx = (idx + scanN) % Math.max(src.length, 1);
-    S.probes += batch.length;
-    S.hits += hits.length;
+    POOL_MEMORY.cursor = (idx + scanN) % Math.max(src.length, 1);
+    POOL_MEMORY.probes += batch.length;
+    POOL_MEMORY.hits += hits.length;
     this.markLaggards(hits);
     this.enterAlive(hits);
   }
@@ -164,10 +168,10 @@ export class ScanProbe {
   private enterAlive(hits: ProbeHit[]): void {
     for (const x of hits) {
       const k = keyOf(x);
-      S.alive.set(k, {
+      NODE_MEMORY.alive.set(k, {
         h: x.h,
         p: x.p,
-        cc: x.cc || S.alive.get(k)?.cc || "",
+        cc: x.cc || NODE_MEMORY.alive.get(k)?.cc || "",
         ms: x.ms,
       });
       NodeStatsTable.nsProbe(k, x.ms, x.tcp || x.ms, x.tls || 0);
@@ -182,7 +186,7 @@ export class ScanProbe {
 
 
 /**
- * 存活节点复测器：三段各自一个方法，状态在 `S.alive` 与 RETEST 队列里。
+ * 存活节点复测器：三段各自一个方法，状态在 `NODE_MEMORY.alive` 与 RETEST 队列里。
  */
 export class ScanAlive {
   /** 复测也要建连：每次探活从这里取号（cron 形态上限更大） */
@@ -204,7 +208,7 @@ export class ScanAlive {
       if (r && !r.bad) {
         NodeStatsTable.nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
         // 复测结果比历史更慢时不要把存活表里的延迟改大：这里只做「拉回来」
-        const a = S.alive.get(k);
+        const a = NODE_MEMORY.alive.get(k);
         if (a && r.ms < (a.ms || 1e9)) a.ms = r.ms;
       }
     }
@@ -218,7 +222,7 @@ export class ScanAlive {
    * @returns 最多 4 个候选键
    */
   keys(): string[] {
-    const cur = S.curs.tput || S.curs.lat || "";
+    const cur = SELECTION_MEMORY.current.tput || SELECTION_MEMORY.current.lat || "";
     const top3 = CANDS.list("tput")
       .map((x) => x.k)
       .filter((k) => k !== cur)
@@ -243,8 +247,8 @@ export class ScanAlive {
    */
   async refreshRest(): Promise<void> {
     const recheck = this.keys();
-    const allRest = [...S.alive.keys()].filter((k) => !recheck.includes(k));
-    const start = allRest.length ? S.poolIdx % allRest.length : 0;
+    const allRest = [...NODE_MEMORY.alive.keys()].filter((k) => !recheck.includes(k));
+    const start = allRest.length ? POOL_MEMORY.cursor % allRest.length : 0;
     // 从游标处环形切 12 条：这个数字要和一轮的 connect 预算（PROBE_CONC × 段数）配得上
     const rest = [...allRest.slice(start), ...allRest.slice(0, start)].slice(0, 12);
     await this.probeInto(rest, true);
@@ -264,7 +268,7 @@ export class ScanAlive {
       if (r && !r.bad) {
         NodeStatsTable.nsProbe(k, r.ms, r.tcp || r.ms, r.tls || 0);
         // 存活表里的 `ms` 就是面板与池子裁剪用的「实测延迟」，成功即覆盖
-        const a = S.alive.get(k);
+        const a = NODE_MEMORY.alive.get(k);
         if (a) a.ms = r.ms;
       } else if (failCounts) {
         NodeStatsTable.nsProbeFail(k);
@@ -284,7 +288,7 @@ export class ScanAlive {
  * 一轮维护的收尾器：裁剪与记账，不产生新候选。
  */
 export class ScanHouse {
-  // 存活表的读写器：无字段，状态全在 `S.alive`；7.350 前它是模块级 `ALIVE`。
+  // 存活表的读写器：无字段，状态全在 `NODE_MEMORY.alive`；7.350 前它是模块级 `ALIVE`。
   private readonly board = new AliveBoard();
   /** 中转实测与 SNI 复测都要建连：从这个闸门取号（cron 形态上限更大） */
   private readonly gate = new BudgetedIO(new BudgetLedger("cron"));
@@ -313,20 +317,20 @@ export class ScanHouse {
    * @returns 无
    */
   trimStats(): void {
-    const live = new Set(S.alive.keys());
+    const live = new Set(NODE_MEMORY.alive.keys());
     const cut = Date.now() - 6 * 3600e3;
-    for (const [k, s] of S.nstat) {
+    for (const [k, s] of NODE_MEMORY.stats) {
       // 有下行样本的节点可能还在被选（候选表会读它的分），不能按「不在存活表」删
       if (live.has(k) || (s.bytesDown || 0) > 0) continue;
       if ((s.at || 0) > cut) continue;
-      S.nstat.delete(k);
+      NODE_MEMORY.stats.delete(k);
     }
-    if (S.nstat.size > ALIVE_MAX) {
-      const old = [...S.nstat.entries()].filter(([k]) => !live.has(k)).sort((a, b) => (a[1].at || 0) - (b[1].at || 0));
+    if (NODE_MEMORY.stats.size > ALIVE_MAX) {
+      const old = [...NODE_MEMORY.stats.entries()].filter(([k]) => !live.has(k)).sort((a, b) => (a[1].at || 0) - (b[1].at || 0));
       for (const [k] of old) {
         // 超上限时裁到 75%：留着余量，免得下一轮又要全表排序
-        if (S.nstat.size <= ALIVE_MAX * 0.75) break;
-        S.nstat.delete(k);
+        if (NODE_MEMORY.stats.size <= ALIVE_MAX * 0.75) break;
+        NODE_MEMORY.stats.delete(k);
       }
     }
   }
@@ -341,7 +345,7 @@ export class ScanHouse {
     const tNow = Date.now();
     const targets: string[] = [];
     // 每轮最多两个站点：每次瞄准 = 4 条节点 × 一次握手，预算要留给探活
-    for (const [h, t] of S.needPx) if (t > tNow && targets.length < 2) targets.push(h);
+    for (const [h, t] of RELAY_DEMAND) if (t > tNow && targets.length < 2) targets.push(h);
     if (!targets.length) return;
     const pool4 = (await this.board.list())
       .filter((x) => !isBlack(keyOf(x)) && !isFrozen(keyOf(x)))
@@ -362,15 +366,15 @@ export class ScanHouse {
   }
 
   /**
-   * 功能：每轮最多写一次 seed，且两次落盘间隔 ≥55 分钟（`S.seed.ts` 来自 KV，跨 isolate 有效）。
+   * 功能：每轮最多写一次 seed，且两次落盘间隔 ≥55 分钟（`SEED_STORE.document.ts` 来自 KV，跨 isolate 有效）。
    *
    * cron 是 30 分钟一轮，早先每轮都强制写 = 48 次/天，光这一项就吃掉 5% 的日额度。
    * @param env Worker 环境
    * @returns 无
    */
   async persistSeed(env: Env): Promise<void> {
-    if (Date.now() - (S.seed.ts || 0) >= 55 * 60000) {
-      await SEED_STORE.write(env, S.colo ? undefined : true, true);
+    if (Date.now() - (SEED_STORE.document.ts || 0) >= 55 * 60000) {
+      await SEED_STORE.write(env, ISOLATE.colo ? undefined : true, true);
     }
   }
 }
@@ -395,7 +399,7 @@ export interface ProbeHit extends NodeEntry {
   tcp?: number;
   /** TLS 段耗时 */
   tls?: number;
-  /** 失败原因（`err`/`notTls`/`noCf` 等，写进 `S.probeWhy` 的同一套词） */
+  /** 失败原因（`err`/`notTls`/`noCf` 等，写进 `POOL_MEMORY.probeWhy` 的同一套词） */
   bad?: string;
 }
 
@@ -475,7 +479,7 @@ export class PoolScan {
     await this.alive.refreshRest();
     // 裁剪动过存活表时，站点排行与分片排序里可能还留着刚被删的节点
     if (this.house.prune(this.pool)) {
-      S.hostRankCache.clear();
+      NODE_MEMORY.rankCache.clear();
       NodeStatsTable.invalidateRank();
     }
     // 国家码只影响展示与地区分组，放在裁剪之后（被裁掉的节点不必再查一次）
@@ -491,8 +495,8 @@ export class PoolScan {
    */
   private async loadPool(): Promise<boolean> {
     this.pool = await ensurePool(this.env);
-    if (!this.pool.length || Date.now() - S.poolBuilt > POOL_TTL_MS) {
-      const { pool: fresh } = await refillPool(this.env, S.pool.length);
+    if (!this.pool.length || Date.now() - POOL_MEMORY.builtAt > POOL_TTL_MS) {
+      const { pool: fresh } = await refillPool(this.env, POOL_MEMORY.rows.length);
       if (fresh.length) {
         const c = await commitPool(this.env, fresh);
         // 提交被拒（缩水守卫）时保留旧池：换成缩水的新池会让可用节点瞬间变少
