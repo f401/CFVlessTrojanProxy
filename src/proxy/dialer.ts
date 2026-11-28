@@ -2,7 +2,9 @@ import { RELAY_DEMAND } from "../core/relay-demand";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 import { SC } from "../core/const";
-import { HOOK } from "../core/hook";
+import { DEAD } from "../facts/deadfacts";
+import { vtWin } from "../facts/verdict";
+import { vtLoad } from "../store/verdictsync";
 import { isPxHost } from "../core/hosts";
 import { isCfIp } from "../core/net";
 import { cnt } from "../core/counter";
@@ -159,13 +161,13 @@ export class Dialer {
     const needDoh = !learned && !onList && !cfHost && env.proxyip === "auto";
     // needDoh：提前启动，与 DoH 并行；cfHost 已缓存但事实未加载：也启动（保持原等待语义）。
     // 非 CF 且无需 DoH：不启动，避免多余 DO 子请求。
-    const factLoad = HOOK.vtLoad && (needDoh || cfHost) ? HOOK.vtLoad(env).catch(() => {}) : null;
+    const factLoad = needDoh || cfHost ? vtLoad(env).catch(() => {}) : null;
     if (needDoh) cfHost = await this.dohCf(host, o.budget);
     if (cfHost && factLoad) {
       // DoH 判定期间事实已在后台加载，这里通常立即返回；200ms 只是兜底上限。
       await Promise.race([factLoad, new Promise<void>((r) => setTimeout(r, 200))]);
     }
-    const win = HOOK.win ? HOOK.win(host) : { d: false, r: false };
+    const win = vtWin(host);
     const relWin = win.r;
     if (cfHost) refreshCfHttp(host, conn.ctx, o.budget);
     // 判定层要知道目标是 CF 托管：直连被自家边缘拒时一次即判，所以放在分支外
@@ -268,7 +270,7 @@ export class Dialer {
       conn.pxTries = tries;
       cnt("pxf");
       // 连上了：把这条中继的「连不上」计数清零（复活只可能由真实连接触发）
-      HOOK.deadNote?.(cand.host, true);
+      DEAD.note(cand.host, true);
       return sock;
     } catch (err) {
       // 额度用尽不是「这条腿不通」：继续换只会把剩下的候选全试一遍，还会把好中继记成坏
@@ -278,7 +280,7 @@ export class Dialer {
       void pk.then((s) => { try { s.close(); } catch { /* 已经被关掉了 */ } }).catch(() => { /* 本来就没连上 */ });
       NodeStatsTable.nsFail(cand.key); // 中转本身连不上：冷却它，下一条换个候选试
       // 连接层事实（v8 §3 的 dead）：没有任何 HTTP 状态行，与业务 403 物理上不可混淆
-      HOOK.deadNote?.(cand.host, false);
+      DEAD.note(cand.host, false);
       return null;
     }
   }

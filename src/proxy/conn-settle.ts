@@ -1,7 +1,7 @@
 import { TRAFFIC_MEMORY } from "../core/traffic-memory";
 import { SC } from "../core/const";
 import { flushSnap, PEND } from "../store/index";
-import { HOOK } from "../core/hook";
+
 import { hostDirectMark, hostNodeMark, logErr } from "../nodes/metrics";
 import { cnt } from "../core/counter";
 import { FO, LAT } from "../core/obs";
@@ -9,6 +9,9 @@ import { NodeStatsTable } from "../nodes/score";
 import { markSeedDirty } from "../px/seed";
 import { PEND_FLUSH_BYTES, scheduleFlush, statBump } from "../store/index";
 import { relayIpOf } from "../core/relay-addr";
+import { CAP } from "../facts/capfacts";
+import { JUDGE } from "../facts/judge";
+import { relNote } from "../facts/relperf";
 
 // ---- 并入自 src\proxy\conn-sample.ts ----
 /** 低于这个下行字节数的窗口不构成「吞吐样本」（512KB / 1s 算一个标准样本） */
@@ -373,9 +376,9 @@ export class ConnSettle {
     // 吞吐只在「真的传了一大段」时才有意义：45KB 的正常首页在 2.5 秒里只有 18KB/s，
     // 而 4 字节的 403 页在 80 毫秒里也有 46KB/s —— 小样本算出来的速率会反向排序。
     // 1MB 以上才算「过了慢启动」；其余样本 kbs 记 0（只保留首字节），由代价函数特殊处理。
-    HOOK.relPerf?.(v.host, ip, t0, kbsOf(v.down, ms - t0));
+    relNote(v.host, ip, t0, kbsOf(v.down, ms - t0));
     // 只有真正拉到 ≥40KB 才算一次可用的吞吐样本：4 字节 403 页算出的"速度"是假的（文档 D5）
-    if (v.down >= 40960) HOOK.capNote?.(ip, Math.round((v.down / 1024) * 1000 / Math.max(1, Date.now() - v.startedAt)));
+    if (v.down >= 40960) CAP.note(ip, Math.round((v.down / 1024) * 1000 / Math.max(1, Date.now() - v.startedAt)));
     // 「站点 × 中继」成功率（v8 §5 的 ps）不在这里写：判定层要的是「同一窗口里有 2xx 对照」，
     // 只有 src/route/judge.ts 的判定出口知道这件事，它自己调 PS.note。
     // 这里只交出三样原料：首字节（relPerf）、容量（capNote）、完整响应字节数（traffic）。
@@ -387,9 +390,9 @@ export class ConnSettle {
    * @returns {void}
    */
   private channelEvidence(v: SettleView): void {
-    if (!v.host || !HOOK.traffic) return;
+    if (!v.host) return;
     // 弱证据只可能把 unknown 提成 ok；判死只有 probe 能下
-    HOOK.traffic({
+    JUDGE.onTraffic({
       cf: v.cf,
       host: v.host,
       via: v.via as "node" | "direct" | "v6",

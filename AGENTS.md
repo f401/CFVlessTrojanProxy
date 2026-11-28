@@ -1,4 +1,4 @@
-- 线上 **7.433**（已部署、可跑）｜仓库 **7.438**（地区面板的数据装配抽到 route 层读模型 `route/panel-rows.ts`，路由不再直接认识五张事实表；`routes/logs.ts` 并进 `routes/health.ts` 以守住 124 个文件的预算；共 215 个缺陷皆已修复）：两者差 5 个版本。
+- 线上 **7.433**（已部署、可跑）｜仓库 **7.439**（事实层独立成 `src/facts/`：事实表与判定表下沉一层，store/proxy/px/route 都能直接 import；HOOK 槽位从 19 个收成 1 个 decide，少一层「注册」就少一类静默失效；共 215 个缺陷皆已修复）：两者差 6 个版本。
 
 # AGENTS.md
 
@@ -26,22 +26,23 @@ Constraints of the free plan shape most of the design: ≤6 concurrent `connect(
 Dependency direction is enforced by `tools/check-arch.js` (reverse and circular imports both fail):
 
 ```
-core → store → nodes → px → proxy → views → edge → routes
+core → facts → store → nodes → px → proxy → views → edge → routes
 ```
 
 | Dir | Responsibility | Key files |
 |---|---|---|
 | `src/core/` | constants, domain memory protocols, utilities, histograms, budget, transports | `const.ts`, `state.ts`, `util.ts`, `table.ts`, `transport.ts` |
+| `src/facts/` | shared facts only: TTL tables, delta/ack ledgers, judgement tables, commit decisions — **no IO** | `fact-table.ts`, `verdict.ts`, `judge.ts`, `factsstore.ts` |
 | `src/store/` | KV and DO (`Meter`) access, snapshots, pending ledger, seal/unseal | `meter.ts`, `meter-state.ts`, `pend.ts`, `snapshot.ts` |
 | `src/nodes/` | node statistics, scoring, error ring, site profiles | `stat.ts`, `score.ts`, `metrics.ts` |
 | `src/px/` | candidate pool, probing, selector, sampling, rotation, seed IO | `pool.ts`, `probe.ts`, `selector.ts`, `ts.ts` |
 | `src/proxy/` | WS entry, protocol, dialing, connection metering, CF detection | `session.ts`, `connection.ts`, `dialer.ts` |
 | `src/views/` | subscriptions (clash / sing-box / links) and panel HTML | `sub.ts`, `panel.ts` |
 | `src/edge/` | auth (`X-Admin-Key` / Bearer / sha256 digest), responses | `auth.ts`, `respond.ts` |
-| `src/route/` | judgement layer: verdict / judge / policy / budget / facts | `policy.ts`, `judge.ts`, `fact-table.ts` |
+| `src/route/` | the policy itself plus the route-layer read models | `policy.ts`, `policy-wiring.ts`, `budget.ts`, `panel-rows.ts` |
 | `src/routes/` | HTTP routes: health, admin, debug, logs, proxyip, cron | `health.ts`, `cron.ts`, `debug.ts` |
 
-`src/proxy/session.ts` **must not** import `src/route/*` (that creates `proxy → route` reversal plus a cycle). Cross-layer calls go through slot objects in `src/core/hook.ts`; `src/route/policy-wiring.ts` fills them and `src/index.ts` wires it with `import "./route/policy"`.
+`src/proxy/session.ts` **must not** import `src/route/*` (that creates `proxy → route` reversal plus a cycle). Since 7.439 the fact layer lives below `store`, so proxies/px/store/routes all import it directly; `src/core/hook.ts` keeps exactly **one** slot (`decide`), filled by `src/route/policy-wiring.ts` and wired by `src/index.ts` with `import "./route/policy"` — `decide` stays because the policy needs `proxy`'s `cfHttpCode`.
 
 Other architectural limits: ≤560 lines per file, no `any`, no top-level `let`, and mutable cross-request state only inside registered domain owners (see `tools/state-owners.json`); `ISOLATE` only holds site/colo (module-level mutable containers are gate-failed).
 
@@ -128,7 +129,7 @@ Account-level traps (all have happened):
 
 ## 9. Current state
 
-- Repo **7.438**; **live 7.433** (both runnable; 7.402 lazily loads the pool on cold `/regions` so the paged list shows the full pool instead of just alive nodes; 7.401 paginates the region panel over the full pool — 40 rows/page, unprobed nodes folded, probes keep per-site RTT across reload; 7.395 fixed Firefox NetworkError via CSP `connect-src 'self'`; 7.396 shows exit-country codes in region-panel probe results and keeps known nodes grouped by country first; 7.398 loads alive/seed on POST probe so relay rows get `[CC]`; 7.399 adds a per-row country column and uses `example.com` as the check-site placeholder so the obfuscator does not mangle `x.com` into `__K(...)`; 7.400 shows real ISO country codes via a display-only `QUALITY.isoCc` table queried by exit IP, leaving routing `cc` untouched). Baseline is **7.270** — an audit against it found and fixed three byte/semantic regressions: 7.375 WS `earlyData` and 7.376 ws2 message frames both used `TextEncoder` on an `atob()` Latin-1 string (double-encoding every byte >127, corrupting VLESS UUIDs); 7.376 also fixed `PendingLedger.flush` single-flight swallowing a forced flush. 7.377 added the self-service region panel; 7.378 fixed three O(N²) panel/subscription hot spots behind the CPU-limit incident; 7.379 expands the node panel with fact columns and throttled probes; 7.380 makes `/regions` lazily load seed/alive on a cold isolate so the panel is never falsely empty.
+- Repo **7.439**; **live 7.433** (both runnable; 7.402 lazily loads the pool on cold `/regions` so the paged list shows the full pool instead of just alive nodes; 7.401 paginates the region panel over the full pool — 40 rows/page, unprobed nodes folded, probes keep per-site RTT across reload; 7.395 fixed Firefox NetworkError via CSP `connect-src 'self'`; 7.396 shows exit-country codes in region-panel probe results and keeps known nodes grouped by country first; 7.398 loads alive/seed on POST probe so relay rows get `[CC]`; 7.399 adds a per-row country column and uses `example.com` as the check-site placeholder so the obfuscator does not mangle `x.com` into `__K(...)`; 7.400 shows real ISO country codes via a display-only `QUALITY.isoCc` table queried by exit IP, leaving routing `cc` untouched). Baseline is **7.270** — an audit against it found and fixed three byte/semantic regressions: 7.375 WS `earlyData` and 7.376 ws2 message frames both used `TextEncoder` on an `atob()` Latin-1 string (double-encoding every byte >127, corrupting VLESS UUIDs); 7.376 also fixed `PendingLedger.flush` single-flight swallowing a forced flush. 7.377 added the self-service region panel; 7.378 fixed three O(N²) panel/subscription hot spots behind the CPU-limit incident; 7.379 expands the node panel with fact columns and throttled probes; 7.380 makes `/regions` lazily load seed/alive on a cold isolate so the panel is never falsely empty.
 - The panel lists all alive ∪ seed nodes, groups by country, and shows quality badge / IP kind / family / proxy-VPN flags / eg-ps-dead-blk-dns facts / optional per-site RTT (`?site=`). `?format=json` keeps the old JSON contract. POST writes the user's own `regions` / `regionTopN` / `targetHost` through the shared `regionConfigList()` helper in `src/proxy/protocol.ts` (also used by admin `op=config`); GET is read-only over in-memory tables. Specified-site probes and per-node quality rechecks are available by POST and each has a 60 s cooldown. Template lives in `src/views/html/regions.html` (esbuild text loader).
 - Architecture phase is closed: 124 source files, 121 exported classes, 58 module-level singleton names / 59 declarations (`DNS` exists in two layers; `FAM` added in 7.389). `docs/ARCHITECTURE.md` lists every class and who owns it; `docs/命名约定.md` holds the naming rules and the ratcheted singleton admission test (`tools/check-singletons.mjs`).
 - Deliberately not done: merging the six fact tables (`VT`/`PS`/`EG`/`DNS`/`DEAD`/`BLK`) behind one root object. They appear ~540 times in `tests/` and `tools/`; the only gain is one less global. Rationale is recorded in `docs/命名约定.md`.

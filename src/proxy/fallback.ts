@@ -11,7 +11,7 @@ import type { BudgetedIO } from "../core/budgeted-io";
 import { logErr } from "../nodes/metrics";
 import { isCfIp } from "../core/net";
 import { isBudgetExhausted } from "../core/budget-ledger";
-import { HOOK } from "../core/hook";
+import { Prefs } from "../facts/prefs";
 import type { Socket } from "cloudflare:sockets";
 import type { Connection } from "./connection";
 import { splitRelay } from "../core/relay-addr";
@@ -50,9 +50,9 @@ export async function dialAnother(
     // 一条被污染的条目不该让整条补救链放弃（调用方回落到直连，等于白丢这次请求）。
     if (checkTarget(host, port)) continue;
     if (st.cf && isCfIp(host)) continue; // 见上：CF 托管目标必须换到非 CF 出口
-    // 与主路径（Dialer.open → Selector.current → HOOK.chanPref）同一个口径：这个站点到这个中继
+    // 与主路径（Dialer.open → Selector.current → Prefs.chan）同一个口径：这个站点到这个中继
     // 已经被实测判为封锁的，别再花 2.5 秒拨一次 —— 走到补救链时客户端已经等了两三秒。
-    if (HOOK.chanPref && HOOK.chanPref(host, st.host) === 2) continue;
+    if (Prefs.chan(host, st.host) === 2) continue;
     // 建连预算与「迟到关闭」都交给 SOCKET_DIALER：补救链更怕挂死——走到这里客户端已经等了两三秒。
     try {
       const socket = await SOCKET_DIALER.open(host, port, budget);

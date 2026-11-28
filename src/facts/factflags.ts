@@ -84,3 +84,12 @@ export function factOn(env: { facts?: string }): Set<FactName> {
 export function factList(env: { facts?: string }): string[] {
   return [...factOn(env)];
 }
+
+/**
+ * 功能：当前生效的事实集合（绑定解析结果；还没解析过就当作全开）。
+ * 为什么不用环境变量在这里解析：解析只该发生一次，之后由 FACT_SWITCHES 缓存。
+ * @returns {ReadonlySet<string>} 生效的事实名
+ */
+export function currentFacts(): ReadonlySet<string> {
+  return FACT_SWITCHES.current ?? new Set<string>(FACT_ALL);
+}

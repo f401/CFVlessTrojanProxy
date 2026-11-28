@@ -13,11 +13,11 @@ import { POOL_MEMORY } from "../px/pool-memory";
 import { SEED_STORE } from "../px/seed";
 import { AliveBoard } from "../px/pool";
 import { QUALITY, COVERAGE, CONN_OBS } from "../px/regions";
-import { EG } from "../route/egfacts";
-import { PS } from "../route/psfacts";
-import { DEAD } from "../route/deadfacts";
-import { BLK } from "../route/blkfacts";
-import { DNS } from "../route/dnsfacts";
+import { EG } from "../facts/egfacts";
+import { PS } from "../facts/psfacts";
+import { DEAD } from "../facts/deadfacts";
+import { BLK } from "../facts/blkfacts";
+import { DNS } from "../facts/dnsfacts";
 import type { RegionNodeRow } from "../views/regions";
 
 /** 地区页面单槽类型化缓存；行与 JSON 分开，均允许 30 秒展示陈旧。 */

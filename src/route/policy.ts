@@ -2,22 +2,22 @@ import { POOL_MEMORY } from "../px/pool-memory";
 import { NODE_MEMORY } from "../core/node-memory";
 import { SC } from "../core/const";
 import { isCfIp } from "../core/net";
-import { DIRECT } from "./channel";
-import { VT } from "./verdict";
-import { HEALTH, ipOf } from "./relay-health";
-import { JUDGE, CF_NEG } from "./judge";
-import { PS } from "./psfacts";
+import { DIRECT } from "../facts/channel";
+import { VT } from "../facts/verdict";
+import { HEALTH, ipOf } from "../facts/relay-health";
+import { JUDGE, CF_NEG } from "../facts/judge";
+import { PS } from "../facts/psfacts";
 import { PolicyWiring } from "./policy-wiring";
 import type { Choice, Ctx } from "./policy-wiring";
 import { cnt } from "../core/counter";
 import { St } from "../core/enums";
-import { FACT_ALL } from "./factflags";
-import { DEAD } from "./deadfacts";
-import { factMul } from "./factmul";
-import { RELPERF } from "./relperf";
-import { EG } from "./egfacts";
+import { FACT_ALL } from "../facts/factflags";
+import { DEAD } from "../facts/deadfacts";
+import { factMul } from "../facts/factmul";
+import { RELPERF } from "../facts/relperf";
+import { EG } from "../facts/egfacts";
 import { cfHttpCode } from "../proxy/cfverdict";
-import { FactRegistry } from "./fact-registry";
+import { FactRegistry } from "../facts/fact-registry";
 
 // ---- 并入自 policy-ctx.ts ----
 // 通道决策的输入/输出类型与共享上限：这里只有类型与常量，不含任何算法，

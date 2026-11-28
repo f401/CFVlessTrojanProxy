@@ -7,16 +7,16 @@ import { httpProbe, isCfHost, resolveV4All, checkTarget, dohQuery, expandV6, res
 import { cfHttpCode, CF_HTTP } from "../proxy/cfverdict";
 import { probeSni, probeProxy } from "../px/probe";
 import { aliveList } from "../px/pool";
-import { BLK_TTL } from "../route/commitfact";
-import { VT, VT_TTL_MS } from "../route/verdict";
+import { BLK_TTL } from "../facts/commitfact";
+import { VT, VT_TTL_MS } from "../facts/verdict";
 import { doFetch } from "../store/index";
 import { splitRelay } from "../core/relay-addr";
 import { HTTP80_TRANSPORT, probeTf } from "../core/transport";
 import { adminOnly } from "../edge/auth";
 import { SOCKET_DIALER } from "../proxy/socket-dialer";
 import { BudgetedIO } from "../core/budgeted-io";
-import { DIRECT, chanKey } from "../route/channel";
-import type { Chan } from "../route/channel";
+import { DIRECT, chanKey } from "../facts/channel";
+import type { Chan } from "../facts/channel";
 import { runTfb } from "../route/tfb";
 
 // ---- 并入自 debug-net-bench.ts ----

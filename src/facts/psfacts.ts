@@ -3,7 +3,7 @@ import { EG } from "./egfacts";
 import { cnt } from "../core/counter";
 import { FactTable } from "./fact-table";
 
-// 唯一写入口：`src/route/judge.ts` 的判定出口（`PS.note`）；读口是选路层的 `PS.factor` / `PS.bestOf`。
+// 唯一写入口：`src/facts/judge.ts` 的判定出口（`PS.note`）；读口是选路层的 `PS.factor` / `PS.bestOf`。
 //
 // 生命周期（有界化、分批上行、ack/nack 的纪律）继承自 `FactTable`：这张表原来自己有一份
 // `PsOutbox`（`pending`/`sent` + `delta`/`ack`/`nack`），与 `eg`/`blk`/`dead`/`dns` 逐字重复 ——

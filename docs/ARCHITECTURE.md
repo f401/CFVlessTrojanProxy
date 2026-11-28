@@ -22,7 +22,9 @@ index.ts  组装根：HTTP、WebSocket、cron 分发
 依赖门禁（`npm run arch`）会拦住：反向依赖、目录级与**文件级**循环依赖、顶层 `let`、单文件 > 560 行、以及**任何 `any`**（`src/` 与 `types/` 一并检查；边界用 `unknown` + 收窄）。
 `types/*.d.ts` 里的全局 `declare` 只允许 `WebSocketPair`（Workers 真全局）；其余全局声明会掩盖漏 import，必须用显式 `import`。
 
-依赖图当前是**严格单向**的：`core → store → nodes → px → proxy → route → views → edge → routes`。`ALLOW` 表为空；`npm run arch` 会对全部层做循环检查，任何反向边都会失败。
+依赖图当前是**严格单向**的：`core → facts → store → nodes → px → proxy → route → views → edge → routes`。`ALLOW` 表为空；`npm run arch` 会对全部层做循环检查，任何反向边都会失败。
+
+`facts`（7.439 起）只持「带 TTL 的事实表 + 增量账本 + 事务边界」，不许 IO：它是判定与选路的共享事实，`store`/`proxy`/`px`/`route`/`routes` 都允许向下 import 它，所以 `HOOK` 只剩 `decide` 一个槽位（策略要 `proxy` 的 `cfHttpCode`，所以策略本身仍住在 `route`）。
 
 ## 2 一次请求怎么走
 
@@ -246,16 +248,16 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `MeterState` | `src/store/meter-state.ts` | 账本本体：五件账本 + 七张事实表 + 代号；`adopt()`/`restore()` 把落盘口径逐项映射到内存字段，`parts()` 反着来，`snapshot()`/`rollback()` 供 `/add` 落盘失败时回滚 |
 | `MeterAdd` | `src/store/meteradd.ts` | `/add` 的合并器：日计数、错误环、连接观测、判定表、六张事实表、中继存活度、节点快照、用量各一个私有方法，`apply()` 只负责顺序；`FactMerger` 是它的私有成员，不再需要模块级单例 |
 | `MeterEndpoints` | `src/store/meter.ts` | 计量 DO 的端点实现：`/add`、`/seed`、`/set` 三个会改账本的（各自处理回滚）与 `/cl`/`/hl`/`/vt`/`/cnt` 四个只读的；诊断端点由它自己持有的 `diagnostics` 分派；`Meter` 只留串行化、落盘与生命周期 |
-| `VerdictTable`（`VT`） | `src/route/verdict.ts` | 判定表（站点 × 通道）：状态机、TTL/上限、弱证据不得冲掉强证据、通配目标拒写；公开类型与 `VT_TTL_MS` 同住这一个文件，调用方直接用 `VT.set(...)`/`VT.bad(...)`（7.300 删掉了十二个同名转发函数） |
-| `Judge`（`JUDGE`） | `src/route/judge.ts` | 判定出口：`onTraffic` 只做编排（事实 → 整页 → 小响应 → 封锁），四段各一方法；7.365 起软记忆交给自己的 `JudgeMemory`，Judge 只做「观测 → 结论」的裁决 |
-| `JudgeMemory`（`JUDGE.memory`） | `src/route/judge.ts` | 判定层软记忆：正/负倾向两张 `TimedMarks` + 整页/小响应三张有界 Map（`bigByHost`/`bigChan`/`smCnt`，7.365 从 `S` 迁入）；`bigDiff` 的 6h 门槛与裁剪口径各只有一份 |
+| `VerdictTable`（`VT`） | `src/facts/verdict.ts` | 判定表（站点 × 通道）：状态机、TTL/上限、弱证据不得冲掉强证据、通配目标拒写；公开类型与 `VT_TTL_MS` 同住这一个文件，调用方直接用 `VT.set(...)`/`VT.bad(...)`（7.300 删掉了十二个同名转发函数） |
+| `Judge`（`JUDGE`） | `src/facts/judge.ts` | 判定出口：`onTraffic` 只做编排（事实 → 整页 → 小响应 → 封锁），四段各一方法；7.365 起软记忆交给自己的 `JudgeMemory`，Judge 只做「观测 → 结论」的裁决 |
+| `JudgeMemory`（`JUDGE.memory`） | `src/facts/judge.ts` | 判定层软记忆：正/负倾向两张 `TimedMarks` + 整页/小响应三张有界 Map（`bigByHost`/`bigChan`/`smCnt`，7.365 从 `S` 迁入）；`bigDiff` 的 6h 门槛与裁剪口径各只有一份 |
 | `Policy`（`POLICY`） | `src/route/policy.ts` | 单点决策与策略分级：三张按站点的内存表（`pin`/`rot`/`seq`）+ 排序链 `neg → pos → score → vAt`；CF 托管目标的分支树按代价四段各自成函数（`cfV6Choice` → `cfColdChoice` → `cfEgressChoice` → `cfEgChoice`），`decideCf` 只编排；7.351 起自己持有装配器 `wiring`；7.363 起 `decide()` 排序前显式调 `FactRegistry.housekeep()`，`rankOf` 变纯只读 |
-| `FactRegistry`（静态） | `src/route/fact-registry.ts` | 判定/封锁表的唯一写入门面：把曾藏在 `rankOf` 里的三条自愈写动作（比例兜底 `VT.setState` / 全死 `VT.clearHost` / `BLK.sweep`）收进 `housekeep(host, relays)`，返回 `FactEffect[]` 供断言；状态仍在 VT/BLK 各自的表里，本类无字段 |
+| `FactRegistry`（静态） | `src/facts/fact-registry.ts` | 判定/封锁表的唯一写入门面：把曾藏在 `rankOf` 里的三条自愈写动作（比例兜底 `VT.setState` / 全死 `VT.clearHost` / `BLK.sweep`）收进 `housekeep(host, relays)`，返回 `FactEffect[]` 供断言；状态仍在 VT/BLK 各自的表里，本类无字段 |
 | `PolicyWiring`（`Policy.wiring`） | `src/route/policy-wiring.ts` | 把策略接到 HOOK 的二十个槽位（漏注册不会有门禁报错，7.123 的 `HOOK.facts` 就是这样失效的）；无状态，7.351 起由 `Policy` 自己持有，模块级 `WIRING` 已撤 |
-| `RelayHealth`（`HEALTH`） | `src/route/relay-health.ts` | 中继健康表（sent/pending 语义） |
-| `RelayLedger` | `src/route/relay-ledger.ts` | 中继健康表的两张账本（已同步快照 + 待确认行）：`forget()` 是唯一删除入口，`counts()` 暴露规模以发现表外键 |
+| `RelayHealth`（`HEALTH`） | `src/facts/relay-health.ts` | 中继健康表（sent/pending 语义） |
+| `RelayLedger` | `src/facts/relay-ledger.ts` | 中继健康表的两张账本（已同步快照 + 待确认行）：`forget()` 是唯一删除入口，`counts()` 暴露规模以发现表外键 |
 | `CronLock` | `src/core/lock.ts` | cron 闸门，纯静态方法：持有时间戳 + `SC.CRON_STALE_MS` 截止；超时接管计 `cronStale`（布尔闩卡死即永久停摆）。7.360 起无模块级 `CRONLOCK` 实例 |
-| `TfbBook`（`TFB`） | `src/route/tfbbook.ts` | 起搏记账（上次开批时间 + 本窗口批数；`sweep` 是唯一清理入口，上限与 `SC.PX_MAX` 同源） |
+| `TfbBook`（`TFB`） | `src/facts/tfbbook.ts` | 起搏记账（上次开批时间 + 本窗口批数；`sweep` 是唯一清理入口，上限与 `SC.PX_MAX` 同源） |
 | `TransportRegistry`（`TRANSPORTS`） | `src/core/transport.ts` | 探测传输的注册表：业务侧只说「要一个能探测的传输」，具体实现（userland TLS / 运行时 fetch / 明文 HTTP·80）由这里决定。7.271 起 `probeTf` 不再写死 tunnelfetch |
 | `TunnelFetchTransport` | `src/core/transport.ts` | 用 `tunnelfetch`（userland TLS 1.3）探测，能把 TCP 落到中继上 —— 唯一能回答「这条中继到目标行不行」的实现 |
 | `GatewayFetchTransport` | `src/core/transport.ts` | 用运行时自带 `fetch` 探测，只能直连；留着做「同一目标、两条腿」的对照，与上一条并排看才能分清「目标拒绝这个出口族」与「中继不可用」 |
@@ -266,21 +268,21 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `ErrRing`（`ERRS`） | `src/nodes/errlog.ts` | 错误账本（5 秒去重、10 分钟直方图、限流丢弃计数） |
 | 预算分配（自由函数 `planRound`） | `src/route/budget.ts` | 每轮预算分配（准入/复核）：判定额度这一项在 7.149 随 `round.ts` 一起删掉，现在只有 `adm` 与 `cap` |
 | `FactMerger` | `src/store/factmerge.ts` | 把 DO 车身里的五类事实并进本地表：每张表一个私有方法（族号、历史最好、判死行、`|` 键、容量淘汰各不相同），`merge()` 只负责分派 |
-| `FactsStore` | `src/route/factsstore.ts` | 事实表同步，纯静态方法：冷启动合并 → 上行增量 → ack/nack 三段生命周期；内部逐类点名五张表（7.360 起无模块级 `FACTS` 实例） |
-| `EgFacts`（`EG`） | `src/route/egfacts.ts` | 出口族事实（中继 IP → v4/v6）与族偏置，含 pending/ack；`biasFor()` 按站点×族实测放松偏置 |
-| `FamFacts`（`FAM`） | `src/route/egfacts.ts` | 本 isolate 的站点×出口族实测成功率（内存派生表，不进线协议、不跨 isolate），供 `biasFor()` 定价取代 CF v6 一刀切 ×40 |
-| `DnsFacts`（`DNS`） | `src/route/dnsfacts.ts` | 「纯 v4 站点」确证（24 小时）与 v6 出口折价 |
-| PsFacts（PS） | src/route/psfacts.ts | 站点 × 中继「能不能过」成功率表（45 分钟半衰期）：形状、先验与表本体同在此文件，待上报队列与有界化继承自 FactTable |
-| `BlkFacts`（`BLK`） | `src/route/blkfacts.ts` | 单 IP 封锁事实（键为站点 + 出口 IP、三批确认、只乘 6 倍代价、站点级自愈）；表本体 / 待上报队列 / 有界化继承自 `FactTable` |
-| `FactTable`（抽象基类） | `src/route/fact-table.ts` | 六张事实表的公共生命周期：`ack()` 只清这一批真的发出去的行、`nack()` 什么都不清、有界化只在插入路径上；子类只声明寿命 / 上限 / 批次与线格式编解码 |
-| `DeadFacts` | `src/route/deadfacts.ts` | 中继「连不上」事实（唯一允许把候选挪到队尾的事实） |
-| `CapFacts` | `src/route/capfacts.ts` | 吞吐容量表（相对池内中位数的容量比，带噪声门） |
-| `FactShadow` | `src/route/factshadow.ts` | 事实写入决策器的影子统计（% 形，不参与决策） |
-| `ShadowTable`（`SHADOW_TABLE`） | `src/route/factshadow.ts` | 影子统计表本体：`bigTyp` 从 `S` 迁入，实例单例，由 `FactShadow` 使用 |
-| `VtSyncLedger`（`VT_SYNC`） | `src/route/verdict.ts` | 判定表的跨 isolate 同步账本：pending/sent/coolUntil/flight 从 `S` 迁入，7.369 起是实例单例（放 verdict.ts 避免 verdict↔verdictsync 循环 import） |
+| `FactsStore` | `src/facts/factsstore.ts` | 事实表同步，纯静态方法：冷启动合并 → 上行增量 → ack/nack 三段生命周期；内部逐类点名五张表（7.360 起无模块级 `FACTS` 实例） |
+| `EgFacts`（`EG`） | `src/facts/egfacts.ts` | 出口族事实（中继 IP → v4/v6）与族偏置，含 pending/ack；`biasFor()` 按站点×族实测放松偏置 |
+| `FamFacts`（`FAM`） | `src/facts/egfacts.ts` | 本 isolate 的站点×出口族实测成功率（内存派生表，不进线协议、不跨 isolate），供 `biasFor()` 定价取代 CF v6 一刀切 ×40 |
+| `DnsFacts`（`DNS`） | `src/facts/dnsfacts.ts` | 「纯 v4 站点」确证（24 小时）与 v6 出口折价 |
+| PsFacts（PS） | src/facts/psfacts.ts | 站点 × 中继「能不能过」成功率表（45 分钟半衰期）：形状、先验与表本体同在此文件，待上报队列与有界化继承自 FactTable |
+| `BlkFacts`（`BLK`） | `src/facts/blkfacts.ts` | 单 IP 封锁事实（键为站点 + 出口 IP、三批确认、只乘 6 倍代价、站点级自愈）；表本体 / 待上报队列 / 有界化继承自 `FactTable` |
+| `FactTable`（抽象基类） | `src/facts/fact-table.ts` | 六张事实表的公共生命周期：`ack()` 只清这一批真的发出去的行、`nack()` 什么都不清、有界化只在插入路径上；子类只声明寿命 / 上限 / 批次与线格式编解码 |
+| `DeadFacts` | `src/facts/deadfacts.ts` | 中继「连不上」事实（唯一允许把候选挪到队尾的事实） |
+| `CapFacts` | `src/facts/capfacts.ts` | 吞吐容量表（相对池内中位数的容量比，带噪声门） |
+| `FactShadow` | `src/facts/factshadow.ts` | 事实写入决策器的影子统计（% 形，不参与决策） |
+| `ShadowTable`（`SHADOW_TABLE`） | `src/facts/factshadow.ts` | 影子统计表本体：`bigTyp` 从 `S` 迁入，实例单例，由 `FactShadow` 使用 |
+| `VtSyncLedger`（`VT_SYNC`） | `src/facts/verdict.ts` | 判定表的跨 isolate 同步账本：pending/sent/coolUntil/flight 从 `S` 迁入，7.369 起是实例单例（放 verdict.ts 避免 verdict↔verdictsync 循环 import） |
 | `SnapshotState`（`SNAP`） | `src/store/snapshot.ts` | 快照模块的本地状态：cache/written/checked/busy 从 `S` 迁入，7.369 起实例单例 |
-| `RelPerfTable` | `src/route/relperf.ts` | 站点 × 中继的实测性能表（首字节 / 吞吐，只有 ≥1 MB 的样本才记吞吐） |
-| `Prefs` | `src/route/prefs.ts` | 判定表折成「能打通 / 打不通」两栏，纯静态方法 `of` / `chan` / `json`；7.349 起不再有 `prefsOf`/`chanPref`/`prefsJson` 三个转发函数，7.360 起也不再需要 `PREFS` 实例（`HOOK.chanPref` 槽位注册到 `Prefs.chan`） |
+| `RelPerfTable` | `src/facts/relperf.ts` | 站点 × 中继的实测性能表（首字节 / 吞吐，只有 ≥1 MB 的样本才记吞吐） |
+| `Prefs` | `src/facts/prefs.ts` | 判定表折成「能打通 / 打不通」两栏，纯静态方法 `of` / `chan` / `json`；7.349 起不再有 `prefsOf`/`chanPref`/`prefsJson` 三个转发函数，7.360 起也不再需要 `PREFS` 实例（`HOOK.chanPref` 槽位注册到 `Prefs.chan`） |
 | `LatObs` | `src/core/obs.ts` | 首字节 / 总耗时 / 抖动三类窗口统计器 |
 | `FirstObs` | `src/core/obs.ts` | 前 N 条连接的端到端质量（只累计、不清零，用于冷启动归因） |
 | `Attacher`（`ProxySession.attacher`） | `src/proxy/attacher.ts` | 上游挂载与补救链：`run()` 只装配，收尾交给 `onClose()`；中转再试一条 / IPv6 兜底 / proxyip 三段各一方法；无字段，7.354 起由 `ProxySession` 自己持有，模块级 `ATTACHER` 已撤 |
@@ -328,7 +330,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `TrafficMemory`（`src/core/traffic-memory.ts`） | `src/core/traffic-memory.ts` | 连接漏斗、上下行聚合与累计出流量（`egressB` 用于诊断平台限额） |
 | `PoolMemory`（`src/px/pool-memory.ts`） | `src/px/pool-memory.ts` | 池子行、代际、构建时间、扫描游标、探活统计与冷却起点 |
 | `SelectionMemory`（`src/px/selection-memory.ts`） | `src/px/selection-memory.ts` | 当前/上一个中继、切换时刻与切换计数、失败次数 |
-| `FactSwitches` | `src/route/factflags.ts` | `env.facts` 解析后的开关现值（`none` / `eg` / `eg,ps` / `all`） |
+| `FactSwitches` | `src/facts/factflags.ts` | `env.facts` 解析后的开关现值（`none` / `eg` / `eg,ps` / `all`） |
 | `RegionPageCache`（`REGION_CACHE`） | `src/route/panel-rows.ts` | 地区面板的基础行与 JSON 文本缓存，装配口径也在同一文件的读模型里 |
 | `KvWriteState` | `src/store/kv.ts` | KV 写计数、配额耗尽标记与冷却时刻 |
 | `MeterClientState` | `src/store/meter-client.ts` | 计量 DO 的调用计数与响应缓存 |

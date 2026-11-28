@@ -1,11 +1,11 @@
 // 判定表的跨 isolate 同步：只同步「强证据」（blocked/dead），带 30 分钟 TTL。
 // 目标 isolate 冷启动时拉一次，之后靠本地的记录增量回传，避免每请求都读 DO。
-import { VT, VT_TTL_MS, VT_SYNC } from "./verdict";
-import { HEALTH } from "./relay-health";
-import { FactsStore, type FactsBody } from "./factsstore";
+import { VT, VT_TTL_MS, VT_SYNC } from "../facts/verdict";
+import { HEALTH } from "../facts/relay-health";
+import { FactsStore, type FactsBody } from "../facts/factsstore";
 import { cnt } from "../core/counter";
 import { dropExpired, trimAged } from "../core/hostmem";
-import { doFetch } from "../store/meter-client";
+import { doFetch } from "./meter-client";
 import { St } from "../core/enums";
 
 interface VtRow {
@@ -179,4 +179,25 @@ async function vtFetch(env: Env): Promise<void> {
 
     VT_SYNC.flight = null;
   }
+}
+
+/**
+ * 功能：一批上报成功后的统一确认 —— 健康度、判定表、四类事实一起 ack。
+ * 口径：只有真的送到 DO 才清 pending，否则下一轮重发等于重试（不是重复计数）。
+ * @returns {void}
+ */
+export function syncAckAll(): void {
+  HEALTH.ack();
+  vtAck();
+  FactsStore.ack();
+}
+
+/**
+ * 功能：一批上报失败后的统一退回 —— 三份增量都保留，下一轮重发。
+ * @returns {void}
+ */
+export function syncNackAll(): void {
+  HEALTH.nack();
+  vtNack();
+  FactsStore.nack();
 }

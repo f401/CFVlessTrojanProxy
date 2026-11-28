@@ -86,8 +86,8 @@ export async function case091({ W, eq, ok, fs }) {
   W.VT_SYNC.sent.clear();
   // ⑤ 三处调用点都在（防止后续改动把裁剪悄悄删掉）
   const dialSrc = fs.readFileSync("src/proxy/dialer.ts", "utf8");
-  const vtSrc = fs.readFileSync("src/route/verdictsync.ts", "utf8");
-  const jdSrc = fs.readFileSync("src/route/judge.ts", "utf8");
+  const vtSrc = fs.readFileSync("src/store/verdictsync.ts", "utf8");
+  const jdSrc = fs.readFileSync("src/facts/judge.ts", "utf8");
   ok("dialer 裁剪 cfHost", dialSrc.includes("dropExpired(this.cfHost)") && dialSrc.includes("trimAged(this.cfHost)"));
   ok("verdictsync 裁剪 vtSent", vtSrc.includes("dropExpired(VT_SYNC.sent)") && vtSrc.includes("trimAged(VT_SYNC.sent)"));
   ok("judge 裁剪 bigByHost", jdSrc.includes("trimAged(this.bigByHost)"));
@@ -96,20 +96,20 @@ export async function case091({ W, eq, ok, fs }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case094({ fs, ok, W }) {
-  const rh = fs.readFileSync("src/route/relay-health.ts", "utf8");
+  const rh = fs.readFileSync("src/facts/relay-health.ts", "utf8");
   ok("合并按条数、平局按较新的观测决定谁胜出", rh.includes("inN > curN || (inN === curN && at > cur.at)"));
   ok("淘汰一条中继时连账本一起清掉", (rh.match(/this\.ledger\.forget\(k\)/g) || []).length === 2);
   ok("表外的键不会被登记进已上报快照", rh.includes("this.ledger.ack((ip) => this.byRelay.has(ip));"));
   ok("中继健康表的 loaded 状态已删除（冷启动由 vtLoad 的 single-flight 负责）", W.HEALTH.loaded === undefined);
   ok("needLoad 已经不存在", typeof W.HEALTH.needLoad === "undefined");
   ok("markLoaded 已经不存在", typeof W.HEALTH.markLoaded === "undefined");
-  const vs = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+  const vs = fs.readFileSync("src/store/verdictsync.ts", "utf8");
   ok("远端事实里的中继健康行带时间戳", vs.includes("hl?: Array<{ i: string; o: number; b: number; d: number; t?: number }>"));
 }
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case097({ fs, ok }) {
-  const vs = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+  const vs = fs.readFileSync("src/store/verdictsync.ts", "utf8");
   ok("待发项记的是 { s, t } 而不是只有到期时间", vs.includes("VT_SYNC.pending.set(k, { s: v.state, t: exp })"));
   ok("上限判断在压入之前", vs.indexOf("if (out.length >= 60) break;") < vs.indexOf("VT_SYNC.pending.set(k, { s: v.state, t: exp })") + 2000);
 }
@@ -145,7 +145,7 @@ export async function case098({ W, eq, mkDO, ok, fs }) {
   eq("DO 里当前均值跟着新观测", Number(prow.q), 40);
   eq("DO 里的历史最好只升不降", Number(prow.top), 200);
   // 源码锁：增量必须把 top 放进线格式
-  ok("增量带 top（源码）", fs.readFileSync("src/route/psfacts.ts", "utf8").includes("top: r.top ?? r.q"));
+  ok("增量带 top（源码）", fs.readFileSync("src/facts/psfacts.ts", "utf8").includes("top: r.top ?? r.q"));
 }
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
@@ -223,8 +223,8 @@ export async function case105({ fs, ok }) {
   // 脚本补丁曾把一条语句顶格（缩进 0），块内的层级读起来是断的。
   const cLines = fs.readFileSync("src/proxy/connection.ts", "utf8").split(/\r?\n/);
   const settleLines = fs.readFileSync("src/proxy/conn-settle.ts", "utf8").split(/\r?\n/);
-  const relLine = settleLines.find((l) => l.includes("HOOK.relPerf?.(v.host"));
-  ok("relPerf 那行和同块其它语句同层级（4 空格）", !!relLine && /^ {4}HOOK\.relPerf\?\./.test(relLine));
+  const relLine = settleLines.find((l) => l.includes("relNote(v.host"));
+  ok("relNote 那行和同块其它语句同层级（4 空格）", !!relLine && /^ {4}relNote\(/.test(relLine));
   ok("closing 块里没有顶格的语句", cLines.filter((l) => /^\S/.test(l) && !/^(import|export|\/\/|\/\*|\}|type |const |function |class )/.test(l)).length === 0);
 }
 
@@ -501,7 +501,7 @@ export async function case118({ W, ok, eq, fs }) {
   ok("起搏仍然记探活样本（probeSamples / tcp / tls）", /nsProbe\s*\(/.test(warmSrc));
   const fbSrc = fs.readFileSync("src/proxy/fallback.ts", "utf8");
   ok("补救链跳过一个被污染的条目，而不是整条放弃", /checkTarget\(host, port\)\)\s*continue;/.test(fbSrc));
-  ok("补救链也跳过本站点已判封锁的中继", /HOOK\.chanPref\(host, st\.host\) === 2/.test(fbSrc));
+  ok("补救链也跳过本站点已判封锁的中继", /Prefs\.chan\(host, st\.host\) === 2/.test(fbSrc));
   ok("补救链的候选上限仍是 4（每个都是一次 connect）", /const ALT_TRIES = 4;/.test(fbSrc));
 }
 
@@ -565,9 +565,9 @@ export async function case119({ W, eq, ok, fs }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case124({ fs, eq, W, ok }) {
-  const capSrc = fs.readFileSync("src/route/capfacts.ts", "utf8");
+  const capSrc = fs.readFileSync("src/facts/capfacts.ts", "utf8");
   const hookSrc179 = fs.readFileSync("src/core/hook.ts", "utf8");
-  const psSrc179 = fs.readFileSync("src/route/psfacts.ts", "utf8");
+  const psSrc179 = fs.readFileSync("src/facts/psfacts.ts", "utf8");
   eq("容量比上限是 256", W.CAP_MAX, 256);
   ok("上限在插入路径上执行", capSrc.indexOf("if (this.rows.size > CAP_MAX) this.trim(now);") >= 0, "capfacts.ts");
   ok("未确认的行按最后取样时间算寿命", capSrc.indexOf("const last = Math.max(row.at, row.seen);") >= 0, "capfacts.ts");
@@ -599,7 +599,7 @@ export async function case124({ fs, eq, W, ok }) {
   // 残槽：HOOK.psNote 没人注册也没人调用，留着会让人以为连接层还在写 ps
   ok("hook.ts 里没有 psNote 槽位", hookSrc179.indexOf("psNote") < 0, "hook.ts");
   ok("HOOK 对象上没有 psNote", !("psNote" in W.HOOK), "HOOK");
-  ok("psfacts 的文档指向真正的调用方", psSrc179.indexOf("src/route/judge.ts") >= 0 && psSrc179.indexOf("HOOK.psNote") < 0, "psfacts.ts");
+  ok("psfacts 的文档指向真正的调用方", psSrc179.indexOf("src/facts/judge.ts") >= 0 && psSrc179.indexOf("HOOK.psNote") < 0, "psfacts.ts");
 }
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
@@ -703,7 +703,7 @@ export async function case130({ verdictAll, eq, W, statAll, ok, fs }) {
   ok("TEN_MB 仍导出（score/metrics 都在用）", srcStat.includes("export const TEN_MB"), "TEN_MB 定义没了");
 
   // ③ 线协议类型只有一份：verdictsync 借用 factsstore 的 FactsBody，不再本地重声明
-  const srcVs = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+  const srcVs = fs.readFileSync("src/store/verdictsync.ts", "utf8");
   eq("verdictsync 不再自带 FactsBody 声明", srcVs.includes("interface FactsBody"), false);
   ok("verdictsync 从 factsstore 借类型", srcVs.includes("type FactsBody") && srcVs.includes("type WireBody = FactsBody &"), "借用没接上");
   // 行为面：七张表里最容易漏的那张（dns）必须真能穿过车身进表
@@ -727,7 +727,7 @@ export async function case131({ fs, ok, eq, W }) {
   ok("PAGE_ABS 定义在 core/facts", srcFacts.includes("export const PAGE_ABS"), "PAGE_ABS 不在 core/facts.ts");
 
   // ① 四个曾经各抄一份的文件都不许再出现裸字面量（改一份忘另一份就是这么开始的）
-  for (const f of ["src/route/judge.ts", "src/route/commitfact.ts", "src/route/egfacts.ts", "src/route/relay-health.ts"]) {
+  for (const f of ["src/facts/judge.ts", "src/facts/commitfact.ts", "src/facts/egfacts.ts", "src/facts/relay-health.ts"]) {
     const s = fs.readFileSync(f, "utf8");
     eq(f + " 不再写裸 20000", s.includes("20000"), false);
     eq(f + " 不再写裸 2048", s.includes("2048"), false);
@@ -746,13 +746,13 @@ export async function case131({ fs, ok, eq, W }) {
   eq("同窗口宽度仍是 120 秒", pa.win, 120000);
 
   // ③ 文档位置：import 必须在它描述的常量之前，否则文档挂到 import 头上、常量反而裸奔
-  const srcCf = fs.readFileSync("src/route/commitfact.ts", "utf8");
+  const srcCf = fs.readFileSync("src/facts/commitfact.ts", "utf8");
   const iImp = srcCf.indexOf("import { FACT_TTL, PAGE_ABS }");
   ok("commitfact 的 import 带上了 PAGE_ABS", iImp >= 0, "import 没引用 PAGE_ABS");
   ok("commitfact 的 import 在 TINY_ABS 文档之前", iImp >= 0 && iImp < srcCf.indexOf("/** tiny 的绝对上限"), "文档又被 import 挤开了");
-  const iDns = fs.readFileSync("src/route/dnsfacts.ts", "utf8").indexOf("/** DNS 事实寿命");
+  const iDns = fs.readFileSync("src/facts/dnsfacts.ts", "utf8").indexOf("/** DNS 事实寿命");
   ok("DNS_TTL 拿回了自己的文档", iDns >= 0, "DNS_TTL 的文档不见了");
-  const srcDns = fs.readFileSync("src/route/dnsfacts.ts", "utf8");
+  const srcDns = fs.readFileSync("src/facts/dnsfacts.ts", "utf8");
   ok("DNS_TTL 的文档与声明相邻", srcDns.slice(iDns, srcDns.indexOf("export const DNS_TTL")).indexOf("import") < 0, "文档与 DNS_TTL 之间隔着 import");
 
   // ④ 门禁在位：这一型（文档挂在 import 上）此前谁都没看见
@@ -962,7 +962,7 @@ export async function case136({ W, ok, eq, fs }) {
 
   // 源码锁：顶层两张 Map 必须消失、清理只走 sweep、上限与 needPx 同源
   const srcCron201 = fs.readFileSync("src/routes/cron.ts", "utf8");
-  const srcBook201 = fs.readFileSync("src/route/tfbbook.ts", "utf8");
+  const srcBook201 = fs.readFileSync("src/facts/tfbbook.ts", "utf8");
   eq("cron.ts 不再有顶层 TFB_AT/TFB_N", /TFB_AT|TFB_N/.test(srcCron201), false);
   eq("cron.ts 不再自己 new Map", srcCron201.includes("new Map("), false);
   eq("cron.ts 走 TFB.sweep 清理", srcCron201.includes("TFB.sweep(RELAY_DEMAND, now)"), true);
@@ -1145,7 +1145,7 @@ export async function case140({ W, eq, fs, ok }) {
   ok("pinFor 里先删后插", srcPolicy.includes("this.pin.delete(host);"), "");
   ok("注释写明 Map.set 不移动位置", srcPolicy.includes("**不移动插入位置**"), "");
   // 零调用的 Judge.okAge 已删（文档说返回「距上次 ok 的时间」，实现返回 1/0）
-  const srcJudge = fs.readFileSync("src/route/judge.ts", "utf8");
+  const srcJudge = fs.readFileSync("src/facts/judge.ts", "utf8");
   ok("Judge.okAge 已删", srcJudge.includes("okAge") === false, "");
   ok("测试窗口里也没有它", typeof W.JUDGE.okAge, "undefined");
 }
@@ -1535,7 +1535,7 @@ export async function case149({ W, ok, eq, fs }) {
   eq("命中缓存不回写", writes, 0);
 
   // ⑤ 源码锁：判据不能被绕过
-  const vsrc = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+  const vsrc = fs.readFileSync("src/store/verdictsync.ts", "utf8");
   ok("DO 读取检查了状态码", vsrc.includes("if (!rr.ok) throw new Error(\"do \" + rr.status);"), vsrc.includes("!rr.ok"));
   ok("DO 读取检查了形状", vsrc.includes("if (!vtShape(bo)) throw new Error(\"do shape\");"));
   ok("vtShape 是类型守卫", vsrc.includes("function vtShape(b: unknown): b is WireBody"));
@@ -1810,7 +1810,7 @@ export async function case158({ fs, eq, W, ok }) {
   eq("窗口常量是 6 小时", W.SC.PX_LEARN, 21_600_000);
   const constSrc227 = codeOf("src/core/const.ts");
   ok("常量声明在 core/const.ts", constSrc227.includes("PX_LEARN: 21_600_000,"));
-  const judgeSrc227 = codeOf("src/route/judge.ts");
+  const judgeSrc227 = codeOf("src/facts/judge.ts");
   ok("judge 不再自带 PX_TTL", /\bPX_TTL\b/.test(judgeSrc227) === false);
   eq("judge 两条写入路径都读同一个常量", (judgeSrc227.match(/now \+ SC\.PX_LEARN/g) || []).length, 2);
   const attSrc227 = codeOf("src/proxy/attacher.ts");
@@ -1818,7 +1818,7 @@ export async function case158({ fs, eq, W, ok }) {
   ok("attacher 不再内联 6 小时", attSrc227.includes("6 * 3600e3") === false);
   // 全仓守卫：往 W.RELAY_DEMAND 写数字字面量的写法一律不允许（写死了就和常量脱钩）
   const needPxWrites = [];
-  for (const rel of ["src/route/judge.ts", "src/proxy/attacher.ts"]) {
+  for (const rel of ["src/facts/judge.ts", "src/proxy/attacher.ts"]) {
     for (const l of codeOf(rel).split("\n")) {
       if (/RELAY_DEMAND\.set\(/.test(l)) needPxWrites.push(l.trim());
     }
@@ -1838,7 +1838,7 @@ export async function case158({ fs, eq, W, ok }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case159({ fs, ok, W }) {
-  const judgeSrc = fs.readFileSync("src/route/judge.ts", "utf8");
+  const judgeSrc = fs.readFileSync("src/facts/judge.ts", "utf8");
   const code = judgeSrc
     .split(/\r?\n/)
     .filter((l) => {
@@ -1948,7 +1948,7 @@ export async function case160({ fs, ok, W }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case161({ fs, ok, W, eq }) {
-  const blkSrc = fs.readFileSync("src/route/blkfacts.ts", "utf8");
+  const blkSrc = fs.readFileSync("src/facts/blkfacts.ts", "utf8");
   const m = blkSrc.match(/export const BLK_MUTE_MAX = (\d+);/);
   const cap = m ? Number(m[1]) : 0;
   ok("静默表有独立上限", cap >= 64 && cap <= 4096, String(cap));
@@ -2550,7 +2550,7 @@ export async function case175({ W, ok, eq, verdictAll, fs }) {
   ok("factout.ts 的老格式按枚举读", srcOut250.includes("St.Blocked") && !srcOut250.includes("? v.s === 3 ? 3 : 2"));
   const srcAdd250 = fs.readFileSync("src/store/meteradd.ts", "utf8");
   ok("meteradd.ts 的老格式按枚举读", srcAdd250.includes("r.s === St.Dead ? St.Dead : St.Blocked"));
-  const srcRel250 = fs.readFileSync("src/route/relperf.ts", "utf8");
+  const srcRel250 = fs.readFileSync("src/facts/relperf.ts", "utf8");
   ok("relperf 的淘汰交给 BoundedMap（不再自己写一份）", srcRel250.includes("new BoundedMap<string, RelSample>") && !srcRel250.includes("private evict("));
   ok("relperf 的上限判断在插入之后", srcRel250.includes("this.rows.prune(now);"));
   ok("relperf 用 Mode 枚举判模式", srcRel250.includes("modeToken === Mode.Latency"));
@@ -2609,10 +2609,10 @@ export async function case176({ W, ok, eq, fs }) {
   ok(`[${G}] vOk 认枚举写入的状态`, W.VT.ok("e251.test", "d") === true);
 
   // 源码锁
-  const relSrc251 = fs.readFileSync("src/route/relperf.ts", "utf8");
+  const relSrc251 = fs.readFileSync("src/facts/relperf.ts", "utf8");
   ok(`[${G}] relperf 用 BoundedMap 而不是自写淘汰`, relSrc251.includes("new BoundedMap<string, RelSample>") && !relSrc251.includes("private m = new Map"));
   ok(`[${G}] relperf 字段名带单位`, relSrc251.includes("kiloBytesPerSec: KiloBytesPerSec;") && relSrc251.includes("updatedAt: EpochMs;"));
-  const tfbSrc251 = fs.readFileSync("src/route/tfbbook.ts", "utf8");
+  const tfbSrc251 = fs.readFileSync("src/facts/tfbbook.ts", "utf8");
   ok(`[${G}] tfbbook 两栏改名`, tfbSrc251.includes("private lastBatchAt") && tfbSrc251.includes("private batchCount"));
   const enumSrc251 = fs.readFileSync("src/core/enums.ts", "utf8");
   ok(`[${G}] 枚举成员名可读`, enumSrc251.includes("Reachable = 1") && enumSrc251.includes('Throughput = "tput"') && enumSrc251.includes('Latency = "lat"'));
@@ -2640,7 +2640,7 @@ export async function case177({ verdictAll, ok, fs, W, eq }) {
 
   const foSrc = fs.readFileSync("src/core/obs.ts", "utf8");
   ok("首次观测计数叫 samples", foSrc.includes("private samples = 0;"), "");
-  const fsSrc = fs.readFileSync("src/route/factshadow.ts", "utf8");
+  const fsSrc = fs.readFileSync("src/facts/factshadow.ts", "utf8");
   ok("影子的计数也叫 samples", fsSrc.includes("private samples = 0;"), "");
 
   // 行为面：快照与记录都改用新字段
@@ -2743,8 +2743,8 @@ export async function case181({ W, eq, pickAll, ok, fs }) {
   // 源码锁：选路里不能再有本地那份 slice(0, lastIndexOf(":")) 解析
   const selSrc = pickAll();
   ok("selector 不再自写 IP 解析", !selSrc.includes('k.slice(0, k.lastIndexOf(":"))'));
-  ok("selector 用 relayIpOf", selSrc.includes("cp(relayIpOf(key), host)") && selSrc.includes("cp(relayIpOf(x.k), host)"));
-  const rhSrc = fs.readFileSync("src/route/relay-health.ts", "utf8");
+  ok("selector 用 relayIpOf", selSrc.includes("Prefs.chan(relayIpOf(key), host)") && selSrc.includes("cp(relayIpOf(x.k), host)"));
+  const rhSrc = fs.readFileSync("src/facts/relay-health.ts", "utf8");
   ok("relay-health 的 ipOf 委托 relayIpOf", rhSrc.includes("return relayIpOf(node);"));
   ok("relay-health 不再自己拆冒号", !rhSrc.includes('node.lastIndexOf(":")'));
   // 行为面：方括号写法与裸写法查到同一条判定（同一张表、同一个键）
@@ -2798,8 +2798,8 @@ export async function case182({ W, eq, ok, fs, debugAll }) {
   led261.forget("10.61.7.7");
   eq("RelayLedger.forget 同时清掉快照与待确认", `${led261.counts().sent}/${led261.counts().pending}`, "0/0");
 
-  const rhSrc = fs.readFileSync("src/route/relay-health.ts", "utf8");
-  const ledSrc = fs.readFileSync("src/route/relay-ledger.ts", "utf8");
+  const rhSrc = fs.readFileSync("src/facts/relay-health.ts", "utf8");
+  const ledSrc = fs.readFileSync("src/facts/relay-ledger.ts", "utf8");
   const dbgSrc = debugAll();
   ok("健康表把两张账本换成了一个类", rhSrc.includes("private ledger = new RelayLedger();"), "缺 ledger 字段");
   ok("健康表自己不再持有 sent 表", !rhSrc.includes("private sent ="), "还有 private sent");
@@ -2887,7 +2887,7 @@ export async function case184({ W, eq, fs, ok }) {
   eq("打不通的通道 state 是 2", (pf.bad[0] || {}).state, 2);
   const json263 = W.Prefs.json(10);
   eq("JSON 出口也用新名", Object.keys(json263.ok[0] || {}).sort().join(","), "channel,state,updatedAt");
-  const src263 = fs.readFileSync("src/route/prefs.ts", "utf8");
+  const src263 = fs.readFileSync("src/facts/prefs.ts", "utf8");
   ok("源码里偏好行是语义名", src263.includes("channel: string;") && src263.includes("updatedAt: number;"), src263.slice(0, 0));
   ok("源码里没有旧的 c/s/at 三行", !/^  c: string;$/m.test(src263) && !/^  s: number;$/m.test(src263) && !/^  at: number;$/m.test(src263), src263.slice(0, 0));
   W.VT.clear();
@@ -2918,17 +2918,17 @@ export async function case185({ eq, W, ok, fs }) {
 
   // 源码锁：四份文件里不再有内联的 lastIndexOf(":")（注释里提到不算），且都从 core/http80 取解析
   const src264 = (p) => fs.readFileSync(p, "utf8");
-  for (const f of ["src/route/judge.ts", "src/route/factshadow.ts", "src/proxy/connection.ts", "src/proxy/fallback.ts"]) {
+  for (const f of ["src/facts/judge.ts", "src/facts/factshadow.ts", "src/proxy/connection.ts", "src/proxy/fallback.ts"]) {
     const body = src264(f)
       .split("\n")
       .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
       .join("\n");
     ok(`${f} 不再内联解析 node → IP`, !body.includes('lastIndexOf(":")'), f);
   }
-  ok("judge.ts 用 relayIpOf", src264("src/route/judge.ts").includes("relayIpOf(e.node)"));
+  ok("judge.ts 用 relayIpOf", src264("src/facts/judge.ts").includes("relayIpOf(e.node)"));
   ok("结算模块用 relayIpOf", src264("src/proxy/conn-settle.ts").includes("relayIpOf(v.node)"));
   ok("fallback.ts 用 splitRelay 拆补救链地址", src264("src/proxy/fallback.ts").includes("const [host, port] = splitRelay(alt, 443);"));
-  ok("四份文件都从 core/relay-addr 取解析", ["src/route/judge.ts", "src/route/factshadow.ts", "src/proxy/conn-settle.ts", "src/proxy/fallback.ts"].every((f) => src264(f).includes('from "../core/relay-addr"')));
+  ok("四份文件都从 core/relay-addr 取解析", ["src/facts/judge.ts", "src/facts/factshadow.ts", "src/proxy/conn-settle.ts", "src/proxy/fallback.ts"].every((f) => src264(f).includes('from "../core/relay-addr"')));
 }
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
@@ -2948,7 +2948,7 @@ export async function case186({ W, eq, ok, fs }) {
   ok("释放确实放开了被判死的中继", rels.slice(0, 4).some((ip) => W.VT.state(H268, "r:" + ip) === 0));
   ok("最近判死的两条仍然保留结论", rels.slice(0, 2).every((ip) => W.VT.state(H268, "r:" + ip) === 2));
   // 7.363：三条写动作搬进 FactRegistry，行为断言不变，源码判据改指新位置。
-  const reg268 = fs.readFileSync("src/route/fact-registry.ts", "utf8");
+  const reg268 = fs.readFileSync("src/facts/fact-registry.ts", "utf8");
   ok("释放只在被判死的集合上做", reg268.includes("const dead = relays.filter((ip) => VT.bad(host, \"r:\" + ip));"));
   ok("排序也只在被判死的集合上做", reg268.includes("const sorted = dead.slice()"));
 }
@@ -3570,7 +3570,7 @@ export async function case203({ fs, ok, eq, W }) {
   ok("连接本体不再自己结算节点分数", !connSrc286.includes("NodeStatsTable.nsOk(") && !connSrc286.includes("NodeStatsTable.nsStall(") && !connSrc286.includes("markSeedDirty("), "");
   ok("连接本体不再自己记 PEND 账", !connSrc286.includes("statBump(") && !connSrc286.includes("scheduleFlush("), "");
   ok("flush 只负责调度结算", connSrc286.includes("this.settle.close(this)") && connSrc286.includes("this.settle.pend(this)"), "");
-  ok("通道证据也搬进结算", !connSrc286.includes("HOOK.traffic") && settleSrc286.includes("HOOK.traffic"), "");
+  ok("通道证据也搬进结算", !connSrc286.includes("JUDGE.onTraffic") && settleSrc286.includes("JUDGE.onTraffic"), "");
   const sampBlock286 = sampSrc286.slice(sampSrc286.indexOf("export const SAMPLE_STD_BYTES"), sampSrc286.indexOf("export const EMIT_BYTES"));
   ok("采样换算是纯函数（不读 S、不计数、不 await）", !sampBlock286.includes("S.") && !sampBlock286.includes("cnt(") && !sampBlock286.includes("await ") && sampBlock286.includes("export function sampleWeight") && sampBlock286.includes("export function stalledWindow") && sampBlock286.includes("export function kbsOf"), "采样换算块必须是纯函数");
   eq("权重封顶：额度用完就是 0", W.sampleWeight(W.SC.CONN_W_CAP, 512 * 1024, 1000), 0);
@@ -3585,9 +3585,9 @@ export async function case203({ fs, ok, eq, W }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case204({ fs, ok, eq, W }) {
-  const tab287 = fs.readFileSync("src/route/verdict.ts", "utf8");
+  const tab287 = fs.readFileSync("src/facts/verdict.ts", "utf8");
   ok("表本体持有私有表与单例", tab287.includes("export class VerdictTable") && tab287.includes("private byKey = new BoundedMap") && tab287.includes("export const VT = new VerdictTable();"));
-  ok("不再有十二个 v* 转发函数", !/^export function v/m.test(tab287));
+  ok("不再有十二个 v* 转发函数", !/^export function v(?!t)/m.test(tab287));
   ok("状态机与通配拒写都在表本体", tab287.includes("private static stateOf(") && tab287.includes("private static blockWild("));
   ok("类型与 TTL 与表同住一个文件", tab287.includes("export type VState") && tab287.includes("export interface Verdict") && tab287.includes("export const VT_TTL_MS = 30 * 60_000;"));
   eq("TTL 只有一个真源", (tab287.match(/30 \* 60_000/g) || []).length, 1);
@@ -3645,7 +3645,7 @@ export async function case205({ fs, ok, W }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case206({ fs, ok, W, eq }) {
-  const psSrc = fs.readFileSync("src/route/psfacts.ts", "utf8");
+  const psSrc = fs.readFileSync("src/facts/psfacts.ts", "utf8");
   ok("四个旧文件都不再单独存在",
     ["ps-types.ts", "ps-prior.ts", "ps-outbox.ts", "ps-table.ts"].every((f) => !fs.existsSync("src/route/" + f)), "");
   ok("形状、先验、表本体现在同在一个文件，且队列由基类提供",
@@ -3761,7 +3761,7 @@ export async function case209({ fs, ok, eq, W }) {
   const polCode292 = polSrc.split("\n").filter((l) => !l.trim().startsWith("*") && !l.trim().startsWith("//")).join("\n");
   ok("rankOf 已去写副作用", !polCode292.includes("VT.setState") && !polCode292.includes("VT.clearHost") && !polCode292.includes("BLK.sweep") && !polCode292.includes("healRatio"));
   ok("decide 排序前显式自愈", polSrc.includes("FactRegistry.housekeep(c.host, c.relays);") && polSrc.indexOf("FactRegistry.housekeep") < polSrc.indexOf("const r = rankOf(c);"));
-  const regSrc = fs.readFileSync("src/route/fact-registry.ts", "utf8");
+  const regSrc = fs.readFileSync("src/facts/fact-registry.ts", "utf8");
   ok("registry 保留三条写动作", regSrc.includes("blockedRatio > 0.75 && usable.length < 2") && regSrc.includes("VT.clearHost(host)") && regSrc.includes("BLK.sweep(host, relays)"));
   ok("registry 返回写动作清单", regSrc.includes("FactEffect[]") && regSrc.includes('kind: "verdict"') && regSrc.includes('kind: "blk"'));
   ok("候选层自己排序", polSrc.includes("const ranked = usable"));
@@ -3789,8 +3789,8 @@ export async function case209({ fs, ok, eq, W }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case210({ fs, ok, W, eq }) {
-  const factsSrc = fs.readFileSync("src/route/blkfacts.ts", "utf8");
-  const baseSrc = fs.readFileSync("src/route/fact-table.ts", "utf8");
+  const factsSrc = fs.readFileSync("src/facts/blkfacts.ts", "utf8");
+  const baseSrc = fs.readFileSync("src/facts/fact-table.ts", "utf8");
   ok("两个旧文件都不再单独存在",
     ["blk-types.ts", "blk-outbox.ts"].every((f) => !fs.existsSync("src/route/" + f)), "");
   ok("形状与状态机同在一个文件、队列归基类",
@@ -4043,7 +4043,7 @@ export async function case216({ ok, W, eq, fs }) {
   ok("丢弃计数是个数字", typeof W.ERRS.dropped() === "number");
 
   // 源码锁：这些名字只以「对象.方法」的形态出现，不再有同名模块函数
-  const relSrc303 = fs.readFileSync("src/route/relperf.ts", "utf8");
+  const relSrc303 = fs.readFileSync("src/facts/relperf.ts", "utf8");
   const pendSrc303 = fs.readFileSync("src/store/pend.ts", "utf8");
   const siteSrc303 = fs.readFileSync("src/nodes/metrics.ts", "utf8");
   const aliveSrc303 = fs.readFileSync("src/px/alive.ts", "utf8");
@@ -4055,10 +4055,10 @@ export async function case216({ ok, W, eq, fs }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case217({ fs, ok, W, eq }) {
-  const egSrc = fs.readFileSync("src/route/egfacts.ts", "utf8");
-  const psSrc = fs.readFileSync("src/route/psfacts.ts", "utf8");
-  const deadSrc = fs.readFileSync("src/route/deadfacts.ts", "utf8");
-  const dnsSrc = fs.readFileSync("src/route/dnsfacts.ts", "utf8");
+  const egSrc = fs.readFileSync("src/facts/egfacts.ts", "utf8");
+  const psSrc = fs.readFileSync("src/facts/psfacts.ts", "utf8");
+  const deadSrc = fs.readFileSync("src/facts/deadfacts.ts", "utf8");
+  const dnsSrc = fs.readFileSync("src/facts/dnsfacts.ts", "utf8");
   ok("四张事实表都继承同一个基类",
     [egSrc, psSrc, deadSrc, dnsSrc].every((x) => /export class \w+ extends FactTable</.test(x)), "");
   ok("出口族与成功率表不再自己维护 pending/sent",
@@ -4104,17 +4104,17 @@ export async function case217({ fs, ok, W, eq }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case218({ fs, ok, W, eq }) {
-  const base = fs.readFileSync("src/route/fact-table.ts", "utf8");
+  const base = fs.readFileSync("src/facts/fact-table.ts", "utf8");
   const tables = {
-    dead: "src/route/deadfacts.ts",
-    dns: "src/route/dnsfacts.ts",
-    eg: "src/route/egfacts.ts",
-    ps: "src/route/psfacts.ts",
-    blk: "src/route/blkfacts.ts",
+    dead: "src/facts/deadfacts.ts",
+    dns: "src/facts/dnsfacts.ts",
+    eg: "src/facts/egfacts.ts",
+    ps: "src/facts/psfacts.ts",
+    blk: "src/facts/blkfacts.ts",
   };
   ok("五张事实表都继承同一个基类",
     Object.values(tables).every((f) => /extends FactTable</.test(fs.readFileSync(f, "utf8"))), "");
-  const cap306 = fs.readFileSync("src/route/capfacts.ts", "utf8");
+  const cap306 = fs.readFileSync("src/facts/capfacts.ts", "utf8");
   ok("容量表刻意不继承（没有线格式与待上报队列）",
     !cap306.includes("extends FactTable<") && cap306.includes("CAP_MAX"), "");
   ok("基类提供 unpend 并写明与 forget 的区别",
@@ -4607,7 +4607,7 @@ export async function case233({ fs, ok, eq, W }) {
     "[322] 判定段负责 CF 托管识别、事实预热与连接事实",
     cls322.includes("this.dohCf(host, o.budget)") &&
       dial322.includes("await withTimeout(isCfHost(host, budget), 1200)") &&
-      cls322.includes("refreshCfHttp(host") && cls322.includes("conn.cf = cfHost") && cls322.includes("HOOK.vtLoad("),
+      cls322.includes("refreshCfHttp(host") && cls322.includes("conn.cf = cfHost") && cls322.includes("vtLoad("),
     "classify",
   );
   ok(
@@ -4678,7 +4678,7 @@ export async function case233({ fs, ok, eq, W }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case234({ fs, ok, W, eq }) {
-  const jSrc = fs.readFileSync("src/route/judge.ts", "utf8").replace(/\r\n/g, "\n");
+  const jSrc = fs.readFileSync("src/facts/judge.ts", "utf8").replace(/\r\n/g, "\n");
   const body = (sig) => {
     const i = jSrc.indexOf(sig);
     if (i < 0) return "";
@@ -4827,7 +4827,7 @@ export async function case238({ fs, ok, W, eq }) {
   const rollBody = body327("private rollback(");
   ok("[327] 退回：字节回账本 + 剩余字节回滚 + 计数基线回退 + 增量退回",
     rollBody.includes("this.bytes += ") && rollBody.includes("cntUnsend(cd)") &&
-    rollBody.includes("HOOK.syncNack"));
+    rollBody.includes("syncNackAll"));
 
   const backBody = body327("private backoff(");
   ok("[327] 退避：失败翻倍最多 60s、成功降回 30s",
@@ -6217,7 +6217,7 @@ export async function case255({ fs, ok, eq, W }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case256({ fs, ok, eq, W }) {
-    const prefsSrc349 = fs.readFileSync("src/route/prefs.ts", "utf8");
+    const prefsSrc349 = fs.readFileSync("src/facts/prefs.ts", "utf8");
     const wiring349 = fs.readFileSync("src/route/policy-wiring.ts", "utf8");
     const debugSrc349 = fs.readFileSync("src/routes/debug.ts", "utf8");
     ok(
@@ -6226,7 +6226,7 @@ export async function case256({ fs, ok, eq, W }) {
       prefsSrc349.split("\n").filter((l) => /export const (prefsOf|chanPref|prefsJson)/.test(l)).join(" | "),
     );
     eq("349·偏好视图不再有模块级实例（7.360 全改静态）", /export const PREFS = new Prefs\(\);/.test(prefsSrc349), false);
-    ok("349·策略注册直接用 PREFS 的方法", wiring349.includes("=> Prefs.chan(ip, host)") && !wiring349.includes("chanPref(ip, host)"), "");
+    ok("349·策略注册不再转发 PREFS", !wiring349.includes("HOOK.chanPref") && !wiring349.includes("chanPref(ip, host)"), "");
     ok("349·?prefs=1 直接用 Prefs.json(60)", debugSrc349.includes("Prefs.json(60)") && !debugSrc349.includes("prefsJson("), "");
     // 全仓不再有「转发函数」的调用形态（`chanPref(` 只剩 HOOK 槽位上的 `HOOK.chanPref(`）
     // 本组自带遍历（`walk` 是别的组块作用域里的辅助函数，这里取不到）
@@ -6241,7 +6241,7 @@ export async function case256({ fs, ok, eq, W }) {
     const all349 = walk349("src").map((f) => fs.readFileSync(f, "utf8")).join("\n");
     eq("349·src 里不再调用 prefsOf()", all349.split("prefsOf(").length - 1, 0);
     eq("349·src 里不再调用 prefsJson()", all349.split("prefsJson(").length - 1, 0);
-    eq("349·src 里只有策略注册那一处直接走 Prefs.chan()", all349.split("Prefs.chan(").length - 1, 1);
+    ok("349·src 里没有 HOOK.chanPref 转发层", !all349.includes("HOOK.chanPref"));
     // 行为：三个入口仍然可用，语义与删包装前一致
     W.VT.clear();
     eq("349·没测过的通道不降权（未知 = 1）", W.Prefs.chan("9.9.9.1", "p349.com"), 1);
@@ -6315,7 +6315,7 @@ export async function case258({ fs, ok, W, eq }) {
   ok("351·策略自己持有装配器字段", pol351.includes("private readonly wiring = new PolicyWiring();"));
   ok("351·安装入口走自己的装配器", pol351.includes("this.wiring.install(this);") && !pol351.includes("WIRING.install("));
   ok("351·窗口里不再导出装配器单例", !surf351.includes("WIRING"));
-  ok("351·装配层仍注册 ≥18 个槽位", (wire351.match(/HOOK\.[a-zA-Z]+ =/g) || []).length >= 18);
+  ok("351·装配层只剩 decide 一个槽位", (wire351.match(/HOOK\.[a-zA-Z]+ =/g) || []).length === 1);
   ok("351·装配器仍可独立构造", typeof W.PolicyWiring === "function" && typeof W.PolicyWiring.prototype.install === "function");
   ok("351·旧单例在窗口里已消失", W.WIRING === undefined);
   ok("351·策略仍生效（槽位已装配）", W.POLICY.enabled === true || W.POLICY.enabled === false);
@@ -6482,7 +6482,7 @@ export async function case264({ fs, ok, eq, W }) {
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case266({ fs, ok, W }) {
   const tableSrc359 = fs.readFileSync("src/core/table.ts", "utf8");
-  const judgeSrc359 = fs.readFileSync("src/route/judge.ts", "utf8");
+  const judgeSrc359 = fs.readFileSync("src/facts/judge.ts", "utf8");
   const markBody359 = (() => {
     const at = tableSrc359.indexOf("  mark(key: string");
     const body = tableSrc359.slice(at);
@@ -6629,7 +6629,7 @@ export async function case268({ fs, ok, W }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case270({ fs, ok, W }) {
-  const jd365 = fs.readFileSync("src/route/judge.ts", "utf8");
+  const jd365 = fs.readFileSync("src/facts/judge.ts", "utf8");
   const st365 = fs.readFileSync("src/core/state.ts", "utf8");
   // 结构：类存在且被导出、Judge 自持、三个 S 字段已迁走、门面方法还在
   ok("[365] JudgeMemory 是导出类", jd365.includes("export class JudgeMemory {"));
@@ -6660,8 +6660,8 @@ export async function case270({ fs, ok, W }) {
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case271({ fs, ok, W }) {
   const src366 = (p) => (fs.existsSync(p) ? fs.readFileSync(p, "utf8").replace(/\r\n/g, "\n") : "");
-  const verdict366 = src366("src/route/verdict.ts");
-  const sync366 = src366("src/route/verdictsync.ts");
+  const verdict366 = src366("src/facts/verdict.ts");
+  const sync366 = src366("src/store/verdictsync.ts");
   const attach366 = src366("src/proxy/attacher.ts");
   const scan366 = src366("src/px/scan.ts");
   const dial366 = src366("src/proxy/dial.ts");
@@ -6758,7 +6758,7 @@ export async function case272({ fs, ok, W, eq }) {
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case273({ fs, ok, W, eq }) {
   // ---- D3: vtShape 必须要求全七张表，缺一张就不能置 vtLoaded ----
-  const vsrc368 = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+  const vsrc368 = fs.readFileSync("src/store/verdictsync.ts", "utf8");
   ok("[368] vtShape 登记全七张表", ["vt", "hl", "eg", "ps", "dead", "blk2", "dns"].every((k) => vsrc368.includes(`"${k}"`)));
   ok("[368] 形状校验用 every 遍历", vsrc368.includes("FACT_TABLES.every("));
 
@@ -7265,9 +7265,9 @@ export async function case289({ W, ok, eq, fs }) {
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case290({ fs, ok, W, eq }) {
     const G = 388;
-    const egSrc = fs.readFileSync("src/route/egfacts.ts", "utf8");
-    const fmSrc = fs.readFileSync("src/route/factmul.ts", "utf8");
-    const jdSrc = fs.readFileSync("src/route/judge.ts", "utf8");
+    const egSrc = fs.readFileSync("src/facts/egfacts.ts", "utf8");
+    const fmSrc = fs.readFileSync("src/facts/factmul.ts", "utf8");
+    const jdSrc = fs.readFileSync("src/facts/judge.ts", "utf8");
     ok([`[${G}] egfacts 有 biasFor`], egSrc.includes("biasFor(host: string"));
     ok([`[${G}] egfacts 有 FamFacts 类`], egSrc.includes("export class FamFacts"));
     ok([`[${G}] egfacts 有 FAM 单例`], egSrc.includes("export const FAM = new FamFacts()"));

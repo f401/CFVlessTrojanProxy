@@ -10,7 +10,7 @@ import { POOL_TTL_MS, refillPool, probeSni, chunks, probeProxy } from "./probe";
 import { commitPool, ensurePool } from "./poolgen";
 import { SC } from "../core/const";
 import { keyOf } from "./const";
-import { HOOK } from "../core/hook";
+import { relayProbeNote } from "../facts/relay-health";
 import { SEED_STORE } from "./seed";
 import { splitRelay } from "../core/relay-addr";
 import { BudgetLedger } from "../core/budget-ledger";
@@ -360,7 +360,7 @@ export class ScanHouse {
         })),
       )) as { hs?: number }[];
       res.forEach((x, i) => {
-        if (HOOK.relayProbe) HOOK.relayProbe(h, pool4[i].h, !!x.hs, x.hs || 0);
+        relayProbeNote(h, pool4[i].h, !!x.hs, x.hs || 0);
       });
     }
   }

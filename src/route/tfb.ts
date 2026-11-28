@@ -1,12 +1,12 @@
 import { ISOLATE } from "../core/state";
 import { NODE_MEMORY } from "../core/node-memory";
-import { TFB } from "./tfbbook";
+import { TFB } from "../facts/tfbbook";
 /** 只用到 env（DO 存根），不引 edge 层类型，避免 route -> edge 反向依赖。 */
 type RouteCtx = { env: Env };
 import { withTimeout } from "../core/util";
 import { IpFamily } from "../core/enums";
 import { CONN_OBS } from "../px/regions";
-import { VT } from "./verdict";
+import { VT } from "../facts/verdict";
 import { splitRelay } from "../core/relay-addr";
 import { logErr } from "../nodes/metrics";
 /**

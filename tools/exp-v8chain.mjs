@@ -2,7 +2,7 @@
 //
 // 为什么需要它：单测是**分模块**的（`commitFact` 19 条、`BlkFacts` 17 条……），全绿也不能证明
 // 「judge 喂进来的证据会被写进表、再被 policy 读到」。这个文件只做一件事：用真实的 bundle
-// 走真实入口（`JUDGE.onTraffic` / `HOOK.*`），再从**外部可观测的结果**反推整条链是否接通。
+// 走真实入口（`JUDGE.onTraffic` / `src/facts/*` 直调），再从**外部可观测的结果**反推整条链是否接通。
 //
 // 三条纪律：
 // 1. 不手写内部状态。`W.SHADOW_TABLE.peers` 这类环形由管线自己记录 —— 手工塞进去会被后一条事件覆盖，
@@ -60,11 +60,11 @@ W.PS.note(HOST, IP4, false, now);
 const psAfter = W.PS.factor(HOST, IP4, now);
 ok("ps：连续失败后折价倍数变大（p 变小）", psAfter > psBefore, [psBefore, psAfter]);
 
-// ── 3) dead：走 HOOK（真实接线），两次连不上就判死 ──────────────────────────
-ok("dead：HOOK.deadNote 已注册", typeof W.HOOK.deadNote === "function", typeof W.HOOK.deadNote);
-W.HOOK.deadNote(IP6, false);
+// ── 3) dead：走事实层直调（真实接线），两次连不上就判死 ──────────────────────────
+ok("dead：判死入口可达", typeof W.DEAD.note === "function", typeof W.DEAD.note);
+W.DEAD.note(IP6, false);
 ok("dead：一次失败还不算死", !W.DEAD.isDead(IP6, now));
-W.HOOK.deadNote(IP6, false);
+W.DEAD.note(IP6, false);
 ok("dead：两次连不上判死", W.DEAD.isDead(IP6, now), true);
 
 // ── 4) blk：真实入口喂三批 tiny + 管线自己记的整页对照 ───────────────────────

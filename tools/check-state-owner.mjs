@@ -14,9 +14,9 @@ import ts from "typescript";
 /** 已从 `S` 迁出的字段：{ 字段名: 现在归谁持有 } */
 const MIGRATED = new Map([
   // 7.365 判定层软记忆
-  ["bigByHost", "JudgeMemory（src/route/judge.ts）"],
-  ["bigChan", "JudgeMemory（src/route/judge.ts）"],
-  ["smCnt", "JudgeMemory（src/route/judge.ts）"],
+  ["bigByHost", "JudgeMemory（src/facts/judge.ts）"],
+  ["bigChan", "JudgeMemory（src/facts/judge.ts）"],
+  ["smCnt", "JudgeMemory（src/facts/judge.ts）"],
   // 7.369 AppState 上帝对象下放：以下字段全部从 S 迁进各自模块的实例持有者
   ["cntKeys", "Counter（src/core/counter.ts）"],
   ["cnt", "Counter（src/core/counter.ts）"],
@@ -35,13 +35,13 @@ const MIGRATED = new Map([
   ["snapBusy", "SnapshotState（src/store/snapshot.ts）"],
   ["snapChecked", "SnapshotState（src/store/snapshot.ts）"],
   ["lastManual", "ProxyipView（src/routes/proxyip.ts）"],
-  ["bigTyp", "ShadowTable（src/route/factshadow.ts）"],
+  ["bigTyp", "ShadowTable（src/facts/factshadow.ts）"],
   ["poolAt", "PoolReadyClock（src/px/pickpath.ts）"],
   ["aliveAt", "WarmPacer（src/px/warm.ts）"],
-  ["vtPend", "VtSyncLedger（src/route/verdict.ts）"],
-  ["vtSent", "VtSyncLedger（src/route/verdict.ts）"],
-  ["vtCool", "VtSyncLedger（src/route/verdict.ts）"],
-  ["vtFlight", "VtSyncLedger（src/route/verdict.ts）"],
+  ["vtPend", "VtSyncLedger（src/facts/verdict.ts）"],
+  ["vtSent", "VtSyncLedger（src/facts/verdict.ts）"],
+  ["vtCool", "VtSyncLedger（src/facts/verdict.ts）"],
+  ["vtFlight", "VtSyncLedger（src/facts/verdict.ts）"],
   ["dnsCache", "DnsCache（src/proxy/dial.ts）"],
   ["v4AllCache", "DnsCache（src/proxy/dial.ts）"],
   ["aaaaCache", "DnsCache（src/proxy/dial.ts）"],

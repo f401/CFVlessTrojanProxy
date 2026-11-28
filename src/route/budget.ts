@@ -9,7 +9,7 @@ import { ISOLATE } from "../core/state";
 // 7.186 之前这里还有一个 `cap` 字段自称「本轮总闸」，但它零读取点：单测拿它当上界做断言，
 // 生产侧从来没有任何减法 —— 等于在验证一条不存在的约束（六型里的「假仪表」）。
 import { SC } from "../core/const";
-import { VT } from "./verdict";
+import { VT } from "../facts/verdict";
 import { DOH_ENDPOINTS } from "../proxy/dial";
 import { REFILL_MAX } from "../px/probe";
 import { RESTORE_MAX } from "../store/snapshot";

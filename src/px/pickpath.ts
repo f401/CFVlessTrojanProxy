@@ -11,7 +11,9 @@ import { cnt } from "../core/counter";
 import { costOf, isBlack, isFrozen, usable, NodeStatsTable, CANDS } from "../nodes/score";
 import { ThompsonPicker } from "./ts";
 import { relayIpOf } from "../core/relay-addr";
-import { HOOK } from "../core/hook";
+import { Prefs } from "../facts/prefs";
+import { vetoRelay } from "../facts/relay-health";
+import { vtPrefer } from "../facts/verdict";
 import { isCfIp } from "../core/net";
 import { keyOf } from "./const";
 import { QUALITY } from "./regions";
@@ -281,8 +283,7 @@ export class PathPrefs {
    * @returns {boolean} 是否否决
    */
   vetoed(host: string, key: string): boolean {
-    const vet = HOOK.veto;
-    return vet && host ? vet(host, relayIpOf(key)) : false;
+    return host ? vetoRelay(host, relayIpOf(key)) : false;
   }
 
   /**
@@ -294,8 +295,7 @@ export class PathPrefs {
    * @returns {string} 候选键；没有符合条件的返回空串
    */
   byPrefer(host: string, mode: Mode, cfOnly: boolean, exclude: Set<string> | null): string {
-    const prefer = HOOK.prefer;
-    if (!prefer) return "";
+    const prefer = vtPrefer;
     const now = Date.now();
     let best = "";
     let bv = Infinity;
@@ -320,8 +320,7 @@ export class PathPrefs {
    * @returns {boolean} true 表示要优先非 CF 出口
    */
   nonCfFirst(): boolean {
-    const fn = HOOK.nonCfFirst;
-    return fn ? fn() : false;
+    return true;
   }
 
   /**
@@ -386,9 +385,7 @@ export class PathPrefs {
    * @returns {boolean} true 表示可用（打得通 0 与没测过 1 都算可用 —— 未知不等于坏）
    */
   chanOpen(host: string, key: string): boolean {
-    const cp = HOOK.chanPref;
-    if (!cp) return true;
-    return cp(relayIpOf(key), host) < 2;
+    return Prefs.chan(relayIpOf(key), host) < 2;
   }
 
   /**
@@ -399,8 +396,7 @@ export class PathPrefs {
    * @returns {string} 候选键；没有符合条件的返回空串
    */
   byChan(host: string, mode: Mode, exclude: Set<string> | null): string {
-    const cp = HOOK.chanPref;
-    if (!cp) return "";
+    const cp = (ip: string, hh = ""): number => Prefs.chan(ip, hh);
     let best = "";
     let bv = Infinity;
     // 这里用的是候选表：换通道时仍然要按「代价」挑，而不是随便找一条没被判死的

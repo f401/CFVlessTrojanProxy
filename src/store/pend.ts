@@ -1,6 +1,8 @@
 import { TRAFFIC_MEMORY } from "../core/traffic-memory";
 import { ERROR_MEMORY } from "../core/client-memory";
-import { HOOK } from "../core/hook";
+import { FactsStore } from "../facts/factsstore";
+import { HEALTH } from "../facts/relay-health";
+import { syncAckAll, syncNackAll, vtDelta } from "./verdictsync";
 import { SC } from "../core/const";
 import { cnt, cntDelta, cntUnsend } from "../core/counter";
 import { eachLimit } from "../core/util";
@@ -222,14 +224,14 @@ export class PendingLedger {
     body.c = { ...cd, d: today }; // 只挂一次，避免重复计
     body.spd = spdSnapshot(); // 节点快照：跨 isolate 可见
     body.e = ERROR_MEMORY.rows.slice(-8); // 错误也带上去：/logs 才能跨 isolate
-    if (HOOK.vtDelta) {
-      const vt = HOOK.vtDelta();
+    {
+      const vt = vtDelta();
       if (vt.length) body.vt = vt;
-      const hl = HOOK.healthDelta ? HOOK.healthDelta() : [];
+      const hl = HEALTH.delta();
       if (hl.length) body.hl = hl;
     }
     // 六类事实一次取齐：新增一类只需改 FactsStore，不必在这里加槽位
-    const fd = HOOK.factsDelta ? HOOK.factsDelta() : null;
+    const fd = FactsStore.delta();
     if (fd) {
       if (fd.blk2 && fd.blk2.length) body.blk2 = fd.blk2;
       if (fd.dead && fd.dead.length) body.dead = fd.dead;
@@ -273,7 +275,7 @@ export class PendingLedger {
    */
   private ack(id: string, carry: PendCarry): void {
     if (carry.owner && String(id).toLowerCase() === carry.owner) {
-      if (carry.sync && HOOK.syncAck) HOOK.syncAck();
+      if (carry.sync) syncAckAll();
       // 按行相减，而不是把整张表清掉（v7.157）：在途期间新加的观测必须留下
       if (carry.rows.length) this.clAck(carry.rows);
     }
@@ -301,7 +303,7 @@ export class PendingLedger {
     this.bytes += (d.up || 0) + (d.down || 0); // 回滚失败批次：健康页与立即刷新的判断要准
     if (carry.owner && String(id).toLowerCase() === carry.owner) {
       if (mine) cntUnsend(cd); // 日计数搭车主批次失败 → 基线退回，下轮重发
-      if (carry.sync && HOOK.syncNack) HOOK.syncNack(); // 判定/中继增量退回，下轮重发
+      if (carry.sync) syncNackAll(); // 判定/中继增量退回，下轮重发
     }
     // 失败也要让用量缓存失效：在途期间别的 isolate 可能已经改了账本，
     // 留着旧缓存会让 readStats 继续返回过期值（与 ack 分支对称，1.2）

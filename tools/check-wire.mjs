@@ -11,27 +11,27 @@ import path from "node:path";
 
 /** 待检查的符号 → 允许的「自己人」文件（定义处，不算调用点） */
 const NEED = [
-  { sym: "EG.bias", own: "src/route/egfacts.ts", why: "选路读取出口族" },
-  { sym: "PS.note", own: "src/route/psfacts.ts", why: "成功率事实的写入点（judge 按 commitFact 裁决）" },
-  { sym: "EG.note", own: "src/route/egfacts.ts", why: "出口族写入点（在 egDerive 内）", via: "egDerive" },
-  { sym: "psFactor", own: "src/route/psfacts.ts", why: "选路读取成功率" },
-  { sym: "deadNote", own: "src/route/deadfacts.ts", why: "连不上事实的写入点" },
-  { sym: "isDead", own: "src/route/deadfacts.ts", why: "选路读取判死" },
-  { sym: "BLK.note", own: "src/route/blkfacts.ts", why: "封锁事实的写入点" },
-  { sym: "blkPen", own: "src/route/blkfacts.ts", why: "选路读取封锁" },
+  { sym: "EG.bias", own: "src/facts/egfacts.ts", why: "选路读取出口族" },
+  { sym: "PS.note", own: "src/facts/psfacts.ts", why: "成功率事实的写入点（judge 按 commitFact 裁决）" },
+  { sym: "EG.note", own: "src/facts/egfacts.ts", why: "出口族写入点（在 egDerive 内）", via: "egDerive" },
+  { sym: "psFactor", own: "src/facts/psfacts.ts", why: "选路读取成功率" },
+  { sym: "deadNote", own: "src/facts/deadfacts.ts", why: "连不上事实的写入点" },
+  { sym: "isDead", own: "src/facts/deadfacts.ts", why: "选路读取判死" },
+  { sym: "BLK.note", own: "src/facts/blkfacts.ts", why: "封锁事实的写入点" },
+  { sym: "blkPen", own: "src/facts/blkfacts.ts", why: "选路读取封锁" },
   { sym: "FO.note", own: "src/core/obs.ts", why: "冷启动观测写入点" },
-  { sym: "DNS.penOf", own: "src/route/dnsfacts.ts", why: "选路读取 AAAA 事实" },
+  { sym: "DNS.penOf", own: "src/facts/dnsfacts.ts", why: "选路读取 AAAA 事实" },
   { sym: "probeFam", own: "src/proxy/dial.ts", why: "AAAA 探测的生产调用点" },
-  { sym: "egDerive", own: "src/route/egfacts.ts", why: "出口族推导的生产调用点（judge.onTraffic）" },
-  { sym: "commitFact", own: "src/route/commitfact.ts", why: "写入决策器被真实链路调用" },
-  { sym: "CAP.note", own: "src/route/capfacts.ts", why: "吞吐容量写入点（经 HOOK.capNote 的薄包装 capNote）", via: "capNote" },
-  { sym: "CAP.factor", own: "src/route/capfacts.ts", why: "选路读取容量比（薄包装 capFactor 已删）" },
+  { sym: "egDerive", own: "src/facts/egfacts.ts", why: "出口族推导的生产调用点（judge.onTraffic）" },
+  { sym: "commitFact", own: "src/facts/commitfact.ts", why: "写入决策器被真实链路调用" },
+  { sym: "CAP.note", own: "src/facts/capfacts.ts", why: "吞吐容量写入点（经 HOOK.capNote 的薄包装 capNote）", via: "capNote" },
+  { sym: "CAP.factor", own: "src/facts/capfacts.ts", why: "选路读取容量比（薄包装 capFactor 已删）" },
 ];
 
 // 槽位不是「调用」而是「注册」：符号扫描看不见它们，于是出现过一个真洞 ——
 // `HOOK.facts` 从来没被赋值，`?facts=none` 只影响 /health 显示、不影响选路，
 // 而所有行为测试都通过（它们直接调 factMul）。这里补一条静态检查。
-const SLOTS = ["facts", "factsFor", "factsDelta", "decide", "vtLoad"];
+// 槽位清单不再硬编码：见下面「HOOK 赋值只允许 decide」的扫描。
 
 const files = [];
 const walk = (d) => {
@@ -54,15 +54,22 @@ for (const n of NEED) {
     console.log(`FAIL ${n.sym} 没有生产调用点（${n.why}）`);
   }
 }
-// HOOK 槽位：proxy 层只读不赋值，赋值必须发生在别处（route 层注册）
+// HOOK 槽位（7.439 起只剩 decide）：其余事实改成 src/facts 的直接 import ——
+// 少一层「注册」就少一类静默失效（7.123 的 HOOK.facts 从未注册，整轮对比实验作废）。
 let slotFail = 0;
-for (const name of SLOTS) {
-  const needle = `HOOK.${name} =`;
-  const hits = prod.filter((f) => fs.readFileSync(f, "utf8").includes(needle));
-  if (!hits.length) {
-    slotFail += 1;
-    console.log(`FAIL HOOK.${name} 从未被注册（读它的代码会静默退回默认行为）`);
+const seenSlots = new Set();
+for (const f of prod) {
+  for (const m of fs.readFileSync(f, "utf8").matchAll(/HOOK\.([A-Za-z0-9_]+)\s*=/g)) {
+    seenSlots.add(m[1]);
+    if (m[1] !== "decide") {
+      slotFail += 1;
+      console.log(`FAIL HOOK.${m[1]} 不允许再赋值（只剩 decide，其余直接调 facts 层）（${f}）`);
+    }
   }
+}
+if (!seenSlots.has("decide")) {
+  slotFail += 1;
+  console.log("FAIL HOOK.decide 从未被注册（proxy 侧决策会退回 wantPx）");
 }
 fail += slotFail;
 // 计数字面量必须在 Counter.keys 登记：漏登记时 cnt() 只打一行 `[cnt] unknown key` 就静默丢计数，

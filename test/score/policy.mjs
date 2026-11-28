@@ -868,7 +868,7 @@ export async function case202({ fs, ok, W, eq }) {
   ok("端口类型住在装配层", ctxSrc.includes("export interface Ctx") && ctxSrc.includes("export interface Choice"));
   ok("常量仍在策略本体", polSrc285.includes("export const FULL_ON") && polSrc285.includes("export const HOST_MEM_MAX"));
   ok("装配层用结构化接口收参数", wireSrc.includes("install(policy: PolicySource): void {") && wireSrc.includes("export interface PolicySource"));
-  ok("装配层注册点 ≥ 18", (wireSrc.match(/HOOK\.[a-zA-Z]+ =/g) || []).length >= 18);
+  ok("装配层只注册 decide 一个槽位", (wireSrc.match(/HOOK\.[a-zA-Z]+ =/g) || []).length === 1);
   ok("装配层不含决策算法（没有 pin 表）", !wireSrc.includes("private pin") && !wireSrc.includes("HOST_MEM_MAX"));
   ok("策略本体不再自己注册 HOOK", !polSrc285.includes("HOOK.decide = ") && !polSrc285.includes("HOOK.facts = "));
   ok("策略本体通过自己的装配器接槽位", polSrc285.includes("this.wiring.install(this);"));

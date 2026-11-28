@@ -261,25 +261,25 @@
     "legacyField": "vtLoaded",
     "owner": "VT_SYNC",
     "member": "loaded",
-    "module": "src/route/verdict.ts"
+    "module": "src/facts/verdict.ts"
   },
   {
     "legacyField": "factSet",
     "owner": "FACT_SWITCHES",
     "member": "current",
-    "module": "src/route/factflags.ts"
+    "module": "src/facts/factflags.ts"
   },
   {
     "legacyField": "peers",
     "owner": "SHADOW_TABLE",
     "member": "peers",
-    "module": "src/route/factshadow.ts"
+    "module": "src/facts/factshadow.ts"
   },
   {
     "legacyField": "tfbV",
     "owner": "TFB",
     "member": "verdicts",
-    "module": "src/route/tfbbook.ts"
+    "module": "src/facts/tfbbook.ts"
   },
   {
     "legacyField": "polSame",

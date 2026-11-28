@@ -314,3 +314,29 @@ export class VerdictTable {
 
 /** 进程内唯一判定表 */
 export const VT = new VerdictTable();
+
+/**
+ * 功能：该站点 × 该中继是否被实测判过可用（判定表里的 ok 证据）。
+ * @param host 目标站
+ * @param ip 中继 IP
+ * @returns {boolean} 判过 ok 为 true
+ */
+export function vtPrefer(host: string, ip: string): boolean {
+  return !!host && !!ip && VT.ok(host, "r:" + ip);
+}
+
+/**
+ * 功能：该站点最近哪条通道成功过（直连 / 中继各自的弱证据汇总）。
+ * @param host 目标站
+ * @returns {{ d: boolean; r: boolean }} 直连与中继是否各自成功过
+ */
+export function vtWin(host: string): { d: boolean; r: boolean } {
+  let d = false;
+  let r = false;
+  for (const v of VT.all()) {
+    if (v.target !== host || v.state !== 1) continue;
+    if (v.channel === "d") d = true;
+    else if (v.channel.startsWith("r:")) r = true;
+  }
+  return { d, r };
+}

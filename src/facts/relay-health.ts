@@ -5,6 +5,7 @@
 import { relayIpOf } from "../core/relay-addr";
 import { RelayLedger } from "./relay-ledger";
 import { PAGE_ABS } from "../core/facts";
+import { VT } from "./verdict";
 
 /** 中继健康记录 */
 interface RelayStat {
@@ -233,3 +234,29 @@ export function ipOf(node: string): string {
   return relayIpOf(node);
 }
 
+
+/**
+ * 功能：该站点 × 该中继出口是否已被判定为不可用（blocked/dead），或中继本身快死了。
+ * 口径：判定表里有坏记录就否决；健康度低于 0.3 也否决 —— 这类中继会把 403 变成 timeout。
+ * @param host 目标站（空串表示只看中继本身）
+ * @param ip 中继 IP
+ * @returns {boolean} 应当避开为 true
+ */
+export function vetoRelay(host: string, ip: string): boolean {
+  if (!ip) return false;
+  if (host && VT.bad(host, "r:" + ip)) return true;
+  return HEALTH.score(ip) < 0.3;
+}
+
+/**
+ * 功能：把「这条中继能不能替该站点转出去」的实测写进判定表（只有成功才写 ok 证据）。
+ * @param host 目标站
+ * @param ip 中继 IP
+ * @param ok 是否握手成功
+ * @param ms 握手耗时（毫秒）
+ * @returns {void}
+ */
+export function relayProbeNote(host: string, ip: string, ok: boolean, ms: number): void {
+  if (!ok) return;
+  VT.set(host, "r:" + ip, 200, ms, 1);
+}

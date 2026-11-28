@@ -107,13 +107,13 @@ export async function case112({ W, eq }) {
     clAckCalls += 1;
     return oldClAck(rows);
   };
-  const oldNack = W.HOOK.syncNack;
-  W.HOOK.syncNack = () => {
+  const oldNack = W.syncNackAll;
+  W.HOOK.syncNackAll = () => {
     nackCalls += 1;
   };
   await W.PEND.flush({ METER: mkMeter(["u2"]), uuid: "u1" }, true);
   W.PEND.clAck = oldClAck;
-  W.HOOK.syncNack = oldNack;
+  W.HOOK.syncNackAll = oldNack;
   eq("连接观测只按发出去的那一批相减一次", clAckCalls, 1);
   eq("别的用户批次失败不会退回主批次的增量", nackCalls, 0);
   eq("失败用户的增量原样回到账本", (W.PEND.rows.get("u2") || {}).up, 30);

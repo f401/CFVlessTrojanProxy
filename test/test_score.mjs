@@ -76,9 +76,9 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 let pass = 0,
   fail = 0;
 /** 功能：读判定表的源码文本（合并成一个文件之后只剩这一份，源码锁读它）。 */
-const verdictAll = () => fs.readFileSync("src/route/verdict.ts", "utf8");
+const verdictAll = () => fs.readFileSync("src/facts/verdict.ts", "utf8");
 /** 功能：把「站点 × 中继」成功率事实的五个文件合成一段文本（源码锁读它）。 */
-const psAll = () => fs.readFileSync("src/route/psfacts.ts", "utf8");
+const psAll = () => fs.readFileSync("src/facts/psfacts.ts", "utf8");
 /** 功能：把一轮池子维护的编排层与三个执行器的源码合并成一段文本（源码锁读它）。 */
 const scanAll = () =>
   ["src/px/scan.ts"]
@@ -1247,42 +1247,42 @@ ok("原因分布有键", Object.keys(W.POLICY.reasons).length > 0, JSON.stringif
 // 第 33 组：判定表接入选路（veto）
 W.VT.clear();
 W.VT.set("x.com", "r:" + "45.136.117.194", 403, 70, 1);
-ok("被判 blocked 的中继被 veto", W.HOOK.veto("x.com", "45.136.117.194") === true);
-ok("同站点未判过的中继不被 veto", W.HOOK.veto("x.com", "89.22.227.132") === false);
-ok("站点级判定不外溢到别的站点", W.HOOK.veto("y.com", "45.136.117.194") === false);
+ok("被判 blocked 的中继被 veto", W.vetoRelay("x.com", "45.136.117.194") === true);
+ok("同站点未判过的中继不被 veto", W.vetoRelay("x.com", "89.22.227.132") === false);
+ok("站点级判定不外溢到别的站点", W.vetoRelay("y.com", "45.136.117.194") === false);
 W.VT.set("*", "r:" + "89.22.227.132", 0, 900, 1);
-ok("通配判定不再生效：写不进表，也不会外溢到别的站点", W.HOOK.veto("y.com", "89.22.227.132") === false);
+ok("通配判定不再生效：写不进表，也不会外溢到别的站点", W.vetoRelay("y.com", "89.22.227.132") === false);
 W.VT.clear();
-ok("清空后不再 veto", W.HOOK.veto("x.com", "45.136.117.194") === false);
+ok("清空后不再 veto", W.vetoRelay("x.com", "45.136.117.194") === false);
 // 第 34 组：连接证据钩子（traffic，差分判据）
 W.VT.clear(); W.RELAY_DEMAND.clear(); W.JUDGE.memory.smCnt.clear(); W.JUDGE.memory.bigByHost.clear();
-W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false, life: 800, up: 0 });
+W.JUDGE.onTraffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false, life: 800, up: 0 });
 eq("只有小响应时不判死（可能只是业务层 403）", W.VT.state("x.com", "r:45.136.117.194"), 0);
 ok("小响应按通道记进 smCnt（不再有复核队列，这条计数是它唯一的下游）", (W.JUDGE.memory.smCnt.get("x.com|r:45.136.117.194") || 0) >= 1);
-W.HOOK.traffic({ host: "x.com", via: "node", node: "89.22.227.132:443", down: 90000, ok: true, life: 4000, up: 900 });
+W.JUDGE.onTraffic({ host: "x.com", via: "node", node: "89.22.227.132:443", down: 90000, ok: true, life: 4000, up: 900 });
 eq("同一站点别的通道能打通 → 记为 ok", W.VT.state("x.com", "r:89.22.227.132"), 1);
-W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false, life: 800, up: 0 });
+W.JUDGE.onTraffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 900, ok: false, life: 800, up: 0 });
 eq("有别的通道能打通 + 本通道两次小响应 → 判该通道被封", W.VT.state("x.com", "r:45.136.117.194"), 2);
 ok("判被封后设 needPx（下次优先中转）", (W.RELAY_DEMAND.get("x.com") || 0) > Date.now());
-W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 90000, ok: true, life: 4000, up: 900 });
+W.JUDGE.onTraffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 90000, ok: true, life: 4000, up: 900 });
 eq("之后拿到大响应 → 解除误判", W.VT.state("x.com", "r:45.136.117.194"), 1);
 
 // 第 35 组：判定表跨 isolate 同步（只同步强证据）
 W.VT.clear(); W.VT_SYNC.sent.clear();
 W.VT.set("x.com", "r:" + "45.136.117.194", 403, 60, 1);
-const dl = W.HOOK.vtDelta();
+const dl = W.vtDelta();
 eq("强证据进增量", dl.length, 1);
 eq("增量键是 target|chan", dl[0].k, "x.com|r:45.136.117.194");
 eq("增量里是 blocked", dl[0].s, 2);
 W.vtAck();
-eq("ack 之后同一证据不重复上报", W.HOOK.vtDelta().length, 0);
+eq("ack 之后同一证据不重复上报", W.vtDelta().length, 0);
 W.VT.clear();
 eq("清空后本地为空", W.VT.all().length, 0);
 W.VT.import(dl);
 eq("远端强证据可导入", W.VT.state("x.com", "r:45.136.117.194"), 2);
-ok("导入后 veto 生效", W.HOOK.veto("x.com", "45.136.117.194") === true);
+ok("导入后 veto 生效", W.vetoRelay("x.com", "45.136.117.194") === true);
 W.VT.set("y.com", "r:" + "1.1.1.1", 200, 40, 1);
-ok("ok 证据不进增量", W.HOOK.vtDelta().every((r) => r.k !== "y.com|r:1.1.1.1"));
+ok("ok 证据不进增量", W.vtDelta().every((r) => r.k !== "y.com|r:1.1.1.1"));
 W.VT.clear(); W.VT_SYNC.sent.clear();
 // 第 36 组：策略分级（0 影子 / 1 只硬规则 / 2 全生效）
 reset(); node("n1:443", {});
@@ -1346,14 +1346,14 @@ W.JUDGE.memory.smCnt.clear();
 W.JUDGE.memory.bigByHost.clear();
 W.JUDGE.memory.bigChan.clear();
 // 1) 没有基线时，小响应不判死任何通道（业务 403 与封锁页在此不可区分）
-W.HOOK.traffic({ host: "api.biz.com", via: "node", node: "9.9.9.9:443", down: 4000, ok: false, life: 900, up: 300 });
-W.HOOK.traffic({ host: "api.biz.com", via: "node", node: "9.9.9.9:443", down: 4000, ok: false, life: 900, up: 300 });
+W.JUDGE.onTraffic({ host: "api.biz.com", via: "node", node: "9.9.9.9:443", down: 4000, ok: false, life: 900, up: 300 });
+W.JUDGE.onTraffic({ host: "api.biz.com", via: "node", node: "9.9.9.9:443", down: 4000, ok: false, life: 900, up: 300 });
 eq("无基线的小响应不写判定（两次也不判）", W.VT.bad("api.biz.com", "r:9.9.9.9"), false);
 ok("无基线时只学「下次优先中转」", (W.RELAY_DEMAND.get("api.biz.com") || 0) > Date.now());
 // 2) A 通道拿到整页 → B 通道的小响应才判被封
-W.HOOK.traffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 60000, ok: true, life: 3000, up: 900 });
+W.JUDGE.onTraffic({ host: "x.com", via: "node", node: "45.136.117.194:443", down: 60000, ok: true, life: 3000, up: 900 });
 eq("大响应建立基线", W.VT.state("x.com", "r:45.136.117.194"), 1);
-W.HOOK.traffic({ host: "x.com", via: "node", node: "185.253.117.147:443", down: 4200, ok: false, life: 900, up: 300 });
+W.JUDGE.onTraffic({ host: "x.com", via: "node", node: "185.253.117.147:443", down: 4200, ok: false, life: 900, up: 300 });
 eq("差分成立 → 判该中继被封", W.VT.bad("x.com", "r:185.253.117.147"), true);
 eq("拿到整页的通道不受牵连", W.VT.bad("x.com", "r:45.136.117.194"), false);
 // 3) 同一通道「先整页、后小响应」不算差分（可能是站点自身行为变化）
@@ -1361,19 +1361,19 @@ W.VT.clear();
 W.JUDGE.memory.smCnt.clear();
 W.JUDGE.memory.bigByHost.clear();
 W.JUDGE.memory.bigChan.clear();
-W.HOOK.traffic({ host: "y.com", via: "node", node: "7.7.7.7:443", down: 60000, ok: true, life: 3000, up: 900 });
-W.HOOK.traffic({ host: "y.com", via: "node", node: "7.7.7.7:443", down: 4000, ok: false, life: 900, up: 300 });
+W.JUDGE.onTraffic({ host: "y.com", via: "node", node: "7.7.7.7:443", down: 60000, ok: true, life: 3000, up: 900 });
+W.JUDGE.onTraffic({ host: "y.com", via: "node", node: "7.7.7.7:443", down: 4000, ok: false, life: 900, up: 300 });
 eq("同通道先大后小不判死", W.VT.bad("y.com", "r:7.7.7.7"), false);
 // 4) 中继假 200（nginx 默认页）攒够 3 次才判
 W.VT.clear();
 W.JUDGE.memory.smCnt.clear();
-for (let i = 0; i < 3; i++) W.HOOK.traffic({ host: "z.com", via: "node", node: "6.6.6.6:443", down: 4300, ok: true, life: 900, up: 200 });
+for (let i = 0; i < 3; i++) W.JUDGE.onTraffic({ host: "z.com", via: "node", node: "6.6.6.6:443", down: 4300, ok: true, life: 900, up: 200 });
 eq("假 200 攒 3 次判该中继不可用", W.VT.bad("z.com", "r:6.6.6.6"), true);
 // 第 44 组：1 次请求感知 + 站点自愈（判定只改路由，永不断路）
 W.VT.clear(); W.RELAY_DEMAND.clear(); W.JUDGE.memory.smCnt.clear(); W.JUDGE.memory.bigByHost.clear(); W.JUDGE.memory.bigChan.clear(); W.CF_HTTP.cache.clear();
 // 1) 本出口 fetch 200 不再是判死旁证：没有另一通道整页差分，业务 403/小响应绝不判死
 W.CF_HTTP.cache.set("x.com", { code: 200, colo: "VIE", t: Date.now() });
-W.HOOK.traffic({ host: "x.com", via: "node", node: "5.5.5.5:443", down: 4200, ok: false, life: 900, up: 300 });
+W.JUDGE.onTraffic({ host: "x.com", via: "node", node: "5.5.5.5:443", down: 4200, ok: false, life: 900, up: 300 });
 eq("无整页差分时即使本出口 fetch 200 也不判死（业务 403 不误伤）", W.VT.bad("x.com", "r:5.5.5.5"), false);
 // 2) 站点自愈：所有中继都被判死时，决策仍给出中继，且该站点的结论被清空
 W.VT.clear();
@@ -1387,7 +1387,7 @@ eq("自愈后该站点的封禁结论被清掉", W.VT.bad("y.com", "r:1.1.1.1"),
 W.VT.clear();
 W.JUDGE.memory.smCnt.clear();
 W.CF_HTTP.cache.set("api.biz.com", { code: 403, colo: "AMS", t: Date.now() });
-W.HOOK.traffic({ host: "api.biz.com", via: "node", node: "8.8.8.8:443", down: 4200, ok: false, life: 900, up: 300 });
+W.JUDGE.onTraffic({ host: "api.biz.com", via: "node", node: "8.8.8.8:443", down: 4200, ok: false, life: 900, up: 300 });
 eq("业务 403 站点不被单次判死", W.VT.bad("api.biz.com", "r:8.8.8.8"), false);
 // ═══ 第 45 组：中继存活度 RelayHealth + 偏好视图 Prefs（OOP 化后的 P1 改动）═══
 W.HEALTH.clear();
@@ -1402,8 +1402,8 @@ eq("ipOf 从 host:port 取 IP", W.ipOf("1.2.3.4:443"), "1.2.3.4");
 W.HEALTH.clear();
 W.HEALTH.note("7.7.7.7:443", 0, false);
 W.HEALTH.note("7.7.7.7:443", 0, false);
-eq("快死的中继被 veto（把 timeout 变成换道）", W.HOOK.veto("x.com", "7.7.7.7"), true);
-eq("未知中继不被 veto", W.HOOK.veto("x.com", "6.6.6.6"), false);
+eq("快死的中继被 veto（把 timeout 变成换道）", W.vetoRelay("x.com", "7.7.7.7"), true);
+eq("未知中继不被 veto", W.vetoRelay("x.com", "6.6.6.6"), false);
 W.HEALTH.clear();
 W.VT.clear();
 W.VT.setState("z.com", "r:5.5.5.5", 1, 1);
@@ -1659,10 +1659,10 @@ eq("FactsStore.clear 一并清 dns", (W.FactsStore.clear(), W.DNS.v6Of("a.exampl
 
 
 console.log("\n96) 事实开关真的接进选路");
-eq("HOOK.facts 已注册（否则绑定只是显示）", typeof W.HOOK.facts, "function");
-eq("HOOK.factsFor 已注册", typeof W.HOOK.factsFor, "function");
-eq("?fx=none 解析成空集合", W.HOOK.factsFor("none").size, 0);
-eq("?fx=eg 只开一类", [...W.HOOK.factsFor("eg")].join(","), "eg");
+eq("HOOK.facts 已注册（否则绑定只是显示）", typeof W.currentFacts, "function");
+eq("HOOK.factsFor 已注册", typeof W.factOnce, "function");
+eq("?fx=none 解析成空集合", W.factOnce("none").size, 0);
+eq("?fx=eg 只开一类", [...W.factOnce("eg")].join(","), "eg");
 W.EG.clear();
 W.EG.note("203.0.113.9", 6, Date.now());
 eq("开 eg 时 v6 出口被重罚", W.factMul(new Set(["eg"]), "x.com", "203.0.113.9", "tput", true) > 1, true);
@@ -1788,7 +1788,7 @@ W.trimAged(W.JUDGE.memory.smCnt, W.SC.SM_CNT_MAX);
 eq("裁剪后正好等于上限", W.JUDGE.memory.smCnt.size, 512);
 ok("计数大的那行还在（这张表留大删小）", W.JUDGE.memory.smCnt.has("keep.test|r:198.51.100.9"));
 ok("计数最小的那些先被删", !W.JUDGE.memory.smCnt.has("flood0.test|r:198.51.100.9"));
-const judgeSrc = fs.readFileSync("src/route/judge.ts", "utf8");
+const judgeSrc = fs.readFileSync("src/facts/judge.ts", "utf8");
 ok("judge 写入 smCnt 后就地裁剪（源码断言，防止被悄悄删掉）", judgeSrc.includes("trimAged(this.smCnt"));
 W.JUDGE.memory.smCnt.clear();
 
@@ -2246,7 +2246,7 @@ ok("留底带着原值", meterSrc221.includes("this.ledger.keepBackup(all);"));
 ok("落盘前备份 a_bak", meterSrc221.includes("const bak = this.ledger.takeBackup();") && meterSrc221.includes("await this.state.storage.put(\"a_bak\", bak);"));
 
 // ---- 第 222 组：站点级自愈（sweep → mute）不能被别处回传的封锁事实撤销（v7.221）----
-const blkSrc = () => fs.readFileSync("src/route/blkfacts.ts", "utf8");
+const blkSrc = () => fs.readFileSync("src/facts/blkfacts.ts", "utf8");
 await contracts.case153({ W, eq, blkSrc, fs });
 
 // ---------- 第 223 组：文档写了但代码没有的调试端点（v7.222） ----------
@@ -2305,7 +2305,7 @@ const mc233 = code233(rd233("src/store/meter-client.ts"));
 const pd233 = code233(rd233("src/store/pend.ts"));
 const st233 = code233(rd233("src/store/stats.ts"));
 const sn233 = code233(rd233("src/store/snapshot.ts"));
-const vs233 = code233(rd233("src/route/verdictsync.ts"));
+const vs233 = code233(rd233("src/store/verdictsync.ts"));
 const mkEnv233 = () => ({ METER: { idFromName: (x) => x, get: () => ({ fetch: async () => new Response(JSON.stringify({ up: 0, down: 0, conns: 0 }), { status: 200 }) }) }, uuid: "u233" });
 const c233 = W.METER_CLIENT.calls | 0;
 if (typeof W.doFetch === "function") {
@@ -2404,7 +2404,7 @@ await contracts.case164({ fs, ok, eq, W });
   const idxSrc = fs.readFileSync("src/index.ts", "utf8");
   ok("index.ts 的 ISOLATE.site 回到六个空格", idxSrc.includes("\n      ISOLATE.capture(host, cf.colo);"));
   const polSrc = fs.readFileSync("src/route/policy-wiring.ts", "utf8");
-  ok("policy-wiring.ts 的 HOOK 注册回到四个空格", polSrc.includes("\n    HOOK.syncAck = "));
+  ok("policy-wiring.ts 的 HOOK 注册回到四个空格", polSrc.includes("\n    HOOK.decide = "));
   const tfbSrc = fs.readFileSync("src/route/tfb.ts", "utf8");
   ok("tfb.ts 的 splitRelay 行回到四个空格", tfbSrc.includes("\n    const ip = splitRelay(row.relay, 443)[0];"));
   const fmSrc = fs.readFileSync("src/store/factmerge.ts", "utf8");
@@ -2563,7 +2563,7 @@ ok("判定表用 BoundedMap", vSrc255.includes("private byKey = new BoundedMap")
 ok("判定表不再自己写 sweep", !vSrc255.includes("private sweep"), "");
 ok("trim 只在超限时动手", vSrc255.includes("if (this.byKey.size <= this.byKey.capacity()) return;"), "");
 ok("fresh() 用表自身的 TTL", vSrc255.includes("this.byKey.lifeMs()"), "");
-ok("relay-health 有自己的删除偏好（dead>0 先跳过），不套用通用淘汰", fs.readFileSync("src/route/relay-health.ts", "utf8").includes("if (s.dead > 0) continue;"), "");
+ok("relay-health 有自己的删除偏好（dead>0 先跳过），不套用通用淘汰", fs.readFileSync("src/facts/relay-health.ts", "utf8").includes("if (s.dead > 0) continue;"), "");
 // ---------------------------------------------------------------- 256. 背压折扣先于单连接权重上限
 const env256 = { STATS: { get: async () => null, put: async () => {}, list: async () => ({ keys: [] }) } };
 const st256 = new W.Connection(env256, { waitUntil() {}, passThroughOnException() {} }, W.Mode.Throughput, "1.1.1.1");
@@ -2724,9 +2724,9 @@ ok("体内注释门禁支持 --max", body266.includes('"--max"') && body266.incl
 ok("preflight 里接了体内注释门禁", fs.readFileSync("tools/preflight.mjs", "utf8").includes('["体内注释门禁", ["tools/body-audit.mjs", "--max", "0"]]'));
 const pkg266 = JSON.parse(fs.readFileSync("package.json", "utf8"));
 eq("package.json 有 body 别名", pkg266.scripts && pkg266.scripts.body, "node tools/body-audit.mjs --max 0");
-const dead266 = fs.readFileSync("src/route/deadfacts.ts", "utf8");
-const dns266 = fs.readFileSync("src/route/dnsfacts.ts", "utf8");
-const base266 = fs.readFileSync("src/route/fact-table.ts", "utf8");
+const dead266 = fs.readFileSync("src/facts/deadfacts.ts", "utf8");
+const dns266 = fs.readFileSync("src/facts/dnsfacts.ts", "utf8");
+const base266 = fs.readFileSync("src/facts/fact-table.ts", "utf8");
 ok("死亡事实的 load 写了体内步骤", dead266.includes("坏行整条跳过") && dead266.includes("批数夹在 1..9"));
 ok("出口族事实的 load 写了体内步骤", base266.includes("三件事任一不成立就整条跳过") && base266.includes("更晚的观测胜出"));
 ok("两张表都不再自己实现 load/ack/nack", !dead266.includes("  load(") && !dns266.includes("  load("));
@@ -2751,8 +2751,8 @@ eq("chanPref 对没测过的中继回 1（未知不惩罚）", W.Prefs.chan("10.
 
 // 源码锁：四个消费端都改走枚举
 const srcPol267 = fs.readFileSync("src/route/policy.ts", "utf8");
-const srcPref267 = fs.readFileSync("src/route/prefs.ts", "utf8");
-const srcVs267 = fs.readFileSync("src/route/verdictsync.ts", "utf8");
+const srcPref267 = fs.readFileSync("src/facts/prefs.ts", "utf8");
+const srcVs267 = fs.readFileSync("src/store/verdictsync.ts", "utf8");
 const srcDbg267 = debugAll();
 ok("policy 用 St.Reachable 过滤判定行", srcPol267.includes("v.state !== St.Reachable"), "");
 ok("prefs 用 St.Reachable/St.Blocked 分栏", srcPref267.includes("x.state === St.Reachable") && srcPref267.includes("x.state >= St.Blocked"), "");
@@ -3309,7 +3309,7 @@ const dial393 = dialSrc393.replace(/\r\n/g, "\n");
 // 结构锁
 ok("[393] factLoad 在 DoH 判定之前启动",
   dial393.indexOf("const factLoad = HOOK.vtLoad") < dial393.indexOf("if (needDoh) cfHost = await this.dohCf("));
-ok("[393] factLoad 吞掉加载异常", dial393.includes("HOOK.vtLoad(env).catch(() => {})"));
+ok("[393] factLoad 吞掉加载异常", dial393.includes("vtLoad(env).catch(() => {})"));
 ok("[393] DoH 后 await 已启动的 promise", dial393.includes("Promise.race([factLoad, new Promise"));
 ok("[393] 不再串行重启 vtLoad", !dial393.includes("await Promise.race([HOOK.vtLoad(env)"));
 ok("[393] 注释记载 403 根因", dial393.includes("v6 排前就 100% 撞 737B IPv6 403"));
