@@ -62,7 +62,7 @@ export { USAGE_MEMORY, UsageMemory } from "./store/usage-memory";
 export { METER_CLIENT, MeterClientState } from "./store/meter-client";
 export { KV_WRITES, KvWriteState } from "./store/kv";
 export { FACT_SWITCHES, FactSwitches } from "./route/factflags";
-export { REGION_CACHE, RegionPageCache } from "./routes/region-panel";
+export { REGION_CACHE, RegionPageCache } from "./route/panel-rows";
 export { EMPTY_CLOSE_BAD, NodeStatsTable, TEN_MB, ZERO_STAT } from "./nodes/stat";
 export { SC } from "./core/const";
 export { SEL, Selector } from "./px/selector";

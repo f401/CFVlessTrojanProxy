@@ -14,5 +14,7 @@ export const readView = file => expandHtml(file);
 export const regionsSource = () => [
   'src/routes/tools.ts',
   'src/routes/region-panel.ts',
+  // 数据装配在 route 层读模型里，源码锁要跟着看
+  'src/route/panel-rows.ts',
   'src/views/regions.ts',
 ].map(file => fs.readFileSync(file, 'utf8')).join('\n');

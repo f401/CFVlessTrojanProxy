@@ -3,13 +3,14 @@
  * 从 `routes/tools.ts` 抽出来的原因：那个文件同时挂着 proxyip 与 debug 的再导出，
  * 面板逻辑占了大半篇幅，改动时看不出「这一改会影响谁」。
  */
+import { REGION_CACHE, buildPanelRows, decoratePanelRows } from "../route/panel-rows";
 import { POOL_MEMORY } from "../px/pool-memory";
 import { ISOLATE } from "../core/state";
 import { SEED_STORE } from "../px/seed";
 import { NODE_MEMORY } from "../core/node-memory";
 import { IpFamily, IpKind } from "../core/enums";
 import { QUALITY, qualityOf, COVERAGE, CONN_OBS } from "../px/regions";
-import { aliveList, ensurePool, nsOf, AliveBoard } from "../px/pool";
+import { aliveList, ensurePool, nsOf } from "../px/pool";
 import { SOCKS } from "../px/selector";
 import { geoLabel, probeSni } from "../px/probe";
 import { html } from "../edge/respond";
@@ -20,29 +21,7 @@ import { renderRegionsPage, levelBadge, kindLabel, ccTag } from "../views/region
 import type { RegionNodeRow } from "../views/regions";
 import { regionConfigList, saveUsers } from "../proxy/protocol";
 import { runTfb } from "../route/tfb";
-import { EG } from "../route/egfacts";
-import { PS } from "../route/psfacts";
-import { DEAD } from "../route/deadfacts";
-import { BLK } from "../route/blkfacts";
-import { DNS } from "../route/dnsfacts";
 
-/** 地区页面单槽类型化缓存；行与 JSON 分开，均允许 30 秒展示陈旧。 */
-export class RegionPageCache {
-  /** 节点行缓存（30 秒）：站点相关列在渲染前才补算 */
-  rows: { t: number; rows: RegionNodeRow[] } | null = null;
-  /** JSON 文本缓存（5 秒）：同一份结果不重复序列化 */
-  json: { t: number; key: string; text: string } | null = null;
-  /** 功能：在寿命内返回基础行，站点投影由调用方复制。@param now 当前时间。@returns 行或 null */
-  freshRows(now: number): RegionNodeRow[] | null {
-    return this.rows && now - this.rows.t < 30000 ? this.rows.rows : null;
-  }
-  /** 功能：按目标与条数命中序列化缓存。@param key 请求键。@param now 当前时间。@returns JSON 或 null */
-  freshJson(key: string, now: number): string | null {
-    return this.json && this.json.key === key && now - this.json.t < 30000 ? this.json.text : null;
-  }
-}
-/** 地区展示缓存所有者，不保存用户上下文或口令。 */
-export const REGION_CACHE = new RegionPageCache();
 
 /**
  * 功能：根据单节点探测的状态码与响应字节，得出「连通 / 被 ban」的诊断结论。
@@ -114,101 +93,6 @@ export class RegionsView {
     this.c = c;
   }
 
-  /**
-   * 功能：把 host 归到地址族（字面量 IPv6 带冒号，其余按 v4）。
-   * @param h 主机（IP 字面量或域名）
-   * @returns 地址族枚举
-   */
-  private familyOf(h: string): IpFamily {
-    return h.includes(":") ? IpFamily.IPv6 : IpFamily.IPv4;
-  }
-
-  /**
-   * 功能：把 seed 的 byColo 分桶摊平成 `key → 国家码` 的映射（跨 isolate 的已知节点）。
-   * @returns key 到 cc 的表
-   */
-  private seedNodes(): Map<string, string> {
-    const out = new Map<string, string>();
-    const byColo = (SEED_STORE.document && SEED_STORE.document.byColo) || {};
-    for (const [cc, bucket] of Object.entries(byColo)) {
-      for (const n of bucket?.nodes || []) {
-        const k = n.k || `${n.h}:${n.p}`;
-        if (!out.has(k)) out.set(k, String(n.cc || cc).toUpperCase());
-      }
-    }
-    return out;
-  }
-
-  /**
-   * 功能：拼出全部节点行（alive ∪ seed），按「质量等级 → 国家码 → key」稳定排序。
-   * @param target 目标站点（空 = 不算 RTT）
-   * @returns 展示行数组
-   */
-  private rows(): RegionNodeRow[] {
-    // 重建 1600 行 + ICU 排序逼近 10ms CPU（TTL 到期即 1102）；缓存 30 秒、命中只看寿命，后台 probe 改 alive 不重建动失效）。
-    const now = Date.now();
-    let rows = REGION_CACHE.freshRows(now);
-    if (!rows) {
-      const alive = new AliveBoard().list();
-      const seeds = this.seedNodes();
-      const keys = [...new Set([...alive.map((n) => `${n.h}:${n.p}`), ...seeds.keys(), ...POOL_MEMORY.rows.map((x) => `${x.h}:${x.p}`)])];
-      // alive 上限 800，逐 key find() 是 64 万次拼接；Map 压成 O(n)。
-      const liveByKey = new Map<string, (typeof alive)[number]>(alive.map((n) => [`${n.h}:${n.p}`, n]));
-      rows = keys.map((key) => {
-        const [h, p] = splitRelay(key, 443), ip = h, seedCc = seeds.get(key) || "", live = liveByKey.get(key);
-        const q = QUALITY.getFor(h, p, now), cov = COVERAGE.rows.get(key), isoCc = QUALITY.getIso(h);
-        return {
-          key,
-          country: String(isoCc || live?.cc || seedCc || "").toUpperCase(),
-          family: this.familyOf(h),
-          alive: !!live,
-          source: live && seedCc ? "alive+seed" : live ? "alive" : "seed",
-          kind: q?.kind ?? IpKind.Unknown,
-          level: q?.level ?? "normal",
-          proxy: q?.proxy ?? false,
-          vpn: q?.vpn ?? false,
-          org: q?.org || "",
-          reach: 0,
-          probed: !!cov || !!q,
-          rtt: null,
-          egFamily: EG.famOf(ip, now),
-          psOk: -1,
-          dead: DEAD.isDead(ip, now),
-          blkPenalty: 1,
-          dnsV6: -1,
-        } as RegionNodeRow;
-      });
-      // 已探测在前，再按质量等级 → 国家 → key 排序。
-      const rank: Record<string, number> = { good: 0, normal: 1, risky: 2 };
-      rows.sort(
-        (a, b) =>
-          Number(b.probed) - Number(a.probed) ||
-          Number(b.alive) - Number(a.alive) ||
-          (rank[a.level] ?? 3) - (rank[b.level] ?? 3) ||
-          (a.country < b.country ? -1 : a.country > b.country ? 1 : 0) ||
-          (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
-      );
-      REGION_CACHE.rows = { t: now, rows };
-    }
-    return rows;
-  }
-
-  /** 功能：给要渲染的那几行补上站点相关列；@param rows 切片后的行；@param target 站点；@returns 同一批行 */
-  private decorate(rows: RegionNodeRow[], target: string): RegionNodeRow[] {
-    // 只补切片：整表 1600 行 × 5 次查表就是 1102 的来源之一
-    const now = Date.now();
-    const coloNow = ISOLATE.colo || "??";
-    const v6 = target ? DNS.v6Of(target, now) : -1;
-    // 基础行由缓存共享；派生站点字段写入新对象，避免本次展示污染下一次请求。
-    return rows.map((r) => {
-      const ip = relayIpOf(r.key);
-      const reachRow = CONN_OBS.get(coloNow, r.key, "@reach", now);
-      return { ...r, reach: reachRow ? (reachRow.ok ? 1 : -1) : 0,
-        rtt: target ? CONN_OBS.rttOf(coloNow, r.key, target, now) : null,
-        psOk: target ? PS.okOf(target, ip, now) : -1,
-        blkPenalty: target ? BLK.penOf(target, ip, now) : 1, dnsV6: v6 };
-    });
-  }
 
   /** 功能：JSON 输出（?format=json 显式请求，?limit= 可收窄）；@param rows 展示行；@param target 站点；@returns JSON 响应 */
   private jsonView(rows: RegionNodeRow[], target: string): Response {
@@ -361,7 +245,7 @@ export class RegionsView {
     const wantJson = this.c.url.searchParams.get("format") === "json";
     if (!wantJson) await ensureIsoCountries();
     const target = (this.c.url.searchParams.get("site") || "").slice(0, 256);
-    const rows = this.rows(); // 建表与排序；站点相关列交给 decorate() 只补切片
+    const rows = buildPanelRows(); // 建表与排序；站点相关列交给 decorate() 只补切片
     if (this.c.url.searchParams.get("format") === "json") {
       // 默认只回前 200 行：全量 1600 行序列化后仍近 400KB，3 并发实测 98% 被 1102 杀掉；
       // 需要全量的调用方显式写 ?limit=0，面板走 HTML 分页不受影响。
@@ -374,7 +258,7 @@ export class RegionsView {
       if (hitJson !== null) {
         return new Response(hitJson, { headers: { "content-type": "application/json;charset=utf-8" } });
       }
-      const respJson = this.jsonView(this.decorate(limit > 0 ? rows.slice(0, limit) : rows, target), target);
+      const respJson = this.jsonView(decoratePanelRows(limit > 0 ? rows.slice(0, limit) : rows, target), target);
       const bodyJson = await respJson.text();
       REGION_CACHE.json = { t: nowJson, key: jkey, text: bodyJson };
       return new Response(bodyJson, { headers: respJson.headers });
@@ -382,6 +266,6 @@ export class RegionsView {
     // 全池可达 1600 条：服务端分页，避免一次性渲染数 MB HTML；JSON 仍返回全量
     const size = 40, pages = Math.max(1, Math.ceil(rows.length / size));
     const page = Math.min(pages, Math.max(1, Number(this.c.url.searchParams.get("page")) || 1));
-    return this.htmlView(this.decorate(rows.slice((page - 1) * size, page * size), target), target, page, pages, rows.length);
+    return this.htmlView(decoratePanelRows(rows.slice((page - 1) * size, page * size), target), target, page, pages, rows.length);
   }
 }

@@ -1231,7 +1231,7 @@ export async function case142({ W, eq, fs, ok, metricsAll }) {
   ok("旧键迁移也走严格读", srcMetrics.includes("kvGetStrict<Record<string, RttEntry>>(env, `rtt:${id}`)"), "");
   ok("metrics 不再引 kvGet", srcMetrics.includes('import { getSnap, kvGet }') === false, "");
 
-  const srcLogs = fs.readFileSync("src/routes/logs.ts", "utf8");
+  const srcLogs = fs.readFileSync("src/routes/health.ts", "utf8");
   ok("日志路径的快照读失败会留痕", srcLogs.includes('logErr("logs snap read failed", "kv")'), "");
 }
 

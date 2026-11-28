@@ -1,5 +1,5 @@
 import type { UserCtx } from "../edge/types";
-import { logs } from "./logs";
+import { logs } from "./health";
 import { subscription } from "./subscription";
 import { debug, proxyip, regions } from "./tools";
 

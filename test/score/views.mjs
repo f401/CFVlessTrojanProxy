@@ -116,7 +116,7 @@ export async function case163({ W, eq, fs, ok }) {
   const jgood = await run234(goodEnv);
   eq("DO 正常时 doSrc 标成 ok", jgood.doSrc, "ok");
   eq("DO 正常时 fromDo 带回一条", jgood.fromDo, 1);
-  const srcLogs234 = fs.readFileSync("src/routes/logs.ts", "utf8");
+  const srcLogs234 = fs.readFileSync("src/routes/health.ts", "utf8");
   ok("DO 读失败要计数", srcLogs234.includes("cnt(\"logsDoFail\");"), "");
   ok("DO 读失败要留痕（与快照失败同一口径）", srcLogs234.includes("logErr(\"logs do read failed\", \"kv\");"), "");
   ok("响应里带上 doSrc", srcLogs234.includes("doSrc, items: out }"), "");
