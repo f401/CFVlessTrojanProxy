@@ -228,10 +228,14 @@ export const TICK_BYTES = 512 * 1024;
 
 export class Connection {
   // —— 归属 ——
+  /** 入口 IP 标签（`?ip=` 或 CF 头推断）：按入口分桶的记忆、限流键都用它 */
   ipTag: string;
+  /** 当前这条连接绑定的中继节点 key（host:port）；直连为空串 */
   node = "";
   host = ""; // 目标域名（按站点的节点画像用）
+  /** 节点选择模式（tput 吞吐优先 / lat 速率优先），决定打分口径与目标流量 */
   mode: Mode;
+  /** 实际生效的通道（direct / relay / v6）：结算与按通道统计都按它分类 */
   via = "direct";
   udp = false; // 首包已判定为 UDP/53：后续帧直接当 DNS 报文
   udpTrojan = false; // Trojan UDP 的后续帧带 [ATYP][ADDR][PORT] 前缀
@@ -240,7 +244,9 @@ export class Connection {
   dead = false; // 已经明确失败并关闭：后续帧不要再解析
 
   // —— 热路径计数 ——
+  /** 已下行字节（含 VLESS 头；热路径累加，tick 看它是否跨过 mark） */
   down = 0;
+  /** 已上行字节（客户端→目标，含首帧头） */
   up = 0;
   mark = TICK_BYTES; // 下一个 tick 的字节水位
 
@@ -256,25 +262,37 @@ export class Connection {
   inflightKey = ""; // 已经计入在途的节点（变更时迁移）
 
   // —— 生命周期 ——
+  /** 是否已给这个节点记过一次成功：一条连接只记一次，避免长连接刷分 */
   markedOk = false;
+  /** 是否已记过一次失败（与 markedOk 先到者生效，防止一失败一成功互相覆盖） */
   markedFail = false;
   notified = false; // onClose 已经通知过（close 与 pipe 的 error 路径互斥，见 tunnel.ts）
   failed = false; // 中途断流/异常（由 pipeBack 的 catch 置位），不算成功
   siteFail = false; // 失败归因：连上了节点但目标侧拒绝（只轻记全局）
   hostTrial = false; // 站点级试探：失败只记账，不动全局游标/不冻结
+  /** 是否已经为重试换过一次节点（限制单连接的重试次数） */
   retried = false;
+  /** 本条连接已尝试的中继个数（免费计划 connect 名额有限，要有上限） */
   pxTries = 0;
+  /** 是否已经试过 IPv6 兜底（同一连接不重复试） */
   triedV6 = false;
+  /** 允许结算的次数（0/1）：保证 ConnSettle 只跑一次 */
   counted = 0;
 
   // —— 上游 ——
+  /** 上游 socket（目标站或中继）：关连接时置空，避免二次 close */
   sock: Socket | null = null;
+  /** 上游 socket 的写端：上行帧直接写它，不经额外缓冲 */
   writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
+  /** 要拼在首个下行分片前面的 VLESS 响应头（还没发出去时非空） */
   header: Uint8Array | null = null;
+  /** 头是否已经随首个分片发出（发过就不再加，避免重复前缀） */
   headerSent = false;
 
   // —— 结算 ——
+  /** 已经上报给计量 DO 的上行字节（增量口径） */
   reportedUp = 0;
+  /** 已经上报给计量 DO 的下行字节（增量口径） */
   reportedDown = 0;
 
   // —— 观测 ——
@@ -288,7 +306,9 @@ export class Connection {
   directFail = false; // 直连阶段 0 字节关闭过（用于"直连对照"）
 
   // —— 身份与上下文 ——
+  /** 连接建立时刻（算总寿命；结算与断流取证都用它） */
   startedAt = Date.now();
+  /** 计费用的用户标识（uuid）；首帧鉴权通过前是 null */
   id: string | null = null;
   /** 调试开关（查询串 hb=1）：这条连接每 3 秒往 DO 打一次心跳，用来判断断流后 isolate 还活不活 */
   debugBeat = false;
@@ -298,7 +318,9 @@ export class Connection {
 
   /** 上一次烧 CPU 时的下行字节数（判断是否又攒够 512 KB） */
   burnAt = 0;
+  /** 运行环境绑定（KV / DO / 密钥）：构造时注入，连接期间不变 */
   env: Env;
+  /** 请求的执行上下文：waitUntil 用来兜住收尾上报 */
   ctx: ExecutionContext;
 
   constructor(env: Env, ctx: ExecutionContext, mode: Mode, ipTag: string) {

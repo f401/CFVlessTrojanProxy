@@ -190,6 +190,7 @@ export interface SocksRow {
  * 状态放 isolate 内存：这些是「这台机器此刻的实测结果」，按硬约束不写 KV/seed。
  */
 export class SocksPool {
+  /** 已验证可用的公共 SOCKS5 代理（key = host:port） */
   private readonly rows = new BoundedMap<string, SocksRow>({
     max: SOCKS_MAX,
     ttlMs: SOCKS_TTL_MS,
@@ -198,6 +199,7 @@ export class SocksPool {
 
   /** 最近一次抓取的时间与各源行数（面板展示用） */
   private lastAt = 0;
+  /** 每个来源最近一次被取用的时刻（来源轮转用） */
   private lastSrc: Record<string, number> = Object.create(null);
 
   /**

@@ -9,6 +9,7 @@ import { bumpProbeBad, COOLDOWN, ensurePool, noteProbe } from "./pool";
 
 /** 冷启动起搏的节流时钟：7.369 起从 AppState 下放，只有本模块读写 */
 export class WarmPacer {
+  /** 上次起搏探活的时刻（节流：别把免费计划的名额打光） */
   lastProbeAt = 0;
 }
 

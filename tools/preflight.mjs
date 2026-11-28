@@ -18,6 +18,7 @@ const steps = [
   ["死导出", ["tools/check-dead.mjs"]],
   ["缩进门禁", ["tools/check-indent.mjs"]],
   ["命名门禁", ["tools/check-names.mjs"]],
+  ["成员注释门禁", ["tools/check-members.mjs"]],
   ["单例准入门禁", ["tools/check-singletons.mjs"]],
   ["插入序门禁", ["tools/check-insertorder.mjs"]],
   ["状态归属门禁", ["tools/check-state-owner.mjs"]],

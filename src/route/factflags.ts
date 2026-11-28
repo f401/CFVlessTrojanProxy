@@ -6,6 +6,7 @@ type FactName = "eg" | "ps" | "cap" | "blk" | "dns";
 
 /** 事实开关的 isolate 配置缓存，解析与其生命周期由同一对象管理。 */
 export class FactSwitches {
+  /** 本次请求解析出的开关集合；null = 还没解析过 */
   current: Set<FactName> | null = null;
 
   /** 功能：首次读取时解析环境开关。@param raw 配置。@returns 打开的事实名 */

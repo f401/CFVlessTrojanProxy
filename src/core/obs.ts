@@ -44,10 +44,15 @@ export interface FirstSnap {
  * 功能：每个 isolate 的前 N 条用户连接质量统计（只累计，不清零）。
  */
 export class FirstObs {
+  /** 已累计的首字节样本数（分母） */
   private samples = 0;
+  /** 首字节成功的样本数 */
   private first = 0;
+  /** 整页成功的样本数（比首字节更严的口径） */
   private page = 0;
+  /** 灰度样本数：落在「像封锁又像业务」灰区、不计入成功率的次数 */
   private gray = 0;
+  /** 被跳过的采样次数（窗口未满或已判死时不计） */
   private skip = 0;
 
   /**
@@ -127,8 +132,11 @@ const MAX = 256;
  * @returns {LatObs} 进程内单例由 `LAT` 提供
  */
 export class LatObs {
+  /** 最近的延迟样本（按窗口裁剪，算 p50/p95 用） */
   private rows: LatSample[] = [];
+  /** 当前延迟窗口的起点时刻（窗口内样本够了才出一组分位数） */
   private win = 0;
+  /** 窗口满（FO/LO 上限）后不再采样、只累加的次数：p95 才不会随流量升高而漂移 */
   private skip = 0;
 
   /**

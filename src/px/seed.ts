@@ -22,6 +22,7 @@ export const BUCKET_DEF = "*";
 export class SeedStore {
   /** 跨 isolate 只保存节点名字与地址，不包含本地统计。 */
   document: Seed = { v: 0, ts: 0, poolGen: 0, poolN: 0, builtAt: 0, byColo: {}, cnt: null };
+  /** 上次把节点表写进 KV 的时刻（节流：同一分钟只写一次） */
   nodeWrittenAt = 0;
   /** 信誉表读取时刻（0=需要重读）：7.369 起由 SeedStore 自己持有 */
   readAt = 0;

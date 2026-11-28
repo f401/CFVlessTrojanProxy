@@ -213,6 +213,7 @@ interface FamRow {
  * 有界化继承 BoundedMap：先 set 后 prune（7.227 教训），TTL 与 eg 同源。
  */
 export class FamFacts {
+  /** 站点 → 出口族可用性事实（v4/v6 各成功多少、何时更新） */
   private readonly rows = new BoundedMap<string, FamRow>({
     max: 512,
     ttlMs: FACT_TTL.eg,

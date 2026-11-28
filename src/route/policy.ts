@@ -275,7 +275,9 @@ export function decideCf(c: Ctx, r: Ranked, src: PinSource): Choice | null {
 export class Policy implements PinSource {
   /** 策略影子计数，与该策略实例同生命周期。 */
   same = 0;
+  /** 影子策略与现行策略结论不同的次数 */
   different = 0;
+  /** 决策原因分布（为什么这样选，面板/诊断用） */
   reasons: Record<string, number> = {};
   /**
    * 冷启动钉住表：站点 → { 中继 IP, 到期时间 }。

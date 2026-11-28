@@ -27,19 +27,19 @@ import { statBump } from "../store/index";
  * 之后所有动作都由 stream 的 `write`/`close`/`abort` 三个回调驱动，最终在 `finally` 里 `finish()`。
  */
 export class ProxySession {
-  private readonly request: Request;
-  private readonly env: Env;
-  private readonly ctx: ExecutionContext;
-  private readonly clientWS: WebSocketLike;
-  private readonly serverWS: WebSocketLike;
-  private readonly conn: Connection;
+  private readonly request: Request; // 触发升级的原始请求（run() 里再读 URL 与查询串）
+  private readonly env: Env; // Worker 环境绑定（KV / DO / 密钥），构造时注入
+  private readonly ctx: ExecutionContext; // 执行上下文：收尾上报用 waitUntil 兜住
+  private readonly clientWS: WebSocketLike; // 交给客户端的 WS 端（本会话只往里写）
+  private readonly serverWS: WebSocketLike; // 与客户端配对的服务端 WS 端（读上行、写下行）
+  private readonly conn: Connection; // 这条连接的持有状态；会话本身不存业务状态
   /** 数据面额度：与 7.270 一致不设请求级闸门（补救链可能拨 5 次，旧的 4 次上限会误杀） */
   private readonly budget = BudgetedIO.unlimited();
-  private readonly mode: Mode;
-  private readonly pxForce: number;
-  private readonly rxPin: string;
-  private readonly ipTag: string;
-  private readonly ipRegion: string | null;
+  private readonly mode: Mode; // 节点选择模式（tput / lat）
+  private readonly pxForce: number; // `?px=0|1` 强制通道：0 直连、1 中继、-1 未指定
+  private readonly rxPin: string; // `?rx=<ip>` 钉住的出口 IP（诊断用；空串不钉）
+  private readonly ipTag: string; // 客户端 IP 标签（入口分桶与限流键）
+  private readonly ipRegion: string | null; // 客户端 IP 归属地区；null = 未知
   /** `?node=` 用户钉住的单个节点 key（host:port）；钉住时硬失败不回落 */
   private readonly pinnedNode: string | null;
   /** `?s5=` 钉住的公共 SOCKS5 出口（host:port）：通用出口，能到任意站点 */
@@ -57,7 +57,7 @@ export class ProxySession {
   // 往哪走的决策（地区硬分流 / 拨号策略 / 补救一条中继）在 7.362 起是单独对象，会话只问 route(host, port)
   private readonly router: SessionRouter;
   // 用户表在 run() 里才读（ctor 只解析参数、不碰 KV）；先给空表让类型成立，真实值在首帧之前就绪
-  private users: Auth = { uuids: new Set<string>(), trojan: new Map<string, string>(), list: [] };
+  private users: Auth = { uuids: new Set<string>(), trojan: new Map<string, string>(), list: [] }; // 鉴权用户表：run() 才从 KV 读，构造期先给空表让类型成立
 
   /**
    * 功能：解析本次升级的参数并建好连接对象（此时还没有任何 I/O 之外的副作用）。

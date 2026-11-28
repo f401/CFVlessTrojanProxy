@@ -15,7 +15,9 @@ import { MeterState } from "./meter-state";
  * 账本本体与落盘映射在 `MeterState`（`src/store/meter-state.ts`），这里只管 DO 生命周期与端点。
  */
 export class Meter {
+  /** DO 的运行状态（storage / alarm），账本落盘用它 */
   state: DurableObjectState;
+  /** DO 的环境绑定（KV / 密钥）：构造时注入 */
   env: Env;
   /** 账本本体：五件账本 + 七张事实表 + 落盘形状（见 `MeterState`） */
   ledger: MeterState;

@@ -224,7 +224,6 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `RawProbe` | `src/px/probe.ts` | 一次原始探测的会话（建连 → 写报文 → 按预算收首段字节）：`open` 负责 sslip.io 回退、`tcpMs`/`elapsedMs` 只在建连时刻上算、`peek` 收够/到点/提前判据三选一退出、`close` 保证迟到连上的 socket 也被关（免费计划全局只有 6 个并发 `connect()`）；两个探测只保留「首段字节怎么判」 |
 | `SeedStore` | `src/px/seed.ts` | 跨 isolate 的种子表（只存名字 `{k,h,p,cc}`），纯静态方法（7.360 起无模块级 `SEEDS` 实例，读失败计 `seedReadFail` 的那条路径仍在） |
 | `Selector`（`SEL`） | `src/px/selector.ts` | 门面：十个方法各一行委托给三个执行器，本身不再有算法；失败记账器与换节点器都由它自己持有（7.347 起不再有模块级 `FAILS`，7.356 起不再有模块级 `ROTATION`，同一个 `rotation` 实例也交给记账器） |
-| `PoolReadyClock`（`READY`） | `src/px/pickpath.ts` | 候选池就绪时钟（`S.dnsCache` 那批一起下放）：`lastAttemptAt` 从 `S` 迁入，实例单例，冷启动 60 秒节流；`ensureReady` 经它读写 |
 | `WarmPacer`（`WARM`） | `src/px/warm.ts` | 存活表起搏时钟（`S.aliveAt` 迁入）：5 分钟节流，实例单例 |
 | `PickPath`（`SEL.picker`） | `src/px/pickpath.ts` | 编排：地区硬要求（`?rg=`）与 `current` 的偏好顺序；同文件里还有下面两个类，7.345 起它们由门面自己持有（`SEL.picker.site` / `SEL.picker.paths`），模块级不再有 `SITE` / `PATHS` 两个单例 —— 画像与偏好都只在编排的调用栈里存活，拆成三个文件会让「这次为什么换了节点」分散在三处 import |
 | `SitePick`（`SEL.picker.site`） | `src/px/pickpath.ts` | 站点画像这一层：`pick` 只做编排，五段各一方法 —— `syncCursor`（游标自愈）、`byProfile`（≥3 条样本、首选不超过 2 小时才覆盖全局）、`byShadow`（冷启动影子）、`bySample`（单层抽样 + 负载溢出）、`leastBad`（全池被罚时的兜底） |

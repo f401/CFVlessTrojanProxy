@@ -2,7 +2,9 @@ import { errMsg } from "../core/util";
 
 /** KV 写入观测与额度冷却；只记录本 isolate 的写请求结果。 */
 export class KvWriteState {
+  /** 累计 KV 写次数（诊断：免费计划每天有额度） */
   writes = 0;
+  /** 最近一次写的结果：ok=null 表示还没写过；quota=true 表示配额耗尽（`quotaAt` 起冷却） */
   status: { ok: boolean | null; key: string; at: number; err?: string; quota?: boolean; quotaAt?: number } = { ok: null, key: "", at: 0 };
 }
 

@@ -2,7 +2,9 @@ import { BoundedMap } from "./table";
 
 /** 入口学习增量与旧 KV 键负缓存；快照层只消费它们。 */
 export class EntryMemory {
+  /** 按入口标签聚合的 RTT 样本（只留最近几个窗口，跨请求累积） */
   rows = new Map<string, Record<string, RttEntry>>();
+  /** 旧 KV 键的负缓存（键 → 到期时刻）：避免反复查不存在的键 */
   misses = new BoundedMap<string, number>({ max: 500, timeOf: (until) => until });
 
   /** 功能：按已写出计数确认入口学习，保留新样本。@param sent 已写出的学习桶。@returns 无 */
@@ -32,6 +34,7 @@ export class EntryMemory {
 
 /** 有界错误记录；分类、去重与限流由 ErrRing 负责。 */
 export class ErrorMemory {
+  /** 错误环（最近若干条错误，超出按时间淘汰），/logs 从它读 */
   rows: ErrItem[] = [];
 
   /** 功能：只移除已持久化的对象，保留在途期间追加的错误。@param sent 已写出的错误。@returns 无 */

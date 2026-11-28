@@ -2,6 +2,7 @@
 
 /** 日计数器：独占 keys/values/day/sent 四张表，进程内计数、跨天清零、批次回滚。 */
 export class Counter {
+  /** 允许统计的键白名单：未登记的键运行时只告警、门禁直接失败 */
   readonly keys = [
     "restore",
     "restoreSkip",
@@ -90,8 +91,11 @@ export class Counter {
     "sz4",
     "vwild",
   ];
+  /** 本进程累计计数（键见 cntKeys），只增不减 */
   values: Record<string, number> = {};
+  /** 当前计数所属的日期分桶（跨天时清零 values） */
   day = "";
+  /** 已上报给计量 DO 的计数快照（算增量用） */
   sent: Record<string, number> = {};
 
   constructor() {

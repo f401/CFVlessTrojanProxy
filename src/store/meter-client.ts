@@ -2,7 +2,9 @@ import { BoundedMap } from "../core/table";
 
 /** DO 用量读缓存与发出次数，均为本 isolate 的客户端状态。 */
 export class MeterClientState {
+  /** DO 调用次数（免费计划每轮子请求预算按它核） */
   calls = 0;
+  /** 用量读取缓存（上限 500 条，按写入时刻淘汰） */
   cache = new BoundedMap<string, { v: UsageMeter | null; t: number }>({ max: 500, timeOf: (row) => row.t });
 
   /** 功能：缓存读数，容量不足只裁最旧行。@param id 用户。@param value 用量或失败。@returns 无 */

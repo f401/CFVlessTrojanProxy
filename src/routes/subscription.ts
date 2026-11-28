@@ -53,6 +53,7 @@ const FEEDS: Record<string, { fmt: SubKind; json: boolean }> = {
  * （一次调用 50 个，见 AGENTS.md 第 5 条）。一个方法一个分支，代价就写在方法体里。
  */
 export class SubscriptionRoutes {
+  /** 用户上下文（已鉴权的 id 与统计），由分发器注入 */
   private readonly c: UserCtx;
   /**
    * 订阅渲染器：三种格式共用一张分派表。

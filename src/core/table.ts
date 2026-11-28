@@ -26,8 +26,11 @@ interface BoundedOptions<Row> {
  * 有容量与寿命上限的 Map。
  */
 export class BoundedMap<Key, Row> extends Map<Key, Row> {
+  /** 容量上限：超过就按 timeOf 收低水位 */
   private readonly max: number;
+  /** 行的存活期（0 = 不按 TTL 淘汰，只按容量） */
   private readonly ttlMs: number;
+  /** 取行时间戳：TTL 判断与淘汰排序都用它 */
   private readonly timeOf: (row: Row) => EpochMs;
 
   /**

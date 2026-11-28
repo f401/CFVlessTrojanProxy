@@ -113,6 +113,7 @@ interface AccRow {
  * 表的裁剪（上限 + TTL）也集中在这里，避免每个写入点各写一遍。
  */
 export class ByteAccumulator {
+  /** 节点 → 跨连接的累加字节与墙钟起点；攒够 256 KB 才产出一条带宽样本 */
   private rows = new Map<string, AccRow>();
 
   /**

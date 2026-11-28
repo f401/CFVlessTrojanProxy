@@ -36,10 +36,6 @@ export interface PickState {
 // 候选池准备：冷 isolate 里内存池是空的（新机房 / 刚回收），而候选池早就由别的机房提交进了 KV。
 // 这一步只做「让池子能用」，不参与挑谁 —— 挑在 pick-site / pick-pref / pickpath 三处。
 
-/** 候选池就绪时钟：7.369 起从 AppState 下放，只有本模块读写；实例单例，不用 static */
-export class PoolReadyClock { lastAttemptAt = 0; }
-export const READY = new PoolReadyClock();
-
 /**
  * 功能：按需把候选池拉起来，并保证存活表至少被起搏过一次。
  * 所有等待都有上限：这里任何一秒都是用户等首字节的秒数。
@@ -48,8 +44,8 @@ export const READY = new PoolReadyClock();
  */
 export async function ensureReady(env: Env): Promise<void> {
   // 只看「池子确实没有」且距上次尝试超过 60 秒：池子有就绝不读 KV，冷启动也不会每个请求都读一次
-  if (!POOL_MEMORY.rows.length && Date.now() - (READY.lastAttemptAt || 0) > 60000) {
-    READY.lastAttemptAt = Date.now();
+  if (!POOL_MEMORY.rows.length && Date.now() - (POOL_MEMORY.lastAttemptAt || 0) > 60000) {
+    POOL_MEMORY.lastAttemptAt = Date.now();
     // 最多等 700ms：ensurePool 会读 KV 代际键，必要时还要去公开源抓列表，
     // 实测在冷 isolate 上能拖到 2–4 秒——那是用户已经在等首字节的时间，
     // 不能整段押在这里。超时就先放行（有 NODE_MEMORY.alive 就用，没有就走直连），

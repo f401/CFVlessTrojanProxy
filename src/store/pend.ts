@@ -36,7 +36,9 @@ interface PendCarry {
 export class PendingLedger {
   /** 尚未提交的用户字节账；只由摘批与失败退回消费。 */
   rows = new Map<string, PendEntry>();
+  /** 本轮已上报的字节数（用来限流，别一轮把预算打光） */
   bytes = 0;
+  /** 定时 flush 的间隔（毫秒） */
   intervalMs = 30000;
   /** 上次实际上报的时刻 */
   private flushedAt = 0;

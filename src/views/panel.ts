@@ -134,14 +134,23 @@ export function renderStatsHtml(
  * 「已经转义好的值」，组装交给 renderTemplate。页面里所有插值在传值前都必须过 escapeHtml。
  */
 export class PanelView {
+  /** 触发面板的原始 URL（决定协议与口令的解析） */
   private readonly url: URL;
+  /** 用户 uuid（面板与订阅链接的一部分） */
   private readonly id: string;
+  /** 入口域名（订阅里显示的 server） */
   private readonly host: string;
+  /** 管理密钥（写进面板里的操作链接） */
   private readonly key: string;
+  /** 面板数据：缺数据时给空壳，模板里每个字段都有兜底文案 */
   private readonly info: PanelInfo;
+  /** 面板/订阅基址 `${origin}/${id}` */
   private readonly base: string;
+  /** 本用户可用的协议清单（vless / trojan，取决于是否配了密码） */
   private readonly protos: string[];
+  /** 已配置的地区列表（面板表单的默认值） */
   private readonly regions: string[];
+  /** 客户端实际会看到的条目数 =（手动节点 + 地区）× 协议数 */
   private readonly nodeCount: number;
 
   /**

@@ -68,7 +68,7 @@ export { SC } from "./core/const";
 export { SEL, Selector } from "./px/selector";
 export { FailBook } from "./px/failbook";
 export { Rotation, dwellOf } from "./px/selector";
-export { PoolReadyClock, PickPath } from "./px/pickpath";
+export { PickPath } from "./px/pickpath";
 export { ThompsonPicker } from "./px/ts";
 export { SitePick, PathPrefs } from "./px/pickpath";
 export { SeedStore, SEED_STORE } from "./px/seed";

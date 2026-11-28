@@ -1,6 +1,8 @@
 /** 本 isolate 即时用量与脏字节；不代替 Durable Object 总账。 */
 export class UsageMemory {
+  /** 按日聚合的本地用量（key = 日期） */
   rows = new Map<string, StatsLocal>();
+  /** 待写回 KV 的字节增量（攒够或到时才写，省 KV 额度） */
   dirtyBytes = 0;
 
   /** 功能：只确认已写出的增量，保留写入在途期间的新字节。@param sent 已写出的用量。@param bytes 已写出的脏字节。@returns 无 */

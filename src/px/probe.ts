@@ -9,8 +9,7 @@ import { isBudgetExhausted } from "../core/budget-ledger";
 // 额外候选主机（不是列表，是"池域名"，解析后是多台机器）
 export const EXTRA_HOSTS = ["pyip.ygkkk.dpdns.org"];
 
-// 候选池来源（按价值排序；单源失败不影响其余源）：1/4 走 GitHub 镜像（API 站恒 403），
-// 2/3 同一份 CB 列表（jsDelivr 防 429），5 是长期验证可用的老源，6 官方 API 待解封兜底。
+// 候选池来源（按价值排序；单源失败不影响其余源）：1/4 走 GitHub 镜像（API 站恒 403），2/3 同一份 CB 列表（jsDelivr 防 429），5 是长期验证可用的老源，6 官方 API 待解封兜底。
 export const POOL_SOURCES = [
   "https://raw.githubusercontent.com/ymyuuu/IPDB/main/BestProxy/proxy.txt",
   "https://raw.githubusercontent.com/CB-X2-Jun/cf-proxyip-lists/main/proxyip.txt",
@@ -50,8 +49,7 @@ export function takePoolLine(line: string, src: string, seen: Map<string, PoolEn
   // 去重键是 ip:port——同一 IP 不同端口是两条不同的出口，不能合并
   const key = ip + ":" + port;
   if (seen.size >= POOL_MAX) return false; // 上游源可能大到离谱，硬上限防内存/ KV 值爆掉
-  // 源里第四份清单是 `ip:port#CC`：国家码是客观事实（不跨 isolate 共享的约束只针对统计），
-  // 丢掉它地区分流就没有可用数据（`?rg=` 永远「暂无可用节点」）。
+  // 源里第四份清单是 `ip:port#CC`：国家码是客观事实（不跨 isolate 共享的约束只针对统计）， 丢掉它地区分流就没有可用数据（`?rg=` 永远「暂无可用节点」）。
   const cc = (line.match(/#([A-Za-z]{2})\b/) || [])[1];
   if (!seen.has(key)) seen.set(key, { h: ip, p: port, src, cc: cc ? cc.toUpperCase() : "" });
   return true;
@@ -268,8 +266,11 @@ export const PROBE_HELLO = (() => {
  * 「首段字节怎么判」外完全一样，所以六个预算数字与「迟到连上要关」只在这里写一遍。
  */
 export class RawProbe {
+  /** 本次探活用的 socket（关不掉会白占一个 connect 名额） */
   private sock: Socket | null = null;
+  /** 开始拨号的时刻（算总耗时） */
   private startedAt = 0;
+  /** TCP 连上的时刻（与 startedAt 之差是握手前的等待） */
   private connectedAt = 0;
   /** @param host 候选主机 @param port 候选端口 @param gate 建连额度闸门（默认不限额） */
   constructor(readonly host: string, readonly port: number, private readonly gate: BudgetedIO = BudgetedIO.unlimited()) {}

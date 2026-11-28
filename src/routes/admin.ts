@@ -20,6 +20,7 @@ import adminHintTpl from "../views/html/admin-hint.html";
  * 构造函数只保存本次请求的上下文，所有分支都在 `run()` 里按原顺序分派。
  */
 export class AdminView {
+  /** 路由上下文（env / url / 鉴权结果），由分发器构造时注入 */
   private readonly c: RouteCtx;
   /** 管理密钥（未配置时整块面板关闭，见 `run()` 的第一个判断） */
   private readonly adminKey: string;

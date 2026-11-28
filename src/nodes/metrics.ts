@@ -171,6 +171,7 @@ export function hostScore(s: HNStat, mode: Mode, now: number): number {
 export class HostProfile {
   /** 每族最多 12 个节点、最多 120 族，写入路径负责按活跃时刻淘汰。 */
   nodes = new Map<string, Map<string, HNStat>>();
+  /** 站点 → 直连观测（成功/失败次数与最近时刻） */
   direct = new Map<string, HDirect>();
   /**
    * 功能：记一次（站点, 节点）的连接结果，必要时淘汰最久未更新的域名/节点。

@@ -67,6 +67,7 @@ function chanKey(o: FactObs): string {
 export class ShadowTable {
   /** 同站点最近窗口的通道观测，每站点最多八条。 */
   peers = new BoundedMap<string, Array<{ ck: string; down: number; at: number }>>({ max: 512, timeOf: (rows) => rows[rows.length - 1]?.at || 0 });
+  /** 站点「整页」的典型字节数（判断某个响应算不算小响应） */
   bigTypical = new Map<string, number>();
 }
 
@@ -139,8 +140,11 @@ export function shadowCtx(o: FactObs, now: number, lastWriteAt = 0): FactCtx {
  * 「v8 的写入规则在真实流量下的形状」，而不是精确账目。
  */
 export class FactShadow {
+  /** 影子比对累计样本数 */
   private samples = 0;
+  /** 影子策略本来会给出的结论分布 */
   private would = new Map<string, number>();
+  /** 影子结论与真实策略不同的原因分布 */
   private why = new Map<string, number>();
   /**
    * 每个事实键上一次「做出裁决」（写入事实，或确认一批）的时间。

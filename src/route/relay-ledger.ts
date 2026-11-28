@@ -31,7 +31,9 @@ interface LedgerRow {
  * 只被 `RelayHealth` 使用，不对外暴露；`counts()` 让「表外键有没有泄漏」可被观察。
  */
 export class RelayLedger {
+  /** 已上报的计数快照（下次算增量用） */
   private sent = new Map<string, RelayCounts>();
+  /** 已累计但还没上报的中继计数 */
   private pending = new Map<string, LedgerRow>();
 
   /**

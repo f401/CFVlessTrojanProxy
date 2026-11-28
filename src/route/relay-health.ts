@@ -42,6 +42,7 @@ const HL_MS = 30 * 60_000; // 存活证据的半衰期：30 分钟不动就回�
  * 只在本 isolate 内使用（硬约束：统计不跨 isolate 共享），随上报管道同步给 DO 做展示。
  */
 export class RelayHealth {
+  /** 每条中继的健康度（成功率与最近延迟，与站点无关） */
   private byRelay = new Map<string, RelayStat>();
   /**
    * 两张账本（已同步快照 + 待确认行）。
