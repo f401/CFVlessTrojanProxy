@@ -1,26 +1,13 @@
 import { METER_CLIENT } from "../store/meter-client";
 import { SELECTION_MEMORY } from "../px/selection-memory";
 import { KV_WRITES } from "../store/kv";
-import { POLICY } from "../route/policy";
-import { POOL_MEMORY } from "../px/pool-memory";
-import { NODE_MEMORY } from "../core/node-memory";
 import { vtAck, vtDelta, vtLoad, vtNack } from "../store/verdictsync";
-import { doFetch, PEND, restoreUsage } from "../store/index";
+import { doFetch, restoreUsage } from "../store/index";
 import { DebugNets } from "./debug-nets";
+import { DebugTables } from "../route/read-models";
 import type { RouteCtx } from "../edge/types";
-import { cntView } from "../core/counter";
 import { json } from "../edge/respond";
-import { BLK } from "../facts/blkfacts";
-import { planView } from "../route/budget";
-import { BLK_TTL } from "../facts/commitfact";
-import { DEAD } from "../facts/deadfacts";
-import { EG } from "../facts/egfacts";
-import { FactsStore } from "../facts/factsstore";
-import { Prefs } from "../facts/prefs";
-import { PS } from "../facts/psfacts";
-import { HEALTH } from "../facts/relay-health";
-import { REL_SAMPLE_TTL, RELPERF } from "../facts/relperf";
-import { VT, VT_SYNC } from "../facts/verdict";
+import { VT_SYNC } from "../facts/verdict";
 import { errMsg, withTimeout } from "../core/util";
 import { adminOnly } from "../edge/auth";
 import { NodeStatsTable } from "../nodes/score";
@@ -32,192 +19,6 @@ import { EXTRA_HOSTS, refillPool } from "../px/probe";
 /** 诊断路由的上下文：`/<uuid>/debug` 挂在用户前缀下，所以一定带着 `id` */
 type DebugCtx = RouteCtx & { id: string };
 
-/**
- * 只读诊断表：把内存里的判定、事实、健康度直接摊开。
- *
- * 为什么单独成类：这十一个分支全是「读一张表、包成 JSON」，不写任何状态，
- * 唯一的例外是 `&do=1` 时把 DO 环形缓冲也取回来（`doFetch` 会记一次子请求计数）。
- * 和测量类（要拨号）、写操作类（要管理员校验并改 KV）混在一个函数里时，
- * 「这次请求到底会不会改变服务端状态」看不出来。
- */
-export class DebugTables {
-  /**
-   * 依次尝试十一个只读分支。
-   * @param c 路由上下文（含 `env` / `id`）
-   * @param url 请求 URL
-   * @returns 命中的分支响应；没有任何只读参数时返回 `null`，交给后面的测量/写操作分支
-   */
-  async read(c: DebugCtx, url: URL): Promise<Response | null> {
-    const q = url.searchParams;
-    // 前八个分支只读内存表：短路顺序就是响应顺序，与原实现逐行一致
-    const hit =
-      this.deadRows(q) ??
-      this.siteFacts(q) ??
-      this.egRows(q) ??
-      this.relayRows(q) ??
-      this.blockRows(q) ??
-      this.factsAll(q) ??
-      this.planRows(q) ??
-      this.verdictRows(q);
-    if (hit) return hit;
-    // 下面三个分支里有两个可能打 DO：`&do=1` 才多一次子请求，所以排在纯读分支之后
-    const heal = await this.healthRows(c, q);
-    if (heal) return heal;
-    const prefs = this.prefsRows(q);
-    if (prefs) return prefs;
-    return this.connRows(c, q);
-  }
-
-  /**
-   * 功能：`?dd=1` —— 被判死的节点（30 分钟后自动复活）。
-   * @param q 查询参数
-   * @returns 命中时的响应，否则 `null`
-   */
-  private deadRows(q: URLSearchParams): Response | null {
-    // 判死的会挪到队尾，30 分钟复活
-    if (!q.get("dd")) return null;
-    return json({ rows: DEAD.snap() });
-  }
-
-  /**
-   * 功能：`?pss=<host>` —— 站点 × 中继的成功率事实（本 isolate）。
-   * @param q 查询参数
-   * @returns 命中时的响应，否则 `null`
-   */
-  private siteFacts(q: URLSearchParams): Response | null {
-    const raw = q.get("pss");
-    if (!raw) return null;
-    const host = String(raw).slice(0, 80);
-    return json({ host, rows: PS.snap(host) });
-  }
-
-  /**
-   * 功能：`?eg=1` —— 出口地址族事实表。
-   * @param q 查询参数
-   * @returns 命中时的响应，否则 `null`
-   */
-  private egRows(q: URLSearchParams): Response | null {
-    if (!q.get("eg")) return null;
-    return json({ rows: EG.snap() });
-  }
-
-  /**
-   * 功能：`?rt=<host>` —— 站点 × 中继的实测样本（含存活表规模与 TTL）。
-   * @param q 查询参数
-   * @returns 命中时的响应，否则 `null`
-   */
-  private relayRows(q: URLSearchParams): Response | null {
-    if (!q.get("rt")) return null;
-    // 站点名是客户端可控的，截断到 80 字符再进表，避免拿它当无界键
-    const host = String(q.get("rt") || "").slice(0, 80);
-    return json({ host, rows: RELPERF.snap(host), alive: NODE_MEMORY.alive.size, ttl: REL_SAMPLE_TTL });
-  }
-
-  /**
-   * 功能：`?blk=<host>` —— 站点 × 中继的封锁行（只读内存表）。
-   * @param q 查询参数
-   * @returns 命中时的响应，否则 `null`
-   */
-  private blockRows(q: URLSearchParams): Response | null {
-    if (!q.get("blk")) return null;
-    // 文档里从 v8 起就写着 `?blk=<host>`；只读内存表，要看别处 isolate 回传的行得配 `?do=1`
-    const host = String(q.get("blk") || "").slice(0, 80);
-    const rows = BLK.snap().filter((r) => r.k === host || r.k.startsWith(host + "|"));
-    return json({ host, muted: BLK.muted(host), rows: rows.slice(0, 60), ttl: BLK_TTL });
-  }
-
-  /**
-   * 功能：`?facts=1` —— 事实层五张表的容量与条数一次看全。
-   * @param q 查询参数
-   * @returns 命中时的响应，否则 `null`
-   */
-  private factsAll(q: URLSearchParams): Response | null {
-    if (q.get("facts") !== "1") return null;
-    return json({ tables: FactsStore.snap(), counters: cntView() });
-  }
-
-  /**
-   * 功能：`?plan=1` —— 本轮预算分配（与 `?vt=<host>` 分支同一口径）。
-   * @param q 查询参数
-   * @returns 命中时的响应，否则 `null`
-   */
-  private planRows(q: URLSearchParams): Response | null {
-    if (q.get("plan") !== "1") return null;
-    return json({ plan: planView(POOL_MEMORY.rows.length, NODE_MEMORY.alive.size), counters: cntView() });
-  }
-
-  /**
-   * 功能：`?vt=<host>` —— 判定表全文 + 策略命中原因 + 预算。
-   * @param q 查询参数
-   * @returns 命中时的响应，否则 `null`
-   */
-  private verdictRows(q: URLSearchParams): Response | null {
-    const host = String(q.get("vt") || "").slice(0, 80);
-    if (!host) return null;
-    // 这里曾经还回三个恒空字段（ips / nodes / rows），它们来自已删除的扫描器，
-    // 于是「扫描结果为空」和「根本没有扫描」在响应里长得一模一样（v7.154 删掉）
-    const plan = planView(POOL_MEMORY.rows.length, NODE_MEMORY.alive.size);
-    const pol = { same: POLICY.same, diff: POLICY.different, why: POLICY.reasons };
-    return json({ host, table: VT.all(), pol, plan, counters: cntView() });
-  }
-
-  /**
-   * 功能：`?hl=1` —— 拼路健康度（本地表 + 可选 DO 环形缓冲）。
-   * @param c 路由上下文（要 `env`）
-   * @param q 查询参数
-   * @returns 命中时的响应，否则 `null`
-   */
-  private async healthRows(c: DebugCtx, q: URLSearchParams): Promise<Response | null> {
-    if (q.get("hl") !== "1") return null;
-    // 环形缓冲要跨 isolate 才有意义，所以只有显式 `&do=1` 才多花一次子请求
-    let ring: unknown = [];
-    if (q.get("do") === "1") {
-      try {
-        const raw = String(c.env.uuid || c.env.uuids).split(",")[0].trim().toLowerCase();
-        const rr = await doFetch(c.env, raw, "https://meter/hl");
-        ring = ((await rr.json()) as { hl?: unknown }).hl || [];
-      } catch {
-        // 读不到就是空环：不把这一维的失败当整轮失败（与 /logs 同口径）
-        ring = [];
-      }
-    }
-    return json({ local: HEALTH.json(20), sizes: HEALTH.counts(), ring });
-  }
-
-  /**
-   * 功能：`?prefs=1` —— 站点偏好表与策略命中原因。
-   * @param q 查询参数
-   * @returns 命中时的响应，否则 `null`
-   */
-  private prefsRows(q: URLSearchParams): Response | null {
-    if (q.get("prefs") !== "1") return null;
-    return json({ prefs: Prefs.json(60), pol: { same: POLICY.same, diff: POLICY.different, why: POLICY.reasons } });
-  }
-
-  /**
-   * 功能：`?cl=1` —— 连接观测（本地快照 + 可选 DO 环形缓冲）。
-   * @param c 路由上下文（要 `env` 与 `id`）
-   * @param q 查询参数
-   * @returns 命中时的响应，否则 `null`
-   */
-  private async connRows(c: DebugCtx, q: URLSearchParams): Promise<Response | null> {
-    if (q.get("cl") !== "1") return null;
-    const { env, id } = c;
-    const local = PEND.clSnap(40);
-    let ring: ClRec[] = [];
-    if (q.get("do") === "1" && env.METER) {
-      try {
-        const r = await doFetch(env, id, "https://meter/cl");
-        const j = (await r.json()) as { cl?: ClRec[] };
-        if (Array.isArray(j.cl)) ring = j.cl;
-      } catch {
-        // 同上：DO 读失败只让这一维为空，本地快照照旧返回
-        ring = [];
-      }
-    }
-    return json({ local, ring, now: Date.now() });
-  }
-}
 
 /** 只读诊断表的单例（无状态，但保持与其它诊断组件一致的调用形状） */
 // ---- 并入自 debug-actions.ts ----
@@ -440,7 +241,7 @@ export class DebugMeterProbes {
  * 在一个地方就能读完（也正是判断「这个参数会不会真的拨号」的入口）。
  */
 export class DebugSuite {
-  /** 只读表：判定、事实层、健康度、连接记录 */
+  /** 只读表：判定、事实层、健康度、连接记录（读模型在 `route/debug-rows.ts`） */
   readonly tables = new DebugTables();
   /** 会对外拨号的测量：出口测速、站点诊断、原始探活、明文 HTTP、判定批 */
   readonly nets = new DebugNets();
@@ -497,8 +298,8 @@ export async function debug(c: DebugCtx): Promise<Response> {
   }
 
   // 1) 只读表
-  const table = await DEBUG.tables.read(c, url);
-  if (table) return table;
+  const table = await DEBUG.tables.read(env, id, url);
+  if (table) return json(table);
 
   // 2) 会对外拨号的测量（顺序敏感：bench 与 diag 都要花真流量）
   const bench = await DEBUG.nets.bench(url);

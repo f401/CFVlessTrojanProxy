@@ -1,3 +1,5 @@
+/** 调试端点的源码：编排在 `routes/debug.ts`，只读表在 `route/read-models.ts`。 */
+const debugSrc = (fs) => ["src/routes/debug.ts", "src/route/read-models.ts"].map((f) => fs.readFileSync(f, "utf8")).join("\n");
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case070({ eq, W, ok, fs }) {
   eq("目标 16 条", W.ALIVE_TARGET, 16);
@@ -2431,7 +2433,7 @@ export async function case173({ W, eq, ok, debugAll, fs }) {
 
   const srcDbg248 = debugAll();
   ok("转发分支不再无条件写 ok: true", !srcDbg248.includes("return json({ ok: true, burn: await resp.json() })"));
-  const srcMeter275 = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const srcMeter275 = debugSrc(fs);
   ok("转发分支带出 DO 状态码", srcMeter275.includes("ok: resp.ok, doStatus: resp.status"));
   ok("六个转发分支已交给 DebugMeterProbes", srcDbg248.includes("DEBUG.probes.run(c, url, id)") && !srcDbg248.includes("searchParams.get(\"burn\")"));
   ok("回填分支用 seedOk", srcDbg248.includes("let seedOk = false;") && srcDbg248.includes("return json({ ok: seedOk, doStatus: seedStatus, seeded });"));
@@ -3120,7 +3122,7 @@ export async function case192({ W, eq, ok, debugAll, fs }) {
   const dbgSrc275 = debugAll().split(/\r?\n/).join("\n");
   ok("debug.ts 只留一行委托", dbgSrc275.includes("DEBUG.probes.run(c, url, id)"));
   ok("debug.ts 不再自己读这六个参数", !dbgSrc275.includes("searchParams.get(\"burn\")") && !dbgSrc275.includes("searchParams.get(\"burnjs\")") && !dbgSrc275.includes("searchParams.get(\"crypto\")"));
-  const dmSrc275 = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const dmSrc275 = debugSrc(fs);
   ok("派发路径带出真实状态码", dmSrc275.includes("ok: resp.ok, doStatus: resp.status"));
   ok("派发路径统一用 withTimeout 包住 DO 调用", dmSrc275.includes("withTimeout(stub.fetch(") && dmSrc275.includes("spec.budgetMs"));
 }
@@ -3496,7 +3498,8 @@ export async function case200({ fs, netsAll, ok, eq, W }) {
     return i < 0 ? "" : whole283.slice(i, j < 0 ? whole283.length : j);
   };
   const orch = cut283("export async function debug(", "");
-  const tabs = cut283("export class DebugTables", "// ---- 并入自 debug-actions.ts ----");
+  // 7.439 起只读表搬进 route 层的读模型：整份 read-models.ts 就是「读」这一层
+  const tabs = fs.readFileSync("src/route/read-models.ts", "utf8");
   const nets = netsAll();
   const acts = cut283("export class DebugActions", "// ---- 并入自 debug-meter.ts ----");
   // 编排层只按固定顺序调用三个组件，自己不再读任何参数：这条锁防的是「拆完之后又往编排里塞逻辑」
@@ -4274,7 +4277,7 @@ export async function case225({ fs, ok, eq, W }) {
   // 收的理由不是「少几个名字」，而是它们只在一个地方按固定顺序出场：
   // 分散成四个 export 时，读代码的人得自己拼「这次调试动用了哪些能力」，
   // 也就看不出「点这个参数会不会真的拨号」。
-  const dbg = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const dbg = debugSrc(fs);
   const netsSrc = fs.readFileSync("src/routes/debug-nets.ts", "utf8");
   ok("四个单例已收进组合根", ["export const TABLES = new DebugTables();", "export const ACTIONS = new DebugActions();", "export const METER_PROBES = new DebugMeterProbes();"].every((x) => !dbg.includes(x)), "");
   ok("debug-nets.ts 不再自带 NETS", !netsSrc.includes("export const NETS = new DebugNets();"), "");
@@ -6219,7 +6222,7 @@ export async function case255({ fs, ok, eq, W }) {
 export async function case256({ fs, ok, eq, W }) {
     const prefsSrc349 = fs.readFileSync("src/facts/prefs.ts", "utf8");
     const wiring349 = fs.readFileSync("src/route/policy-wiring.ts", "utf8");
-    const debugSrc349 = fs.readFileSync("src/routes/debug.ts", "utf8");
+    const debugSrc349 = debugSrc(fs);
     ok(
       "349·prefs 里不再有 prefsOf/chanPref/prefsJson 三个转发",
       !/export const (prefsOf|chanPref|prefsJson) =/.test(prefsSrc349),
@@ -6924,7 +6927,7 @@ export async function case274({ W, eq, fs, ok }) {
 
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case275({ fs, ok, W }) {
-  const dbgSrc370 = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const dbgSrc370 = debugSrc(fs);
   ok("[370] ?do=1 成功时 ack", dbgSrc370.includes("if (r.ok) vtAck();"), "成功未 ack");
   ok("[370] ?do=1 失败时 nack", dbgSrc370.includes("else vtNack();") && /catch \{[\s\S]{0,140}vtNack\(\);/.test(dbgSrc370), "失败未 nack");
 

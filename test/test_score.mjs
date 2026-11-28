@@ -63,7 +63,7 @@ const netsAll = () => fs.readFileSync("src/routes/debug-nets.ts", "utf8");
  * @returns {string} 四段源码
  */
 const debugAll = () =>
-  ["src/routes/debug.ts", "src/routes/debug-nets.ts"]
+  ["src/routes/debug.ts", "src/routes/debug-nets.ts", "src/route/read-models.ts"]
     .map((f) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : ""))
     .join("\n");
 import * as W from "./_bundle.mjs";

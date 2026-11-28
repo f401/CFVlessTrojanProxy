@@ -1,3 +1,5 @@
+/** 调试端点的源码：编排在 `routes/debug.ts`，只读表在 `route/read-models.ts`。 */
+const debugSrc = (fs) => ["src/routes/debug.ts", "src/route/read-models.ts"].map((f) => fs.readFileSync(f, "utf8")).join("\n");
 /** 顺序由 test_score.mjs 保持；共享夹具显式传入，不在模块加载时执行。 */
 export async function case008({ W, ok }) {
   const html1 = W.renderStatsHtml(
@@ -181,7 +183,7 @@ export async function case220({ eq, fs, ok, W }) {
   ok(`[${g}] 页面壳与五个渲染入口同住 panel.ts（页壳不再是单独文件）`,
     !fs.existsSync("src/views/pageview.ts") && !fs.existsSync("src/views/html.ts") && panel.includes("export function renderHtml(") && panel.includes("export function fmtBytes("));
 
-  const dbg = fs.readFileSync("src/routes/debug.ts", "utf8");
+  const dbg = debugSrc(fs);
   eq(`[${g}] 调试路由：四段都在一个文件`,
     ["export class DebugTables", "export class DebugActions", "export class DebugMeterProbes", "export async function debug("].every((x) => dbg.includes(x)), true);
   eq(`[${g}] 上下文类型只声明一次`, (dbg.match(/type DebugCtx = RouteCtx & \{ id: string \};/g) || []).length, 1);

@@ -895,7 +895,7 @@ export async function case248({ debugAll, ok, eq, W }) {
   // read 的编排段：从签名到第一个分支方法之前
   const readBody = (() => {
     const i = dbg.indexOf("async read(");
-    const j = dbg.indexOf("return this.connRows(c, q);") + "return this.connRows(c, q);".length;
+    const j = dbg.indexOf("return this.connRows(env, id, q);") + "return this.connRows(env, id, q);".length;
     return i >= 0 && j > i ? dbg.slice(i, j) : "";
   })();
   ok(
@@ -936,24 +936,24 @@ export async function case248({ debugAll, ok, eq, W }) {
   // 行为：编排顺序与「没有只读参数就返回 null」是这套拆法的契约
   const env340 = { uuid: "11111111-1111-1111-1111-111111111111" };
   const tables340 = W.DEBUG.tables;
-  const call340 = (qs) => tables340.read({ env: env340, id: env340.uuid }, new URL("https://dbg340.test/x" + qs));
+  const call340 = (qs) => tables340.read(env340, env340.uuid, new URL("https://dbg340.test/x" + qs));
   ok(`[${g}] 没有只读参数时返回 null（交给测量/写分支）`, (await call340("")) === null);
   ok(`[${g}] 未知参数同样返回 null`, (await call340("?nope=1")) === null);
   const dd340 = await call340("?dd=1");
-  ok(`[${g}] ?dd=1 给出 rows 数组`, (await dd340.json()).rows.length >= 0);
+  ok(`[${g}] ?dd=1 给出 rows 数组`, dd340.rows.length >= 0);
   const pss340 = await call340("?pss=a340.example.com");
-  eq(`[${g}] ?pss= 回显站点名`, (await pss340.json()).host, "a340.example.com");
+  eq(`[${g}] ?pss= 回显站点名`, pss340.host, "a340.example.com");
   const plan340 = await call340("?plan=1");
-  ok(`[${g}] ?plan=1 给出预算与计数`, Boolean((await plan340.json()).plan));
+  ok(`[${g}] ?plan=1 给出预算与计数`, Boolean(plan340.plan));
   W.BLK.clear();
   W.BLK.load([
     { k: "b340.example.com|10.7.0.1", n: 3, at: Date.now() },
     { k: "b340.example.com|10.7.0.2", n: 1, at: Date.now() },
     { k: "other340.example.com|10.7.0.3", n: 3, at: Date.now() },
   ]);
-  const blk340 = await (await call340("?blk=b340.example.com")).json();
+  const blk340 = await call340("?blk=b340.example.com");
   eq(`[${g}] ?blk= 只回该站点前缀的行`, blk340.rows.length, 2);
-  const hl340 = await (await call340("?hl=1")).json();
+  const hl340 = await call340("?hl=1");
   eq(`[${g}] ?hl=1 不带 &do=1 时不打 DO`, hl340.ring.length, 0);
   ok(`[${g}] ?hl=1 仍返回本地表`, Array.isArray(hl340.local) && typeof hl340.sizes === "object");
   W.BLK.clear();

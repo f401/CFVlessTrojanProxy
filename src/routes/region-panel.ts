@@ -3,7 +3,7 @@
  * 从 `routes/tools.ts` 抽出来的原因：那个文件同时挂着 proxyip 与 debug 的再导出，
  * 面板逻辑占了大半篇幅，改动时看不出「这一改会影响谁」。
  */
-import { REGION_CACHE, buildPanelRows, decoratePanelRows } from "../route/panel-rows";
+import { REGION_CACHE, buildPanelRows, decoratePanelRows } from "../route/read-models";
 import { POOL_MEMORY } from "../px/pool-memory";
 import { ISOLATE } from "../core/state";
 import { SEED_STORE } from "../px/seed";

@@ -62,7 +62,7 @@ export { USAGE_MEMORY, UsageMemory } from "./store/usage-memory";
 export { METER_CLIENT, MeterClientState } from "./store/meter-client";
 export { KV_WRITES, KvWriteState } from "./store/kv";
 export { FACT_SWITCHES, FactSwitches } from "./facts/factflags";
-export { REGION_CACHE, RegionPageCache } from "./route/panel-rows";
+export { REGION_CACHE, RegionPageCache, DebugTables } from "./route/read-models";
 export { EMPTY_CLOSE_BAD, NodeStatsTable, TEN_MB, ZERO_STAT } from "./nodes/stat";
 export { SC } from "./core/const";
 export { SEL, Selector } from "./px/selector";
@@ -134,7 +134,7 @@ export { runCron } from "./routes/cron";
 export { ProxyipView, proxyip } from "./routes/proxyip";
 export { AdminView, admin } from "./routes/admin";
 export { SubscriptionRoutes, subscription } from "./routes/subscription";
-export { debug, DEBUG, DebugActions, DebugMeterProbes, DebugTables, DebugSuite } from "./routes/debug";
+export { debug, DEBUG, DebugActions, DebugMeterProbes, DebugSuite } from "./routes/debug";
 export { regions, RegionsView, levelBadge, kindLabel, familyLabel, flagLabel, egLabel, psLabel, dnsLabel, groupRows, nodeCheckConclusion, countryOf, ccTag } from "./routes/tools";
 export {
   DebugBench,

@@ -15,6 +15,15 @@ export const regionsSource = () => [
   'src/routes/tools.ts',
   'src/routes/region-panel.ts',
   // 数据装配在 route 层读模型里，源码锁要跟着看
-  'src/route/panel-rows.ts',
+  'src/route/read-models.ts',
   'src/views/regions.ts',
+].map(file => fs.readFileSync(file, 'utf8')).join('\n');
+
+/**
+ * 调试端点的源码锁要跟着「只读表搬进 route 层读模型」走：
+ * 分支的实现现在在 `src/route/read-models.ts`，`src/routes/debug.ts` 只剩编排与写操作。
+ */
+export const debugSource = () => [
+  'src/routes/debug.ts',
+  'src/route/read-models.ts',
 ].map(file => fs.readFileSync(file, 'utf8')).join('\n');

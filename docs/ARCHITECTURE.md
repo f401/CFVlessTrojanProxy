@@ -198,7 +198,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 - **选择器放 `px/`**：它需要“当前中转出口/存活池”，放在中转域后 `nodes` 不再反向依赖 `px`，
   这是 v7 拆环的关键一步。
 - **route 层的读模型**：`routes/*` 只做 HTTP 形状（分页、JSON、表单），凡是要把“池子 + 存活表 +
-  若干事实表”装配成展示数据的，放 `route/` 下的读模型（`panel-rows.ts`）。理由：路由文件曾经
+  若干事实表”装配成展示数据的，放 `route/` 下的读模型（`read-models.ts`）。理由：路由文件曾经
   各自动手 import 4–7 层（`debug.ts` 一度 28 个 import），改一张表要动一圈；装配口径收在一处后，
   新增一张事实表只改读模型。缓存跟着读模型走，放进 `routes/` 会造成 `route → routes` 反向依赖。
 
@@ -331,7 +331,7 @@ scripts/deploy.sh 一条龙：arch → tsc → bundle → test → golden → ob
 | `PoolMemory`（`src/px/pool-memory.ts`） | `src/px/pool-memory.ts` | 池子行、代际、构建时间、扫描游标、探活统计与冷却起点 |
 | `SelectionMemory`（`src/px/selection-memory.ts`） | `src/px/selection-memory.ts` | 当前/上一个中继、切换时刻与切换计数、失败次数 |
 | `FactSwitches` | `src/facts/factflags.ts` | `env.facts` 解析后的开关现值（`none` / `eg` / `eg,ps` / `all`） |
-| `RegionPageCache`（`REGION_CACHE`） | `src/route/panel-rows.ts` | 地区面板的基础行与 JSON 文本缓存，装配口径也在同一文件的读模型里 |
+| `RegionPageCache`（`REGION_CACHE`） | `src/route/read-models.ts` | 地区面板的基础行与 JSON 文本缓存，装配口径也在同一文件的读模型里 |
 | `KvWriteState` | `src/store/kv.ts` | KV 写计数、配额耗尽标记与冷却时刻 |
 | `MeterClientState` | `src/store/meter-client.ts` | 计量 DO 的调用计数与响应缓存 |
 | `UsageMemory` | `src/store/usage-memory.ts` | 尚未落盘的用量增量（`rows` / `dirtyBytes`），flush 成功后清零 |

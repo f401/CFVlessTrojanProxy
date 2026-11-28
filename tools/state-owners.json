@@ -303,12 +303,12 @@
     "legacyField": "regionRowsCache",
     "owner": "REGION_CACHE",
     "member": "rows",
-    "module": "src/route/panel-rows.ts"
+    "module": "src/route/read-models.ts"
   },
   {
     "legacyField": "regionJsonCache",
     "owner": "REGION_CACHE",
     "member": "json",
-    "module": "src/route/panel-rows.ts"
+    "module": "src/route/read-models.ts"
   }
 ]
